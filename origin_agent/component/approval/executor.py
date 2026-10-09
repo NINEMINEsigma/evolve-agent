@@ -11,7 +11,6 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from abstract.tools.registry import registry as tool_registry
 from entity.puretype import ApprovalOutcome, ApprovalMode, ToolDangerLevel
 from component.approval.handsfree import get_approval_mode, is_handsfree_mode
 from component.approval.core import build_denied_tool_result, request_user_confirm
@@ -39,6 +38,9 @@ def _needs_approval(tool_name: str, session_id: str) -> bool:
     - write 级别仅在脱手模式下需要
     - safe 直接执行
     """
+    from abstract.tools.registry import ToolRegistry
+    from system.application import Application
+    tool_registry = Application.current().get_system(ToolRegistry)
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
     approval_mode = get_approval_mode(session_id)
     return _policy_needs_approval(MAIN_SESSION_POLICY, danger_level, approval_mode)
@@ -83,6 +85,9 @@ async def execute_with_approval(
     approval_args = {k: v for k, v in args.items() if k != "_session_id"}
 
     # 获取 danger_level 用于 critical 级别特殊处理
+    from abstract.tools.registry import ToolRegistry
+    from system.application import Application
+    tool_registry = Application.current().get_system(ToolRegistry)
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
 
     # critical 级别：始终需要审批，跳过 allowlist 检查

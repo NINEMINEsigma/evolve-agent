@@ -16,7 +16,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +170,13 @@ def _handle_window_find(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="WindowFind",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register WindowFind into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="WindowFind",
+        toolset="automation",
+        schema={
         # 通过窗口标题查找窗口，返回所有匹配窗口的 HWND 及尺寸信息。
         # 前置条件：仅 Windows；目标窗口必须存在且可见。
         # 调用效果：遍历所有可见顶层窗口，返回标题包含指定字符串的全部窗口。
@@ -226,4 +230,4 @@ Inspect the `matches` array to pick the correct window by its full title, then p
         },
     },
     handler=_handle_window_find,
-)
+    )

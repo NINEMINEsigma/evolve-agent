@@ -23,11 +23,20 @@ import logging
 import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeGuard
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from framework import AsyncSystem
+from system.runtime import RuntimeSystem
+from system.llm_profile_store import LLMProfileStore
+from system.lifecycle import (
+    ApplicationStoppingError, LifecycleFailure, TaskOwner, requires_lifecycle_propagation,
+)
+from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 
 from easysave import load as es_load, save as es_save
 
 from abstract.llm.loader import create_llm_client
-from system.context import get_runtime_context
 from entity.constant import (
     FORWARDED_AUDIO_TAG,
     FORWARDED_VISION_TAG,
@@ -76,9 +85,6 @@ def _generate_dummy_wav_b64() -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-_DUMMY_WAV_B64: str = _generate_dummy_wav_b64()
-
-
 def _load_dummy_mp4_b64() -> str:
     """从模板文件加载 dummy MP4 的 base64。
 
@@ -89,14 +95,8 @@ def _load_dummy_mp4_b64() -> str:
     from system.templates import read_template
     b64 = read_template("probe/dummy_video_mp4.txt")
     if not b64:
-        logger.warning("Failed to load dummy_video_mp4.txt template — video probe will not work")
+        raise ValueError("The video probe template is empty")
     return b64
-
-
-_DUMMY_MP4_B64: str = _load_dummy_mp4_b64()
-
-# 按 cache_key 串行化探查请求，防止多 session 同时探查同一 model+base_url
-_probe_locks: dict[str, asyncio.Lock] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -228,26 +228,8 @@ def resolve_modality_reference_profile(
     return active_reference if active_reference is not None else global_reference
 
 
-def resolve_effective_modality_reference_profile(
-    active_profile: LLMProfile,
-    media_type: Literal["image", "audio", "video"],
-) -> LLMProfile | None:
-    """解析指定媒体的有效转发 Profile（便捷封装）。
-
-    内部从 ``Application.current().llm_profile_store`` 取 ``LLMProfileData``
-    后委托 :func:`resolve_modality_reference_profile`。仅在 Application
-    已装配完成的运行路径使用；prompt 构建等无单例依赖路径请直接调用
-    纯函数版本并显式传入 ``LLMProfileData``。
-    """
-    from system.application import Application
-    return resolve_modality_reference_profile(
-        active_profile,
-        media_type,
-        Application.current().llm_profile_store.get_data(),
-    )
-
-
-async def forward_modality_to_ref_profile(
+async def _forward_modality_to_ref_profile(
+    system: ModalityCapabilitySystem,
     context: ToolContext | None,
     active_profile: LLMProfile,
     media_data: dict,
@@ -281,7 +263,7 @@ async def forward_modality_to_ref_profile(
             .replace("{{error_message}}", error_message)
         )
 
-    ref_profile = resolve_effective_modality_reference_profile(
+    ref_profile = system.resolve_effective_modality_reference_profile(
         active_profile,
         media_type,
     )
@@ -290,7 +272,7 @@ async def forward_modality_to_ref_profile(
             f"No active or global reference profile configured for {media_type}"
         )
 
-    ctx = context.runtime_context if context is not None else get_runtime_context()
+    ctx = system.runtime.context
     if not ref_profile.llm_client_name:
         return _error_text(
             ref_profile.name,
@@ -338,6 +320,8 @@ async def forward_modality_to_ref_profile(
         )
         raise
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         import openai as _openai
         if not isinstance(exc, _openai.BadRequestError) and not (
             isinstance(exc, _openai.APIStatusError)
@@ -365,17 +349,12 @@ def _cache_key(model: str, base_url: str) -> str:
     return f"{model.lower()}@{base_url}"
 
 
-def _cache_path() -> Path:
-    return get_runtime_context().workspace / MODALITY_CAPABILITY_ES_FILENAME
-
-
-def _load_cache() -> dict[str, ModalityCapability]:
+def _load_cache(path: Path) -> dict[str, ModalityCapability]:
     """加载 easysave 缓存（dict[cache_key, ModalityCapability]，类型保留）。
 
     easysave 直接重建 ModalityCapability 实例，无需再做 model_validate。
     文件缺失/无 key/损坏时返回空 dict（缓存可丢弃，缺失时重新探测）。
     """
-    path = _cache_path()
     try:
         raw = es_load(MODALITY_CAPABILITY_ES_KEY, str(path))
     except (FileNotFoundError, KeyError):
@@ -389,14 +368,13 @@ def _load_cache() -> dict[str, ModalityCapability]:
     return raw
 
 
-def _save_cache(data: dict[str, ModalityCapability]) -> None:
+def _save_cache(path: Path, data: dict[str, ModalityCapability]) -> None:
     """经 easysave 直接持久化 dict[cache_key, ModalityCapability]。
 
     直接传 ModalityCapability 实例，由 easysave 保留类型（type_token），
     不做 model_dump() 降级。easysave.save 需先读取既有文件，文件损坏时
     删除后重试一次（保持缓存自愈能力）。
     """
-    path = _cache_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         es_save(MODALITY_CAPABILITY_ES_KEY, str(path), data)
@@ -408,42 +386,130 @@ def _save_cache(data: dict[str, ModalityCapability]) -> None:
             logger.warning("Failed to save modality capability cache: %s", exc)
 
 
-def _get_cached_field(model: str, base_url: str, field: str) -> bool | None:
-    """读取指定 model+base_url 条目的单个能力字段；未命中/未探测返回 None。"""
-    entry = _load_cache().get(_cache_key(model, base_url))
-    if entry is None:
-        return None
-    return getattr(entry, field)
+class ModalityCapabilitySystem(AsyncSystem):
+    """多模态探测锁、探针媒体、缓存路径与请求的唯一所有者。"""
 
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem, LLMProfileStore))
+        self._runtime: RuntimeSystem | None = None
+        self._profiles: LLMProfileStore | None = None
+        self._owner: TaskOwner | None = None
+        self._cache_file: Path | None = None
+        self._probe_locks: dict[str, asyncio.Lock] = {}
+        self._wav = ""
+        self._mp4 = ""
+        self._closed = False
 
-def get_cached_vision_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 vision（tool 消息图片）能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "vision")
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._profiles = self.get_system(LLMProfileStore)
+        self._owner = TaskOwner("modality-capability", self.runtime.record_failure)
+        self._cache_file = self.runtime.context.workspace / MODALITY_CAPABILITY_ES_FILENAME
+        self._wav = _generate_dummy_wav_b64()
+        self._mp4 = _load_dummy_mp4_b64()
 
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("ModalityCapabilitySystem has not been awakened")
+        return self._runtime
 
-def get_cached_audio_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 audio（tool 消息音频）能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "audio")
+    @property
+    def task_owner(self) -> TaskOwner:
+        if self._owner is None:
+            raise LifecycleFailure("ModalityCapabilitySystem has not been awakened")
+        return self._owner
 
+    @property
+    def cache_path(self) -> Path:
+        if self._cache_file is None:
+            raise LifecycleFailure("Modality cache path has not been initialized")
+        return self._cache_file
 
-def get_cached_user_vision_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 user 消息 vision 能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "user_vision")
+    @contextmanager
+    def _admit(self) -> Iterator[None]:
+        with self.runtime.admission():
+            if self._closed:
+                raise ApplicationStoppingError("Modality requests have closed")
+            yield
 
+    def close_admission(self) -> None:
+        self._closed = True
 
-def get_cached_user_audio_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 user 消息 audio 能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "user_audio")
+    async def cancel_pending(self) -> None:
+        self.close_admission()
+        await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
+    async def virtual_shotdown(self) -> None:
+        await self.cancel_pending()
+        self._probe_locks.clear()
+        self._wav = self._mp4 = ""
 
-def get_cached_video_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 video（tool 消息视频）能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "video")
+    def probe_lock(self, key: str) -> asyncio.Lock:
+        lock = self._probe_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._probe_locks[key] = lock
+        return lock
 
+    def modality_blocks(self, modality: str) -> list[MessageBlock]:
+        return _build_modality_blocks(modality, self._wav, self._mp4)
 
-def get_cached_user_video_support(model: str, base_url: str) -> bool | None:
-    """读取模型在指定服务商下的 user 消息 video 能力缓存；未命中返回 None。"""
-    return _get_cached_field(model, base_url, "user_video")
+    def resolve_effective_modality_reference_profile(
+        self, active_profile: LLMProfile, media_type: Literal["image", "audio", "video"],
+    ) -> LLMProfile | None:
+        profiles = self._profiles
+        if profiles is None:
+            raise LifecycleFailure("Modality Profile store has not been initialized")
+        with profiles.locked():
+            return resolve_modality_reference_profile(active_profile, media_type, profiles.get_data())
+
+    def _get_cached_capability(self, model: str, base_url: str) -> ModalityCapability | None:
+        return _load_cache(self.cache_path).get(_cache_key(model, base_url))
+
+    def get_cached_vision_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.vision if entry is not None else None
+
+    def get_cached_audio_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.audio if entry is not None else None
+
+    def get_cached_user_vision_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.user_vision if entry is not None else None
+
+    def get_cached_user_audio_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.user_audio if entry is not None else None
+
+    def get_cached_video_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.video if entry is not None else None
+
+    def get_cached_user_video_support(self, model: str, base_url: str) -> bool | None:
+        entry = self._get_cached_capability(model, base_url)
+        return entry.user_video if entry is not None else None
+
+    async def run_modality_probe(self, context: ToolContext | None) -> ModalityCapability:
+        return await self.task_owner.run_request(
+            lambda: _run_modality_probe(self, context), name="modality-probe", admission=self._admit,
+        )
+
+    async def ensure_modality_capability(self, context: ToolContext | None) -> ModalityCapability:
+        return await self.run_modality_probe(context)
+
+    async def forward_modality_to_ref_profile(
+        self, context: ToolContext | None, active_profile: LLMProfile,
+        media_data: dict, media_type: Literal["image", "audio", "video"],
+    ) -> str:
+        return await self.task_owner.run_request(
+            lambda: _forward_modality_to_ref_profile(self, context, active_profile, media_data, media_type),
+            name="modality-forward", admission=self._admit,
+        )
+
+    def build_modality_prompt_block(self, profile: LLMProfile, agentspace: Path | None = None) -> str:
+        return _build_modality_prompt_block(self, profile, agentspace)
 
 
 def _is_complete(entry: ModalityCapability | None) -> TypeGuard[ModalityCapability]:
@@ -493,7 +559,7 @@ def _build_tool_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
     ]
 
 
-def _build_modality_blocks(modality: str) -> list[MessageBlock]:
+def _build_modality_blocks(modality: str, wav: str, mp4: str) -> list[MessageBlock]:
     """按模态构造探测用 content block 列表（dummy 载荷 + 伪 path 元数据）。"""
     if modality == "vision":
         return [
@@ -502,26 +568,28 @@ def _build_modality_blocks(modality: str) -> list[MessageBlock]:
         ]
     if modality == "audio":
         return [
-            AudioBlock(data=_DUMMY_WAV_B64, format="wav"),
+            AudioBlock(data=wav, format="wav"),
             TextBlock(text='{"path": "probe://audio.wav"}'),
         ]
     # video
     return [
-        VideoBlock(video_url=f"data:video/mp4;base64,{_DUMMY_MP4_B64}"),
+        VideoBlock(video_url=f"data:video/mp4;base64,{mp4}"),
         TextBlock(text='{"path": "probe://video.mp4"}'),
     ]
 
 
 async def _probe_single_modality(
+    system: ModalityCapabilitySystem,
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
     modality: str,
 ) -> bool:
     """伪装成工具调用单独探测一种模态，返回该模态在工具消息中是否可用。"""
-    probe_messages = _build_tool_probe_messages(_build_modality_blocks(modality))
+    probe_messages = _build_tool_probe_messages(system.modality_blocks(modality))
 
     try:
+        system.runtime.require_running()
         await client.chat(probe_messages)
         logger.info(
             "probe_modality | session=%s model=%s %s=True source=single_probe(tool)",
@@ -529,6 +597,8 @@ async def _probe_single_modality(
         )
         return True
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         if isinstance(exc, UnsupportedModalityError):
             logger.info(
                 "probe_modality | session=%s model=%s %s=False source=single_probe(tool) reason=unsupported_modality",
@@ -540,7 +610,7 @@ async def _probe_single_modality(
         # 400 错误（无论是否匹配 modality 关键词）都判定为该模态在工具消息中不可用。
         # 某些 provider 返回通用的 "Invalid request parameters" / "Upstream request failed"
         # 而非明确的 "unsupported content" 消息，此时乐观默认 True 会导致能力误判。
-        if isinstance(exc, (_openai.BadRequestError, _openai.APIStatusError)):
+        if isinstance(exc, _openai.APIStatusError) and exc.status_code == 400:
             logger.info(
                 "probe_modality | session=%s model=%s %s=False source=single_probe reason=http_400",
                 session_id, model_name, modality,
@@ -563,15 +633,17 @@ def _build_user_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
 
 
 async def _probe_single_user_modality(
+    system: ModalityCapabilitySystem,
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
     modality: str,
 ) -> bool:
     """发送普通 user 消息单独探测一种模态，返回该模态在 user 消息中是否可用。"""
-    probe_messages = _build_user_probe_messages(_build_modality_blocks(modality))
+    probe_messages = _build_user_probe_messages(system.modality_blocks(modality))
 
     try:
+        system.runtime.require_running()
         await client.chat(probe_messages)
         logger.info(
             "probe_modality | session=%s model=%s %s=True source=single_probe(user)",
@@ -579,6 +651,8 @@ async def _probe_single_user_modality(
         )
         return True
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         if isinstance(exc, UnsupportedModalityError):
             logger.info(
                 "probe_modality | session=%s model=%s %s=False source=single_probe(user) reason=unsupported_modality",
@@ -586,7 +660,7 @@ async def _probe_single_user_modality(
             )
             return False
         import openai as _openai
-        if isinstance(exc, (_openai.BadRequestError, _openai.APIStatusError)):
+        if isinstance(exc, _openai.APIStatusError) and exc.status_code == 400:
             logger.info(
                 "probe_modality | session=%s model=%s %s=False source=single_probe(user) reason=http_400",
                 session_id, model_name, modality,
@@ -600,7 +674,8 @@ async def _probe_single_user_modality(
 # 探测入口
 # ---------------------------------------------------------------------------
 
-async def run_modality_probe(
+async def _run_modality_probe(
+    system: ModalityCapabilitySystem,
     context: ToolContext | None,
 ) -> ModalityCapability:
     """执行一次完整的多模态能力探测，返回 ModalityCapability（六项全非 None）。
@@ -613,14 +688,14 @@ async def run_modality_probe(
         RuntimeError: 无 active profile 或无 llm_client_name。
         Exception: 探测过程中的非模态错误（网络、认证、超时等），向上抛出。
     """
-    ctx = context.runtime_context if context is not None else get_runtime_context()
+    ctx = system.runtime.context
     session_id = context.session_id if context is not None else ""
     model_name, base_url, profile = resolve_active_model_base_url(context)
 
     key = _cache_key(model_name, base_url)
 
     # 缓存命中检查：如果六项都已探测，直接返回缓存值，跳过 API 请求
-    cached = _load_cache().get(key)
+    cached = _load_cache(system.cache_path).get(key)
     if _is_complete(cached):
         logger.info(
             "probe_modality | session=%s model=%s cache_hit, skipping API probe",
@@ -629,13 +704,10 @@ async def run_modality_probe(
         return cached
 
     # 按 cache_key 串行化，防止多 session 同时探查同一 model+base_url
-    lock = _probe_locks.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _probe_locks[key] = lock
-    async with lock:
+    async with system.probe_lock(key):
+        system.runtime.require_running()
         # 双检缓存：等待期间可能已被其他请求写入
-        cache = _load_cache()
+        cache = _load_cache(system.cache_path)
         cached = cache.get(key)
         if _is_complete(cached):
             logger.info(
@@ -655,22 +727,18 @@ async def run_modality_probe(
         # 直接按 模态 × 消息路径（tool/user）六路并发探测，不做组合探测：
         # 全模态（三模态全支持）的模型+厂商极少，组合探测几乎必然失败、
         # 白白多一次请求后才回退分别探测，因此首次即分别并发探测。
-        results = await asyncio.gather(
-            _probe_single_modality(client, model_name, session_id, "vision"),
-            _probe_single_modality(client, model_name, session_id, "audio"),
-            _probe_single_modality(client, model_name, session_id, "video"),
-            _probe_single_user_modality(client, model_name, session_id, "vision"),
-            _probe_single_user_modality(client, model_name, session_id, "audio"),
-            _probe_single_user_modality(client, model_name, session_id, "video"),
-            return_exceptions=True,
-        )
-        # 单路探针仅对 HTTP 模态拒绝或客户端明确不支持的模态返回 False；
-        # 网络/认证/超时等真实错误仍向上抛出，不写缓存。
-        probed: list[bool] = []
-        for item in results:
-            if isinstance(item, BaseException):
-                raise item
-            probed.append(item)
+        # TaskGroup 持有并等待全部子探针；失败/取消时先完成子任务清理，
+        # 再向完整请求传播异常组，不能留下仍调用模型的孤儿探针。
+        async with asyncio.TaskGroup() as group:
+            probes = [
+                group.create_task(_probe_single_modality(system, client, model_name, session_id, "vision")),
+                group.create_task(_probe_single_modality(system, client, model_name, session_id, "audio")),
+                group.create_task(_probe_single_modality(system, client, model_name, session_id, "video")),
+                group.create_task(_probe_single_user_modality(system, client, model_name, session_id, "vision")),
+                group.create_task(_probe_single_user_modality(system, client, model_name, session_id, "audio")),
+                group.create_task(_probe_single_user_modality(system, client, model_name, session_id, "video")),
+            ]
+        probed = [probe.result() for probe in probes]
 
         result = ModalityCapability(
             vision=probed[0],
@@ -680,8 +748,10 @@ async def run_modality_probe(
             user_audio=probed[4],
             user_video=probed[5],
         )
+        # 不同模型键并发时重新读取最新根，避免覆盖另一路已保存能力。
+        cache = _load_cache(system.cache_path)
         cache[key] = result
-        _save_cache(cache)
+        _save_cache(system.cache_path, cache)
         logger.info(
             "probe_modality | session=%s model=%s vision=%s audio=%s video=%s "
             "user_vision=%s user_audio=%s user_video=%s source=concurrent_probe",
@@ -689,20 +759,6 @@ async def run_modality_probe(
             probed[0], probed[1], probed[2], probed[3], probed[4], probed[5],
         )
         return result
-
-
-async def ensure_modality_capability(
-    context: ToolContext | None,
-) -> ModalityCapability:
-    """确保当前活跃模型的多模态能力已探测。有缓存读缓存，无缓存自动探查。
-
-    Returns:
-        ModalityCapability（六项全非 None）
-
-    Raises:
-        Exception: 探测过程中的非模态错误（网络/认证/超时），向上抛出。
-    """
-    return await run_modality_probe(context)
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +772,8 @@ def _fmt_support(value: bool | None) -> str:
     return "supported" if value else "NOT supported"
 
 
-def build_modality_prompt_block(
+def _build_modality_prompt_block(
+    system: ModalityCapabilitySystem,
     profile: LLMProfile,
     agentspace: Path | None = None,
 ) -> str:
@@ -740,7 +797,7 @@ def build_modality_prompt_block(
         return ""
 
     # 能力值：单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件
-    entry = _load_cache().get(_cache_key(profile.model, profile.base_url))
+    entry = _load_cache(system.cache_path).get(_cache_key(profile.model, profile.base_url))
     if entry is None:
         image_tool = image_user = _fmt_support(None)
         audio_tool = audio_user = _fmt_support(None)
@@ -755,9 +812,9 @@ def build_modality_prompt_block(
             return "not configured"
         return f'"{reference.name}" (model ``{reference.model}``)'
 
-    image_ref = resolve_effective_modality_reference_profile(profile, "image")
-    audio_ref = resolve_effective_modality_reference_profile(profile, "audio")
-    video_ref = resolve_effective_modality_reference_profile(profile, "video")
+    image_ref = system.resolve_effective_modality_reference_profile(profile, "image")
+    audio_ref = system.resolve_effective_modality_reference_profile(profile, "audio")
+    video_ref = system.resolve_effective_modality_reference_profile(profile, "video")
     replacements = {
         "{{model}}": profile.model,
         "{{image_tool}}": image_tool,

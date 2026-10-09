@@ -1,6 +1,6 @@
 """跨会话历史查询工具 — ReadSession + RecallSession。
 
-模块导入时通过 ``registry.register()`` 注册两个工具：
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册两个工具：
   - ReadSession: 精准读取指定会话的区间消息（session_id + index + length）
   - RecallSession: 混合检索全体会话（exact / substring / bm25），RRF 融合排序
 
@@ -18,7 +18,9 @@ from typing import Any
 
 from rank_bm25 import BM25Okapi
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
+from entity.messages import CharacterConversationMessage, History
 from entity.puretype import ToolAvailability, ToolDangerLevel, Role, SessionStatus
 from entity.constant import (
     SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT,
@@ -86,7 +88,7 @@ def _rrf_fuse(channel_ranks: dict[str, dict[Any, int]]) -> dict[Any, float]:
     return fused
 
 
-def _filter_conversation_messages(history) -> list[tuple[int, Any]]:
+def _filter_conversation_messages(history: History) -> list[tuple[int, CharacterConversationMessage]]:
     """过滤出 Role.USER 和 Role.ASSISTANT 的 CharacterConversationMessage。
 
     返回 (conv_index, message) 列表，conv_index 是过滤后的序号（0, 1, 2, ...），
@@ -94,7 +96,7 @@ def _filter_conversation_messages(history) -> list[tuple[int, Any]]:
     """
     from entity.messages import CharacterConversationMessage
 
-    result: list[tuple[int, Any]] = []
+    result: list[tuple[int, CharacterConversationMessage]] = []
     conv_idx = 0
     for msg in history.iter_messages():
         if not isinstance(msg, CharacterConversationMessage):
@@ -106,7 +108,7 @@ def _filter_conversation_messages(history) -> list[tuple[int, Any]]:
     return result
 
 
-def _extract_content_with_suffix(msg) -> str:
+def _extract_content_with_suffix(msg: CharacterConversationMessage) -> str:
     """提取消息的纯文本内容，附加固着器后缀。
 
     使用与摘要生成相同的 _content_to_text 方法提取纯文本，
@@ -115,10 +117,10 @@ def _extract_content_with_suffix(msg) -> str:
     from entry.agent_support.history_summary import _content_to_text
 
     text = _content_to_text(msg.content)
-    suffix = getattr(msg, "message_suffix", None)
+    suffix = msg.message_suffix
     if suffix:
         text += suffix
-    dynamic_suffix = getattr(msg, "dynamic_message_suffix", None)
+    dynamic_suffix = msg.dynamic_message_suffix
     if dynamic_suffix:
         text += dynamic_suffix
     return text
@@ -132,7 +134,8 @@ def _get_session_store():
     from system.application import Application
     from system.session_store import SessionStore
 
-    sm = Application.current().session_manager
+    from gateway.session_manager import SessionManager
+    sm = Application.current().get_system(SessionManager)
     if sm is None:
         return None
     store_path = sm._store_path
@@ -188,7 +191,7 @@ def _handle_read_session(args: dict[str, Any]) -> dict:
         messages.append({
             "index": i,
             "role": msg.role.value,
-            "character_name": getattr(msg, "character_name", ""),
+            "character_name": msg.character_name,
             "content": content_text,
         })
 
@@ -233,7 +236,8 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
 
     from system.application import Application
 
-    sm = Application.current().session_manager
+    from gateway.session_manager import SessionManager
+    sm = Application.current().get_system(SessionManager)
     if sm is None:
         return tool_error("SessionManager not available")
 
@@ -361,7 +365,7 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             "session_title": u["title"],
             "message_index": u["conv_idx"],
             "role": msg.role.value,
-            "character_name": getattr(msg, "character_name", ""),
+            "character_name": msg.character_name,
             "preview": _extract_preview(u["text"]),
             "matched_methods": matched,
             "fusion_score": round(score, 6),
@@ -380,7 +384,7 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             "session_id": sid,
             "title": info.title,
             "tags": info.tags if info.tags else [],
-            "status": info.status.value if hasattr(info.status, "value") else str(info.status),
+            "status": info.status.value,
             "matched_methods": [c for c, ranks in hist_channel_ranks.items() if sid in ranks],
             "fusion_score": round(score, 6),
         }
@@ -399,7 +403,7 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
     )
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── schema 常量 ─────────────────────────────────────────────────
 
 # 精准读取指定会话的区间消息（类比 Read）。
 # 前置条件：会话管理子系统已初始化，目标会话存在。
@@ -410,12 +414,9 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
 # 典型场景：配合 RecallSession 定位后拉取完整消息内容，或按窗口顺序浏览会话历史。
 # 副作用：加载会话历史时可能有短暂延迟。
 # 提醒：index 是过滤后的对话消息序号（0-based），不是原始消息序列位置；length 上限受 SESSION_SEARCH_READ_LENGTH_LIMIT 约束。
-registry.register(
-    name="ReadSession",
-    toolset="core",
-    schema={
-        "description": (
-            """Read a range of messages from a specific session by index.
+_READ_SESSION_SCHEMA = {
+    "description": (
+        """Read a range of messages from a specific session by index.
 
 ## Prerequisites
 The session management system must be initialized. The target session must exist.
@@ -449,37 +450,32 @@ Loading a session's history may cause a brief delay.
 ## Notes
 - Index is 0-based, referring to the position in the filtered conversation message sequence (user + assistant only).
 """
-            f"- `length` is capped at {SESSION_SEARCH_READ_LENGTH_LIMIT} to limit response size.\n"
-            """- Out-of-range indices are silently clipped."""
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    # 目标会话 ID。必需。
-                    "description": """The target session ID. Required.""",
-                },
-                "index": {
-                    "type": "integer",
-                    # 起始消息索引（0-based），对话消息序号。必需。
-                    "description": """The starting index in the conversation message sequence (0-based). Required.""",
-                },
-                "length": {
-                    "type": "integer",
-                    # 从 index 开始读取的消息条数。
-                    "description": f"""Number of messages to read starting from index. Default {SESSION_SEARCH_READ_LENGTH_DEFAULT}, max {SESSION_SEARCH_READ_LENGTH_LIMIT}.""",
-                    "default": SESSION_SEARCH_READ_LENGTH_DEFAULT,
-                },
+        f"- `length` is capped at {SESSION_SEARCH_READ_LENGTH_LIMIT} to limit response size.\n"
+        """- Out-of-range indices are silently clipped."""
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "session_id": {
+                "type": "string",
+                # 目标会话 ID。必需。
+                "description": """The target session ID. Required.""",
             },
-            "required": ["session_id", "index"],
+            "index": {
+                "type": "integer",
+                # 起始消息索引（0-based），对话消息序号。必需。
+                "description": """The starting index in the conversation message sequence (0-based). Required.""",
+            },
+            "length": {
+                "type": "integer",
+                # 从 index 开始读取的消息条数。
+                "description": f"""Number of messages to read starting from index. Default {SESSION_SEARCH_READ_LENGTH_DEFAULT}, max {SESSION_SEARCH_READ_LENGTH_LIMIT}.""",
+                "default": SESSION_SEARCH_READ_LENGTH_DEFAULT,
+            },
         },
+        "required": ["session_id", "index"],
     },
-    handler=_handle_read_session,
-    is_async=False,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+}
 
 # 混合检索全体会话历史：exact / substring / bm25 三通道召回，RRF 按名次融合排序。
 # 前置条件：会话管理子系统已初始化。
@@ -493,12 +489,9 @@ Loading a session's history may cause a brief delay.
 # 典型场景：按关键词、缩写检索历史讨论，定位相关会话。
 # 副作用：无。
 # 提醒：message 级结果截断到 max_message_results（受 SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT/LIMIT 约束），history 级结果截断到 max_history_results（受 SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT/LIMIT 约束），两个上限独立；使用 ReadSession 拉取完整消息内容。
-registry.register(
-    name="RecallSession",
-    toolset="core",
-    schema={
-        "description": (
-            """Hybrid search across all session histories: three recall channels fused by Reciprocal Rank Fusion (RRF).
+_RECALL_SESSION_SCHEMA = {
+    "description": (
+        """Hybrid search across all session histories: three recall channels fused by Reciprocal Rank Fusion (RRF).
 
 ## Prerequisites
 The session management system must be initialized.
@@ -543,8 +536,8 @@ Runs the specified matching channels (exact, substring, bm25) across all session
 `fusion_score` is the RRF score used for ordering (higher is better).
 `summary` is only included for archived sessions.
 """
-            f"Message `preview` and history `summary` are truncated to {SESSION_SEARCH_PREVIEW_LENGTH} characters.\n\n"
-            """## When to Use
+        f"Message `preview` and history `summary` are truncated to {SESSION_SEARCH_PREVIEW_LENGTH} characters.\n\n"
+        """## When to Use
 - Locating sessions by abbreviations, identifiers, or multi-word keywords (bm25 channel).
 - Precise lookups by title, tag, or exact phrase (exact/substring channels).
 
@@ -554,49 +547,70 @@ None.
 ## Notes
 - Only user and assistant messages are searched; tool calls and system prompts are excluded.
 """
-            f"- Message matches are capped at `max_message_results` (default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}); "
-            f"history matches are capped at `max_history_results` (default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}). "
-            """The two limits are independent.
+        f"- Message matches are capped at `max_message_results` (default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}); "
+        f"history matches are capped at `max_history_results` (default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}). "
+        """The two limits are independent.
 - Use `ReadSession` to fetch full message content for any matched index."""
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    # 查询文本，可以是关键词、缩写或描述性句子。必需。
-                    "description": """The query text to search for. Can be a keyword, an abbreviation/identifier, or a descriptive sentence. Required.""",
-                },
-                "match_methods": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["exact", "substring", "bm25"]},
-                    # 使用的匹配通道列表。默认全部三种，经 RRF 融合排序。
-                    "description": """Matching channels to use. Default: all three (exact, substring, bm25), fused by RRF.""",
-                },
-                "max_message_results": {
-                    "type": "integer",
-                    # message 级匹配结果上限。
-                    "description": f"""Maximum number of message-level matches to return. Default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}.""",
-                    "default": SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT,
-                },
-                "max_history_results": {
-                    "type": "integer",
-                    # history 级匹配结果上限。
-                    "description": f"""Maximum number of history-level matches to return. Default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}.""",
-                    "default": SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT,
-                },
-                "include_history": {
-                    "type": "boolean",
-                    # 是否同时匹配会话级元信息（title/tags/summary）。默认 true。
-                    "description": """Whether to also match session-level metadata (title, tags, summary). Default true.""",
-                    "default": True,
-                },
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                # 查询文本，可以是关键词、缩写或描述性句子。必需。
+                "description": """The query text to search for. Can be a keyword, an abbreviation/identifier, or a descriptive sentence. Required.""",
             },
-            "required": ["query"],
+            "match_methods": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["exact", "substring", "bm25"]},
+                # 使用的匹配通道列表。默认全部三种，经 RRF 融合排序。
+                "description": """Matching channels to use. Default: all three (exact, substring, bm25), fused by RRF.""",
+            },
+            "max_message_results": {
+                "type": "integer",
+                # message 级匹配结果上限。
+                "description": f"""Maximum number of message-level matches to return. Default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}.""",
+                "default": SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT,
+            },
+            "max_history_results": {
+                "type": "integer",
+                # history 级匹配结果上限。
+                "description": f"""Maximum number of history-level matches to return. Default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}.""",
+                "default": SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT,
+            },
+            "include_history": {
+                "type": "boolean",
+                # 是否同时匹配会话级元信息（title/tags/summary）。默认 true。
+                "description": """Whether to also match session-level metadata (title, tags, summary). Default true.""",
+                "default": True,
+            },
         },
+        "required": ["query"],
     },
-    handler=_handle_recall_session,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register session search tools."""
+    del ui_events  # session search tools have no UI event handlers
+    registry.register(
+        name="ReadSession",
+        toolset="core",
+        schema=_READ_SESSION_SCHEMA,
+        handler=_handle_read_session,
+        is_async=False,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
+
+    registry.register(
+        name="RecallSession",
+        toolset="core",
+        schema=_RECALL_SESSION_SCHEMA,
+        handler=_handle_recall_session,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )

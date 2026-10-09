@@ -8,8 +8,8 @@
 工具生成的内容块 JSON 载荷不得超过 45 MiB；具体 LLM 客户端必须完整发送
 收到的多模态块，无法支持时自行抛出异常，本工具不假定客户端能力。
 
-模块导入时通过 ``registry.register()`` 注册，由 AST 扫描自动发现。
-路径解析通过 ``Application.current().sandbox`` 获取共享的 ``Sandbox`` 实例。
+注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
+显式调用。路径解析通过 ``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例。
 """
 
 from __future__ import annotations
@@ -43,11 +43,11 @@ from entity.messages import BaseMessage, MessageBlock, TextBlock
 from entity.puretype import Role, ToolDangerLevel
 
 # ── 工具注册 ──
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 # ── 沙箱与运行时上下文 ──
 from system.sandbox import SandboxError
-from system.context import get_runtime_context
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -56,9 +56,10 @@ logger = logging.getLogger(__name__)
 
 
 def _s():
-    """委托到 Application.sandbox property。"""
+    """委托到 Application 已注册的 Sandbox System。"""
     from system.application import Application
-    return Application.current().sandbox
+    from system.sandbox import Sandbox
+    return Application.current().get_system(Sandbox)
 
 
 def _classify_media(mime_type: str) -> tuple[str, int] | None:
@@ -188,10 +189,16 @@ async def _handle_read_forward(
         )
 
     # ── 步骤 c：按 profile_name 从共享根对象取得 LLMProfile ──
-    ctx = context.runtime_context if context is not None else get_runtime_context()
     from system.application import Application
+    from system.runtime import RuntimeSystem
+    ctx = (
+        context.runtime_context
+        if context is not None
+        else Application.current().get_system(RuntimeSystem).context
+    )
     try:
-        ref_profile = Application.current().llm_profile_store.get_profile(profile_name)
+        from system.llm_profile_store import LLMProfileStore
+        ref_profile = Application.current().get_system(LLMProfileStore).get_profile(profile_name)
     except LookupError as exc:
         return tool_error(str(exc), profile_name=profile_name)
 
@@ -307,20 +314,23 @@ async def _handle_read_forward(
 
 
 # ---------------------------------------------------------------------------
-# 注册（模块导入时执行）
+# Registration
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="ReadForward",
-    toolset="read_forward",
-    schema={
-        # 按 paths 顺序读取多个图片/音频/视频文件，通过同一条 user 消息和一次
-        # LLM 调用转发给指定 Profile。每个媒体块前会插入：
-        # File <1-based index>: <logical path> (<MIME type>)
-        # Agent 应在 prompt 中使用序号或逻辑路径准确引用文件。
-        # 任意文件无效时整体失败，不发送部分内容。文件数量没有独立上限；
-        # 最终工具生成内容块 JSON 总载荷不得超过 45 MiB。
-        "description": """Read multiple image/audio/video files and forward them to a specified LLM profile in one user message and one LLM call, with one custom prompt appended after all media.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register ReadForward tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="ReadForward",
+        toolset="read_forward",
+        schema={
+            # 按 paths 顺序读取多个图片/音频/视频文件，通过同一条 user 消息和一次
+            # LLM 调用转发给指定 Profile。每个媒体块前会插入：
+            # File <1-based index>: <logical path> (<MIME type>)
+            # Agent 应在 prompt 中使用序号或逻辑路径准确引用文件。
+            # 任意文件无效时整体失败，不发送部分内容。文件数量没有独立上限；
+            # 最终工具生成内容块 JSON 总载荷不得超过 45 MiB。
+            "description": """Read multiple image/audio/video files and forward them to a specified LLM profile in one user message and one LLM call, with one custom prompt appended after all media.
 
 ## Prerequisites
 - `paths` must be a non-empty array of logical file paths. There is no separate file-count limit.
@@ -348,29 +358,29 @@ On error: `{"error": "..."}`. File-specific errors also identify the 1-based ind
 - This tool does not probe modality support or assume any `custom_llm_client` implementation.
 - A client must faithfully send every media block or raise an error; it must not silently drop or replace unsupported media.
 - Mixed-modality support ultimately depends on the target client and provider, which may reject the request explicitly.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "paths": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {"type": "string"},
-                    "description": "Ordered logical paths of image/audio/video files. Each file is labeled for the target profile as `File <1-based index>: <logical path> (<MIME type>)`; use these numbers or paths in `prompt` for accurate references. Namespace prefixes such as fork:, ws:, fix:, skills:, and available read-only namespaces are required.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string"},
+                        "description": "Ordered logical paths of image/audio/video files. Each file is labeled for the target profile as `File <1-based index>: <logical path> (<MIME type>)`; use these numbers or paths in `prompt` for accurate references. Namespace prefixes such as fork:, ws:, fix:, skills:, and available read-only namespaces are required.",
+                    },
+                    "profile_name": {
+                        "type": "string",
+                        "description": "Name of the target LLM profile to forward to (matched by LLMProfile.name).",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "The single analysis instruction appended after all labeled media blocks. Refer to specific inputs by their `File N` label or logical path.",
+                    },
                 },
-                "profile_name": {
-                    "type": "string",
-                    "description": "Name of the target LLM profile to forward to (matched by LLMProfile.name).",
-                },
-                "prompt": {
-                    "type": "string",
-                    "description": "The single analysis instruction appended after all labeled media blocks. Refer to specific inputs by their `File N` label or logical path.",
-                },
+                "required": ["paths", "profile_name", "prompt"],
             },
-            "required": ["paths", "profile_name", "prompt"],
         },
-    },
-    handler=_handle_read_forward,
-    no_timeout=True,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-)
+        handler=_handle_read_forward,
+        no_timeout=True,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+    )

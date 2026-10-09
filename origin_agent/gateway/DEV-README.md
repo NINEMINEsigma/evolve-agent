@@ -8,7 +8,9 @@
 
 ```
 gateway/
-├── server.py                ← FastAPI 应用本体：静态资源、REST API、WS 路由
+├── system.py                ← GatewaySystem：FastAPI/uvicorn/socket 与全部路由后台工作的唯一所有者（S21）
+├── lifecycle.py             ← GatewayAdmission（HTTP/WS 输入准入）与 GatewayReadyTracker（真实启动就绪）
+├── server.py                ← 静态 APIRouter 路由表 + build_router_app() 运行实例工厂
 ├── message_router.py        ← MessageRouter：WebSocket 消息按类型分发
 ├── chat.py                  ← SessionManager：会话索引、归档、合并、分支
 ├── session_manager.py       ← SessionManager：session_id → IMainSessionLoop 映射
@@ -21,12 +23,20 @@ gateway/
 
 | 文件 | 职责 |
 |---|---|
-| `server.py` | FastAPI 应用：挂载前端静态文件、注册 REST 路由、运行 `WS /ws/chat`、管理 WebSocket 连接生命周期。消息处理委托给 `MessageRouter`。 |
-| `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。从 `server.py` 的 `ws_chat` 中拆分，负责所有消息类型的处理逻辑。 |
+| `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 与 `GatewayPortBusyError`（占用按退出 0 的普通业务拒绝）也在此。 |
+| `lifecycle.py` | `GatewayAdmission`：新业务经 `admit_business()`（要求 RUNNING）；WS 连接经 `admit_connection()`（STARTING/RUNNING）；已建立连接的每条输入经 `require_open_connection()`。`GatewayReadyTracker` 由 uvicorn 子类在 startup 成功后置位。 |
+| `server.py` | 只含静态路由定义的模块级 `APIRouter` 与 `build_router_app() -> FastAPI` 工厂（include_router、挂载 assets、计算 build_hash 存于 `app.state.build_hash`）。不再有模块级 FastAPI 实例、`_agentspace_path`/`_BUILD_HASH` 运行快照、`set_agentspace_path` 或旧 `create_server` 入口；文件上传路径经 `RuntimeSystem.context.agentspace`。 |
+| `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。USER_MESSAGE 在 `route()` 内同步完成目标/字段/Profile 校验并登记输入记录（主会话 `message_queue.accept(ready=False)`），之后才经 `GatewaySystem.spawn_work` 启动准备任务（Profile 就绪、自动标题、客户端信息、子会话转发），准备完成后 `mark_ready`；准备任务非取消异常按 RV9 记录应用失败，记录保留由关闭刷新只落 History。 |
 | `chat.py` | `SessionManager`：维护会话元数据索引（`_index.json`），提供会话的创建、归档、删除、合并、分支、标签、标题等操作。 |
-| `session_manager.py` | `SessionManager`：在 `chat.py` 的 `SessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。通过 `Application.current()` 访问单例。 |
+| `session_manager.py` | `SessionManager`：在 `chat.py` 的 `SessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。 |
 
 ---
+
+## 主会话系统迁移（S16进行中）
+
+`gateway/session_manager.py::SessionManager`已继承AsyncSystem并声明计划依赖，无参构造仅建立内存字段，virtual_awake创建索引管理器并确保随意聊聊索引；此时不创建Loop。Gateway、工具及钩子的Application.session_manager引用改为get_system(SessionManager)。输入关闭分为freeze_inputs、stop_rounds、flush_inputs，最后者返回ShutdownInputReport；运行期Loop及退役Loop由同一Manager持有，不并发保存同一History。
+
+主队列先同步登记InputDelivery再安排消费者，Parent/Multi逐项APPENDED/PERSISTED后回显；Loop替换保留旧回复与工具结果提交，记录原sequence转交新队列。`SubAgentOrchestrator` 已作为 framework `AsyncSystem` 迁移，Gateway及工具调用统一经 `Application.current().get_system(SubAgentOrchestrator)` 取得；它不再由 `main.py` 注入启动用 Loop。子会话输入登记、反馈关闭交接和普通子Agent最终保存由该System持有；Gateway USER_MESSAGE 在后台任务之前的多目标接收/ready准备已由 S21 完成，Application 最终装配由 P22 完成。
 
 ## MessageRouter
 
@@ -38,24 +48,22 @@ gateway/
 
 | 消息类型 | 处理方法 | 说明 |
 |---|---|---|
-| `USER_MESSAGE` | `handle_user_message` | 后台 task 执行：自动标题、归档检查、子 Agent 转发、主会话处理、session 旋转检查 |
+| `USER_MESSAGE` | `route()` 同步接收登记 + `_prepare_user_message` 后台任务 | 先在路由内完成目标/字段/Profile 校验并登记输入记录，再启动准备任务（自动标题、Profile 就绪、子 Agent 转发）；准备失败按 RV9 失败关闭，记录只落 History |
 | `CONFIRM_RESPONSE` | `handle_confirm_response` | 审批确认/拒绝，解析到 `FrontendSink` |
 | `ASK_RESPONSE` | `handle_ask_response` | 提问回答，解析到 `FrontendSink` |
-| `INTERRUPT` | `handle_interrupt` | WS 兼容中断入口；后台调用统一 `request_interrupt()` 并通过 done callback 观察异常，前端权威交互使用 HTTP |
+| `INTERRUPT` | `handle_interrupt` | WS 兼容中断入口；经 `GatewaySystem.spawn_work` 调用统一 `request_interrupt()` 并通过 done callback 观察异常，前端权威交互使用 HTTP |
 | `FILE_UPLOAD` | `handle_file_upload` | 文件上传：硬链接优先 → 复制 fallback → base64 解码 |
 | `HANDSFREE_MODE` | `handle_handsfree_mode` | 切换手动/脱手/YOLO 模式；服务端实际模式先更新内存，再尽力原子写入会话文件并回送权威值 |
 | `PING` | `handle_ping` | 心跳响应 |
 | `SYSTEM` | `handle_system_message` | 系统消息（仅记录日志；多模态块使用占位符，不改变既有无截断约定） |
 | 其他 | `handle_unsupported` | 不支持的消息类型 |
 
-**`handle_user_message` 子流程**：
+**`USER_MESSAGE` 处理流程（S21）**：
 
-1. `_auto_generate_title()`：首条消息自动生成标题。
-2. `_dispatch_subagent_messages()`：转发消息到子 Agent 会话。
-3. `_process_main_session()`：主会话消息处理，调用 `loop.process_message()`。
-4. `_handle_session_rotation()`：检查 session 旋转，更新 WebSocket 映射。
-5. `_emit_assistant_reply()`：发送 assistant 回复到前端。
-6. `_send_token_update()`：发送 token 消耗更新。
+1. `route()` 同步接收：目标会话存在性/归档状态、`llm_profile_name` 字段与 Profile 命中校验；主会话经 `message_queue.accept(ready=False)` 登记输入记录。
+2. `GatewaySystem.spawn_work(_prepare_user_message)`：Profile 就绪（空闲主会话立即切换）、`_auto_generate_title()`、客户端信息合并、`_dispatch_subagent_messages()` 子会话转发、轮次后回调注册。
+3. 准备完成后对主会话记录 `mark_ready`；消费者只按 sequence 连续消费 ready 前缀。
+4. 关闭中不再登记新输入；已登记记录由 SessionManager 关闭刷新只落 History。
 
 ---
 
@@ -78,7 +86,7 @@ WS /ws/chat?resume=<sid>
 - `server_info`：服务端信息。
 - `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式。前端不持久化该值。
 - `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。
-- `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，连接断开时取消转发 task并注销订阅；自动旋转复用同一物理连接和订阅。
+- `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`；转发 task 登记在 `GatewaySystem.task_owner`，连接断开时经 `TaskOwner.cancel` 预期取消（禁止裸 `task.cancel()`，否则 Owner 会按 RV11 判定为未授权取消并报生命周期失败）并注销订阅；自动旋转复用同一物理连接和订阅。
 
 ### 上行消息类型
 
@@ -121,7 +129,7 @@ WS /ws/chat?resume=<sid>
 
 `ws_chat` 从连接登记后的初始化起进入统一 `try/finally`：客户端信息读取、Loop 创建、服务端状态与 Agentspace 订阅任一步意外失败均传播，不继续提供不完整握手。订阅释放即使失败，也在嵌套 `finally` 中释放本连接的待审批/询问和连接登记；旧连接不得清除已接管的新连接状态。明确断线按正常生命周期结束，取消继续传播；通用 `RuntimeError` 不再被解释成正常断线。Agentspace 后台转发失败记录原异常并关闭连接，不伪造 watcher 降级状态。
 
-`entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。
+`entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。Gateway经`Application.current().get_system(FrontendSink)`取得唯一实例（`_get_ws`、HTTP confirm/ask、会话占用检查、删除关闭、Profile广播与连接释放均走此入口），不再访问`Application.frontend_sink`属性。
 
 `ToolCallRequest`、`ToolCallDelta`、`MessageMetrics` 在进程内保持类型，流式事件在 `FrontendSink._send_stream_event()` 才执行一次 JSON 序列化；可选 `None` 字段省略。工具增量保留 `id/index/name/args_delta/phase`，起始 `id` 可为空，`phase` 为 `start/append/done`，不把未完成的 `args_delta` 当作完整 JSON解析。现有事件出口的空结束正文仍按旧规则省略，不改变中断时的部分输出。其他非流式事件与入站通用 `Message` 暂时保持原协议。
 
@@ -134,6 +142,14 @@ WS /ws/chat?resume=<sid>
 `GET /api/sessions/{session_id}/status` 除了返回 `exists` 和 `occupied`，还返回 `processing` 与非持久化 `activity` 快照。快照包含 `activity_id`、`revision`、`source`、`phase`、可空 `stream_id` 和可空 `character_name`。状态查询只读取已经存在的运行时 Loop，不会为了轮询隐式创建 Loop。
 
 `processing` 表示 Loop存在活动快照或已经进入处理状态；它覆盖队列排队窗口。WebSocket 的 `history_sync.processing` 保留兼容用途并使用相同活跃语义，首字前精细状态由前端活动状态轮询取得。
+
+## 输入准入与关闭（S21）
+
+- RUNNING 之前与 STOPPING 之后，所有新业务 HTTP 入口经 `_admit_business_http()` 返回 503；`/health` 只报告状态、不创建 Loop，非服务状态返回 503。
+- WS 握手在 STARTING/RUNNING 期间允许（`admit_connection`），STOPPING 后以标准 1001 拒绝；已建立连接上的每条输入也经 `require_open_connection()` 检查，关闭时连接以 1001 结束。
+- 动态端点在登记队列消息成功后才回报 202；关闭中的拒绝返回 503。
+- 关闭顺序：先 `stop_accepting()` 封闭新输入（既有输出连接保留到 History 刷新完成），`cancel_background_work()` 取消自动标题/准备/恢复等路由后台任务，最后 `stop_server()` 结束 SSE/WS、置 `server.should_exit` 并等待 serve 任务结束。Gateway 是最后唤醒、首先资源注销的 System。
+- uvicorn 由 GatewaySystem 子类 `_GatewayUvicornServer` 管理：禁用自身信号安装（App 统一处理信号），startup 成功后置 ready 事件；启动等待 ready、serve 提前结束与 30 秒超时三者竞速。
 
 ## HTTP 请求类型边界
 
@@ -212,6 +228,8 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主动推送。WebSocket 断线不停止 Shell；自动旋转迁移所有权；手动终结、永久删除和应用关闭负责停止。
 
+Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronRouter)`，不再导入cron_tools获取服务。任务持久化、调度和实际命令属于CronRouter；应用冻结不同于用户取消，不删除持久任务或把未执行任务标为完成。激活由 Application 在全部 System 唤醒且 Gateway ready 后统一执行，关闭编排由 Application 统一执行。
+
 ### LLM Profile
 
 | 方法 | 端点 | 说明 |
@@ -245,7 +263,7 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 | GET | `/api/metadata/profile` | 返回全局元数据 Profile 的可空名称、模型与配置可用性 |
 | PUT | `/api/metadata/profile` | 按 Profile 名称设置或以 `null`清空全局元数据 Profile |
 
-自动标题、自动标签和摘要直接调用 Application 持有的 `SessionMetadataService`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
+自动标题、自动标签和摘要直接调用 `Application.current().get_system(SessionMetadataService)`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
 
 ### 全局多模态回退 Profile
 
@@ -258,7 +276,7 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 
 `/files` 的会话视觉入口支持 GET/HEAD 探测：源目录同级 `.meta` 的 `[redirect]` 只解析一层，合法目标通过 307 指向带 `visual_raw` 的原始入口，避免目标目录再次解析；最终 HEAD 响应返回 `X-Session-Visual-Version`。无效配置静默使用源目录，普通静态文件不受影响。site 的 `/zip` 源目录同样复用该规则。
 
-`/files`、`/downloads` 与 `/zip` 均复用 `Application.sandbox`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
+`/files`、`/downloads` 与 `/zip` 均复用 `Application.current().get_system(Sandbox)`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
@@ -285,7 +303,7 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 
 Agentspace mutation body 均携带 `operation_id`；`write` 另携带 `expected_version`，`rename` 只接收 `path + new_name`。错误 `detail` 为机器可读对象：无效路径 400、不存在 404、目标或版本冲突 409、非 UTF-8 文本 415、命中 Agent 回复轮次文件锁 423、内部错误 500。该 SSE 只服务独立 Agentspace 编辑器：使用 `event: agentspace`，`id` 为进程内递增 sequence，连接后先发送 `resync` 与完整 `locks`，心跳为注释帧；断线重连后前端重新取得 REST 权威快照。聊天页视觉不再创建此 EventSource，而从已有会话 WebSocket接收 `agentspace_event`。
 
-Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；`main.py::App._stop_gateway()` 会等待 uvicorn 完成正常关闭，仅在超时后强制取消。`AgentspaceService` 的订阅在响应结束时由 `finally` 释放。
+Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待任务经 `GatewaySystem.task_owner` 登记，应用关闭编排（P3/P22）会等待 uvicorn 完成正常关闭，仅在超时后强制取消。`AgentspaceService` 的订阅在响应结束时由 `finally` 释放。
 
 ### 技能与动态端点
 

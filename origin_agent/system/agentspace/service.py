@@ -35,13 +35,17 @@ from entity.puretype import (
     AgentspacePathIdentity,
     AgentspaceTrashEntry,
 )
+from framework import AsyncSystem
 from system.atomic_io import (
     create_text_exclusive,
     move_file_no_replace,
     move_tree_no_replace,
     replace_atomic,
 )
+from system.lifecycle import LifecycleFailure
+from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox, SandboxError
+from system.session_visual_resources import SessionVisualResourceService
 from .errors import (
     AgentspaceAlreadyExistsError,
     AgentspaceInvalidPathError,
@@ -60,10 +64,38 @@ logger = logging.getLogger(__name__)
 _NATURAL_PART = re.compile(r"(\d+)")
 
 
-class AgentspaceService:
-    def __init__(self, sandbox: Sandbox, agentspace_root: Path) -> None:
+class AgentspaceService(AsyncSystem):
+    """Agentspace 编辑器的文件、锁、垃圾桶与实时事件业务服务。
+
+    注册为 framework AsyncSystem，依赖 RuntimeSystem 与 Sandbox；由 Application
+    在 P22 装配后经 ``app.get_system(AgentspaceService)`` 取得。virtual_awake 取
+    得 Sandbox/ctx，构造锁、垃圾桶、EventHub、Watcher 及 visual_resources 叶
+    服务，然后完成原 start 的绑定/恢复/watcher 启动。watcher 启动失败不再降
+    级为成功状态，直接传播（D2）。关闭时 watcher 停止确认退出、EventHub 最终
+    释放；History 提交与 Gateway 事件连接结束前 EventHub 不 close。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem, Sandbox))
+        self._sandbox: Sandbox | None = None
+        self._root: Path | None = None
+        self._event_hub: AgentspaceEventHub | None = None
+        self._lock_registry: AgentspaceLockRegistry | None = None
+        self._operation_gate: AgentspaceOperationGate | None = None
+        self._trash_store: AgentspaceTrashStore | None = None
+        self._watcher: AgentspaceWatcher | None = None
+        self._visual_resources: SessionVisualResourceService | None = None
+        self._pending_changes: dict[str, str] = {}
+        self._pending_lock = threading.Lock()
+        self._started = False
+        self._watcher_available = False
+
+    async def virtual_awake(self) -> None:
+        runtime = self.get_system(RuntimeSystem)
+        sandbox = self.get_system(Sandbox)
+        ctx = runtime.context
         self._sandbox = sandbox
-        self._root = agentspace_root.resolve()
+        self._root = ctx.agentspace.resolve()
         self._event_hub = AgentspaceEventHub(AGENTSPACE_EVENT_QUEUE_SIZE)
         self._lock_registry = AgentspaceLockRegistry(
             self._event_hub,
@@ -80,10 +112,90 @@ class AgentspaceService:
             AGENTSPACE_WATCH_DEBOUNCE_MS,
             {AGENTSPACE_TRASH_DIR_NAME, AGENTSPACE_INTERNAL_DIR_NAME},
         )
-        self._pending_changes: dict[str, str] = {}
-        self._pending_lock = threading.Lock()
-        self._started = False
-        self._watcher_available = False
+        self._visual_resources = SessionVisualResourceService(sandbox)
+        # 初始化失败也必须收尾已经取得的资源；取消不能遗留恢复线程。
+        loop = asyncio.get_running_loop()
+        self._event_hub.bind_loop(loop)
+        recovery = asyncio.create_task(
+            asyncio.to_thread(self.trash_store.recover_staging),
+            name="agentspace-trash-recovery",
+        )
+        try:
+            await asyncio.shield(recovery)
+            self._watcher.start(loop)
+        except BaseException as failure:
+            runtime.record_failure(failure)
+            failures: list[BaseException] = [failure]
+            try:
+                await asyncio.shield(recovery)
+            except BaseException as exc:
+                if exc is not failure:
+                    failures.append(exc)
+            try:
+                await asyncio.to_thread(self._watcher.stop)
+            except BaseException as exc:
+                failures.append(exc)
+            try:
+                self._event_hub.close()
+            except BaseException as exc:
+                failures.append(exc)
+            if len(failures) > 1:
+                raise BaseExceptionGroup("Agentspace initialization cleanup failed", failures) from None
+            raise
+        self._watcher_available = True
+        self._started = True
+
+    @property
+    def sandbox(self) -> Sandbox:
+        if self._sandbox is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._sandbox
+
+    @property
+    def root(self) -> Path:
+        if self._root is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._root
+
+    @property
+    def event_hub(self) -> AgentspaceEventHub:
+        if self._event_hub is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._event_hub
+
+    @property
+    def lock_registry(self) -> AgentspaceLockRegistry:
+        if self._lock_registry is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._lock_registry
+
+    @property
+    def operation_gate(self) -> AgentspaceOperationGate:
+        if self._operation_gate is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._operation_gate
+
+    @property
+    def trash_store(self) -> AgentspaceTrashStore:
+        if self._trash_store is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._trash_store
+
+    @property
+    def watcher(self) -> AgentspaceWatcher:
+        if self._watcher is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._watcher
+
+    @property
+    def visual_resources(self) -> SessionVisualResourceService:
+        if self._visual_resources is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._visual_resources
+
+    @property
+    def watcher_available(self) -> bool:
+        return self._watcher_available
 
     @staticmethod
     def _timestamp() -> str:
@@ -135,11 +247,11 @@ class AgentspaceService:
         )
         logical = f"ws:{normalized}"
         try:
-            resolved = self._sandbox.resolve_write(logical)
+            resolved = self.sandbox.resolve_write(logical)
         except SandboxError as exc:
             raise AgentspaceInvalidPathError("路径未通过工作空间沙盒校验。", path=path) from exc
         try:
-            resolved.real.resolve(strict=False).relative_to(self._root)
+            resolved.real.resolve(strict=False).relative_to(self.root)
         except ValueError as exc:
             raise AgentspaceInvalidPathError("路径越出工作空间。", path=path) from exc
         return normalized, resolved.real
@@ -225,7 +337,7 @@ class AgentspaceService:
         source: AgentspaceEventSource = AgentspaceEventSource.SERVICE,
         message: str | None = None,
     ) -> None:
-        self._event_hub.publish_threadsafe(
+        self.event_hub.publish_threadsafe(
             AgentspaceEvent(
                 kind=kind,
                 source=source,
@@ -284,7 +396,7 @@ class AgentspaceService:
     ) -> AgentspaceFileSnapshot:
         normalized, target = self._resolve_user_path(relative_path)
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation([normalized]):
+        with self.operation_gate.user_operation([normalized]):
             if target.exists():
                 if not target.is_file():
                     raise AgentspaceAlreadyExistsError("目标已存在且不是文件。", path=normalized)
@@ -369,7 +481,7 @@ class AgentspaceService:
     ) -> AgentspaceEntry:
         normalized, target = self._resolve_user_path(relative_path)
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation([normalized]):
+        with self.operation_gate.user_operation([normalized]):
             if target.exists():
                 raise AgentspaceAlreadyExistsError("目标路径已存在。", path=normalized)
             if not target.parent.is_dir():
@@ -414,7 +526,7 @@ class AgentspaceService:
             raise AgentspaceNotFoundError("要重命名的路径不存在。", path=normalized)
         is_directory = source.is_dir()
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation(
+        with self.operation_gate.user_operation(
             [normalized, new_normalized],
             include_descendants=is_directory,
         ):
@@ -451,11 +563,11 @@ class AgentspaceService:
             raise AgentspaceNotFoundError("要删除的路径不存在。", path=normalized)
         is_directory = source.is_dir()
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation(
+        with self.operation_gate.user_operation(
             [normalized, AGENTSPACE_TRASH_DIR_NAME],
             include_descendants=True,
         ):
-            entry = self._trash_store.move_to_trash(normalized)
+            entry = self.trash_store.move_to_trash(normalized)
             self.record_user_change("delete", normalized)
         self._publish(
             AgentspaceEventKind.DELETED,
@@ -472,26 +584,26 @@ class AgentspaceService:
         return entry
 
     def list_trash(self) -> list[AgentspaceTrashEntry]:
-        return self._trash_store.list_entries()
+        return self.trash_store.list_entries()
 
     def restore_trash(
         self,
         entry_id: str,
         operation_id: str = "",
     ) -> tuple[AgentspaceTrashEntry, str]:
-        _entry, expected_target = self._trash_store.preview_restore(entry_id)
+        _entry, expected_target = self.trash_store.preview_restore(entry_id)
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation(
+        with self.operation_gate.user_operation(
             [expected_target, AGENTSPACE_TRASH_DIR_NAME],
             include_descendants=True,
         ):
-            _current_entry, current_target = self._trash_store.preview_restore(entry_id)
+            _current_entry, current_target = self.trash_store.preview_restore(entry_id)
             if current_target != expected_target:
                 raise AgentspaceAlreadyExistsError(
                     "恢复目标在操作期间发生变化，请重试。",
                     path=expected_target,
                 )
-            entry, restored_path = self._trash_store.restore(entry_id)
+            entry, restored_path = self.trash_store.restore(entry_id)
             self.record_user_change("create", restored_path)
         self._publish(
             AgentspaceEventKind.CREATED,
@@ -509,11 +621,11 @@ class AgentspaceService:
 
     def purge_trash(self, entry_id: str, operation_id: str = "") -> None:
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation(
+        with self.operation_gate.user_operation(
             [AGENTSPACE_TRASH_DIR_NAME],
             include_descendants=True,
         ):
-            self._trash_store.purge(entry_id)
+            self.trash_store.purge(entry_id)
         self._publish(
             AgentspaceEventKind.TRASH_CHANGED,
             path=AGENTSPACE_TRASH_DIR_NAME,
@@ -523,11 +635,11 @@ class AgentspaceService:
 
     def empty_trash(self, operation_id: str = "") -> tuple[int, list[str]]:
         operation_id = operation_id or uuid.uuid4().hex
-        with self._operation_gate.user_operation(
+        with self.operation_gate.user_operation(
             [AGENTSPACE_TRASH_DIR_NAME],
             include_descendants=True,
         ):
-            result = self._trash_store.empty()
+            result = self.trash_store.empty()
         self._publish(
             AgentspaceEventKind.TRASH_CHANGED,
             path=AGENTSPACE_TRASH_DIR_NAME,
@@ -546,7 +658,7 @@ class AgentspaceService:
         if not ws_paths:
             yield
             return
-        with self._operation_gate.agent_access(owner, ws_paths):
+        with self.operation_gate.agent_access(owner, ws_paths):
             yield
 
     def acquire_agent_access(
@@ -563,24 +675,20 @@ class AgentspaceService:
             character_name=character_name,
             round_id=owner_id,
         )
-        with self._operation_gate.agent_access(owner, [(logical_path, recursive)]):
+        with self.operation_gate.agent_access(owner, [(logical_path, recursive)]):
             pass
 
     def release_agent_access(self, round_id: str) -> None:
-        self._lock_registry.release_round(round_id)
+        self.lock_registry.release_round(round_id)
 
     def locks_snapshot(self) -> list[AgentspaceLockInfo]:
-        return self._lock_registry.snapshot()
-
-    @property
-    def watcher_available(self) -> bool:
-        return self._watcher_available
+        return self.lock_registry.snapshot()
 
     def subscribe_events(self):
-        return self._event_hub.subscribe()
+        return self.event_hub.subscribe()
 
     def unsubscribe_events(self, subscription_id: str) -> None:
-        self._event_hub.unsubscribe(subscription_id)
+        self.event_hub.unsubscribe(subscription_id)
 
     def record_user_change(
         self,
@@ -619,30 +727,27 @@ class AgentspaceService:
             lines.append(f"- {labels.get(operation, operation)}: {path}")
         return "\n".join(lines)
 
-    async def start(self) -> None:
-        if self._started:
-            return
-        loop = asyncio.get_running_loop()
-        self._event_hub.bind_loop(loop)
-        await asyncio.to_thread(self._trash_store.recover_staging)
-        try:
-            self._watcher.start(loop)
-            self._watcher_available = True
-        except Exception as exc:
-            self._watcher_available = False
-            logger.warning("Agentspace watcher unavailable: %s", exc, exc_info=True)
-            self._publish(
-                AgentspaceEventKind.WATCHER_ERROR,
-                source=AgentspaceEventSource.SYSTEM,
-                message="外部文件实时同步不可用，请使用手动刷新。",
-            )
-        self._started = True
+    async def virtual_shotdown(self) -> None:
+        """关闭：停止 watcher（取消 debounce timers、join 并确认退出），最终释放 EventHub。
 
-    async def shutdown(self) -> None:
+        watcher.stop 取消所有 debounce Timer、停止 Observer 并 join(timeout=5)；
+        EventHub 在 History 提交与 Gateway 事件连接结束前不 close，由本方法
+        最终释放。错误直接上抛；不吞掉清理失败或覆盖为成功。
+        """
         if not self._started:
             return
-        if self._watcher_available:
-            await asyncio.to_thread(self._watcher.stop)
-        self._event_hub.close()
+        failures: list[BaseException] = []
+        # watcher 停止：取消 debounce timers、join 并确认退出，超时上抛。
+        try:
+            await asyncio.to_thread(self.watcher.stop)
+        except BaseException as exc:
+            failures.append(exc)
+        # EventHub 最终释放。
+        try:
+            self.event_hub.close()
+        except BaseException as exc:
+            failures.append(exc)
         self._started = False
         self._watcher_available = False
+        if failures:
+            raise BaseExceptionGroup("AgentspaceService shutdown failed", failures)

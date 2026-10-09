@@ -89,9 +89,13 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 ### `abstract/tools/registry.py`
 
-`ToolRegistry` 是线程安全的中央注册表单例，提供：
+`ToolRegistry` 已迁移为依赖 `RuntimeSystem` 的 framework `AsyncSystem`，通过 `app.get_system(ToolRegistry)` 取得唯一实例。工具表、工具集元数据、检查缓存及锁均由该实例持有，不再提供模块级 `registry` 单例或兼容代理。
 
-- `registry.register()`：模块级注册，声明 schema、handler、toolset、危险等级、`availability` 位掩码等。
+工具模块通过顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None` 显式声明；导入模块不取得 Application、不修改注册表。ToolDiscoverySystem 持有本次已注册模块集合并传入唯一工具/事件注册表。下文 `registry` 表示显式参数或运行期取得的实例，而非可导入的全局对象。
+
+提供：
+
+- `registry.register()`：在显式实例上注册，声明 schema、handler、toolset、危险等级、`availability` 位掩码等。
 - `registry.register_toolset()`：显式注册工具集元数据（`ToolsetEntry`：名称、描述、是否默认加载）。
 - `registry.dispatch(name, args, context)`：按名分发工具调用；内含工具集加载检查（`is_toolset_loaded`）。
 - `registry.get_definitions_for_loaded_toolsets(scope, loaded_toolsets)`：按已加载工具集和 scope 返回工具 schema（渐进式加载核心方法）。
@@ -110,20 +114,25 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 工具集元数据由 `ToolsetEntry` 承载，可显式注册或由工具首次注册时自动创建无描述回退项。`abstract/tools/toolsets_meta.py` 在启动时为所有内置工具集注册简短描述及加载后的使用说明；其中 shell 工具集说明要求跨命令和回复轮次复用 Shell会话，不因单次命令或回复完成而例行调用 `StopShell`。`skills` 工具集已并入 `core`。
 
+### 工具执行与关闭所有权
+
+`virtual_awake` 创建唯一 ThreadPoolExecutor。同步入口仅允许在非事件循环线程调用，同步与异步分发中的同步 handler 均经该执行器运行；`contextvars.copy_context()` 保留调用上下文。原生 Future 在 handler 开始前完成登记，取消异步等待只解除请求等待责任，不删除尚未完成的线程记录；真实完成与结果交接均发生后才回收。取消后迟到的执行失败与明确生命周期失败报告 Runtime，普通请求错误仍交回调用方。
+
+异步分发以 `TaskOwner.run_request` 托管完整 handler 操作，使用 Runtime 的同步接收边界及开始前复查。`close_dispatch` 在 STOPPING 期间仍可调用；`cancel_pending_calls` 取消并等待请求任务与结果交接；`wait_idle` 还等待真实同步工作，不用清表表示结束。超时保留资源并抛出生命周期失败。最终关闭仅在没有活工作时通过独立、受持有的异步任务在线程中执行 `executor.shutdown(wait=True)`；主事件循环不阻塞 join，关闭失败继续传播。
+
 ### `abstract/tools/discover.py`
 
-纯 stdlib 实现：
+`discover_builtin_tools(tools_dir, package_prefix, *, registry, ui_events)` 严格读取并解析候选 `.py`，识别顶层同步 `register_tools` 函数，按路径顺序导入后显式调用。辅助模块正常跳过；旧全局注册表导入、导入期注册、语法/读取/导入/注册错误直接失败。命名冲突未授权覆盖时 ToolRegistry 抛错，不把拒绝注册计为成功。
 
-- 扫描指定目录下的 `.py` 文件。
-- 检测模块级别的 `registry.register()` 调用。
-- 自动 `importlib.import_module()` 加载工具模块。
-- 无需在核心代码中显式导入新工具文件。
+`ToolDiscoverySystem` 是 framework AsyncSystem，依赖已就绪的工具所需业务系统（包括 MCPSystem），构造不发现工具。`virtual_awake` 扫描原五个 component 子目录与可选 custom_tools，显式注册 MCPRefresh，最后登记工具集元数据；缺失内置目录失败，只有不存在的 custom_tools 可跳过。实例保存唯一已注册模块名集合，同一次装配重复注册直接失败。Python 模块缓存照常保留，每次显式调用入口，不重载或修改 sys.modules；宿主根导入路径沿原启动方式加入，只有本次添加的路径才在失败/注销时释放。
+
+发现失败终止启动，不提供半套工具继续服务、不重试注册或创建第二个注册表；已提交条目仍由原 ToolRegistry/UIEventRouter 持有。最终注销只清除本次发现记录和导入路径，不卸载模块，不重连 MCP。
 
 ### `abstract/tools/ui_event_router.py`
 
-- 提供工具级前端 emit handler 注册。
-- 工具执行后由 `emit_for()` 统一分发事件到前端，例如 `task_progress`、`clipboard_display`、`subagent_update`。
-- 避免工具直接耦合 WebSocket 细节。
+- `UIEventRouter` 是依赖 RuntimeSystem 的 AsyncSystem，模块级实例已删除；工具在 `register_tools` 内通过显式 `ui_events` 参数注册事件，与工具声明共用唯一实例。
+- 工具后处理经 `Application.current().get_system(UIEventRouter).emit_for()` 分发 task_progress、clipboard_display 等事件。映射由实例唯一持有，完整 handler 请求使用 TaskOwner.run_request 托管。
+- 已发生结果在 STOPPING 仍可发送，最终注销才封闭输出、取消并等待在途请求和结果交接后清表。网络断线由 FrontendSink 处理，路由不吞内部异常。它不持有额外 WebSocket 或另一套全局注册表。
 
 ---
 
@@ -163,9 +172,8 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - **并发工具调用**：可开关。
 - 凭据脱敏、提示注入扫描、重连退避。
 
-配置通过 `component/mcp_tools.py` 调用 `register_mcp_servers(servers)` 时传入，默认读取 `workspace/mcp_config.json`。
+配置入口已迁入 `MCPSystem.virtual_awake()`，`component/mcp_tools.py` 只通过 `register_tools(registry, ui_events)` 声明 `MCPRefresh`，不在导入期安装回调或创建连接。`MCPCore` 完整持有服务器表、专用 loop/thread、stdio 进程、stderr 句柄、断路器状态及 OAuth Manager；OAuth 认证任务、回调 HTTP 线程、401 dedup 和 stdio 进程生命周期均经独立静态复核确认闭合。初始并发连接失败清理所有部分成功连接后传播，运行期刷新保留新增/移除结果；`close_admission` 拒绝新工作，`stop_calls` 确认真实任务退出，`shutdown` 等待全部资源（OAuth、stdio、cleanup、loop thread）实际完成后才释放。
 
-### `abstract/mcp/schema.py`
 
 `normalize_mcp_input_schema(schema, diagnostic=None)` 是 MCP 工具输入 schema 的 provider 兼容层。它不依赖 MCP SDK、ToolRegistry 或 LLM 客户端，使用深拷贝按 JSON Schema 的结构位置递归处理：`properties`/`patternProperties`/`$defs`/`definitions` 是映射边界，`items`、组合关键字和 `additionalProperties` 才进入子 schema。这样业务参数名为 `properties`、`type` 或 `required` 时不会被误认为结构关键字。
 
@@ -191,5 +199,5 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 ### 扩展点
 
 - **自定义 LLM 客户端**：在 `custom_llm_client/` 下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。
-- **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，使用 `registry.register()` 注册，启动时由 AST 扫描自动发现。
+- **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，导出顶层同步 `register_tools(registry, ui_events)` 并在其中声明工具/事件；ToolDiscoverySystem 按 AST 发现后显式调用，导入模块不得注册或取得运行时服务。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。

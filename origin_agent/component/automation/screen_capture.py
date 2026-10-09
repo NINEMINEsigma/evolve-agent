@@ -15,7 +15,8 @@ import logging
 import time
 from typing import * # type: ignore
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from system.sandbox import SandboxError
 
 if TYPE_CHECKING:
@@ -79,14 +80,14 @@ class _BITMAPINFO(ctypes.Structure):
 
 
 # ---------------------------------------------------------------------------
-# 沙箱引用（与 shell.py 相同的延迟引用模式）
+# 沙箱引用（通过 Application 已注册的 Sandbox System）
 # ---------------------------------------------------------------------------
-
-from component.tools.filesystem import _s as _get_sandbox  # noqa: E402
 
 
 def _s():
-    return _get_sandbox()
+    from system.application import Application
+    from system.sandbox import Sandbox
+    return Application.current().get_system(Sandbox)
 
 
 # ---------------------------------------------------------------------------
@@ -220,10 +221,13 @@ def _handle_screen_capture(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="ScreenCapture",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register ScreenCapture into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="ScreenCapture",
+        toolset="automation",
+        schema={
         # 通过 HWND 后台截取窗口内容并保存到 agentspace（窗口被遮挡时仍可截取）。
         # 前置条件：仅 Windows；需安装 Pillow；需先用 WindowFind 获取 HWND。
         # 调用效果：使用 PrintWindow 后台渲染窗口内容，保存为 PNG 到沙箱。
@@ -275,4 +279,4 @@ The `path` is a sandbox logical path (ws: namespace). Use it with `TemplateMatch
         },
     },
     handler=_handle_screen_capture,
-)
+    )

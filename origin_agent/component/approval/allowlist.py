@@ -1,7 +1,4 @@
-"""统一工具 allowlist。
-
-为 write / dangerous 工具提供统一的"始终允许"持久化能力。
-"""
+"""工具白名单业务存储；实例由 ApprovalSystem 唯一持有。"""
 
 from __future__ import annotations
 
@@ -13,16 +10,10 @@ from typing import Any
 
 from entity.constant import TOOL_ALLOWLIST_FILENAME
 from entity.puretype import ToolAllowlistEntry
-from system.context import get_runtime_context
 
 logger = logging.getLogger(__name__)
 
 _EXCLUDED_KEYS = {"_session_id", "_pre_approved", "_approval_action", "reason"}
-_lock = threading.RLock()
-
-
-def _allowlist_path() -> Path:
-    return get_runtime_context().workspace / TOOL_ALLOWLIST_FILENAME
 
 
 def _json_safe(value: Any) -> Any:
@@ -43,53 +34,67 @@ def normalize_args(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _empty_store() -> list[ToolAllowlistEntry]:
-    return []
+class ToolAllowlistStore:
+    """保存原 JSON 白名单规则，不建立独立的模块级锁或配置入口。"""
 
+    def __init__(self, workspace: Path) -> None:
+        self._path = workspace / TOOL_ALLOWLIST_FILENAME
+        self._lock = threading.RLock()
 
-def _load_store() -> list[ToolAllowlistEntry]:
-    path = _allowlist_path()
-    if not path.exists():
-        return _empty_store()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return [ToolAllowlistEntry(**entry) for entry in data if isinstance(entry, dict)]
-        if isinstance(data, dict):
-            entries = data.get("entries", [])
-            if isinstance(entries, list):
-                return [ToolAllowlistEntry(**entry) for entry in entries if isinstance(entry, dict)]
-        return _empty_store()
-    except Exception as exc:
-        logger.exception("Failed to load tool allowlist: %s", exc)
-        return _empty_store()
+    def _load_store(self) -> list[ToolAllowlistEntry]:
+        if not self._path.exists():
+            return []
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [ToolAllowlistEntry(**entry) for entry in data if isinstance(entry, dict)]
+            if isinstance(data, dict):
+                entries = data.get("entries", [])
+                if isinstance(entries, list):
+                    return [ToolAllowlistEntry(**entry) for entry in entries if isinstance(entry, dict)]
+            return []
+        except Exception as exc:
+            logger.exception("Failed to load tool allowlist: %s", exc)
+            return []
 
+    def _save_store(self, entries: list[ToolAllowlistEntry]) -> None:
+        # 保持既有白名单的尽力保存语义；本迁移不更改审批业务策略。
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps([entry.model_dump() for entry in entries], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.exception("Failed to save tool allowlist: %s", exc)
 
-def _save_store(entries: list[ToolAllowlistEntry]) -> None:
-    path = _allowlist_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([e.model_dump() for e in entries], ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as exc:
-        logger.exception("Failed to save tool allowlist: %s", exc)
+    def is_allowed(self, tool_name: str, args: dict[str, Any]) -> bool:
+        normalized = normalize_args(args)
+        with self._lock:
+            return any(
+                entry.tool == tool_name and entry.args == normalized
+                for entry in self._load_store()
+            )
+
+    def add_allowed(self, tool_name: str, args: dict[str, Any]) -> None:
+        normalized = normalize_args(args)
+        with self._lock:
+            entries = self._load_store()
+            if any(entry.tool == tool_name and entry.args == normalized for entry in entries):
+                return
+            entries.append(ToolAllowlistEntry(tool=tool_name, args=normalized))
+            self._save_store(entries)
 
 
 def is_allowed(tool_name: str, args: dict[str, Any]) -> bool:
-    normalized = normalize_args(args)
-    with _lock:
-        entries = _load_store()
-        for entry in entries:
-            if entry.tool == tool_name and entry.args == normalized:
-                return True
-    return False
+    """公共审批业务入口；不持有实例或状态。"""
+    from component.approval.system import ApprovalSystem
+    from system.application import Application
+    return Application.current().get_system(ApprovalSystem).allowlist.is_allowed(tool_name, args)
 
 
 def add_allowed(tool_name: str, args: dict[str, Any]) -> None:
-    normalized = normalize_args(args)
-    with _lock:
-        entries = _load_store()
-        for entry in entries:
-            if entry.tool == tool_name and entry.args == normalized:
-                return
-        entries.append(ToolAllowlistEntry(tool=tool_name, args=normalized))
-        _save_store(entries)
+    """公共审批业务入口；委托唯一系统拥有的白名单。"""
+    from component.approval.system import ApprovalSystem
+    from system.application import Application
+    Application.current().get_system(ApprovalSystem).allowlist.add_allowed(tool_name, args)

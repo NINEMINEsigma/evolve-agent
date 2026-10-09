@@ -11,24 +11,32 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs."
 )
 
-_ELEMENT_NOT_FOUND: str = "未找到目标元素，请先用 BrowserQuery 确认其 path 或 selector。"
+_ELEMENT_NOT_FOUND: str = "Target element not found. Use BrowserQuery to confirm its path or selector first."
 
 _DEFAULT_TIMEOUT_MS: int = 30000
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _resolve_page_and_locator(
@@ -52,8 +60,10 @@ async def _resolve_page_and_locator(
         return None, None, "provide 'path' or 'selector' (at least one)"
 
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("interact: reconnect failed: %s: %s", type(exc).__name__, exc)
         return None, None, _NOT_CONNECTED
     page = await _connection.find_page(browser, tab)
@@ -138,10 +148,13 @@ async def _handle_browser_scroll(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="BrowserClick",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register browser interact tools into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserClick",
+        toolset="browser",
+        schema={
         # 点击指定元素（path 或 selector 定位，真实输入事件）。
         #
         # ## 行为规范
@@ -197,12 +210,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.write,
-)
+    )
 
-registry.register(
-    name="BrowserType",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserType",
+        toolset="browser",
+        schema={
         # 向指定元素输入文本（fill，真实输入事件）。
         #
         # ## 行为规范
@@ -250,12 +263,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.write,
-)
+    )
 
-registry.register(
-    name="BrowserPress",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserPress",
+        toolset="browser",
+        schema={
         # 按下键盘按键。有元素定位时在该元素上按键，否则全局按键
         # （如 Enter 提交当前聚焦表单）。
         #
@@ -297,12 +310,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.write,
-)
+    )
 
-registry.register(
-    name="BrowserScroll",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserScroll",
+        toolset="browser",
+        schema={
         # 滚动页面。有元素定位时滚动到该元素可见；否则按 delta_y 像素滚动。
         "description": """Scrolls the page. With an element target, scrolls until it is visible; otherwise scrolls by delta_y pixels (mouse wheel).""",
         "parameters": {
@@ -338,4 +351,4 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

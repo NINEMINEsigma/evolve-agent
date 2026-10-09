@@ -11,23 +11,31 @@ import logging
 import uuid
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
-from component.tools.filesystem import _s as _get_sandbox
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
+from system.sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
-    "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
-    "本工具不会自动打开任何页面。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs; "
+    "if the target page is not listed, ask the user to open or switch to it manually, then retry. "
+    "This tool does not open any page."
 )
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
@@ -37,8 +45,10 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
     full_page: bool = bool(args.get("full_page", False))
 
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserScreenshot: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
@@ -47,7 +57,7 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
         return tool_error(_TAB_NOT_FOUND, tab=tab)
 
     logical = f"ws:logs/browser_screenshots/{uuid.uuid4().hex[:12]}.png"
-    resolved = _get_sandbox().resolve_write(logical)
+    resolved = Application.current().get_system(Sandbox).resolve_write(logical)
     resolved.real.parent.mkdir(parents=True, exist_ok=True)
     await page.screenshot(path=str(resolved.real), full_page=full_page)
 
@@ -64,10 +74,13 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="BrowserScreenshot",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserScreenshot into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserScreenshot",
+        toolset="browser",
+        schema={
         # 对已接管浏览器中的指定标签页截图，返回用户视野一致的页面画面。
         #
         # ## 前置条件
@@ -132,4 +145,4 @@ Tab location follows the same rules as BrowserScreenshot (0-based index, or URL/
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.write,
-)
+    )

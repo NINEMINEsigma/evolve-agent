@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from framework import AsyncSystem
 from abstract.llm.formats import to_summary_dict
 from abstract.llm.loader import create_llm_client
 from entity.constant import (
@@ -14,17 +17,24 @@ from entity.constant import (
     AUTO_TITLE_CONTENT_MAX,
     META_EXTRACTOR_CHARACTER,
     SESSIONS_DIR_NAME,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.messages import BaseMessage, CharacterConversationMessage, History
 from entity.puretype import LLMProfile, MetadataProfileState, Role
 from entry.agent_support.history_summary import summarize_history
+from system.lifecycle import (
+    ApplicationStoppingError,
+    LifecycleFailure,
+    TaskOwner,
+    contains_lifecycle_failure,
+)
+from system.llm_profile_store import LLMProfileStore
 from system.session_store import SessionStore
+from system.runtime import RuntimeSystem
 from system.templates import read_template
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
-    from system.context import RuntimeContext
-    from system.llm_profile_store import LLMProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -41,34 +51,106 @@ class MetadataGenerationError(SessionMetadataError):
     """元数据模型调用或输出解析失败。"""
 
 
-class SessionMetadataService:
-    """解析目标会话的元数据 Profile，并生成标题、标签与摘要。"""
+class SessionMetadataService(AsyncSystem):
+    """解析目标会话的元数据 Profile，并生成标题、标签与摘要。
 
-    def __init__(
-        self,
-        runtime_context: RuntimeContext,
-        llm_profile_store: LLMProfileStore,
-        profile_lock: threading.RLock,
-    ) -> None:
-        self._runtime_context = runtime_context
-        self._llm_profile_store = llm_profile_store
-        self._profile_lock = profile_lock
-        self._session_store = SessionStore(
-            runtime_context.workspace / SESSIONS_DIR_NAME
+    注册为 framework AsyncSystem，依赖 RuntimeSystem 与 LLMProfileStore；
+    不创建独立的 Profile 事务锁，所有 ``_profile_lock`` 语义统一通过
+    ``LLMProfileStore.locked()`` 访问同一把共享 RLock。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem, LLMProfileStore))
+        self._runtime: RuntimeSystem | None = None
+        self._llm_profile_store: LLMProfileStore | None = None
+        self._session_store: SessionStore | None = None
+        self._task_owner: TaskOwner | None = None
+        self._admission_closed = False
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._llm_profile_store = self.get_system(LLMProfileStore)
+        ctx = self._runtime.context
+        self._session_store = SessionStore(ctx.workspace / SESSIONS_DIR_NAME)
+        self._task_owner = TaskOwner(
+            "SessionMetadataService",
+            self._runtime.record_failure,
         )
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("SessionMetadataService has not been awakened")
+        return self._runtime
+
+    @property
+    def llm_profile_store(self) -> LLMProfileStore:
+        if self._llm_profile_store is None:
+            raise LifecycleFailure("SessionMetadataService has not been awakened")
+        return self._llm_profile_store
+
+    @property
+    def session_store(self) -> SessionStore:
+        if self._session_store is None:
+            raise LifecycleFailure("SessionMetadataService has not been awakened")
+        return self._session_store
+
+    @property
+    def task_owner(self) -> TaskOwner:
+        if self._task_owner is None:
+            raise LifecycleFailure("SessionMetadataService has not been awakened")
+        return self._task_owner
+
+    def close_admission(self) -> None:
+        """关闭接收：停止后不再开始新的元数据生成调用。"""
+        self._admission_closed = True
+
+    @contextmanager
+    def _admit_generation(self) -> Iterator[None]:
+        """只登记操作；同步区间内不得读取文件或请求模型。"""
+        with self.runtime.admission():
+            if self._admission_closed:
+                raise ApplicationStoppingError("Metadata generation admission is closed")
+            yield
+
+    async def cancel_pending(self) -> None:
+        """封闭接收，等待完整请求结束以及请求方的取消/结果交接。"""
+        self.close_admission()
+        await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+
+    async def virtual_shotdown(self) -> None:
+        """解绑后仍通过已持有的 Owner 核对失败及结果交接，不仅检查活任务。"""
+        await self.cancel_pending()
+
+    @staticmethod
+    def _preserve_lifecycle_error(error: BaseException) -> None:
+        """业务错误转换不能掩盖生命周期失败或异常组内的取消。"""
+        if isinstance(error, (ApplicationStoppingError, asyncio.CancelledError)):
+            raise error
+        if contains_lifecycle_failure(error):
+            raise error
+        if isinstance(error, BaseExceptionGroup):
+            interrupted = error.subgroup((asyncio.CancelledError, ApplicationStoppingError))
+            if interrupted is not None:
+                raise error
 
     @staticmethod
     def _missing_connection_fields(profile: LLMProfile) -> list[str]:
         return [
-            field
-            for field in ("llm_client_name", "base_url", "model")
-            if not str(getattr(profile, field, "")).strip()
+            name
+            for name, value in (
+                ("llm_client_name", profile.llm_client_name),
+                ("base_url", profile.base_url),
+                ("model", profile.model),
+            )
+            if not value.strip()
         ]
 
     def get_state(self) -> MetadataProfileState:
         """返回全局元数据 Profile 的服务端权威状态。"""
-        with self._profile_lock:
-            profile = self._llm_profile_store.get_metadata_profile()
+        store = self.llm_profile_store
+        with store.locked():
+            profile = store.get_metadata_profile()
             if profile is None:
                 return MetadataProfileState()
             return MetadataProfileState(
@@ -79,7 +161,8 @@ class SessionMetadataService:
 
     def select_profile(self, profile: LLMProfile | None) -> MetadataProfileState:
         """设置或清空全局元数据 Profile。"""
-        with self._profile_lock:
+        store = self.llm_profile_store
+        with store.locked():
             if profile is not None:
                 missing = self._missing_connection_fields(profile)
                 if missing:
@@ -87,23 +170,25 @@ class SessionMetadataService:
                         f"全局元数据 Profile {profile.name!r} 缺少必需字段："
                         + ", ".join(missing)
                     )
-            self._llm_profile_store.set_metadata_profile(profile)
+            store.set_metadata_profile(profile)
             return self.get_state()
 
     def is_selected_profile(self, profile: LLMProfile) -> bool:
         """返回目标是否为当前全局元数据 Profile。"""
-        return self._llm_profile_store.is_metadata_profile(profile)
+        return self.llm_profile_store.is_metadata_profile(profile)
 
     def _resolve_profile_snapshot(self, session_id: str) -> LLMProfile:
         """按全局优先、目标会话回退规则取得单次任务 Profile 快照。"""
-        with self._profile_lock:
-            profile = self._llm_profile_store.get_metadata_profile()
+        store = self.llm_profile_store
+        with store.locked():
+            profile = store.get_metadata_profile()
             if profile is None:
                 try:
-                    profile_name = self._session_store.read_active_profile_name(
+                    profile_name = self.session_store.read_active_profile_name(
                         session_id
                     )
                 except Exception as exc:
+                    self._preserve_lifecycle_error(exc)
                     raise MetadataProfileUnavailableError(
                         f"无法读取会话 {session_id!r} 的活动 Profile"
                     ) from exc
@@ -112,7 +197,7 @@ class SessionMetadataService:
                         "未配置全局元数据 Profile，目标会话也没有活动 Profile"
                     )
                 try:
-                    profile = self._llm_profile_store.get_profile(profile_name)
+                    profile = store.get_profile(profile_name)
                 except LookupError as exc:
                     raise MetadataProfileUnavailableError(
                         f"目标会话活动 Profile {profile_name!r} 不存在"
@@ -127,22 +212,30 @@ class SessionMetadataService:
             return profile.model_copy()
 
     def _create_client(self, session_id: str) -> BaseLLMClient:
+        # 已停机后不再为元数据创建 LLM 客户端，避免在关闭期间发起新的模型请求。
+        if self._admission_closed:
+            raise ApplicationStoppingError(
+                "Application is no longer accepting metadata generation work"
+            )
+        self.runtime.require_running()
         profile = self._resolve_profile_snapshot(session_id)
         try:
             return create_llm_client(
                 profile.llm_client_name,
-                self._runtime_context,
+                self.runtime.context,
                 profile,
             )
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataProfileUnavailableError(
                 f"无法创建元数据 Profile {profile.name!r} 的 LLM 客户端：{exc}"
             ) from exc
 
     def _read_history(self, session_id: str) -> History:
         try:
-            history = self._session_store.read_history(session_id)
+            history = self.session_store.read_history(session_id)
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(
                 f"无法读取会话 {session_id!r} 的历史：{exc}"
             ) from exc
@@ -151,6 +244,41 @@ class SessionMetadataService:
         return history
 
     async def generate_title(self, session_id: str) -> str:
+        return await self.task_owner.run_request(
+            lambda: self._generate_title(session_id),
+            name=f"metadata-title-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def generate_tags(self, session_id: str, existing_tags: list[str]) -> list[str]:
+        return await self.task_owner.run_request(
+            lambda: self._generate_tags(session_id, existing_tags),
+            name=f"metadata-tags-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def generate_summary(self, session_id: str, history: History | None = None) -> str:
+        return await self.task_owner.run_request(
+            lambda: self._generate_summary(session_id, history),
+            name=f"metadata-summary-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def regenerate_summary(self, session_id: str) -> str:
+        return await self.task_owner.run_request(
+            lambda: self._regenerate_summary(session_id),
+            name=f"metadata-regenerate-summary-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def ensure_summary(self, session_id: str) -> str:
+        return await self.task_owner.run_request(
+            lambda: self._ensure_summary(session_id),
+            name=f"metadata-ensure-summary-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def _generate_title(self, session_id: str) -> str:
         """根据目标会话完整对话历史生成标题。"""
         history = self._read_history(session_id)
         messages = [
@@ -169,27 +297,26 @@ class SessionMetadataService:
             "{{context}}",
             json.dumps(messages_json, ensure_ascii=False)[-AUTO_TITLE_CONTENT_MAX:],
         )
+        client = self._create_client(session_id)
         try:
-            response = await self._create_client(session_id).chat(
+            response = await client.chat(
                 [
-                    BaseMessage(
-                        role=Role.SYSTEM,
-                        content=read_template("auto_title.txt"),
-                    ),
+                    BaseMessage(role=Role.SYSTEM, content=read_template("auto_title.txt")),
                     BaseMessage(role=Role.USER, content=user_prompt),
                 ],
                 character=META_EXTRACTOR_CHARACTER,
             )
-        except SessionMetadataError:
+        except (SessionMetadataError, ApplicationStoppingError):
             raise
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(f"自动标题生成失败：{exc}") from exc
         title = (response.content or "").strip().strip("\"'")[:50]
         if not title:
             raise MetadataGenerationError("元数据模型返回了空标题")
         return title
 
-    async def generate_tags(
+    async def _generate_tags(
         self,
         session_id: str,
         existing_tags: list[str],
@@ -222,8 +349,9 @@ class SessionMetadataService:
             "{{old_text}}",
             json.dumps(messages_json, ensure_ascii=False)[-AUTO_TAGS_CONTENT_MAX:],
         )
+        client = self._create_client(session_id)
         try:
-            response = await self._create_client(session_id).chat(
+            response = await client.chat(
                 [
                     BaseMessage(role=Role.SYSTEM, content=system_prompt),
                     BaseMessage(role=Role.USER, content=user_prompt),
@@ -232,9 +360,10 @@ class SessionMetadataService:
                 response_format={"type": "json_object"},
             )
             result = json.loads(response.content or "")
-        except SessionMetadataError:
+        except (SessionMetadataError, ApplicationStoppingError):
             raise
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(f"自动标签生成失败：{exc}") from exc
 
         if isinstance(result, dict):
@@ -258,7 +387,7 @@ class SessionMetadataService:
             raise MetadataGenerationError("元数据模型返回了无效的标签列表")
         return [item.strip() for item in result]
 
-    async def generate_summary(
+    async def _generate_summary(
         self,
         session_id: str,
         history: History | None = None,
@@ -267,34 +396,35 @@ class SessionMetadataService:
         target_history = history if history is not None else self._read_history(session_id)
         if target_history.count == 0:
             raise MetadataGenerationError("会话历史为空，无法生成摘要")
+        client = self._create_client(session_id)
         try:
-            summary = await summarize_history(
-                target_history,
-                self._create_client(session_id),
-            )
-        except SessionMetadataError:
+            summary = await summarize_history(target_history, client)
+        except (SessionMetadataError, ApplicationStoppingError):
             raise
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(f"会话摘要生成失败：{exc}") from exc
         if not summary:
             raise MetadataGenerationError("元数据模型返回了空摘要")
         return summary
 
-    async def regenerate_summary(self, session_id: str) -> str:
+    async def _regenerate_summary(self, session_id: str) -> str:
         """强制重生成摘要，仅成功后覆盖旧摘要。"""
-        summary = await self.generate_summary(session_id)
+        summary = await self._generate_summary(session_id)
         try:
-            self._session_store.write_summary(session_id, summary)
+            self.session_store.write_summary(session_id, summary)
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(f"会话摘要保存失败：{exc}") from exc
         return summary
 
-    async def ensure_summary(self, session_id: str) -> str:
+    async def _ensure_summary(self, session_id: str) -> str:
         """返回已有摘要，缺失时保底生成并持久化。"""
         try:
-            summary = self._session_store.read_summary(session_id)
+            summary = self.session_store.read_summary(session_id)
         except Exception as exc:
+            self._preserve_lifecycle_error(exc)
             raise MetadataGenerationError(f"会话摘要读取失败：{exc}") from exc
         if summary:
             return summary
-        return await self.regenerate_summary(session_id)
+        return await self._regenerate_summary(session_id)

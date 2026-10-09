@@ -1,7 +1,7 @@
 """压缩/解压工具 — 支持多种格式（zip、tar、gztar、bztar、xztar）。
 
-模块导入时通过 ``registry.register()`` 注册。
-所有路径均为逻辑路径（命名空间前缀），通过沙盒解析。
+注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
+显式调用。所有路径均为逻辑路径（命名空间前缀），通过沙盒解析。
 """
 
 from __future__ import annotations
@@ -14,12 +14,18 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolDangerLevel
-from component.tools.filesystem import _s as _get_sandbox
 from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
+
+
+def _s() -> "Sandbox":
+    from system.application import Application
+    from system.sandbox import Sandbox
+    return Application.current().get_system(Sandbox)
 
 # ---------------------------------------------------------------------------
 # 格式映射
@@ -90,7 +96,7 @@ def _handle_compress(args: dict[str, Any]) -> dict:
         )
 
     try:
-        sandbox = _get_sandbox()
+        sandbox = _s()
         r_src = sandbox.resolve_read(source)
         r_out = sandbox.resolve_write(output)
     except SandboxError as exc:
@@ -158,7 +164,7 @@ def _handle_decompress(args: dict[str, Any]) -> dict:
         return tool_error("output_dir is required", output_dir=output_dir)
 
     try:
-        sandbox = _get_sandbox()
+        sandbox = _s()
         r_src = sandbox.resolve_read(source)
         r_out = sandbox.resolve_write(output_dir)
     except SandboxError as exc:
@@ -219,37 +225,40 @@ def _handle_decompress(args: dict[str, Any]) -> dict:
 # Registration
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="Compress",
-    toolset="archive",
-    schema={
-        # 将文件或目录压缩为指定格式的压缩包。
-        # ⚠️ 如果 output 已存在，会被自动删除后重新创建。
-        #
-        # ## 前置条件
-        # - source 文件或目录必须存在。
-        # - output 路径所在命名空间必须是可写的。
-        #
-        # ## 调用效果
-        # 将 source（文件或目录）压缩为指定格式的压缩包到 output 路径。
-        # 如果 output 已存在（无论文件还是目录），会被删除后重新创建。
-        # 返回 source_is_dir 表示源是文件还是目录。
-        #
-        # ## 返回
-        # ```json
-        # {"success": true, "source": "ws:src", "output": "ws:src.zip", "format": "zip", "source_is_dir": true}
-        # ```
-        #
-        # ## 何时使用
-        # - 打包多份文件以便通过 /downloads/ 路由一次性发送。
-        # - 打包文件或目录用于传输或归档。
-        # - 备份目录结构。
-        #
-        # ## 副作用/注意
-        # - ⚠️ output 已存在时被无条件删除后重新创建。
-        # - 压缩目录时，压缩包内包含目录本身作为根条目（非仅内容）。
-        # - 目录压缩自动递归处理。
-        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar, 7z. ⚠️ If the output path already exists, it is automatically deleted and recreated.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register archive tools into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="Compress",
+        toolset="archive",
+        schema={
+            # 将文件或目录压缩为指定格式的压缩包。
+            # ⚠️ 如果 output 已存在，会被自动删除后重新创建。
+            #
+            # ## 前置条件
+            # - source 文件或目录必须存在。
+            # - output 路径所在命名空间必须是可写的。
+            #
+            # ## 调用效果
+            # 将 source（文件或目录）压缩为指定格式的压缩包到 output 路径。
+            # 如果 output 已存在（无论文件还是目录），会被删除后重新创建。
+            # 返回 source_is_dir 表示源是文件还是目录。
+            #
+            # ## 返回
+            # ```json
+            # {"success": true, "source": "ws:src", "output": "ws:src.zip", "format": "zip", "source_is_dir": true}
+            # ```
+            #
+            # ## 何时使用
+            # - 打包多份文件以便通过 /downloads/ 路由一次性发送。
+            # - 打包文件或目录用于传输或归档。
+            # - 备份目录结构。
+            #
+            # ## 副作用/注意
+            # - ⚠️ output 已存在时被无条件删除后重新创建。
+            # - 压缩目录时，压缩包内包含目录本身作为根条目（非仅内容）。
+            # - 目录压缩自动递归处理。
+            "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar, 7z. ⚠️ If the output path already exists, it is automatically deleted and recreated.
 
 ## Prerequisites
 - The source file or directory must exist.
@@ -272,61 +281,61 @@ Compresses the source (file or directory) into an archive at the output path. If
 - ⚠️ If output already exists, it is unconditionally deleted and recreated.
 - When compressing a directory, the archive contains the directory itself as the root entry (not just its contents).
 - Directory compression is recursive.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    # 要压缩的文件或目录逻辑路径（命名空间前缀）。
-                    "description": "File or directory logical path to compress (namespace prefix).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        # 要压缩的文件或目录逻辑路径（命名空间前缀）。
+                        "description": "File or directory logical path to compress (namespace prefix).",
+                    },
+                    "output": {
+                        "type": "string",
+                        # 输出压缩包逻辑路径（命名空间前缀 + 文件名）。
+                        "description": "Output archive logical path (namespace prefix + filename).",
+                    },
+                    "format": {
+                        "type": "string",
+                        # 压缩格式：zip、tar、gztar、bztar、xztar、7z。
+                        "description": "Archive format. Supported: zip, tar, gztar, bztar, xztar, 7z.",
+                        "enum": ["zip", "tar", "gztar", "bztar", "xztar", "7z"],
+                    },
                 },
-                "output": {
-                    "type": "string",
-                    # 输出压缩包逻辑路径（命名空间前缀 + 文件名）。
-                    "description": "Output archive logical path (namespace prefix + filename).",
-                },
-                "format": {
-                    "type": "string",
-                    # 压缩格式：zip、tar、gztar、bztar、xztar、7z。
-                    "description": "Archive format. Supported: zip, tar, gztar, bztar, xztar, 7z.",
-                    "enum": ["zip", "tar", "gztar", "bztar", "xztar", "7z"],
-                },
+                "required": ["source", "output", "format"],
             },
-            "required": ["source", "output", "format"],
         },
-    },
-    handler=_handle_compress,
-    danger_level=ToolDangerLevel.safe,
-)
+        handler=_handle_compress,
+        danger_level=ToolDangerLevel.safe,
+    )
 
-registry.register(
-    name="Decompress",
-    toolset="archive",
-    schema={
-        # 将压缩包解压到指定目录。支持格式自动推断（根据文件名后缀）。
-        # format 留空时自动从文件后缀推断：.zip → zip、.tar.gz/.tgz → gztar 等。
-        #
-        # ## 前置条件
-        # - source 压缩包必须存在。
-        # - output_dir 路径所在命名空间必须是可写的。
-        #
-        # ## 调用效果
-        # 将压缩包解压到目标目录。自动创建目标目录（如不存在）。
-        # format 可选，留空时根据文件后缀自动推断。
-        #
-        # ## 返回
-        # ```json
-        # {"success": true, "source": "ws:src.zip", "output_dir": "ws:extracted/", "format": "zip"}
-        # ```
-        #
-        # ## 何时使用
-        # - 解压 .zip、.tar.gz 等压缩包。
-        #
-        # ## 副作用/注意
-        # - 写入文件系统。目标目录自动创建。
-        # - format 自动推断规则：.zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar, .7z→7z。
-        # - 无法推断格式时需明确指定 format。
-        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar, 7z. Format is auto-inferred from filename suffix when not specified.
+    registry.register(
+        name="Decompress",
+        toolset="archive",
+        schema={
+            # 将压缩包解压到指定目录。支持格式自动推断（根据文件名后缀）。
+            # format 留空时自动从文件后缀推断：.zip → zip、.tar.gz/.tgz → gztar 等。
+            #
+            # ## 前置条件
+            # - source 压缩包必须存在。
+            # - output_dir 路径所在命名空间必须是可写的。
+            #
+            # ## 调用效果
+            # 将压缩包解压到目标目录。自动创建目标目录（如不存在）。
+            # format 可选，留空时根据文件后缀自动推断。
+            #
+            # ## 返回
+            # ```json
+            # {"success": true, "source": "ws:src.zip", "output_dir": "ws:extracted/", "format": "zip"}
+            # ```
+            #
+            # ## 何时使用
+            # - 解压 .zip、.tar.gz 等压缩包。
+            #
+            # ## 副作用/注意
+            # - 写入文件系统。目标目录自动创建。
+            # - format 自动推断规则：.zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar, .7z→7z。
+            # - 无法推断格式时需明确指定 format。
+            "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar, 7z. Format is auto-inferred from filename suffix when not specified.
 
 ## Prerequisites
 - The source archive must exist.
@@ -347,30 +356,30 @@ Decompresses the archive into the target directory. The target directory is auto
 - Writes to the file system. Target directory is auto-created.
 - Auto-inference: .zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar, .7z→7z.
 - If format cannot be inferred, specify it explicitly.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    # 压缩包逻辑路径（命名空间前缀）。
-                    "description": "Archive file logical path to decompress (namespace prefix).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        # 压缩包逻辑路径（命名空间前缀）。
+                        "description": "Archive file logical path to decompress (namespace prefix).",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        # 解压目标目录逻辑路径（命名空间前缀）。
+                        "description": "Destination directory logical path (namespace prefix).",
+                    },
+                    "format": {
+                        "type": "string",
+                        # 压缩格式。留空时自动根据文件名后缀推断。
+                        "description": "Archive format. Leave empty to auto-infer from filename suffix. Supported: zip, tar, gztar, bztar, xztar, 7z.",
+                        "enum": ["", "zip", "tar", "gztar", "bztar", "xztar", "7z"],
+                        "default": "",
+                    },
                 },
-                "output_dir": {
-                    "type": "string",
-                    # 解压目标目录逻辑路径（命名空间前缀）。
-                    "description": "Destination directory logical path (namespace prefix).",
-                },
-                "format": {
-                    "type": "string",
-                    # 压缩格式。留空时自动根据文件名后缀推断。
-                    "description": "Archive format. Leave empty to auto-infer from filename suffix. Supported: zip, tar, gztar, bztar, xztar, 7z.",
-                    "enum": ["", "zip", "tar", "gztar", "bztar", "xztar", "7z"],
-                    "default": "",
-                },
+                "required": ["source", "output_dir"],
             },
-            "required": ["source", "output_dir"],
         },
-    },
-    handler=_handle_decompress,
-    danger_level=ToolDangerLevel.safe,
-)
+        handler=_handle_decompress,
+        danger_level=ToolDangerLevel.safe,
+    )

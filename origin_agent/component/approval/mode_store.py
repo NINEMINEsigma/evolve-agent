@@ -55,7 +55,7 @@ class ApprovalModeStore:
                 raise TypeError(
                     "Approval mode root must be SessionApprovalModeState"
                 )
-            if not hasattr(state, "mode") or not isinstance(state.mode, ApprovalMode):
+            if not isinstance(state.mode, ApprovalMode):
                 raise TypeError("Approval mode state must contain an ApprovalMode")
             return state.mode
         except Exception:

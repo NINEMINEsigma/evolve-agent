@@ -23,20 +23,18 @@ if TYPE_CHECKING:
 def _get_approval_mode_store() -> ApprovalModeStore:
     """返回 Application 持有的唯一审批模式存储。"""
     from system.application import Application
+    from component.approval.system import ApprovalSystem
 
-    return Application.current().approval_mode_store
+    return Application.current().get_system(ApprovalSystem).mode_store
 
 
 def is_handsfree_available() -> bool:
     """返回项目级审批 Profile 是否已配置且具备必需连接字段。"""
-    try:
-        from system.application import Application
+    from system.application import Application
+    from component.approval.system import ApprovalSystem
 
-        manager = Application.current().approval_backend_manager
-        return manager is not None and manager.get_backend() is not None
-    except Exception:
-        logger.debug("Failed to resolve handsfree availability", exc_info=True)
-        return False
+    manager = Application.current().get_system(ApprovalSystem).backend_manager
+    return manager.get_backend() is not None
 
 
 def set_approval_mode(session_id: str, mode: ApprovalMode) -> ApprovalMode:
@@ -126,21 +124,19 @@ async def _handsfree_confirm(
     extra_context: str | None = None,
 ) -> ApprovalResult:
     """把工具调用发送给审批 Profile，并解释单次普通文本响应。"""
-    try:
-        from system.application import Application
+    from system.application import Application
+    from component.approval.system import ApprovalSystem
 
-        manager = Application.current().approval_backend_manager
-        backend = manager.get_backend() if manager is not None else None
-    except Exception:
-        logger.warning("Failed to resolve approval backend", exc_info=True)
-        return _approval_model_failure("backend resolution failed")
+    approval_system = Application.current().get_system(ApprovalSystem)
+    backend = approval_system.backend_manager.get_backend()
 
     if backend is None:
         logger.warning("Approval backend unavailable — handsfree mode deny")
         return _approval_model_failure("backend unavailable")
 
     from system.application import Application as _App
-    _approval_profile = _App.current().llm_profile_store.get_approval_profile()
+    from system.llm_profile_store import LLMProfileStore
+    _approval_profile = _App.current().get_system(LLMProfileStore).get_approval_profile()
     logger.info(
         "Approval model request | tool=%s profile=%s model=%s",
         tool_name,
@@ -152,7 +148,9 @@ async def _handsfree_confirm(
 
     # 获取工具的参数 schema，使审批模型能理解每个参数的类型、描述、
     # 默认值和是否必填，从而区分"必需信息缺失"与"可选参数省略"。
-    from abstract.tools.registry import registry as tool_registry
+    from abstract.tools.registry import ToolRegistry
+    from system.application import Application
+    tool_registry = Application.current().get_system(ToolRegistry)
     tool_schema = tool_registry.get_schema(tool_name)
 
     system_prompt = (
@@ -174,9 +172,15 @@ async def _handsfree_confirm(
             content=json.dumps(user_prompt_data, ensure_ascii=False),
         ),
     ]
+    from system.lifecycle import ApplicationStoppingError, contains_lifecycle_failure
+
     try:
-        response = await backend.chat(messages)
-    except Exception:
+        response = await approval_system.chat(messages)
+    except ApplicationStoppingError:
+        raise
+    except Exception as exc:
+        if contains_lifecycle_failure(exc):
+            raise
         logger.warning(
             "Approval model request failed | tool=%s",
             tool_name,

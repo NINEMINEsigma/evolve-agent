@@ -22,10 +22,16 @@
 - **Git 只读。** 只允许 `git diff` 和 `git log`。所有写操作（`add`、`commit`、`push`、`checkout`、`branch` 等）必须由用户本人执行。
 - **严禁批量编辑脚本。** 只做有针对性的、可逐条审查的修改。
 - **严禁自作主张推进代码进度。** 如果不知道要干什么，最好什么都不要干。
-- **最大复用性与解耦优先。** 代码编写遵守最大复用性和解耦原则，而不是最小增量。
 - **前端语法感知可能不准确。** `origin_agent/frontend/` 不在仓库根目录，编辑器对前端的语法/类型分析未必可靠；需要测试或构建验证时停下来通知用户。
 - **未经明确批准不得切换 RIPER-5 模式。** 尤其严禁未经用户许可从 RESEARCH/PLAN 跳到 EXECUTE。
+
+## 代码风格
+
+- **最大复用性与解耦优先。** 代码编写遵守最大复用性和解耦原则，而不是最小增量。
+- **快速失败（Fail-Fast）+ 只崩溃软件（Crash-only software）**
 - **严禁在传给 `easysave.save()` 前先 `.model_dump()` 降级 BaseModel。** easysave 会保留类型并重建实例（见下文「easysave 序列化」小节）；先转 dict 会丢失类型，违背设计。
+- **代码文件中除注释外只使用英文**
+- **origin仓库非必要禁止使用反射。** 已知模型字段、固定方法和项目内稳定接口必须显式访问，禁止使用 `getattr` / `setattr` / `hasattr` / `delattr` 绕过类型约定，也不得通过 `__dict__`、`vars()` 或转为字典后按字段名取值规避。确属动态插件发现或无法静态表达的外部兼容边界时，需就地说明必要性；类型注解不完整不是使用反射的理由。
 
 ## 保护 workspace 目录
 
@@ -71,7 +77,7 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
   - 退出码 `0` → 正常停止
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 提升、重启。**备份与提升均为 `copytree(dirs_exist_ok=True)` 合并覆盖，不再先 rmtree**（避免前端 `node_modules`/`dist` 重新下载安装；目标侧独有旧文件残留）。各阶段（backup/swap/complete）追加写入 `workspace/logs/evolution.status` 供前端展示。
   - 其他 → 进入 fallback：`.fallback` 缺失时先从 origin 补齐，仍无 `__main__.py` 则退出；否则运行 `.fallback/__main__.py --mode fallback --fix_fork <fast> --fix <logs/fast_agent_runtime_error.log>` 修复。修复成功（退出码 0）回到循环重启 fast，失败则退出（日志见 `logs/fallback_agent_runtime_error.log`）。
-- 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志）→ `main.py::App`（uvicorn gateway）→ `system/application.py::Application`（进程级单例，初始化各子系统，`Application.current()` 访问）。
+- 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志，`asyncio.run` 结束后解除关闭硬截止）→ `main.py::App`（创建唯一 Application、平台信号处理、等待关闭、退出码映射）→ `system/application.py::Application`（继承 `AsyncArchitecture` 的进程级单例；`start()` 按固定拓扑顺序注册 21 个 AsyncSystem 并在全部唤醒后开放输入，`shutdown()` 统一执行业务停止、History 提交与逆拓扑注销，`Application.current()` 访问）。
 - 前端在 agent 目录内由 `_build_frontend()` 用 `<pkg_mgr> install && <pkg_mgr> run build`（`CI=true`，包管理器优先 pnpm 回退 npm，由 `system/pkgmgr.py` 检测）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过，`--frontend_force_build` 可强制重建。
 
 ## 沙盒命名空间（system/sandbox.py）
@@ -92,6 +98,12 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 | `custom_tools:` | 仓库根 `custom_tools/` | ro | ro | 自定义工具 |
 
 **没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。权限模型为 `_PERMISSIONS`（mode × namespace → Access 列表），`namespace_bases()` 是 ns→物理根的唯一映射来源（`resolve()` 与 LSP 反向映射复用）；`Namespace` 枚举定义在 `entity/constant/sandbox.py`。
+
+## 工具注册与发现
+
+工具模块导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`；在入口内调用 `registry.register()` 和必要的 `ui_events.register()`，使用传入的唯一实例。模块导入只定义函数、常量和类型，不查询 Application、不注册工具、不创建连接。handler 执行时再通过 ToolContext/app 的 `get_system(T)` 取得业务服务。
+
+`ToolDiscoverySystem` 按 AST 识别显式入口，按路径排序导入并调用，保留本次已注册模块集合；Python 模块缓存不替代显式注册。旧全局 registry/UI 路由导入、顶层注册、源码读取/语法/导入/注册错误直接失败；仅可选 `custom_tools/` 不存在时跳过。完整应用装配进度以任务文件为准，中间源码不可启动。
 
 ## 记忆与上下文钩子（custom_hooks/）
 

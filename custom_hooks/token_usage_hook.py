@@ -12,7 +12,8 @@ def hook_tag_name(**kwargs) -> str:
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     try:
         from system.application import Application
-        sm = Application.current().session_manager
+        from gateway.session_manager import SessionManager
+        sm = Application.current().get_system(SessionManager)
         if sm is None:
             return ""
         loop_wrap = sm.get_loop(session_id)

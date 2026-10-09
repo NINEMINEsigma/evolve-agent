@@ -178,7 +178,8 @@
 | 非固着器 | 仅实现 `hook_message` 的钩子：产出**非持久化**扩展块（`dynamic_message_suffix`，当轮注入） |
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
-| 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展 |
+| 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，按显式工具注册入口声明 |
+| 显式工具注册入口 | 英文锚点：explicit tool registration entrypoint。工具模块顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，由 ToolDiscoverySystem 在依赖就绪后调用；模块导入只定义声明，工具与 UI 事件注册只使用传入的唯一实例 |
 | 自定义LLM客户端 | `custom_llm_client/` 下的 `.py` LLM 客户端扩展 |
 | 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件（当前无运行时接入，保留目录供未来用途） |
 | MCP 桥接 | `component/mcp_tools.py` 将外部 MCP server 工具注册进工具注册表 |
@@ -413,6 +414,18 @@
 | 聊天区样式暂停开关 | 用户在顶部栏命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
 | 舞台层暂停开关 | 用户在顶部栏命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |
 | 公开样式选择器契约 | 以 `data-chat-scope` 和 `data-message-role` 属性构成的稳定选择器集合，向 Evolve Agent 承诺跨版本兼容 | public style selector contract |
+
+---
+
+## 应用生命周期
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| 运行时系统 | Application 内的唯一配置与进程生命周期系统；持有运行状态、输入接收同步边界、关闭信号及失败记录，不代替各业务 System 的资源所有权 | RuntimeSystem |
+| 输入投递记录 | 关闭前已接受输入的非持久化提交记录，包含进程内序号、原始消息、准备状态和 History 提交状态；不同于 client_message_id，也不是可在重启后自动执行的持久队列 | InputDelivery |
+| 只落历史关闭 | 停止新工作与模型生成，把已接受但未提交的输入加入所属会话 History 并按原约定保存；重启不自动补跑，临时Agent不新增持久化 | history-only shutdown |
+
+上述约定按异步架构迁移阶段接入，当前实施进度见 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`。
 
 ---
 

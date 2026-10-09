@@ -25,7 +25,8 @@ import logging
 from ctypes import wintypes
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -276,10 +277,13 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="KeyboardPress",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register KeyboardPress into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="KeyboardPress",
+        toolset="automation",
+        schema={
         # 模拟按键或组合键，支持前台 pyautogui 和后台两种模式。
         # 前置条件：前台模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：前台模式用 pyautogui 按键；
@@ -352,4 +356,4 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
     },
     handler=_handle_keyboard_press,
     check_fn=_check_pyautogui,
-)
+    )

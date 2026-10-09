@@ -1,343 +1,302 @@
-"""Application 唯一全局单例 — 装配所有子系统。
-
-所有业务对象通过 Application.current() 访问，避免模块级全局变量。
-子系统在 init() 中 eager 初始化，通过 @property 只读暴露，防止意外赋值。
-"""
+"""进程级唯一异步架构；业务 System 由 framework 注册表持有。"""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from graphlib import CycleError, TopologicalSorter
 import logging
-import threading
-from framework import Architecture
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
+
+from framework import AsyncArchitecture, AsyncSystem
+
+from entity.constant import ApplicationState, ShutdownReason
+from system.lifecycle import LifecycleFailure, close_resources
 
 if TYPE_CHECKING:
-    from entity.puretype import ApprovalProfileState
     from system.context import RuntimeContext
-    from system.llm_profile_store import LLMProfileStore
-    from system.session_metadata import SessionMetadataService
-    from system.sandbox import Sandbox
-    from system.shell_manager import ShellManager
-    from system.subprocess_utils import SubprocessRunner
-    from system.agentspace import AgentspaceService
-    from system.session_visual_resources import SessionVisualResourceService
-    from gateway.session_manager import SessionManager
-    from component.approval.backend import ApprovalBackend
-    from component.approval.mode_store import ApprovalModeStore
-    from component.cron_router import CronRouter
-    from abstract.tools.registry import ToolRegistry
-    from entry.agent_sink import FrontendSink
-    from subagent.orchestrator import SubAgentOrchestrator
+    from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
-# 模块级引用，指向运行中的 Application 实例。
-_app: Application | None = None
+
+def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
+    """按 P1 拓扑顺序构造唯一 System 清单；构造无副作用。"""
+    from abstract.mcp.system import MCPSystem
+    from abstract.tools.discover import ToolDiscoverySystem
+    from abstract.tools.registry import ToolRegistry
+    from abstract.tools.ui_event_router import UIEventRouter
+    from component.approval.system import ApprovalSystem
+    from component.browser.system import BrowserSystem
+    from component.cron_router import CronRouter
+    from component.dynamic_endpoints import DynamicEndpointSystem
+    from entry.agent_sink import FrontendSink
+    from gateway.session_manager import SessionManager
+    from gateway.system import GatewaySystem
+    from subagent.orchestrator import SubAgentOrchestrator
+    from system.agentspace.service import AgentspaceService
+    from system.llm_profile_store import LLMProfileStore
+    from system.lsp import LSPManager
+    from system.modality_capability import ModalityCapabilitySystem
+    from system.runtime import RuntimeSystem
+    from system.sandbox import Sandbox
+    from system.session_metadata import SessionMetadataService
+    from system.shell_manager import ShellManager
+    from system.subprocess_utils import SubprocessRunner
+
+    return [
+        RuntimeSystem(context),
+        SubprocessRunner(),
+        Sandbox(),
+        ShellManager(),
+        AgentspaceService(),
+        LLMProfileStore(),
+        SessionMetadataService(),
+        ApprovalSystem(),
+        FrontendSink(),
+        ToolRegistry(),
+        UIEventRouter(),
+        LSPManager(),
+        BrowserSystem(),
+        ModalityCapabilitySystem(),
+        CronRouter(),
+        SessionManager(),
+        SubAgentOrchestrator(),
+        DynamicEndpointSystem(),
+        MCPSystem(),
+        ToolDiscoverySystem(),
+        GatewaySystem(),
+    ]
 
 
-class Application(Architecture):
-    """进程级唯一单例，持有所有子系统引用。
+class Application(AsyncArchitecture):
+    """一次进程只装配一个架构；失败或关闭后不能重新创建。"""
 
-    用法::
-
-        app = Application(runtime_ctx)
-        app.init()           # 构造后立刻调用，初始化所有子系统
-        # 后续通过 app.cron_router / app.session_manager 等只读访问
-    """
+    _current: ClassVar[Application | None] = None
 
     def __init__(self, runtime_context: RuntimeContext) -> None:
-        global _app
-        self.runtime_context: RuntimeContext = runtime_context
+        if Application._current is not None:
+            raise LifecycleFailure("Application has already been created in this process")
+        super().__init__()
+        self._startup_context = runtime_context
+        self._state = ApplicationState.NEW
+        self._registered_types: list[type[AsyncSystem]] = []
+        self._shutdown_task: asyncio.Task[None] | None = None
+        self._runtime_ref: RuntimeSystem | None = None
+        Application._current = self
 
-        # -- 子系统 private fields（由 init() 创建，@property 只读暴露）--
-        self._profile_lock:              threading.RLock = threading.RLock()
-        self._llm_profile_store:         LLMProfileStore | None = None
-        self._session_metadata_service:  SessionMetadataService | None = None
-        self._subprocess_runner:         SubprocessRunner | None = None
-        self._sandbox:                   Sandbox | None = None
-        self._shell_manager:             ShellManager | None = None
-        self._agentspace_service:        AgentspaceService | None = None
-        self._session_visual_resource_service: SessionVisualResourceService | None = None
-        self._cron_router:               CronRouter | None = None
-        self._session_manager:           SessionManager | None = None
-        self._frontend_sink:             FrontendSink | None = None
-        self._approval_mode_store:       ApprovalModeStore | None = None
-        self._approval_backend_manager:  ApprovalBackendManager | None = None
-
-        # -- 外部注入的复杂对象（private field + setter property）--
-        # TODO: subagent_orchestrator 改为 init() 中初始化或懒加载
-        #   原因：依赖 agent_loop，需引入 Application.agent_loop property 后才能懒加载
-        self._subagent_orchestrator:      SubAgentOrchestrator | None = None
-
-        # -- 关闭信号（与 main.py 的 App 共享） --
-        self._shutdown_event:             asyncio.Event | None = None
-
-        _app = self
-
-    def init(self) -> None:
-        """构造后立刻调用，初始化所有无复杂依赖的子系统。
-
-        依赖：RuntimeContext 已 set（由 __main__.py 保证）。
-        本方法在 _app = self 之后调用，因此 Application.current() 可用。
-        """
-        # 1. SubprocessRunner — 子进程执行层（无依赖，纯构造）
-        from system.subprocess_utils import SubprocessRunner
-        self._subprocess_runner = SubprocessRunner()
-
-        # 2. Sandbox — Application 持有的唯一安全边界与全局动态空间管理实例；
-        # 依赖 RuntimeContext，并注入 SubprocessRunner 全局单例。
-        from system.sandbox import Sandbox
-        # TODO: subprocess_runner本就可以通过Application获取, 不需要在构造中被引用
-        self._sandbox = Sandbox(self.runtime_context, self._subprocess_runner)
-
-        # 2.5 ShellManager — 长期 Windows ConPTY Shell会话的唯一生命周期管理器。
-        from system.shell_manager import ShellManager
-        self._shell_manager = ShellManager(self._sandbox)
-
-        # 3. AgentspaceService — 依赖共享 Sandbox；异步 watcher 在 main.py 启动。
-        from system.agentspace import AgentspaceService
-        self._agentspace_service = AgentspaceService(
-            self._sandbox,
-            self.runtime_context.agentspace,
-        )
-        from system.session_visual_resources import SessionVisualResourceService
-        self._session_visual_resource_service = SessionVisualResourceService(self._sandbox)
-
-        # 3. LLMProfileStore — 必须先于审批 Profile 和任何 Loop 恢复。
-        from system.llm_profile_store import LLMProfileStore
-        self._llm_profile_store = LLMProfileStore(
-            self.runtime_context.agentspace,
-            self._profile_lock,
-        )
-
-        # 3.5 SessionMetadataService — 全局元数据 Profile 与会话回退的唯一业务入口。
-        from system.session_metadata import SessionMetadataService
-        self._session_metadata_service = SessionMetadataService(
-            self.runtime_context,
-            self._llm_profile_store,
-            self._profile_lock,
-        )
-
-        # 3. CronRouter — 构造后从磁盘恢复持久化任务
-        #    _load_all_tasks 内部调用 _get_cr() → Application.current().cron_router，
-        #    此时 self._cron_router 已设好，不会重入问题。
-        from component.cron_router import CronRouter
-        self._cron_router = CronRouter()
-        from component.extools.cron_tools import _load_all_tasks
-        _load_all_tasks()
-
-        # 4. ApprovalModeStore — 会话级审批模式的唯一内存与持久化服务。
-        from component.approval.mode_store import ApprovalModeStore
-        from entity.constant import SESSIONS_DIR_NAME
-        sessions_dir = self.runtime_context.workspace / SESSIONS_DIR_NAME
-        self._approval_mode_store = ApprovalModeStore(sessions_dir)
-
-        # 5. SessionManager — 依赖 ApprovalModeStore 初始化/清理会话模式。
-        from gateway.session_manager import SessionManager
-        self._session_manager = SessionManager(str(sessions_dir))
-
-        # 5.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
-        from component.extools.dynamic_endpoint_tools import _load_all_endpoints
-        _load_all_endpoints()
-
-        # 6. FrontendSink — 纯构造，无依赖
-        from entry.agent_sink import FrontendSink
-        self._frontend_sink = FrontendSink()
-
-        # 7. ApprovalBackendManager — 通过项目级审批 Profile 连接外部管理模型。
-        self._approval_backend_manager = ApprovalBackendManager(
-            self.runtime_context,
-            self._llm_profile_store,
-        )
-
-        logger.info("Application initialized | subsystems ready")
-
-    # ── 只读 property（init() 创建，外部不可赋值）──────────────
-
-    @property
-    def profile_lock(self) -> threading.RLock:
-        """返回 Profile 根对象与会话选择共用的进程锁。"""
-        return self._profile_lock
-
-    @property
-    def llm_profile_store(self) -> LLMProfileStore:
-        """返回进程内唯一的 LLM Profile 根对象存储。"""
-        return self._llm_profile_store  # type: ignore[return-value]
-
-    @property
-    def session_metadata_service(self) -> SessionMetadataService:
-        """返回进程内唯一的会话元数据生成服务。"""
-        return self._session_metadata_service  # type: ignore[return-value]
-
-    @property
-    def subprocess_runner(self) -> SubprocessRunner:
-        """返回进程内唯一的子进程执行器（同步 + 真异步）。"""
-        return self._subprocess_runner  # type: ignore[return-value]
-
-    @property
-    def sandbox(self) -> Sandbox:
-        return self._sandbox  # type: ignore[return-value]
-
-    @property
-    def session_visual_resource_service(self) -> SessionVisualResourceService:
-        """返回会话视觉资源的唯一服务端解析器。"""
-        return self._session_visual_resource_service  # type: ignore[return-value]
-
-    @property
-    def shell_manager(self) -> ShellManager:
-        """返回进程内唯一的 Shell会话管理器。"""
-        return self._shell_manager  # type: ignore[return-value]
-
-    @property
-    def agentspace_service(self) -> AgentspaceService:
-        """返回 Agentspace 编辑器唯一业务服务。"""
-        return self._agentspace_service  # type: ignore[return-value]
-
-    @property
-    def cron_router(self) -> CronRouter:
-        return self._cron_router  # type: ignore[return-value]
-
-    @property
-    def session_manager(self) -> SessionManager:
-        return self._session_manager  # type: ignore[return-value]
-
-    @property
-    def frontend_sink(self) -> FrontendSink:
-        return self._frontend_sink  # type: ignore[return-value]
-
-    @property
-    def approval_mode_store(self) -> ApprovalModeStore:
-        """返回进程内唯一的会话级审批模式存储。"""
-        return self._approval_mode_store  # type: ignore[return-value]
-
-    @property
-    def approval_backend_manager(self) -> ApprovalBackendManager:
-        return self._approval_backend_manager  # type: ignore[return-value]
-
-    @property
-    def tool_registry(self) -> ToolRegistry:
-        """全局工具注册表。"""
-        from abstract.tools.registry import registry
-        return registry
-
-    # ── setter property（外部注入的复杂对象）──────────────────
-
-    @property
-    def subagent_orchestrator(self) -> SubAgentOrchestrator | None:
-        return self._subagent_orchestrator
-
-    @subagent_orchestrator.setter
-    def subagent_orchestrator(self, value: SubAgentOrchestrator | None) -> None:
-        self._subagent_orchestrator = value
-
-    # ── 单例访问 ──────────────────────────────────────────────
+    @classmethod
+    def current(cls) -> Application:
+        app = Application._current
+        if app is None:
+            raise RuntimeError("Application has not been created")
+        if app._state in (ApplicationState.CLOSED, ApplicationState.FAILED):
+            raise LifecycleFailure("Application lifecycle has ended")
+        return app
 
     @staticmethod
-    def current() -> Application:
-        """返回当前进程的 Application 单例。"""
-        global _app
-        if _app is None:
-            raise RuntimeError("Application not initialized — call Application(ctx) first")
-        return _app
+    def get() -> Application:
+        """覆盖 framework 的默认工厂，避免创建第二个基础架构。"""
+        return Application.current()
 
-    def link_shutdown_event(self, event: asyncio.Event) -> None:
-        """绑定 main.py App 的关闭事件，供子系统优雅退出使用。"""
-        self._shutdown_event = event
-
-    @property
-    def shutdown_event(self) -> asyncio.Event:
-        """进程关闭信号，供 Gateway 长连接在优雅关闭时退出。"""
-        if self._shutdown_event is None:
-            raise RuntimeError("Application shutdown event is not linked")
-        return self._shutdown_event
-
-    async def shutdown(self) -> None:
-        """按依赖顺序停止子系统。"""
-        logger.info("Application shutdown initiated")
-        failures: list[str] = []
-        # 1. 先停止仍可能继续写文件的 Shell会话。
-        if self._shell_manager is not None:
-            try:
-                stopped = await self._shell_manager.shutdown()
-                if stopped:
-                    logger.info("Stopped %d Shell session(s)", stopped)
-            except Exception as exc:
-                logger.exception("ShellManager shutdown failed: %s", exc)
-                failures.append(f"ShellManager: {exc}")
-        # 2. 停止 Agentspace watcher 与 SSE 订阅。
-        if self._agentspace_service is not None:
-            try:
-                await self._agentspace_service.shutdown()
-            except Exception as exc:
-                logger.exception("AgentspaceService shutdown failed: %s", exc)
-                failures.append(f"AgentspaceService: {exc}")
-        # 2. 停止 cron 后台任务
-        if self._cron_router is not None:
-            try:
-                await self._cron_router.shutdown()
-            except Exception as exc:
-                logger.exception("CronRouter shutdown failed: %s", exc)
-                failures.append(f"CronRouter: {exc}")
-        # 2. 停止审批后端
-        if self._approval_backend_manager is not None:
-            try:
-                await self._approval_backend_manager.shutdown()
-            except Exception as exc:
-                logger.exception("ApprovalBackendManager shutdown failed: %s", exc)
-                failures.append(f"ApprovalBackendManager: {exc}")
-        # 3. 停止子 Agent 编排器
-        if self._subagent_orchestrator is not None:
-            try:
-                await self._subagent_orchestrator.shutdown_all()
-            except Exception as exc:
-                logger.exception("SubAgentOrchestrator shutdown failed: %s", exc)
-                failures.append(f"SubAgentOrchestrator: {exc}")
-        if failures:
-            logger.error("Application shutdown completed with failures: %s", "; ".join(failures))
-        else:
-            logger.info("Application shutdown complete")
-
-
-class ApprovalBackendManager:
-    """管理由项目级审批 Profile 驱动的后端与客户端缓存。"""
-
-    def __init__(
+    def _validate_system_graph(
         self,
-        ctx: RuntimeContext,
-        llm_profile_store: LLMProfileStore,
-    ) -> None:
-        from component.approval.backend import ProfileApprovalBackend
+        systems: Sequence[AsyncSystem],
+    ) -> tuple[type[AsyncSystem], ...]:
+        """检查完整依赖图，并保持经验证的显式装配顺序。"""
+        system_types = tuple(type(system) for system in systems)
+        if len(set(system_types)) != len(system_types):
+            raise LifecycleFailure("Application contains duplicate System slots")
+        known = set(system_types)
+        graph: dict[type[AsyncSystem], frozenset[type[AsyncSystem]]] = {}
+        for system in systems:
+            missing = system.dependencies - known
+            if missing:
+                names = ", ".join(sorted(dependency.__name__ for dependency in missing))
+                raise LifecycleFailure(
+                    f"System {type(system).__name__} has missing dependencies: {names}"
+                )
+            graph[type(system)] = system.dependencies
+        try:
+            TopologicalSorter(graph).prepare()
+        except CycleError as exc:
+            raise LifecycleFailure("Application System dependency graph contains a cycle") from exc
+        preceding: set[type[AsyncSystem]] = set()
+        for system in systems:
+            if not system.dependencies.issubset(preceding):
+                raise LifecycleFailure(
+                    f"System {type(system).__name__} precedes one of its dependencies"
+                )
+            preceding.add(type(system))
+        return system_types
 
-        self._llm_profile_store = llm_profile_store
-        self._backend: ApprovalBackend = ProfileApprovalBackend(
-            ctx,
-            llm_profile_store,
+    # -- 装配与关闭（P22）--
+
+    async def start(self) -> None:
+        """构造完整清单、串行注册、确认全部唤醒后开放输入。"""
+        if self._state is not ApplicationState.NEW:
+            raise LifecycleFailure(f"Application cannot start from state {self._state}")
+        self._state = ApplicationState.STARTING
+        systems = _build_system_manifest(self._startup_context)
+        order = self._validate_system_graph(systems)
+        instances = {type(system): system for system in systems}
+        self._registered_types = []
+        from system.runtime import RuntimeSystem
+        try:
+            for system_type in order:
+                # 记录“尝试注册过的类型”：awake 失败的节点可能已进入 framework
+                # 注册表但未唤醒，必须由 _unregister_systems 显式移除（RV10）。
+                self._registered_types.append(system_type)
+                registered = await self.register(instances[system_type])
+                if not registered:
+                    raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
+                if not instances[system_type].is_awake:
+                    raise LifecycleFailure(
+                        f"System {system_type.__name__} was not awakened after registration"
+                    )
+        except BaseException as startup_error:
+            self._state = ApplicationState.FAILED
+            try:
+                await self._unregister_systems()
+            except BaseException as cleanup_error:
+                raise BaseExceptionGroup(
+                    "Application startup failed and cleanup also failed",
+                    [startup_error, cleanup_error],
+                ) from startup_error
+            raise
+        try:
+            runtime = AsyncArchitecture.get_system(self, RuntimeSystem)
+            runtime.mark_running()
+            self._runtime_ref = runtime
+            from component.cron_router import CronRouter
+            AsyncArchitecture.get_system(self, CronRouter).activate()
+        except BaseException as startup_error:
+            self._state = ApplicationState.FAILED
+            try:
+                await self._unregister_systems()
+            except BaseException as cleanup_error:
+                raise BaseExceptionGroup(
+                    "Application startup failed and cleanup also failed",
+                    [startup_error, cleanup_error],
+                ) from startup_error
+            raise
+        self._state = ApplicationState.RUNNING
+        logger.info("Application started | systems=%d", len(order))
+
+    async def _unregister_systems(self) -> None:
+        """按装配逆序逐一注销；失败节点仍被移除，错误合并保留。"""
+        failures: list[BaseException] = []
+        for system_type in reversed(self._registered_types):
+            try:
+                removed = await self.unregister(system_type)
+                if not removed:
+                    # framework 拒绝（例如仍有依赖未注销）时保留并上报。
+                    if self.has_system(system_type) is not None:
+                        failures.append(LifecycleFailure(
+                            f"System {system_type.__name__} could not be unregistered"
+                        ))
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("Application system unregistration failed", failures)
+
+    async def _stop_business(self) -> None:
+        """P3 步骤 2—7：冻结输入、停止生成、提交 History、保留输出到最后。"""
+        from abstract.mcp.system import MCPSystem
+        from abstract.tools.registry import ToolRegistry
+        from component.approval.system import ApprovalSystem
+        from component.cron_router import CronRouter
+        from entry.agent_sink import FrontendSink
+        from gateway.session_manager import SessionManager
+        from gateway.system import GatewaySystem
+        from subagent.orchestrator import SubAgentOrchestrator
+        from system.modality_capability import ModalityCapabilitySystem
+        from system.session_metadata import SessionMetadataService
+        from system.subprocess_utils import SubprocessRunner
+
+        gateway = AsyncArchitecture.get_system(self, GatewaySystem)
+        sessions = AsyncArchitecture.get_system(self, SessionManager)
+        orchestrator = AsyncArchitecture.get_system(self, SubAgentOrchestrator)
+        cron = AsyncArchitecture.get_system(self, CronRouter)
+        sink = AsyncArchitecture.get_system(self, FrontendSink)
+        registry = AsyncArchitecture.get_system(self, ToolRegistry)
+        mcp = AsyncArchitecture.get_system(self, MCPSystem)
+        subprocesses = AsyncArchitecture.get_system(self, SubprocessRunner)
+        metadata = AsyncArchitecture.get_system(self, SessionMetadataService)
+        approval = AsyncArchitecture.get_system(self, ApprovalSystem)
+        modality = AsyncArchitecture.get_system(self, ModalityCapabilitySystem)
+
+        # 步骤 2：同一接收状态下封闭新工作；长连接与输出保留。
+        gateway.stop_accepting()
+        sessions.freeze_inputs()
+        orchestrator.freeze_inputs()
+        cron.freeze()
+        sink.close_admission()
+        mcp.close_admission()
+
+        # 步骤 3—4：停止生成请求与在途调用；取消路由后台工作。
+        async def stop_rounds() -> None:
+            await sessions.stop_rounds()
+            await orchestrator.stop_rounds()
+
+        async def cancel_pending() -> None:
+            await close_resources((
+                registry.cancel_pending_calls,
+                mcp.stop_calls,
+                subprocesses.terminate_all,
+                metadata.cancel_pending,
+                approval.cancel_pending,
+                modality.cancel_pending,
+                gateway.cancel_background_work,
+            ))
+            sink.cancel_pending_interactions()
+
+        await close_resources((stop_rounds, cancel_pending))
+
+        # 步骤 5—6：子会话未消费输入与反馈先交接，再串行提交主会话 History。
+        await orchestrator.flush_inputs()
+        await orchestrator.transfer_shutdown_feedback()
+        report = await sessions.flush_inputs()
+        logger.info(
+            "Shutdown input flush | accepted=%d appended=%d persisted=%d ephemeral=%d",
+            report.accepted, report.appended, report.persisted, report.ephemeral,
         )
 
-    def get_backend(self) -> ApprovalBackend | None:
-        """返回可用审批后端；未配置或配置无效时返回 ``None``。"""
-        return self._backend if self._backend.is_available() else None
+        # 步骤 7：History 刷新完成后才结束连接与服务器。
+        await sink.close_all_connections()
+        await gateway.stop_server()
 
-    def get_state(self) -> ApprovalProfileState:
-        """返回项目级审批 Profile 的权威状态。"""
-        from entity.puretype import ApprovalProfileState
-
-        profile = self._llm_profile_store.get_approval_profile()
-        if profile is None:
-            return ApprovalProfileState()
-        return ApprovalProfileState(
-            profile_name=profile.name,
-            model=profile.model or None,
-            available=self._backend.is_available(),
-        )
-
-    def invalidate(self) -> None:
-        """清除审批客户端缓存，使下一次调用按当前 Profile 重建。"""
-        invalidate = getattr(self._backend, "invalidate", None)
-        if callable(invalidate):
-            invalidate()
+    def disarm_shutdown_deadline(self) -> None:
+        """仅由 App 在 asyncio.run 及其线程池结束后调用（RV7）。"""
+        if self._runtime_ref is not None:
+            self._runtime_ref.disarm_shutdown_deadline()
 
     async def shutdown(self) -> None:
-        """释放审批客户端引用。"""
-        self.invalidate()
+        """单一协调任务：业务停止 → 逆拓扑注销；重复请求等待同一任务。"""
+        task = self._shutdown_task
+        if task is None:
+            task = asyncio.create_task(self._shutdown_impl(), name="application-shutdown")
+            self._shutdown_task = task
+        await asyncio.shield(task)
+
+    async def _shutdown_impl(self) -> None:
+        from system.runtime import RuntimeSystem
+        runtime = AsyncArchitecture.get_system(self, RuntimeSystem)
+        self._state = ApplicationState.STOPPING
+        failures: list[BaseException] = []
+        try:
+            await self._stop_business()
+        except BaseException as exc:
+            failures.append(exc)
+        try:
+            await self._unregister_systems()
+        except BaseException as exc:
+            failures.append(exc)
+        failures.extend(error for error in runtime.failures if not any(
+            existing is error for existing in failures
+        ))
+        self._state = (
+            ApplicationState.FAILED if failures else ApplicationState.CLOSED
+        )
+        if failures:
+            raise BaseExceptionGroup("Application shutdown failed", failures)

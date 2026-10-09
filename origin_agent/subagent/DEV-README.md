@@ -51,10 +51,10 @@ graph TD
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：使用父主会话的审批模式。safe、白名单命中或 YOLO 直接执行；手动模式其余调用等待父Agent通过 `ApprovalSubAgent` 审批（不是用户弹窗），脱手模式则由审批模型处理。多Agent模式参与者使用主会话策略，与此独立子会话路径不同。
 - **启动事务与失败可见性**：普通子Agent和临时Agent启动时先登记启动状态，再完成上下文、历史和前端回放事件准备；不设置活跃数量上限，也不进入等待队列。显式传入的 `.es` 历史加载失败会使启动失败，不会降级为空历史；启动阶段异常统一回滚 `_active`、任务和 waiter。
-- **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
+- **结果收集**：事件驱动——子代理通过 `append_feedback()` 登记 `SubAgentFeedbackDelivery`，或改变待审批队列时唤醒 waiter。正常运行的 waiter 将未交接反馈一次性投递到父会话；关闭阶段先冻结 waiter，反馈由专用关闭交接转入父会话关闭批次，不能重新启动父模型。
 - **稳定类型边界**：`launch()`、`chat()`、`approve()`、`stop()` 与 `get_snapshot()` 在 `SubAgentOrchestrator` 和 `_OrchestratorContext` 之间只传递 `entity.puretype.subagent` 中的 BaseModel；工具结果和 WebSocket/HTTP 序列化仅在边界处执行。`SubAgentSnapshot` 统一定义 `status`、`feedback`、`pending_approvals` 与 `interactive`，调用方通过属性访问，不再依赖字典键。
 - **响应与状态**：编排响应不持久化，不保留旧排队协议：启动结果仅含 `success`、可选 `session_id` / `error`；停止结果仅含 `success`、`session_id`、可选 `session_path` / `error`。删除 `SubAgentPromotion`，状态仅为 `running` / `completed` / `terminated`；History 持久化结构保持不变。
-- **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
+- **历史持久化**：停止时先请求并等待子Agent任务及工具收尾，再把未消费 Inbox 追加到 History，最后通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`；使用 `easysave` 多态序列化。TaskAgent只完成内存交接，不保存历史；角色是否长期保留历史由 Agent 自行移动。
 
 ### 2. 多 Agent 协作模式（MultiAgent）
 
@@ -83,7 +83,9 @@ graph TD
 - `launch()`、`chat()`、`approve()`、`stop()`、`get_snapshot()` 分别返回 `SubAgentLaunchResult`、`SubAgentChatResult`、`SubAgentApprovalResult`、`SubAgentStopResult`、`SubAgentSnapshotResponse`；调用方通过属性读取。
 - 生命周期由 `Application.shutdown()` 管理（`shutdown_all()`）。
 
-### `_OrchestratorContext`
+`SubAgentOrchestrator` 是 framework `AsyncSystem`，依赖 `RuntimeSystem`、`SessionManager` 及子Agent运行所需的已注册业务 System。`virtual_awake` 只取得依赖，不创建启动用 Loop；每个上下文在运行时通过 `SessionManager` 查询真实父会话。启动、运行、waiter 和状态推送任务均由上下文的强引用表持有，关闭时按冻结输入、等待任务、刷新 History、交接反馈顺序收尾。
+
+
 
 单个父会话的运行时上下文：
 
@@ -96,7 +98,8 @@ graph TD
 
 `subagent/loop.py` 中的子代理核心循环，继承 `BasePrivateChatAgentLoop`：
 
-- 处理 inbox/outbox、工具审批、事件推送。
+- 处理由 `InputDeliveryBuffer[InboxMessage]` 驱动的 Inbox、反馈记录、工具审批、事件推送。
+- 初始 prompt 与父Agent消息都先登记 sequence，再追加到内存 History；关闭时未消费记录按原角色和文本格式补入 History。
 - 使用 `SubRuntimeContext` 拥有独立的 LLM 配置。
 - 工具调用挂起时进入 `_pending_approvals`。
 - 通过 `ParentAgentSink` 与父 Agent 通信。
@@ -170,7 +173,7 @@ graph TD
 
 ---
 
-## 工具可见性
+工具结果使用 `prepare_tool_result → store_tool_result → PreparedToolResult.emit`；普通子Agent先提交内存 History，停止时再严格保存，TaskAgent只提交内存并永久不保存。
 
 子代理的工具集不是"除了 multiagent 之外的所有工具"，而是由 `ToolRegistry.get_definitions_for_loaded_toolsets(ToolAvailability.SUBAGENT, loaded_toolsets)` 决定。每个工具注册时可声明 `availability` 位掩码：
 
@@ -192,7 +195,7 @@ graph TD
 
 1. 工具调用进入 `_pending_approvals` 并等待决定。
 2. `ApprovalSubAgent` 工具由父Agent调用，批量通过/拒绝；前端 pending 状态并不表示用户审批弹窗。
-3. 子Agent `outbox` 追加或 `pending_approvals` 变化时，`SubAgentOrchestrator` 的 waiter 即时将 outbox + 待审批列表格式化为 `[subagent-result]` 消息，push 到父Agent的 `SessionMessageQueue`。
+3. 子Agent通过 `append_feedback()` 登记反馈；正常运行的 waiter 将未交接反馈格式化为 `[subagent-result]` 消息推送到父Agent的 `SessionMessageQueue`，关闭期间改由 `SessionManager.accept_shutdown_feedback()` 一次性交接，不重新启动父模型。
 4. 父Agent的下一轮 LLM 调用即可看到子Agent的产出。
 
 脱手模式下，需审批调用直接经 `request_user_confirm` 使用父主会话的审批模型，不经过 `_pending_approvals` 队列。白名单以工具名和规范化参数匹配，不是工具名级的无限制授权。
@@ -202,6 +205,12 @@ graph TD
 `templates/subagent/subagent_system.txt` 描述上述独立子会话规则；`templates/multiagent/multi_agent_system_prompt.txt` 则面向所有多Agent参与者，明确其使用主会话策略（手动模式 write 直接执行）。临时Agent继续无系统提示词、仅允许 safe 工具。
 
 ---
+
+## 工具注册表迁移（S10）
+
+运行期工具查询与执行统一使用 `app.get_system(ToolRegistry)`。注册表管理异步请求任务和真实同步 Future，子Agent取消等待不代表同步 handler 已退出；子Agent仅负责本次分发/审批等待的完整交接。停止、生命周期及 History 持久化失败（包括异常组）透传到运行边界，不能在工具错误、审批拒绝或 Loop 兜底中改写为正常完成。普通工具失败仍保持原消息协议。
+
+子会话输入登记、最终停止与 History 保存顺序已由 S17 完成；Application 最终装配件 P22 接通。
 
 ## Shell会话所有权
 

@@ -10,28 +10,37 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
+from entity.constant import QUERY_MAX_RESULTS, QUERY_MAX_RESULTS_HARD
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
-    "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs; "
+    "if the target page is not listed, ask the user to open or switch to it manually, then retry."
 )
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _handle_browser_query(args: dict[str, Any]) -> dict:
     tab: str = str(args.get("tab", "")).strip()
     selector: str = str(args.get("selector", "")).strip()
     text: str = str(args.get("text", "")).strip()
-    max_results: int = int(args.get("max_results", _connection.QUERY_MAX_RESULTS))
+    max_results: int = int(args.get("max_results", QUERY_MAX_RESULTS))
 
     if not tab:
         return tool_error("tab is required")
@@ -39,12 +48,14 @@ async def _handle_browser_query(args: dict[str, Any]) -> dict:
         return tool_error("provide 'selector' or 'text' (at least one)")
     if max_results < 1:
         max_results = 1
-    if max_results > _connection.QUERY_MAX_RESULTS_HARD:
-        max_results = _connection.QUERY_MAX_RESULTS_HARD
+    if max_results > QUERY_MAX_RESULTS_HARD:
+        max_results = QUERY_MAX_RESULTS_HARD
 
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserQuery: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
@@ -77,10 +88,13 @@ async def _handle_browser_query(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="BrowserQuery",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserQuery into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserQuery",
+        toolset="browser",
+        schema={
         # 在页面中定位元素，返回元素引用列表（含 path），供 BrowserClick / BrowserType 等交互工具使用。
         #
         # ## 前置条件
@@ -163,4 +177,4 @@ The path can be passed directly as the path argument of BrowserClick / BrowserTy
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

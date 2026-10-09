@@ -1,12 +1,6 @@
-"""CDP 连接共享模块 — browser 工具组的连接单例与标签页定位。
+"""浏览器无状态探测、标签页定位与 DOM 查询。
 
-模块级仅导入 stdlib；playwright 延迟到函数内导入。这是 check_fn
-机制成立的前提：未安装 playwright 时本模块仍可被正常 import，
-工具组仅对 LLM 隐藏而非导入失败。
-
-连接为模块级单例，在 agent 主事件循环首次创建（工具经
-``registry.async_dispatch`` 在主 loop 中 await）；每次调用前探活，
-失效自动重建。
+可选 playwright 仅在业务调用时导入；连接与自有进程归 BrowserSystem。
 """
 
 from __future__ import annotations
@@ -14,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
-import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -26,30 +19,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CDP_ENDPOINT_DEFAULT: str = "http://localhost:9222"
-CONNECT_TIMEOUT_MS: int = 5000
-_CDP_VERSION_PATH: str = "/json/version"
-
-# Windows 上 Edge 的常见安装路径（64 位系统默认装于 x86 目录）。
-EDGE_CANDIDATE_PATHS: tuple[str, ...] = (
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+from entity.constant import (
+    CDP_ENDPOINT_DEFAULT, CDP_VERSION_PATH, EDGE_CANDIDATE_PATHS,
+    DOM_TEXT_SUMMARY_CHARS,
 )
-
-# 面向终端用户的操作指引（agent 会转述），connect/launch 失败时共用。
-# Chromium 136+ 起，默认用户数据目录下 --remote-debugging-port 被静默忽略，
-# 必须配合非默认 --user-data-dir 使用。
-EDGE_DEBUG_GUIDE: str = (
-    "无法接管浏览器：CDP 端点不可达。优先请 agent 调用 BrowserLaunch 自动启动调试 Edge；"
-    "若需手动启动，请执行：\n"
-    '   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --remote-debugging-port=9222 --user-data-dir=C:\\edge-cdp-profile\n'
-    "注意：Chromium 136+ 在默认用户数据目录下会静默忽略调试端口参数，必须指定非默认 --user-data-dir。"
-)
-
-_pw: Any = None        # playwright.async_api.Playwright
-_browser: Any = None   # playwright.async_api.Browser
-_endpoint: str = CDP_ENDPOINT_DEFAULT
-_headless_proc: subprocess.Popen | None = None  # 无头浏览器进程（需在应用关闭时终止）
 
 
 def playwright_available() -> bool:
@@ -71,7 +44,7 @@ def probe_cdp_endpoint(endpoint: str = CDP_ENDPOINT_DEFAULT, timeout: float = 2.
     阻塞式网络调用，供 ``asyncio.to_thread`` 包装后使用，避免卡住事件循环。
     """
     try:
-        with urllib.request.urlopen(f"{endpoint}{_CDP_VERSION_PATH}", timeout=timeout) as resp:
+        with urllib.request.urlopen(f"{endpoint}{CDP_VERSION_PATH}", timeout=timeout) as resp:
             return resp.status == 200
     except (urllib.error.URLError, urllib.error.HTTPError, OSError):
         return False
@@ -85,92 +58,6 @@ async def wait_for_endpoint(endpoint: str = CDP_ENDPOINT_DEFAULT, timeout_s: flo
             return True
         await asyncio.sleep(0.5)
     return False
-
-
-def current_endpoint() -> str:
-    """返回当前成功连接的 CDP 端点（未连接时为默认值）。"""
-    return _endpoint
-
-
-async def get_browser(endpoint: str = CDP_ENDPOINT_DEFAULT) -> "Browser":
-    """返回存活的 Browser 连接；未连接或已断开则重建。
-
-    连接失败时抛出异常，由调用方转换为引导错误。
-    """
-    global _pw, _browser, _endpoint
-    if _browser is not None and _browser.is_connected():
-        return _browser
-    await teardown()
-    from playwright.async_api import async_playwright
-    _pw = await async_playwright().start()
-    try:
-        _browser = await _pw.chromium.connect_over_cdp(endpoint, timeout=CONNECT_TIMEOUT_MS)
-    except Exception:
-        await teardown()
-        raise
-    _endpoint = endpoint
-    logger.info("browser CDP connected: %s", endpoint)
-    return _browser
-
-
-async def teardown() -> None:
-    """断开 CDP 连接（不关闭用户浏览器）并释放 playwright。
-
-    无头浏览器进程的终止由 ``cleanup_headless_browser`` 在应用关闭时处理，
-    本函数仅断开 CDP 连接。
-    """
-    global _pw, _browser
-    if _browser is not None:
-        try:
-            await _browser.close()
-        except Exception:
-            pass
-        _browser = None
-    if _pw is not None:
-        try:
-            await _pw.stop()
-        except Exception:
-            pass
-        _pw = None
-
-
-def register_headless_proc(proc: subprocess.Popen) -> None:
-    """登记无头浏览器进程句柄，供应用关闭时终止。
-
-    由 ``BrowserLaunch`` 在 headless=True 时调用。
-    覆盖之前登记的句柄（幂等：同一进程重复登记无副作用）。
-    """
-    global _headless_proc
-    _headless_proc = proc
-
-
-def cleanup_headless_browser() -> int:
-    """终止无头浏览器进程。供 main.py 在 agent 关闭时调用。返回 killed count。
-
-    无头模式启动的浏览器无法被用户手动关闭，必须在应用退出时强制终止，
-    否则会成为孤儿进程持续占用资源。
-    """
-    global _headless_proc
-    if _headless_proc is None:
-        return 0
-    from system.subprocess_utils import _kill_proc_tree
-
-    proc = _headless_proc
-    _headless_proc = None
-    try:
-        _kill_proc_tree(proc.pid)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "Headless browser (pid=%d) did not exit within 5s after kill",
-                proc.pid,
-            )
-        logger.info("Headless browser process terminated (pid=%d)", proc.pid)
-        return 1
-    except Exception:
-        logger.warning("Failed to kill headless browser process", exc_info=True)
-        return 1
 
 
 def all_pages(browser: "Browser") -> list["Page"]:
@@ -216,10 +103,6 @@ async def find_page(browser: "Browser", tab: str) -> "Page | None":
 #   shadowRoot→children[1]→children[3]），resolveByPath 遇 # 切换到 shadowRoot，
 #   pathOf 上溯到 ShadowRoot 时自动插入 # + shadow 内索引。
 # ---------------------------------------------------------------------------
-
-DOM_TEXT_SUMMARY_CHARS: int = 80
-QUERY_MAX_RESULTS: int = 50
-QUERY_MAX_RESULTS_HARD: int = 200
 
 _DOM_SCRIPT: str = r"""(args) => {
   const summaryChars = args.summary_chars || 80;

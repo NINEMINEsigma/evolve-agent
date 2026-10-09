@@ -12,21 +12,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_result
+from abstract.tools.registry import ToolRegistry, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
 
 logger = logging.getLogger(__name__)
 
 
 async def _handle_browser_close(args: dict[str, Any]) -> dict:
-    endpoint: str = _connection.current_endpoint()
+    bs = Application.current().get_system(BrowserSystem)
+    endpoint: str = bs.current_endpoint()
 
     # 1. 断开 CDP 连接（不关闭有头浏览器），释放 playwright
-    await _connection.teardown()
+    await bs.teardown()
 
     # 2. 终止无头浏览器进程（若有）：无头窗口不可见，用户无法手动关闭
-    headless_killed: int = _connection.cleanup_headless_browser()
+    headless_killed: int = await bs.cleanup_headless_browser()
 
     logger.info(
         "BrowserClose: CDP disconnected (endpoint=%s), headless processes killed=%d",
@@ -42,10 +46,13 @@ async def _handle_browser_close(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="BrowserClose",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserClose into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserClose",
+        toolset="browser",
+        schema={
         # 关闭浏览器：断开 CDP 连接 + 终止无头浏览器进程（若有）。
         #
         # ## 行为细节
@@ -98,4 +105,4 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

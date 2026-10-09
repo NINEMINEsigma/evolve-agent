@@ -7,6 +7,9 @@
 # Cron 任务持久化文件名 — 存放于 workspace/ 下
 CRON_STORE_FILENAME: str = "cron_jobs.json"
 
+# 内部子进程会话键前缀，与主/子会话隔离，供关闭路径精确终止Cron命令。
+CRON_PROCESS_SESSION_PREFIX: str = "cron:"
+
 # 动态端点持久化文件名 — 存放于 workspace/ 下
 DYNAMIC_ENDPOINTS_STORE_FILENAME: str = "dynamic_endpoints.json"
 

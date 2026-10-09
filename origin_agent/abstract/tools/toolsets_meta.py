@@ -1,13 +1,16 @@
 """内置工具集元数据注册。
 
-在工具发现后由 main.py 调用，为每个内置工具集注册简短描述和详细使用说明。
+由 ToolDiscoverySystem 在全部工具模块显式注册后调用，接收同一 ToolRegistry。
 未加载时系统提示词只显示 description（简述），加载后显示 usage_guide（详细说明）。
+模块导入不注册元数据，也不取得 Application 或创建第二个注册表。
 """
 
-from abstract.tools.registry import registry
+from __future__ import annotations
+
+from abstract.tools.registry import ToolRegistry
 
 
-def register_builtin_toolset_descriptions() -> None:
+def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
     """注册所有内置工具集的简短描述和详细使用说明。"""
     registry.register_toolset(
         name="core",

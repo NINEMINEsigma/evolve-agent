@@ -1,23 +1,41 @@
 """工具 schema 和 handler 的中央注册表。
 
-每个工具模块在模块级别调用 ``registry.register()`` 声明其
+每个工具模块在显式 ``register_tools(registry, ui_events)`` 入口调用
+``registry.register()`` 声明其
 schema、handler、toolset 成员关系和可用性检查。下游代码使用
 ``get_definitions()`` 获取 OpenAI 格式的 schema（按可用性筛选）
 并通过名称 ``dispatch()`` 执行 handler。
 
 所有变更通过 ``threading.RLock`` 序列化，单调递增的
 generation 计数器支持外部缓存失效。
+
+``ToolRegistry`` 是依赖 ``RuntimeSystem`` 的 framework ``AsyncSystem``。
+运行期通过 ``app.get_system(ToolRegistry)`` 取得唯一实例，不提供模块级
+单例或兼容代理。ToolDiscoverySystem 负责调用显式声明入口；完整应用装配待 P22。
 """
 
 import asyncio
+import concurrent.futures
 import inspect
 import json
 import logging
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import copy_context
 from typing import Any, Callable
 
+from framework import AsyncSystem
+
+from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import ToolAvailability, ToolDangerLevel
+from entity.puretype.lifecycle import SyncToolCallRecord
+from system.lifecycle import (
+    ApplicationStoppingError, LifecycleFailure, TaskOwner,
+    close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
+)
+from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -117,57 +135,17 @@ class ToolsetEntry:
         description: str = "",
         usage_guide: str = "",
         loaded_by_default: bool = False,
-    ):
-        self.name: str = name
-        self.description: str = description
-        self.usage_guide: str = usage_guide
-        self.loaded_by_default: bool = loaded_by_default
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.usage_guide = usage_guide
+        self.loaded_by_default = loaded_by_default
 
-
-# ---------------------------------------------------------------------------
-# check_fn TTL 缓存
-#
-# check_fn 可调用对象探测外部状态（Docker 守护进程、二进制可用性、
-# 配置路径）。对长期运行的进程，每次 get_definitions() 都调用是
-# 纯粹浪费 — 外部状态在人类时间尺度上变化。缓存结果约 30 秒，
-# 使 env var 翻转能在一两个回合内传播而无需显式失效。
-# ---------------------------------------------------------------------------
-
-_CHECK_FN_TTL_SECONDS: float = 30.0
-_check_fn_cache: dict[Callable, tuple[float, bool]] = {}
-_check_fn_cache_lock: threading.Lock = threading.Lock()
 
 DEFAULT_RESULT_SIZE_CHARS: int = 100000
 
 # 默认加载的工具集名称
 DEFAULT_LOADED_TOOLSET: str = "core"
-
-
-def _check_fn_cached(fn: Callable) -> bool:
-    """返回 bool(fn())，跨调用 TTL 缓存。异常吞没为 False。"""
-    now: float = time.monotonic()
-    with _check_fn_cache_lock:
-        cached: tuple[float, bool] | None = _check_fn_cache.get(fn)
-        if cached is not None:
-            ts: float
-            value: bool
-            ts, value = cached
-            if now - ts < _CHECK_FN_TTL_SECONDS:
-                return value
-    try:
-        value = bool(fn())
-    except Exception:
-        logger.warning("Tool availability check failed", exc_info=True)
-        value = False
-    with _check_fn_cache_lock:
-        _check_fn_cache[fn] = (now, value)
-    return value
-
-
-def invalidate_check_fn_cache() -> None:
-    """丢弃所有缓存的 ``check_fn`` 结果。在影响工具可用性的配置变更后调用。"""
-    with _check_fn_cache_lock:
-        _check_fn_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +156,13 @@ def _handler_accepts_context(handler: Callable, context: Any) -> bool:
     """检查 handler 是否声明了 ``context`` 参数。
 
     仅当 ``context`` 非 None 且 handler 签名包含 ``context`` 形参时返回 True。
+
+    inspect.signature is only used at the dynamic user-plugin boundary to
+    determine whether a handler accepts a ``context`` keyword. This is the
+    only place where signature introspection is necessary because tool
+    handlers are user-authored extensions with no shared base class or
+    protocol; the core project does not use reflection for its own known
+    interfaces.
     """
     if context is None:
         return False
@@ -190,31 +175,91 @@ def _handler_accepts_context(handler: Callable, context: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# ToolRegistry（单例）
+# ToolRegistry（AsyncSystem）
 # ---------------------------------------------------------------------------
 
 
-class ToolRegistry:
-    """单例注册表，收集来自工具文件的 tool schema + handler。
+class ToolRegistry(AsyncSystem):
+    """工具注册表与执行器，注册为 framework AsyncSystem。
 
-    所有变更方法（register、deregister）持有 ``RLock``，
-    因此可以安全地从多线程调用（如 MCP 动态刷新 vs 读取查询）。
-    每次变更时递增的 ``_generation`` 计数器使基于 generation
-    key 的外部缓存能廉价地检测过期。
+    依赖 RuntimeSystem；无参构造，``virtual_awake`` 取得 RuntimeSystem 并
+    创建唯一 ``ThreadPoolExecutor``。同步 handler 通过 ``copy_context().run``
+    保留上下文传播，以 ``executor.submit`` 取得真实
+    ``concurrent.futures.Future`` 并登记；异步请求统一经 ``TaskOwner``
+    登记。取消 await 不删除仍在运行的线程 Future。
+
+    所有变更方法（register、deregister）持有 ``RLock``。
+    check_fn 缓存与缓存锁已从模块级迁移为实例字段。
     """
 
-    def __init__(self):
+    _CHECK_FN_TTL_SECONDS: float = 30.0
+
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem,))
         self._tools: dict[str, ToolEntry] = {}
         self._toolset_checks: dict[str, Callable] = {}
         self._toolset_aliases: dict[str, str] = {}
         self._toolsets: dict[str, ToolsetEntry] = {}
         # 序列化变更并为读取者提供稳定快照。
         self._lock: threading.RLock = threading.RLock()
-        # 单调递增的 generation 计数器。每次变更时递增
-        # （register / deregister / register_toolset_alias）。
-        # 外部调用方可基于它 memoize：key 基于 generation 的缓存条目
-        # 在 generation 未变化期间有效。
+        # 单调递增的 generation 计数器；每次变更时递增，外部缓存据此失效。
         self._generation: int = 0
+        # check_fn TTL 缓存，迁移自模块级。
+        self._check_fn_cache: dict[Callable, tuple[float, bool]] = {}
+        self._check_fn_cache_lock: threading.Lock = threading.Lock()
+        # 执行器与在途任务登记，virtual_awake 创建。
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._sync_calls: dict[concurrent.futures.Future[Any], SyncToolCallRecord] = {}
+        self._sync_calls_lock = threading.RLock()
+        self._sync_changed: asyncio.Event | None = None
+        self._sync_failures: list[BaseException] = []
+        self._task_owner: TaskOwner | None = None
+        self._executor_shutdown_task: asyncio.Task[None] | None = None
+        self._dispatch_closed: bool = False
+        self._runtime: RuntimeSystem | None = None
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._task_owner = TaskOwner("tool-registry", self.runtime.record_failure)
+        self._sync_changed = asyncio.Event()
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            thread_name_prefix="tool-handler",
+        )
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("ToolRegistry has not been awakened")
+        return self._runtime
+
+    # -- check_fn 缓存（实例级） -------------------------------------------
+
+    def _check_fn_cached(self, fn: Callable) -> bool:
+        """返回 bool(fn())，跨调用 TTL 缓存。异常吞没为 False。"""
+        now: float = time.monotonic()
+        with self._check_fn_cache_lock:
+            cached: tuple[float, bool] | None = self._check_fn_cache.get(fn)
+            if cached is not None:
+                ts: float
+                value: bool
+                ts, value = cached
+                if now - ts < self._CHECK_FN_TTL_SECONDS:
+                    return value
+        try:
+            value = bool(fn())
+        except Exception as error:
+            if requires_lifecycle_propagation(error):
+                raise
+            logger.warning("Tool availability check failed", exc_info=True)
+            value = False
+        with self._check_fn_cache_lock:
+            self._check_fn_cache[fn] = (now, value)
+        return value
+
+    def invalidate_check_fn_cache(self) -> None:
+        """丢弃所有缓存的 ``check_fn`` 结果。"""
+        with self._check_fn_cache_lock:
+            self._check_fn_cache.clear()
 
     # -- 内部快照辅助方法 -----------------------------------------
 
@@ -237,7 +282,9 @@ class ToolRegistry:
             return True
         try:
             return bool(check())
-        except Exception:
+        except Exception as error:
+            if requires_lifecycle_propagation(error):
+                raise
             logger.warning("Toolset %s check raised; marking unavailable", toolset, exc_info=True)
             return False
 
@@ -249,10 +296,7 @@ class ToolRegistry:
             return self._tools.get(name)
 
     def get_schema(self, name: str) -> dict|None:
-        """返回工具的原始 schema 字典，绕过 check_fn 过滤。
-
-        用于 token 估算和内省，这些场景下可用性不重要 — 只需 schema 内容。
-        """
+        """返回工具的原始 schema 字典，绕过 check_fn 过滤。"""
         entry: ToolEntry | None = self.get_entry(name)
         return entry.schema if entry else None
 
@@ -282,16 +326,7 @@ class ToolRegistry:
         tool_names: set | None = None,
         quiet: bool = False,
     ) -> list[dict]:
-        """返回指定 availability 范围的工具的 OpenAI 格式 schema。
-
-        *scope* 为 ``ToolAvailability`` 位掩码。工具 ``entry.availability``
-        与 *scope* 的按位与结果非零时可见。常见取值：
-        - ``ToolAvailability.MAIN``: 返回 ``MAIN`` 或 ``EVERY`` 的工具
-        - ``ToolAvailability.SUBAGENT``: 返回 ``SUBAGENT`` 或 ``EVERY`` 的工具
-        - ``ToolAvailability.EVERY``: 仅返回 ``EVERY`` 的工具
-
-        若提供 *tool_names*，仅返回名称在该集合中的工具。
-        """
+        """返回指定 availability 范围的工具的 OpenAI 格式 schema。"""
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
         entries_by_name: dict[str, ToolEntry] = {
@@ -311,7 +346,7 @@ class ToolRegistry:
                 continue
             if entry.check_fn:
                 if entry.check_fn not in check_results:
-                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                    check_results[entry.check_fn] = self._check_fn_cached(entry.check_fn)
                 if not check_results[entry.check_fn]:
                     if not quiet:
                         logger.debug("Tool %s unavailable (check failed)", name)
@@ -323,7 +358,8 @@ class ToolRegistry:
                     if isinstance(overrides, dict):
                         schema_with_name.update(overrides)
                 except Exception as exc:
-                    # 动态 schema 覆盖失败属于可恢复降级：回退到静态 schema
+                    if requires_lifecycle_propagation(exc):
+                        raise
                     logger.warning(
                         "dynamic_schema_overrides for tool %s raised %s; using static schema",
                         name, exc,
@@ -337,17 +373,13 @@ class ToolRegistry:
         return entry.danger_level if entry else ToolDangerLevel.safe
 
     def is_tool_available(self, name: str) -> bool:
-        """返回单个工具的即时可用性。
-
-        复用 ``_check_fn_cached`` 的 30 秒 TTL 缓存。
-        未注册返回 ``False``；无 ``check_fn`` 返回 ``True``。
-        """
+        """返回单个工具的即时可用性。"""
         entry: ToolEntry | None = self.get_entry(name)
         if entry is None:
             return False
         if entry.check_fn is None:
             return True
-        return _check_fn_cached(entry.check_fn)
+        return self._check_fn_cached(entry.check_fn)
 
     def get_tool_to_toolset_map(self) -> dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
@@ -397,11 +429,7 @@ class ToolRegistry:
         usage_guide: str = "",
         loaded_by_default: bool = False,
     ) -> None:
-        """显式注册工具集元数据。
-
-        若工具集已存在（包括自动创建的回退项），仅更新 description、
-        usage_guide 和 loaded_by_default；若已有值且新值为空，保留原值。
-        """
+        """显式注册工具集元数据。"""
         with self._lock:
             existing: ToolsetEntry | None = self._toolsets.get(name)
             if existing is not None:
@@ -450,19 +478,10 @@ class ToolRegistry:
         availability: ToolAvailability = ToolAvailability.EVERY,
         resets_turn_counter: bool = False,
     ) -> None:
-        """注册工具。由每个工具文件在模块导入时调用。
-
-        ``override=True`` 是显式 opt-in，用于意图替换来自不同 toolset
-        的现有工具的插件。未设置时，会遮蔽现有工具的注册将被拒绝，
-        以防止意外覆盖。
-
-        同一 toolset 内注册的工具静默相互覆盖（最新的获胜 —
-        预期用于重载/重新导入）。
-        """
+        """由显式工具声明或 MCP 动态发现注册；冲突拒绝必须向调用方传播。"""
         with self._lock:
             existing: ToolEntry | None = self._tools.get(name)
             if existing and existing.toolset != toolset:
-                # 允许相同类别覆盖（如 MCP-to-MCP 刷新）。
                 both_mcp: bool = (
                     existing.toolset.startswith("mcp-")
                     and toolset.startswith("mcp-")
@@ -486,7 +505,10 @@ class ToolRegistry:
                         "intentional, or deregister the existing tool first.",
                         name, toolset, existing.toolset,
                     )
-                    return
+                    raise ValueError(
+                        f"Tool {name!r} in {toolset!r} conflicts with {existing.toolset!r}; "
+                        "set override=True only for an intentional replacement"
+                    )
 
             self._tools[name] = ToolEntry(
                 name=name,
@@ -506,23 +528,16 @@ class ToolRegistry:
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn
-            # 自动为工具集创建无描述回退 ToolsetEntry（若尚不存在）
             if toolset not in self._toolsets:
                 self._toolsets[toolset] = ToolsetEntry(name=toolset)
             self._generation += 1
 
     def deregister(self, name: str) -> None:
-        """从注册表中移除工具。
-
-        如果同一 toolset 中无其他工具残留，同时清理 toolset 检查。
-        适用于动态工具刷新（如 MCP server 发送
-        ``notifications/tools/list_changed``）。
-        """
+        """从注册表中移除工具。"""
         with self._lock:
             entry: ToolEntry | None = self._tools.pop(name, None)
             if entry is None:
                 return
-            # 如果这是该 toolset 中的最后一个工具，移除 toolset 检查和别名。
             toolset_still_exists: bool = any(
                 e.toolset == entry.toolset for e in self._tools.values()
             )
@@ -543,18 +558,8 @@ class ToolRegistry:
         tool_names: set,
         quiet: bool = False,
     ) -> list[dict]:
-        """返回请求工具名称的 OpenAI 格式 tool schema。
-
-        仅包含 ``check_fn()`` 返回 True（或无 check_fn）的工具。
-        ``check_fn()`` 结果通过 :func:`_check_fn_cached` 缓存约 30 秒，
-        以摊平重复探测开销。
-
-        返回 ``{"type": "function", "function": schema}`` 字典列表，
-        适合直接传递给 OpenAI 格式的 chat completions API。
-        """
+        """返回请求工具名称的 OpenAI 格式 tool schema。"""
         result: list[dict] = []
-        # 在 30 秒 TTL 之上的每次调用缓存 — 处理一次 definitions
-        # 调用中对同一 check_fn 的重复探测，无需重新读取 TTL 时钟。
         check_results: dict[Callable, bool] = {}
         entries_by_name: dict[str, ToolEntry] = {entry.name: entry for entry in self._snapshot_entries()}
         for name in sorted(tool_names):
@@ -563,21 +568,20 @@ class ToolRegistry:
                 continue
             if entry.check_fn:
                 if entry.check_fn not in check_results:
-                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                    check_results[entry.check_fn] = self._check_fn_cached(entry.check_fn)
                 if not check_results[entry.check_fn]:
                     if not quiet:
                         logger.debug("Tool %s unavailable (check failed)", name)
                     continue
-            # 确保 schema 始终包含 "name" 字段 — 使用 entry.name 作为兜底
             schema_with_name: dict = {**entry.schema, "name": entry.name}
-            # 应用运行时动态覆盖
             if entry.dynamic_schema_overrides is not None:
                 try:
                     overrides: dict = entry.dynamic_schema_overrides()
                     if isinstance(overrides, dict):
                         schema_with_name.update(overrides)
                 except Exception as exc:
-                    # 动态 schema 覆盖失败属于可恢复降级：回退到静态 schema
+                    if requires_lifecycle_propagation(exc):
+                        raise
                     logger.warning(
                         "dynamic_schema_overrides for tool %s raised %s; "
                         "using static schema",
@@ -594,13 +598,7 @@ class ToolRegistry:
         loaded_toolsets: set[str],
         quiet: bool = False,
     ) -> list[dict]:
-        """返回已加载工具集中符合 scope 和 check_fn 的工具 schema。
-
-        安全降级：持久化的工具集名称可能指向已注销的 MCP 工具集，
-        此时该名称下的成员为空，自然被跳过，不抛异常。
-
-        返回 ``{"type": "function", "function": schema}`` 字典列表。
-        """
+        """返回已加载工具集中符合 scope 和 check_fn 的工具 schema。"""
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
         entries_by_name: dict[str, ToolEntry] = {
@@ -618,7 +616,7 @@ class ToolRegistry:
                 continue
             if entry.check_fn:
                 if entry.check_fn not in check_results:
-                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                    check_results[entry.check_fn] = self._check_fn_cached(entry.check_fn)
                 if not check_results[entry.check_fn]:
                     if not quiet:
                         logger.debug("Tool %s unavailable (check failed)", name)
@@ -630,6 +628,8 @@ class ToolRegistry:
                     if isinstance(overrides, dict):
                         schema_with_name.update(overrides)
                 except Exception as exc:
+                    if requires_lifecycle_propagation(exc):
+                        raise
                     logger.warning(
                         "dynamic_schema_overrides for tool %s raised %s; "
                         "using static schema",
@@ -645,22 +645,7 @@ class ToolRegistry:
         scope: ToolAvailability,
         loaded_toolsets: set[str],
     ) -> list[dict]:
-        """返回按当前 Loop scope 和 check_fn 过滤后的工具集目录。
-
-        每个工具集至少有一个可见且可用的成员工具时才包含在目录中。
-
-        返回格式::
-
-            [
-                {
-                    "name": "filesystem",
-                    "description": "...",
-                    "loaded": True,
-                    "tools": ["Read", "Write", ...],
-                },
-                ...
-            ]
-        """
+        """返回按当前 Loop scope 和 check_fn 过滤后的工具集目录。"""
         entries: list[ToolEntry] = self._snapshot_entries()
         check_results: dict[Callable, bool] = {}
         toolsets: dict[str, dict] = {}
@@ -670,7 +655,7 @@ class ToolRegistry:
                 continue
             if entry.check_fn:
                 if entry.check_fn not in check_results:
-                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                    check_results[entry.check_fn] = self._check_fn_cached(entry.check_fn)
                 if not check_results[entry.check_fn]:
                     continue
 
@@ -678,7 +663,6 @@ class ToolRegistry:
             if ts not in toolsets:
                 ts_entry: ToolsetEntry | None = self._toolsets.get(ts)
                 is_loaded = ts in loaded_toolsets
-                # 已加载时优先使用 usage_guide（详细说明），未加载时使用 description（简述）
                 if is_loaded and ts_entry and ts_entry.usage_guide:
                     display_desc = ts_entry.usage_guide
                 else:
@@ -693,95 +677,225 @@ class ToolRegistry:
 
         return sorted(toolsets.values(), key=lambda t: t["name"])
 
+    # -- 关闭接收与在途任务管理 ---------------------------------------------
+
+    @property
+    def task_owner(self) -> TaskOwner:
+        if self._task_owner is None:
+            raise LifecycleFailure("ToolRegistry has not been awakened")
+        return self._task_owner
+
+    @contextmanager
+    def _admit_dispatch(self) -> Iterator[None]:
+        with self.runtime.admission():
+            with self._sync_calls_lock:
+                if self._dispatch_closed:
+                    raise ApplicationStoppingError("Tool dispatch has been closed")
+                yield
+
+    def close_dispatch(self) -> None:
+        """STOPPING 期间也可封闭接收，不调用要求 RUNNING 的入口。"""
+        with self._sync_calls_lock:
+            self._dispatch_closed = True
+
+    def _settle_sync(self, record: SyncToolCallRecord) -> None:
+        """由真实 Future 结局与请求交接共同决定回收，可由工作线程调用。"""
+        failure: BaseException | None = None
+        with self._sync_calls_lock:
+            future = record.future
+            if future.done():
+                if future.cancelled():
+                    error: BaseException | None = LifecycleFailure(
+                        "Native tool Future was cancelled outside its owner"
+                    )
+                else:
+                    error = future.exception()
+                if error is not None and not record.failure_reported:
+                    if contains_lifecycle_failure(error):
+                        failure = error
+                    elif record.cancelled_while_running and not isinstance(
+                        error, ApplicationStoppingError
+                    ):
+                        failure = LifecycleFailure("Native tool failed after request cancellation")
+                        failure.__cause__ = error
+                    if failure is not None:
+                        record.failure_reported = True
+                        self._sync_failures.append(failure)
+                if record.request_released:
+                    self._sync_calls.pop(future, None)
+        # 不在登记锁内取得 Runtime 锁；接收的锁顺序是 Runtime -> 登记表。
+        if failure is not None:
+            self.runtime.record_failure(failure)
+        changed = self._sync_changed
+        if changed is not None:
+            self.runtime.loop.call_soon_threadsafe(changed.set)
+
+    def _release_sync(self, record: SyncToolCallRecord, *, cancelled: bool) -> None:
+        with self._sync_calls_lock:
+            record.request_released = True
+            record.cancelled_while_running = cancelled and not record.future.done()
+        self._settle_sync(record)
+
+    def _submit_sync(
+        self, entry: ToolEntry, args: dict, kwargs: dict[str, Any],
+    ) -> SyncToolCallRecord:
+        context = copy_context()
+        # 门闩保证线程即使立即调度，也先完成真实 Future 登记。
+        ready = threading.Event()
+
+        def invoke() -> Any:
+            ready.wait()
+            with self._admit_dispatch():
+                pass
+            return context.run(entry.handler, args, **kwargs)
+
+        with self._admit_dispatch():
+            executor = self._executor
+            if executor is None:
+                raise LifecycleFailure("ToolRegistry executor has not been initialized")
+            future = executor.submit(invoke)
+            record = SyncToolCallRecord(future=future)
+            self._sync_calls[future] = record
+            future.add_done_callback(lambda done: self._settle_sync(record))
+            ready.set()
+        return record
+
+    @staticmethod
+    def _observe_sync_adapter(future: asyncio.Future[Any]) -> None:
+        # 真实错误由原生记录或等待方处理；适配 Future 不另设失败政策。
+        if not future.cancelled():
+            future.exception()
+
+    async def cancel_pending_calls(self) -> None:
+        """取消请求任务并等待真实异步收尾；原生线程仍由登记表持有。"""
+        self.close_dispatch()
+        await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+
+    async def wait_idle(self) -> None:
+        """有界等待请求交接和真实同步工作；超时保留登记并报告失败。"""
+        self.close_dispatch()
+
+        async def wait_sync() -> None:
+            changed = self._sync_changed
+            if changed is None:
+                raise LifecycleFailure("ToolRegistry has not been awakened")
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + SYSTEM_QUIESCE_TIMEOUT_SECONDS
+            while True:
+                changed.clear()
+                with self._sync_calls_lock:
+                    if not self._sync_calls:
+                        failures = tuple(self._sync_failures)
+                        break
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    failure = LifecycleFailure("Native tool calls did not finish within shutdown deadline")
+                    self.runtime.record_failure(failure)
+                    raise failure
+                try:
+                    await asyncio.wait_for(changed.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    # 回到唯一截止判断，不能把超时当作真实线程退出。
+                    continue
+            if failures:
+                raise BaseExceptionGroup("Native tool cleanup failed", failures)
+
+        await close_resources((self.cancel_pending_calls, wait_sync))
+
     # -- 分发 ----------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, context: Any = None) -> dict:
-        """同步分发 — 供非 async 上下文调用。
-
-        通过 ``inspect.signature`` 检查 handler 是否声明 ``context`` 参数。
-        仅当 handler 兼容时传递 ``context``，实现逐步迁移。
-
-        * 同步 handler 直接调用。
-        * 异步 handler 通过 ``asyncio.run()`` 桥接。
-        * 所有异常被捕获并返回 ``{"error": "..."}``，保证一致的错误格式。
-
-        返回 dict。违反 dict 契约的 handler 返回值会被转为 error dict 并 logger.error 记录。
-        """
-        entry: ToolEntry | None = self.get_entry(name)
-        if not entry:
+    def _resolve_call(self, name: str, context: Any) -> ToolEntry | dict:
+        entry = self.get_entry(name)
+        if entry is None:
             return {"error": f"Unknown tool: {name}"}
-        # 工具集加载检查：若 context 携带 loop 且工具集未加载，拦截
-        if context is not None and hasattr(context, "loop") and hasattr(context.loop, "is_toolset_loaded"):
-            if not context.loop.is_toolset_loaded(entry.toolset):
+        if context is not None:
+            from entry.base_agent_loop import ToolContext
+            if isinstance(context, ToolContext) and not context.loop.is_toolset_loaded(entry.toolset):
                 return {
                     "error": f"Tool '{name}' belongs to toolset '{entry.toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
                     "_toolset_not_loaded": True,
                     "_toolset": entry.toolset,
                 }
-        try:
-            handler = entry.handler
-            _pass_context = _handler_accepts_context(handler, context)
-            kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
+        return entry
 
-            if entry.is_async:
-                result = asyncio.run(handler(args, **kwargs))
-            else:
-                result = handler(args, **kwargs)
-            if isinstance(result, dict):
-                return result
-            logger.error(
-                "Tool '%s' returned non-dict result (type: %s). "
-                "Tool handlers must return dict.",
-                name, type(result).__name__,
-            )
-            return {"error": f"Tool '{name}' returned non-dict result (type: {type(result).__name__}). Tool handlers must return dict."}
-        except Exception as e:
-            logger.exception("Tool %s dispatch error: %s", name, e)
-            sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
-            return {"error": sanitized}
+    @staticmethod
+    def _tool_result(name: str, result: Any) -> dict:
+        if isinstance(result, dict):
+            return result
+        logger.error("Tool '%s' returned non-dict result (type: %s)", name, type(result).__name__)
+        return {"error": f"Tool '{name}' returned non-dict result (type: {type(result).__name__}). Tool handlers must return dict."}
+
+    def dispatch(self, name: str, args: dict, context: Any = None) -> dict:
+        """仅供非事件循环线程调用；同步 handler 同样由唯一执行器登记。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise LifecycleFailure("Synchronous tool dispatch cannot block an event loop")
+        with self._admit_dispatch():
+            pass
+        entry = self._resolve_call(name, context)
+        if isinstance(entry, dict):
+            return entry
+        if entry.is_async:
+            return {"error": f"Tool '{name}' is async; use async_dispatch in an async context"}
+        kwargs = {"context": context} if _handler_accepts_context(entry.handler, context) else {}
+        record = self._submit_sync(entry, args, kwargs)
+        try:
+            return self._tool_result(name, record.future.result())
+        except ApplicationStoppingError:
+            raise
+        except Exception as error:
+            if requires_lifecycle_propagation(error):
+                raise
+            logger.exception("Tool %s dispatch error", name)
+            return {"error": f"Tool execution failed: {type(error).__name__}: {error}"}
+        finally:
+            self._release_sync(record, cancelled=False)
+
+    async def _invoke_handler(
+        self, entry: ToolEntry, args: dict, context: Any,
+    ) -> dict:
+        kwargs = {"context": context} if _handler_accepts_context(entry.handler, context) else {}
+        if entry.is_async:
+            with self._admit_dispatch():
+                pass
+            result = await entry.handler(args, **kwargs)
+        else:
+            record = self._submit_sync(entry, args, kwargs)
+            cancelled = False
+            try:
+                adapter = asyncio.wrap_future(record.future)
+                adapter.add_done_callback(self._observe_sync_adapter)
+                result = await asyncio.shield(adapter)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+            finally:
+                self._release_sync(record, cancelled=cancelled)
+        return self._tool_result(entry.name, result)
 
     async def async_dispatch(self, name: str, args: dict, context: Any = None) -> dict:
-        """异步分发 — 供 async 上下文调用。
-
-        与 ``dispatch()`` 语义相同，但：
-        * 同步 handler 通过 ``asyncio.to_thread`` 卸载到线程池避免阻塞事件循环。
-        * 异步 handler 直接 ``await``。
-        * **不** 处理超时 — 调用方自行 ``asyncio.wait_for``。
-
-        返回 dict。违反 dict 契约的 handler 返回值会被转为 error dict 并 logger.error 记录。
-        """
-        entry: ToolEntry | None = self.get_entry(name)
-        if not entry:
-            return {"error": f"Unknown tool: {name}"}
-        # 工具集加载检查：若 context 携带 loop 且工具集未加载，拦截
-        if context is not None and hasattr(context, "loop") and hasattr(context.loop, "is_toolset_loaded"):
-            if not context.loop.is_toolset_loaded(entry.toolset):
-                return {
-                    "error": f"Tool '{name}' belongs to toolset '{entry.toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
-                    "_toolset_not_loaded": True,
-                    "_toolset": entry.toolset,
-                }
+        """完整 handler 请求由 TaskOwner 持有；原生线程另行登记真实结局。"""
+        with self._admit_dispatch():
+            pass
+        entry = self._resolve_call(name, context)
+        if isinstance(entry, dict):
+            return entry
         try:
-            handler = entry.handler
-            _pass_context = _handler_accepts_context(handler, context)
-            kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
-
-            if entry.is_async:
-                result = await handler(args, **kwargs)
-            else:
-                result = await asyncio.to_thread(handler, args, **kwargs)
-            if isinstance(result, dict):
-                return result
-            logger.error(
-                "Tool '%s' returned non-dict result (type: %s). "
-                "Tool handlers must return dict.",
-                name, type(result).__name__,
+            return await self.task_owner.run_request(
+                lambda: self._invoke_handler(entry, args, context),
+                name=f"tool-handler-{name}",
+                admission=self._admit_dispatch,
             )
-            return {"error": f"Tool '{name}' returned non-dict result (type: {type(result).__name__}). Tool handlers must return dict."}
-        except Exception as e:
-            logger.exception("Tool %s async_dispatch error: %s", name, e)
-            sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
-            return {"error": sanitized}
+        except ApplicationStoppingError:
+            raise
+        except Exception as error:
+            if requires_lifecycle_propagation(error):
+                raise
+            logger.exception("Tool %s async_dispatch error", name)
+            return {"error": f"Tool execution failed: {type(error).__name__}: {error}"}
 
     # -- toolset 可用性查询 --------------------------------------
 
@@ -799,10 +913,7 @@ class ToolRegistry:
         return DEFAULT_RESULT_SIZE_CHARS
 
     def is_toolset_available(self, toolset: str) -> bool:
-        """检查 toolset 的要求是否满足。
-
-        当检查函数抛出意外异常时返回 False（而非崩溃）。
-        """
+        """检查 toolset 的要求是否满足。"""
         with self._lock:
             check: Callable | None = self._toolset_checks.get(toolset)
         return self._evaluate_toolset_check(toolset, check)
@@ -819,17 +930,7 @@ class ToolRegistry:
         }
 
     def get_available_toolsets(self) -> dict[str, dict]:
-        """返回用于 UI 展示的 toolset 元数据。
-
-        每个值::
-
-            {
-                "available": bool,
-                "tools": [str, ...],
-                "description": "",
-                "requirements": [str, ...],
-            }
-        """
+        """返回用于 UI 展示的 toolset 元数据。"""
         toolsets: dict[str, dict] = {}
         entries: list[ToolEntry]
         toolset_checks: dict[str, Callable]
@@ -853,18 +954,7 @@ class ToolRegistry:
         return toolsets
 
     def get_toolset_requirements(self) -> dict[str, dict]:
-        """构建向后兼容的 toolset-requirements 字典。
-
-        每个值::
-
-            {
-                "name": str,
-                "env_vars": [str, ...],
-                "check_fn": Callable | None,
-                "setup_url": None,
-                "tools": [str, ...],
-            }
-        """
+        """构建向后兼容的 toolset-requirements 字典。"""
         result: dict[str, dict] = {}
         entries: list[ToolEntry]
         toolset_checks: dict[str, Callable]
@@ -887,16 +977,7 @@ class ToolRegistry:
         return result
 
     def check_tool_availability(self, quiet: bool = False) -> tuple[list[str], list[dict]]:
-        """返回 ``(available_toolsets, unavailable_info)``。
-
-        每个不可用条目::
-
-            {
-                "name": str,
-                "env_vars": [str, ...],
-                "tools": [str, ...],
-            }
-        """
+        """返回 ``(available_toolsets, unavailable_info)``。"""
         available: list[str] = []
         unavailable: list[dict] = []
         seen: set = set()
@@ -918,34 +999,51 @@ class ToolRegistry:
                 })
         return available, unavailable
 
+    async def _shutdown_executor(self) -> None:
+        with self._sync_calls_lock:
+            native_idle = not self._sync_calls
+        if not native_idle or not self.task_owner.is_idle:
+            failure = LifecycleFailure("Cannot release tool executor while calls are still owned")
+            self.runtime.record_failure(failure)
+            raise failure
+        executor = self._executor
+        if executor is None:
+            return
+        if self._executor_shutdown_task is None:
+            self._executor_shutdown_task = asyncio.create_task(
+                asyncio.to_thread(executor.shutdown, wait=True),
+                name="tool-executor-shutdown",
+            )
+            self._executor_shutdown_task.add_done_callback(self._observe_executor_shutdown)
+        task = self._executor_shutdown_task
+        done, _ = await asyncio.wait({task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+        if not done:
+            failure = LifecycleFailure("Tool executor threads did not finish shutdown")
+            self.runtime.record_failure(failure)
+            raise failure
+        task.result()
+        self._executor = None
 
-# 模块级单例
-registry: ToolRegistry = ToolRegistry()
+    def _observe_executor_shutdown(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            self.runtime.record_failure(LifecycleFailure("Tool executor shutdown was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self.runtime.record_failure(error)
+
+    async def virtual_shotdown(self) -> None:
+        """工作实际结束后在线程中 join；失败保留依赖和活资源记录。"""
+        self.close_dispatch()
+        await close_resources((self.wait_idle, self._shutdown_executor))
 
 
 # ---------------------------------------------------------------------------
 # 工具响应序列化辅助函数
 # ---------------------------------------------------------------------------
-# 每个工具 handler 必须返回 JSON 字符串。这些辅助函数消除
-# 工具文件中反复出现的样板代码。
-#
-# 用法：
-#   from abstract.tools.registry import registry, tool_error, tool_result
-#
-#   return tool_error("something went wrong")
-#   return tool_error("not found", code=404)
-#   return tool_result(success=True, data=payload)
-#   return tool_result(items)            # 直接传 dict
-
 
 def tool_error(message: str, **extra: Any) -> dict:
-    """返回工具 handler 的错误 dict。
-
-    >>> tool_error("file not found")
-    {"error": "file not found"}
-    >>> tool_error("bad input", success=False)
-    {"error": "bad input", "success": false}
-    """
+    """返回工具 handler 的错误 dict。"""
     result: dict = {"error": str(message)}
     if extra:
         result.update(extra)
@@ -953,15 +1051,7 @@ def tool_error(message: str, **extra: Any) -> dict:
 
 
 def tool_result(data: dict | None = None, **kwargs: Any) -> dict:
-    """返回工具 handler 的结果 dict。
-
-    接受 dict 位置参数 *或* 关键字参数（不能混用）：
-
-    >>> tool_result(success=True, count=42)
-    {"success": true, "count": 42}
-    >>> tool_result({"key": "value"})
-    {"key": "value"}
-    """
+    """返回工具 handler 的结果 dict。"""
     if data is not None:
         return data
     return kwargs

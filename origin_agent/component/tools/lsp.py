@@ -8,7 +8,7 @@
   - ``LSPSymbols``    : 获取文件的符号列表
   - ``LSPRefresh``    : 主动刷新 LSP 索引
 
-模块导入时通过 ``registry.register()`` 自动注册。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
 """
 
 from __future__ import annotations
@@ -16,17 +16,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
+from system.application import Application
+from system.lsp import LSPManager
 
 logger = logging.getLogger(__name__)
 
-# 从 filesystem 模块导入 sandbox 引用（同一单例）
-from .filesystem import _s as _get_sandbox
 
-
-def _s():
-    return _get_sandbox()
+def _lsp() -> LSPManager:
+    return Application.current().get_system(LSPManager)
 
 
 # ---------------------------------------------------------------------------
@@ -39,14 +39,12 @@ def _handle_lsp_start(args: dict[str, Any]) -> dict:
 
     root: 逻辑路径（如 'fork:' 或 'ws:src'）。必须是一个存在的目录。
     """
-    from system.lsp import get_lsp_manager
-
     root: str = str(args.get("root", "")).strip()
     if not root:
         return tool_error("root is required")
 
-    manager = get_lsp_manager()
-    result = manager.start(root, _s())
+    manager = _lsp()
+    result = manager.start(root)
     if "error" in result:
         return tool_error(result["error"])
     return tool_result(**result)
@@ -54,9 +52,7 @@ def _handle_lsp_start(args: dict[str, Any]) -> dict:
 
 async def _handle_lsp_references(args: dict[str, Any]) -> dict:
     """查找符号的所有引用。"""
-    from system.lsp import get_lsp_manager
-
-    if not get_lsp_manager().is_ready():
+    if not _lsp().is_ready():
         return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
@@ -65,7 +61,7 @@ async def _handle_lsp_references(args: dict[str, Any]) -> dict:
     if not path or line < 1 or column < 1:
         return tool_error("file, line (1-indexed), and column (1-indexed) are required")
 
-    refs = await get_lsp_manager().references(path, line, column, _s())
+    refs = await _lsp().references(path, line, column)
     return tool_result(
         references=[r.model_dump() for r in refs],
         count=len(refs),
@@ -74,9 +70,7 @@ async def _handle_lsp_references(args: dict[str, Any]) -> dict:
 
 async def _handle_lsp_definition(args: dict[str, Any]) -> dict:
     """跳转到符号定义。"""
-    from system.lsp import get_lsp_manager
-
-    if not get_lsp_manager().is_ready():
+    if not _lsp().is_ready():
         return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
@@ -85,7 +79,7 @@ async def _handle_lsp_definition(args: dict[str, Any]) -> dict:
     if not path or line < 1 or column < 1:
         return tool_error("file, line (1-indexed), and column (1-indexed) are required")
 
-    definition = await get_lsp_manager().definition(path, line, column, _s())
+    definition = await _lsp().definition(path, line, column)
     if definition is None:
         return tool_result(definition=None, message="No definition found.")
     return tool_result(definition=definition.model_dump())
@@ -93,16 +87,14 @@ async def _handle_lsp_definition(args: dict[str, Any]) -> dict:
 
 async def _handle_lsp_diagnostics(args: dict[str, Any]) -> dict:
     """获取文件的语义诊断。"""
-    from system.lsp import get_lsp_manager
-
-    if not get_lsp_manager().is_ready():
+    if not _lsp().is_ready():
         return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     if not path:
         return tool_error("file is required")
 
-    diags = await get_lsp_manager().diagnostics(path, _s())
+    diags = await _lsp().diagnostics(path)
     return tool_result(
         diagnostics=[d.model_dump() for d in diags],
         count=len(diags),
@@ -111,16 +103,14 @@ async def _handle_lsp_diagnostics(args: dict[str, Any]) -> dict:
 
 async def _handle_lsp_symbols(args: dict[str, Any]) -> dict:
     """获取文件的符号列表。"""
-    from system.lsp import get_lsp_manager
-
-    if not get_lsp_manager().is_ready():
+    if not _lsp().is_ready():
         return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     if not path:
         return tool_error("file is required")
 
-    symbols = await get_lsp_manager().symbols(path, _s())
+    symbols = await _lsp().symbols(path)
     return tool_result(
         symbols=[s.model_dump() for s in symbols],
         count=len(symbols),
@@ -129,9 +119,7 @@ async def _handle_lsp_symbols(args: dict[str, Any]) -> dict:
 
 async def _handle_lsp_refresh(args: dict[str, Any]) -> dict:
     """主动刷新 LSP 索引。"""
-    from system.lsp import get_lsp_manager
-
-    if not get_lsp_manager().is_ready():
+    if not _lsp().is_ready():
         return tool_error("LSP not started. Call LSPStart first.")
 
     file: str | None = args.get("file")
@@ -140,31 +128,28 @@ async def _handle_lsp_refresh(args: dict[str, Any]) -> dict:
         if not file:
             file = None
 
-    result = await get_lsp_manager().refresh(file, _s())
+    result = await _lsp().refresh(file)
     if "error" in result:
         return tool_error(result["error"])
     return tool_result(**result)
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="LSPStart",
-    toolset="lsp",
-    schema={
-        # 启动或替换 pyright LSP server。指定一个逻辑路径作为根目录，
-        # pyright 将索引该目录下的所有 .py 文件。
-        # 重复调用时直接停止旧进程并以新根目录重启，返回重启信息。
-        # 前置条件：root 必须是一个存在的目录（如 'fork:' 或 'ws:src'）。
-        # pyright 未安装时返回安装提示。
-        # 调用效果：启动 pyright-langserver 子进程，执行 LSP 初始化握手和索引，
-        # 完成后标记为 READY。进程以 daemon 方式运行。
-        # 返回：{started, root, root_uri, [replaced, previous_root]}
-        # 典型场景：agent 需要分析某个命名空间下的代码前，先启动 LSP。
-        # 副作用：启动子进程。替换重启时会终止之前的 pyright 进程。
-        "description": """Start or replace the pyright LSP server for a given root directory.
+_LSP_START_SCHEMA = {
+    # 启动或替换 pyright LSP server。指定一个逻辑路径作为根目录，
+    # pyright 将索引该目录下的所有 .py 文件。
+    # 重复调用时直接停止旧进程并以新根目录重启，返回重启信息。
+    # 前置条件：root 必须是一个存在的目录（如 'fork:' 或 'ws:src'）。
+    # pyright 未安装时返回安装提示。
+    # 调用效果：启动 pyright-langserver 子进程，执行 LSP 初始化握手和索引，
+    # 完成后标记为 READY。进程以 daemon 方式运行。
+    # 返回：{started, root, root_uri, [replaced, previous_root]}
+    # 典型场景：agent 需要分析某个命名空间下的代码前，先启动 LSP。
+    # 副作用：启动子进程。替换重启时会终止之前的 pyright 进程。
+    "description": """Start or replace the pyright LSP server for a given root directory.
 
 ## Prerequisites
 - `root` must be an existing directory accessible via a sandbox namespace prefix (e.g. 'fork:', 'ws:src').
@@ -194,34 +179,27 @@ Error:
 ## Side Effects
 - Starts a subprocess (pyright-langserver).
 - On replacement, the previous pyright process is terminated.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "root": {
-                    "type": "string",
-                    # 逻辑路径（命名空间前缀 + 路径），如 'fork:' 或 'ws:src'。必须是一个存在的目录。
-                    "description": "Logical path (namespace prefix + path) to use as LSP root directory. Must be an existing directory. Examples: 'fork:', 'ws:src'.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "root": {
+                "type": "string",
+                # 逻辑路径（命名空间前缀 + 路径），如 'fork:' 或 'ws:src'。必须是一个存在的目录。
+                "description": "Logical path (namespace prefix + path) to use as LSP root directory. Must be an existing directory. Examples: 'fork:', 'ws:src'.",
             },
-            "required": ["root"],
         },
+        "required": ["root"],
     },
-    handler=_handle_lsp_start,
-    danger_level=ToolDangerLevel.write,
-    availability=ToolAvailability.EVERY,
-)
+}
 
-registry.register(
-    name="LSPReferences",
-    toolset="lsp",
-    schema={
-        # 查找指定位置符号的所有引用（语义级别，非文本匹配）。
-        # 前置条件：LSP 已通过 LSPStart 启动。
-        # 调用效果：只读查询，向 pyright 发送 textDocument/references 请求。
-        # 返回：{references: [{file, line, column, end_line, end_column, preview}], count}
-        # 典型场景：评估修改某个函数/类前的影响范围。
-        # 副作用：无。
-        "description": """Find all references of the symbol at the given position. Semantic-level lookup (not text matching).
+_LSP_REFERENCES_SCHEMA = {
+    # 查找指定位置符号的所有引用（语义级别，非文本匹配）。
+    # 前置条件：LSP 已通过 LSPStart 启动。
+    # 调用效果：只读查询，向 pyright 发送 textDocument/references 请求。
+    # 返回：{references: [{file, line, column, end_line, end_column, preview}], count}
+    # 典型场景：评估修改某个函数/类前的影响范围。
+    # 副作用：无。
+    "description": """Find all references of the symbol at the given position. Semantic-level lookup (not text matching).
 
 ## Prerequisites
 - LSP must be started via `LSPStart`.
@@ -246,44 +224,37 @@ Read-only query. Sends `textDocument/references` to pyright. Returns all locatio
 
 ## Side Effects
 - None (read-only query).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    # 文件逻辑路径（如 'fork:main.py'）。
-                    "description": "File logical path (e.g. 'fork:main.py').",
-                },
-                "line": {
-                    "type": "integer",
-                    # 符号所在行号（1-indexed）。
-                    "description": "Line number of the symbol (1-indexed).",
-                },
-                "column": {
-                    "type": "integer",
-                    # 符号所在列号（1-indexed，字符偏移）。
-                    "description": "Column number of the symbol (1-indexed, character offset).",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                # 文件逻辑路径（如 'fork:main.py'）。
+                "description": "File logical path (e.g. 'fork:main.py').",
             },
-            "required": ["file", "line", "column"],
+            "line": {
+                "type": "integer",
+                # 符号所在行号（1-indexed）。
+                "description": "Line number of the symbol (1-indexed).",
+            },
+            "column": {
+                "type": "integer",
+                # 符号所在列号（1-indexed，字符偏移）。
+                "description": "Column number of the symbol (1-indexed, character offset).",
+            },
         },
+        "required": ["file", "line", "column"],
     },
-    handler=_handle_lsp_references,
-    is_async=True,
-    availability=ToolAvailability.EVERY,
-)
+}
 
-registry.register(
-    name="LSPDefinition",
-    toolset="lsp",
-    schema={
-        # 跳转到指定位置符号的定义位置。
-        # 前置条件：LSP 已通过 LSPStart 启动。
-        # 调用效果：只读查询，向 pyright 发送 textDocument/definition 请求。
-        # 返回：{definition: {file, line, column, end_line, end_column, preview}} 或 {definition: null}
-        # 典型场景：理解函数/类/变量的来源定义。
-        # 副作用：无。
-        "description": """Go to the definition of the symbol at the given position.
+_LSP_DEFINITION_SCHEMA = {
+    # 跳转到指定位置符号的定义位置。
+    # 前置条件：LSP 已通过 LSPStart 启动。
+    # 调用效果：只读查询，向 pyright 发送 textDocument/definition 请求。
+    # 返回：{definition: {file, line, column, end_line, end_column, preview}} 或 {definition: null}
+    # 典型场景：理解函数/类/变量的来源定义。
+    # 副作用：无。
+    "description": """Go to the definition of the symbol at the given position.
 
 ## Prerequisites
 - LSP must be started via `LSPStart`.
@@ -308,44 +279,37 @@ Not found:
 
 ## Side Effects
 - None (read-only query).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    # 文件逻辑路径（如 'fork:main.py'）。
-                    "description": "File logical path (e.g. 'fork:main.py').",
-                },
-                "line": {
-                    "type": "integer",
-                    # 符号所在行号（1-indexed）。
-                    "description": "Line number of the symbol (1-indexed).",
-                },
-                "column": {
-                    "type": "integer",
-                    # 符号所在列号（1-indexed，字符偏移）。
-                    "description": "Column number of the symbol (1-indexed, character offset).",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                # 文件逻辑路径（如 'fork:main.py'）。
+                "description": "File logical path (e.g. 'fork:main.py').",
             },
-            "required": ["file", "line", "column"],
+            "line": {
+                "type": "integer",
+                # 符号所在行号（1-indexed）。
+                "description": "Line number of the symbol (1-indexed).",
+            },
+            "column": {
+                "type": "integer",
+                # 符号所在列号（1-indexed，字符偏移）。
+                "description": "Column number of the symbol (1-indexed, character offset).",
+            },
         },
+        "required": ["file", "line", "column"],
     },
-    handler=_handle_lsp_definition,
-    is_async=True,
-    availability=ToolAvailability.EVERY,
-)
+}
 
-registry.register(
-    name="LSPDiagnostics",
-    toolset="lsp",
-    schema={
-        # 获取文件的语义诊断信息（错误、警告、提示）。
-        # 前置条件：LSP 已通过 LSPStart 启动。
-        # 调用效果：只读查询，返回 pyright 缓存中该文件的最新 diagnostics。
-        # 返回：{diagnostics: [{severity, line, column, end_line, end_column, message, source, code}], count}
-        # 典型场景：Write/PatchEdit 后检查代码错误；主动验证文件语义正确性。
-        # 副作用：无。
-        "description": """Get semantic diagnostics (errors, warnings, hints) for a file.
+_LSP_DIAGNOSTICS_SCHEMA = {
+    # 获取文件的语义诊断信息（错误、警告、提示）。
+    # 前置条件：LSP 已通过 LSPStart 启动。
+    # 调用效果：只读查询，返回 pyright 缓存中该文件的最新 diagnostics。
+    # 返回：{diagnostics: [{severity, line, column, end_line, end_column, message, source, code}], count}
+    # 典型场景：Write/PatchEdit 后检查代码错误；主动验证文件语义正确性。
+    # 副作用：无。
+    "description": """Get semantic diagnostics (errors, warnings, hints) for a file.
 
 ## Prerequisites
 - LSP must be started via `LSPStart`.
@@ -370,34 +334,27 @@ Read-only query. Returns the latest cached diagnostics from pyright for the spec
 
 ## Side Effects
 - None (read-only query).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    # 文件逻辑路径（如 'fork:main.py'）。
-                    "description": "File logical path (e.g. 'fork:main.py').",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                # 文件逻辑路径（如 'fork:main.py'）。
+                "description": "File logical path (e.g. 'fork:main.py').",
             },
-            "required": ["file"],
         },
+        "required": ["file"],
     },
-    handler=_handle_lsp_diagnostics,
-    is_async=True,
-    availability=ToolAvailability.EVERY,
-)
+}
 
-registry.register(
-    name="LSPSymbols",
-    toolset="lsp",
-    schema={
-        # 获取文件中的符号列表（函数、类、变量等）。
-        # 前置条件：LSP 已通过 LSPStart 启动。
-        # 调用效果：只读查询，向 pyright 发送 textDocument/documentSymbol 请求。
-        # 返回：{symbols: [{name, kind, line, column, end_line, end_column, detail, children}], count}
-        # 典型场景：浏览模块结构；了解文件中定义了哪些函数/类。
-        # 副作用：无。
-        "description": """Get the list of symbols (functions, classes, variables, etc.) in a file.
+_LSP_SYMBOLS_SCHEMA = {
+    # 获取文件中的符号列表（函数、类、变量等）。
+    # 前置条件：LSP 已通过 LSPStart 启动。
+    # 调用效果：只读查询，向 pyright 发送 textDocument/documentSymbol 请求。
+    # 返回：{symbols: [{name, kind, line, column, end_line, end_column, detail, children}], count}
+    # 典型场景：浏览模块结构；了解文件中定义了哪些函数/类。
+    # 副作用：无。
+    "description": """Get the list of symbols (functions, classes, variables, etc.) in a file.
 
 ## Prerequisites
 - LSP must be started via `LSPStart`.
@@ -424,34 +381,27 @@ Read-only query. Sends `textDocument/documentSymbol` to pyright. Returns the sym
 
 ## Side Effects
 - None (read-only query).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    # 文件逻辑路径（如 'fork:main.py'）。
-                    "description": "File logical path (e.g. 'fork:main.py').",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                # 文件逻辑路径（如 'fork:main.py'）。
+                "description": "File logical path (e.g. 'fork:main.py').",
             },
-            "required": ["file"],
         },
+        "required": ["file"],
     },
-    handler=_handle_lsp_symbols,
-    is_async=True,
-    availability=ToolAvailability.EVERY,
-)
+}
 
-registry.register(
-    name="LSPRefresh",
-    toolset="lsp",
-    schema={
-        # 主动刷新 LSP 索引。可选指定单个文件，不指定则刷新整个工作区。
-        # 前置条件：LSP 已通过 LSPStart 启动。
-        # 调用效果：指定文件时发送 didChange 全量替换通知；不指定时触发工作区重分析。
-        # 返回：{refreshed: true, file?: "...", scope?: "workspace"}
-        # 典型场景：文件被外部手段修改后（绕过 Write/PatchEdit），或索引过时时。
-        # 副作用：清除该文件的 diagnostics 缓存（指定文件时）或全部缓存（工作区刷新时）。
-        "description": """Manually refresh the LSP index for a specific file or the entire workspace.
+_LSP_REFRESH_SCHEMA = {
+    # 主动刷新 LSP 索引。可选指定单个文件，不指定则刷新整个工作区。
+    # 前置条件：LSP 已通过 LSPStart 启动。
+    # 调用效果：指定文件时发送 didChange 全量替换通知；不指定时触发工作区重分析。
+    # 返回：{refreshed: true, file?: "...", scope?: "workspace"}
+    # 典型场景：文件被外部手段修改后（绕过 Write/PatchEdit），或索引过时时。
+    # 副作用：清除该文件的 diagnostics 缓存（指定文件时）或全部缓存（工作区刷新时）。
+    "description": """Manually refresh the LSP index for a specific file or the entire workspace.
 
 ## Prerequisites
 - LSP must be started via `LSPStart`.
@@ -476,18 +426,71 @@ Workspace refresh:
 
 ## Side Effects
 - Clears the diagnostics cache for the specified file (or all files for workspace refresh).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    # 可选。要刷新的文件逻辑路径。省略则刷新整个工作区。
-                    "description": "Optional. File logical path to refresh. Omit to refresh the entire workspace.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file": {
+                "type": "string",
+                # 可选。要刷新的文件逻辑路径。省略则刷新整个工作区。
+                "description": "Optional. File logical path to refresh. Omit to refresh the entire workspace.",
             },
         },
     },
-    handler=_handle_lsp_refresh,
-    is_async=True,
-    availability=ToolAvailability.EVERY,
-)
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register LSP tools."""
+    del ui_events  # LSP tools have no UI event handlers
+    registry.register(
+        name="LSPStart",
+        toolset="lsp",
+        schema=_LSP_START_SCHEMA,
+        handler=_handle_lsp_start,
+        danger_level=ToolDangerLevel.write,
+        availability=ToolAvailability.EVERY,
+    )
+    registry.register(
+        name="LSPReferences",
+        toolset="lsp",
+        schema=_LSP_REFERENCES_SCHEMA,
+        handler=_handle_lsp_references,
+        is_async=True,
+        availability=ToolAvailability.EVERY,
+    )
+    registry.register(
+        name="LSPDefinition",
+        toolset="lsp",
+        schema=_LSP_DEFINITION_SCHEMA,
+        handler=_handle_lsp_definition,
+        is_async=True,
+        availability=ToolAvailability.EVERY,
+    )
+    registry.register(
+        name="LSPDiagnostics",
+        toolset="lsp",
+        schema=_LSP_DIAGNOSTICS_SCHEMA,
+        handler=_handle_lsp_diagnostics,
+        is_async=True,
+        availability=ToolAvailability.EVERY,
+    )
+    registry.register(
+        name="LSPSymbols",
+        toolset="lsp",
+        schema=_LSP_SYMBOLS_SCHEMA,
+        handler=_handle_lsp_symbols,
+        is_async=True,
+        availability=ToolAvailability.EVERY,
+    )
+    registry.register(
+        name="LSPRefresh",
+        toolset="lsp",
+        schema=_LSP_REFRESH_SCHEMA,
+        handler=_handle_lsp_refresh,
+        is_async=True,
+        availability=ToolAvailability.EVERY,
+    )

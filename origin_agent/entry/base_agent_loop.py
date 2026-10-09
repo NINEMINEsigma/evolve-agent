@@ -12,11 +12,13 @@ import asyncio
 import logging
 import shutil
 import uuid
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Awaitable, Callable, ContextManager, TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from entity.puretype import (
     Role,
@@ -29,6 +31,8 @@ from entity.puretype import (
     MessageContent,
     LLMProfile,
     MessageMetrics,
+    InputDelivery,
+    ShutdownInputReport,
     QueuedMessage,
     MainSessionInterruptResult,
     MainSessionActivitySource,
@@ -51,8 +55,10 @@ from entity.messages import (
     TextBlock,
 )
 from entity.constant import (
+    ApplicationState, InputDeliveryState, ShutdownReason,
     USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
     INHERIT_LAST_ROUNDS,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
     MAIN_SESSION_INTERRUPT_TIMEOUT,
     MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT,
 )
@@ -67,8 +73,9 @@ from entry.agent_support.multimodal import (
     content_to_serializable,
     extract_tool_call_meta,
 )
-from system.pathutils import find_repo_root
-from system.session_store import SessionStore
+from system.session_store import SessionStore, HistoryPersistenceError
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -76,7 +83,7 @@ if TYPE_CHECKING:
     from system.application import Application
     from entry.agent_sink import AgentSink
     from gateway.session_manager import SessionManager
-    from entry.tool_post_dispatch import ResultFieldInjector
+    from entry.tool_post_dispatch import PreparedToolResult, ResultFieldInjector
     from entry.session_message_queue import SessionMessageQueue
 
 logger = logging.getLogger(__name__)
@@ -102,33 +109,53 @@ class UserMessage(InboxMessage):
 
 
 class Inbox:
-    """线程安全的收件箱，支持等待新消息。
+    """由 InputDeliveryBuffer 驱动的子会话收件箱。
 
-    SubAgentLoop 父→子通道使用（SP-5 D8：主会话已切队列，inbox 仅子 Agent 保留）。
+    主会话使用 SessionMessageQueue；子会话保留 InboxMessage 业务类型，
+    但每条输入先登记全局 sequence，再由消费方确认 History 状态。
     """
 
-    def __init__(self) -> None:
-        self._queue: asyncio.Queue[InboxMessage] = asyncio.Queue()
+    def __init__(self, runtime: "RuntimeSystem") -> None:
+        from entry.input_delivery import InputDeliveryBuffer
+
+        self._buffer = InputDeliveryBuffer[InboxMessage](runtime)
         self._wake_event: asyncio.Event = asyncio.Event()
         self._wake_event.set()  # 初始允许首轮 LLM 调用
 
-    def put(self, msg: InboxMessage) -> None:
-        """投递消息并唤醒等待中的循环。"""
-        self._queue.put_nowait(msg)
+    def put(self, msg: InboxMessage) -> int:
+        """登记消息并唤醒等待中的循环。"""
+        sequence = self._buffer.accept(msg)
+        self._wake_event.set()
+        return sequence
+
+    def pending_deliveries(self) -> list[InputDelivery[InboxMessage]]:
+        """返回尚未完成 History 交接的输入记录。"""
+        return self._buffer.uncommitted()
+
+    def reserve_pending(self, *, reservation_id: str) -> list[InputDelivery[InboxMessage]]:
+        return self._buffer.reserve_pending(reservation_id=reservation_id)
+
+    def reserve_shutdown(self, *, reservation_id: str) -> list[InputDelivery[InboxMessage]]:
+        return self._buffer.reserve_shutdown(reservation_id=reservation_id)
+
+    def mark_appended(self, sequence: int, history_index: int) -> None:
+        self._buffer.mark_appended(sequence, history_index)
+
+    def mark_persisted(self, sequences: list[int]) -> None:
+        self._buffer.mark_persisted(sequences)
+
+    def mark_ephemeral(self, sequences: list[int]) -> None:
+        self._buffer.mark_ephemeral(sequences)
+
+    def release_reservation(self, reservation_id: str) -> None:
+        self._buffer.release_reservation(reservation_id)
+
+    def freeze(self) -> None:
+        self._buffer.freeze()
         self._wake_event.set()
 
-    def get_pending(self) -> list[InboxMessage]:
-        """非阻塞获取所有待处理消息。"""
-        msgs: list[InboxMessage] = []
-        while not self._queue.empty():
-            try:
-                msgs.append(self._queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-        return msgs
-
     async def wait(self) -> None:
-        """阻塞直到有新消息。"""
+        """阻塞直到有新消息或收件箱被冻结。"""
         self._wake_event.clear()
         await self._wake_event.wait()
 
@@ -137,8 +164,17 @@ class Inbox:
         self._wake_event.set()
 
     @property
+    def frozen(self) -> bool:
+        return self._buffer.frozen
+
+    @property
     def has_pending(self) -> bool:
-        return not self._queue.empty()
+        return bool(self._buffer.uncommitted())
+
+    @property
+    def buffer(self):
+        """返回内部记录表，仅供所属 SubAgentLoop 完成交接。"""
+        return self._buffer
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +200,22 @@ class ToolContext(BaseModel):
     # None = 未指定（modality_capability 等回退到 loop.active_llm_profile）
     llm_profile: LLMProfile | None = None
 
+    _evolution_requested: bool = PrivateAttr(default=False)
+
+    def request_evolution(self) -> None:
+        """登记本次工具调用的进化意图（非持久化）。
+
+        仅作调用级标记；所属 Loop 在真实工具结果严格保存后才消费
+        并请求关闭（D6），保存失败或中断占位不会触发进化成功。
+        """
+        self._evolution_requested = True
+
+    def consume_evolution_request(self) -> bool:
+        """读取并清除意图标记；仅由工具执行收尾路径调用。"""
+        requested = self._evolution_requested
+        self._evolution_requested = False
+        return requested
+
     @property
     def app(self) -> Application:
         from system.application import Application
@@ -171,14 +223,16 @@ class ToolContext(BaseModel):
 
     @property
     def runtime_context(self) -> RuntimeContext:
-        return self.app.runtime_context
+        from system.runtime import RuntimeSystem
+        return self.app.get_system(RuntimeSystem).context
 
     @property
     def resource_session_id(self) -> str:
         """返回长期资源归属的主会话 ID。"""
-        parent_session_id = getattr(self.loop, "parent_session_id", "")
-        if isinstance(parent_session_id, str) and parent_session_id:
-            return parent_session_id
+        from subagent.loop import SubAgentLoop
+
+        if isinstance(self.loop, SubAgentLoop):
+            return self.loop.parent_session_id
         return self.session_id
 
     @property
@@ -202,7 +256,8 @@ class ToolContext(BaseModel):
             character_name=self.character_name,
             round_id=self.round_id,
         )
-        return self.app.agentspace_service.agent_access(owner, paths)
+        from system.agentspace import AgentspaceService
+        return self.app.get_system(AgentspaceService).agent_access(owner, paths)
 
 
 # ---------------------------------------------------------------------------
@@ -309,12 +364,14 @@ class BaseAgentLoop(ABC):
     def __init__(self, app: Application, session_id: str) -> None:
         self.session_id: str = session_id
         self.app: Application = app
-        self._inbox: Inbox = Inbox()
+        from system.runtime import RuntimeSystem
+        self._inbox: Inbox = Inbox(app.get_system(RuntimeSystem))
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._disgust_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
         self._history: History = History()
         self._session_store: SessionStore | None = None
+        self._history_failure: HistoryPersistenceError | None = None
         self._token_record: TokenUsageRecord = TokenUsageRecord()
         # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
         # 仅主会话 loop 使用，子 Agent loop 保持 None
@@ -371,7 +428,8 @@ class BaseAgentLoop(ABC):
             )
             return
         try:
-            self.app.agentspace_service.release_agent_access(round_id)
+            from system.agentspace import AgentspaceService
+            self.app.get_system(AgentspaceService).release_agent_access(round_id)
         finally:
             if self._agentspace_round_ids.get(character_name) == round_id:
                 self._agentspace_round_ids.pop(character_name, None)
@@ -478,7 +536,7 @@ class BaseAgentLoop(ABC):
 
         子类可重写以处理特定类型的消息。
         """
-        return self._inbox.get_pending()
+        return [delivery.payload for delivery in self._inbox.pending_deliveries()]
 
     # -- 取消控制 ---------------------------------------------------------
 
@@ -564,7 +622,9 @@ class BaseAgentLoop(ABC):
 
         子类通过 get_tool_availability_scope() 返回当前 Loop 的 ToolAvailability。
         """
-        from abstract.tools.registry import registry as tool_registry
+        from system.application import Application
+        from abstract.tools.registry import ToolRegistry
+        tool_registry = Application.current().get_system(ToolRegistry)
         scope = self.get_tool_availability_scope()
         return tool_registry.get_definitions_for_loaded_toolsets(
             scope=scope,
@@ -625,12 +685,40 @@ class BaseAgentLoop(ABC):
 
     def save_history(self, session_id: str) -> None:
         """将当前 History 持久化到磁盘。"""
+        if self._history_failure is not None:
+            raise self._history_failure
         if self._session_store is None:
             return
         try:
             self._session_store.write_history(session_id, self._history)
-        except Exception as exc:
-            logger.exception("Failed to save history for session %s: %s", session_id, exc)
+        except HistoryPersistenceError as error:
+            self._history_failure = error
+            self.app.get_system(RuntimeSystem).record_failure(error)
+            raise
+
+    def store_tool_result(self, prepared: PreparedToolResult) -> int:
+        """同步提交真实消息及其输入预订；成功保存之前不得回显。
+
+        携带调用级进化意图的结果在实际保存成功后才请求关闭（D6）；
+        保存失败或中断占位不产生进化成功退出。
+        """
+        if self._history_failure is not None:
+            prepared.abort()
+            raise self._history_failure
+        if self._session_store is None:
+            prepared.abort()
+            raise LifecycleFailure("Main session tool result requires a History store")
+        try:
+            index = self._history.add_message(prepared.message)
+            prepared.mark_appended(index)
+            self.save_history(self.session_id)
+            prepared.mark_persisted()
+        except BaseException:
+            prepared.abort()
+            raise
+        if prepared.evolution_requested:
+            self.app.get_system(RuntimeSystem).request_shutdown(ShutdownReason.EVOLUTION)
+        return index
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """移除 History 中最后一条 user 消息并持久化。"""
@@ -708,11 +796,71 @@ class BaseAgentLoop(ABC):
             shutil.rmtree(str(session_path), ignore_errors=True)
             logger.info("Cleared persisted data for session %s", self.session_id)
 
-    def stop_message_queue(self) -> None:
-        """停止本会话的消息队列消费者（gateway 在 loop 消亡时调用）。
+    def freeze_inputs(self) -> None:
+        """封闭主会话新输入；已经接受的队列记录仍可由关闭刷新处理。"""
+        if self._message_queue is not None:
+            self._message_queue.freeze_inputs()
 
-        SP-4 D8：旋转复用 loop 不调用（队列随 loop 存活）；仅 terminate/replace 调用。
-        """
+    def build_queued_message(self, item: QueuedMessage) -> CharacterConversationMessage:
+        """主会话子类构造消息；不执行模型或在构造时追加History。"""
+        raise NotImplementedError("Only main session loops construct queued input messages")
+
+    async def _commit_input_deliveries(self, items: list[InputDelivery[QueuedMessage]]) -> None:
+        queue = self._message_queue
+        if queue is None or self._session_store is None:
+            raise LifecycleFailure("Main session input requires a queue and History store")
+        if self._history_failure is not None:
+            raise self._history_failure
+        for delivery in items:
+            if delivery.state is InputDeliveryState.PERSISTED:
+                continue
+            if delivery.state is InputDeliveryState.APPENDED:
+                # APPENDED的前次保存失败不能重新保存或重复追加。
+                raise LifecycleFailure("Unconfirmed History append cannot be replayed")
+            message = self.build_queued_message(delivery.payload)
+            index = self._history.add_message(message)
+            queue.mark_appended(delivery, index)
+            self.save_history(self.session_id)
+            queue.mark_persisted([delivery])
+            # 保存确认先于任何网络await；取消回显不会重放输入。
+            await self.get_sink().emit_user_message(
+                self.session_id, delivery.payload.content, message.character_name, index,
+                visible_characters=message.visible_characters,
+                response_characters=message.response_characters,
+                client_message_id=delivery.payload.client_message_id,
+                message_suffix=message.message_suffix,
+                dynamic_message_suffix=message.dynamic_message_suffix,
+            )
+
+    async def flush_shutdown_inputs(
+        self, items: list[InputDelivery[QueuedMessage]],
+    ) -> ShutdownInputReport:
+        """所有写任务退出后，在处理锁内复用消息构造与提交，不准备模型。"""
+        async with self._process_lock:
+            await self._commit_input_deliveries(items)
+        queue = self._message_queue
+        if queue is None:
+            raise LifecycleFailure("Main session input queue is missing")
+        return queue.shutdown_report()
+
+    async def flush_pending_inputs(self) -> ShutdownInputReport:
+        queue = self._message_queue
+        if queue is None:
+            return ShutdownInputReport()
+        self.freeze_inputs()
+        items = queue.reserve_shutdown()
+        try:
+            return await self.flush_shutdown_inputs(items)
+        finally:
+            queue.release_shutdown(items)
+
+    @property
+    def message_queue(self) -> "SessionMessageQueue | None":
+        """返回主会话消息队列的只读引用。"""
+        return self._message_queue
+
+    def stop_message_queue(self) -> None:
+        """停止本会话的消息队列消费者。"""
         if self._message_queue is not None:
             self._message_queue.stop()
 
@@ -1161,6 +1309,7 @@ class BaseAgentLoop(ABC):
 
     async def merge_sessions(self, sources: list[str]) -> SessionMergeResult:
         """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""
+        from system.runtime import RuntimeSystem
         sm = self.session_manager
         if sm is None:
             return SessionMergeResult(merged=False, error="session manager not available")
@@ -1175,11 +1324,12 @@ class BaseAgentLoop(ABC):
         )
         from system.session_metadata import SessionMetadataError
         from system.templates import read_template
+        from system.session_metadata import SessionMetadataService
 
         summaries: list[tuple[str, str]] = []
         for source_id in sources:
             try:
-                summary = await self.app.session_metadata_service.ensure_summary(
+                summary = await self.app.get_system(SessionMetadataService).ensure_summary(
                     source_id
                 )
             except SessionMetadataError as exc:
@@ -1207,7 +1357,7 @@ class BaseAgentLoop(ABC):
                 f"[Session {source_id}]: {summary}"
                 for source_id, summary in summaries
             )
-            threshold = self.app.runtime_context.merge_concat_threshold
+            threshold = self.app.get_system(RuntimeSystem).context.merge_concat_threshold
             if threshold > 0 and len(joined) > threshold:
                 joined = joined[-threshold:]
             context = (
@@ -1281,18 +1431,16 @@ class BaseAgentLoop(ABC):
         if self._message_hooks_cache is not None:
             return self._message_hooks_cache
         from entity.constant import Namespace
-        hooks_dir: Path = self.app.sandbox.get_base(Namespace.CUSTOM_HOOKS)
+        from system.sandbox import Sandbox
+        hooks_dir: Path = self.app.get_system(Sandbox).get_base(Namespace.CUSTOM_HOOKS)
         hooks = load_message_hooks(hooks_dir, logger)
         self._message_hooks_cache = hooks
         return hooks
 
     def _get_workspace(self) -> str:
         """返回当前 loop 使用的 workspace 路径。"""
-        return (
-            str(self.app.runtime_context.workspace)
-            if self.app.runtime_context is not None
-            else str(find_repo_root())
-        )
+        from system.runtime import RuntimeSystem
+        return str(self.app.get_system(RuntimeSystem).context.workspace)
 
     def _collect_hooks_context(
         self,
@@ -1307,11 +1455,12 @@ class BaseAgentLoop(ABC):
         sid = session_id or self.session_id
         hooks = self._load_message_hooks()
         workspace = self._get_workspace()
+        from system.runtime import RuntimeSystem
         return collect_all_hooks_context(
             hooks=hooks,
             session_id=sid,
             workspace=workspace,
-            runtime_ctx=self.app.runtime_context,
+            runtime_ctx=self.app.get_system(RuntimeSystem).context,
         )
 
     def get_hooks_context(self, session_id: str) -> str:
@@ -1360,6 +1509,67 @@ class IMainSessionLoop(ABC):
         """初始化主会话活动任务注册表。由主会话实现类在 ``super().__init__`` 后调用。"""
         self._interrupt_lock: asyncio.Lock = asyncio.Lock()
         self._active_round_task: asyncio.Task | None = None
+        self._reply_tasks: set[asyncio.Task[Any]] = set()
+
+    @asynccontextmanager
+    async def reply_scope(self) -> AsyncIterator[None]:
+        runtime = self.loop.app.get_system(RuntimeSystem)
+        task = asyncio.current_task()
+        if task is None:
+            raise LifecycleFailure("Reply operation requires an asyncio task")
+        with runtime.admission():
+            queue = self.loop.message_queue
+            if queue is not None:
+                queue.require_reply_admission()
+            self._reply_tasks.add(task)
+        entered = False
+        try:
+            queue = self.loop.message_queue
+            if queue is not None:
+                await queue.wait_handoff()
+            async with self.loop._process_lock:
+                runtime.require_running()
+                if queue is not None:
+                    queue.require_reply_admission()
+                entered = True
+                yield
+        finally:
+            queue = self.loop.message_queue
+            if entered and queue is not None:
+                queue.abort_tool_reservations()
+            self._reply_tasks.discard(task)
+
+    async def wait_reply_tasks(self) -> None:
+        tasks = tuple(self._reply_tasks)
+        if asyncio.current_task() in tasks:
+            raise LifecycleFailure("Reply task cannot wait for itself")
+        if tasks:
+            await asyncio.wait(tasks)
+            for task in tasks:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None and not isinstance(error, ApplicationStoppingError):
+                        raise error
+
+    async def stop_reply_tasks(self) -> None:
+        tasks = tuple(self._reply_tasks)
+        if asyncio.current_task() in tasks:
+            raise LifecycleFailure("Reply task cannot synchronously wait for itself")
+        for task in tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+            failures = []
+            for task in done:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None and not isinstance(error, ApplicationStoppingError):
+                        failures.append(error)
+            if pending:
+                failures.append(LifecycleFailure("Main session reply tasks did not finish"))
+            if failures:
+                raise BaseExceptionGroup("Main reply shutdown failed", failures)
 
     def register_round_task(self, task: asyncio.Task | None) -> None:
         """登记已经取得处理锁的当前主会话回复任务。"""
@@ -1409,7 +1619,8 @@ class IMainSessionLoop(ABC):
 
             # 终止本会话登记的活动子进程树。
             try:
-                self.loop.app.sandbox.kill_active(sid)
+                from system.sandbox import Sandbox
+                self.loop.app.get_system(Sandbox).kill_active(sid)
             except Exception:
                 logger.warning(
                     "kill_active failed during interrupt | session=%s", sid, exc_info=True,
@@ -1579,7 +1790,7 @@ class IMainSessionLoop(ABC):
         pass
 
     @abstractmethod
-    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+    async def run_pending_round(self, items: list[InputDelivery[QueuedMessage]]) -> str | None:
         """以队列 drained 消息列表为输入驱动一轮会话（SP-4 D3）。
 
         实现必须：持 _process_lock → 置 _processing → （parent 系）超限检查（旋转随动）

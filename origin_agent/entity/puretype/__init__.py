@@ -66,6 +66,14 @@ from .approval import (
     ToolCallMeta,
     ToolAllowlistEntry,
 )
+from .mcp import MCPBridgeCall, MCPOAuthProviderEntry
+from .lifecycle import (
+    ManagedTaskRecord,
+    SyncToolCallRecord,
+    InputDelivery,
+    ShutdownInputReport,
+    ToolResultNotification,
+)
 from .metadata import (
     MetadataProfileUpdateRequest,
     MetadataProfileState,
@@ -110,6 +118,7 @@ from .session_visual import (
 from .subagent import (
     SubAgentStatus,
     SubAgentFeedback,
+    SubAgentFeedbackDelivery,
     SubAgentPendingApproval,
     SubAgentApprovalDecisionResult,
     SubAgentLaunchResult,
@@ -221,6 +230,14 @@ from .agentspace import (
 )
 
 __all__ = [
+    "MCPBridgeCall",
+    "MCPOAuthProviderEntry",
+    "ManagedTaskRecord",
+    "SyncToolCallRecord",
+    "InputDelivery",
+    "ShutdownInputReport",
+    "ToolResultNotification",
+    "SubAgentFeedbackDelivery",
     "SessionVisualKind",
     "SessionVisualStatus",
     "SessionVisualSource",

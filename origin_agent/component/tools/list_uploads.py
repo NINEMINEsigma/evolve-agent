@@ -1,4 +1,7 @@
-"""获取最晚上传文件的工具 — 按真实上传时间排序，返回文件名、大小、上传时间、修改时间和路径。"""
+"""获取最晚上传文件的工具 — 按真实上传时间排序，返回文件名、大小、上传时间、修改时间和路径。
+
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+"""
 
 from __future__ import annotations
 
@@ -8,13 +11,18 @@ import logging
 import re
 from typing import Any, Dict, List
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolDangerLevel
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN, UPLOADS_WS_PREFIX
-from system.sandbox import SandboxError
-from .filesystem import _s
+from system.sandbox import Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
+
+
+def _s() -> Sandbox:
+    from system.application import Application
+    return Application.current().get_system(Sandbox)
 
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 _UPLOAD_TIME_RE = re.compile(UPLOAD_TIME_RE_PATTERN)
@@ -98,20 +106,17 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="ListUploads",
-    toolset="filesystem",
-    schema={
-        # 列出最近上传的文件，按上传时间降序排列。
-        # 前置条件：无（uploads 目录不存在时返回空列表）。
-        # 调用效果：只读查询，无副作用。
-        # n: 返回数量，默认 10，最大 100。
-        # 返回：{ files: [{ filename, size, upload_time, mtime, path }] }。upload_time 从文件名前缀时间戳解析（格式 YYYYMMDD_HHMMSS_utc_rand），旧文件回退到 mtime。
-        # 典型场景：查看用户刚上传了哪些文件；获取文件路径后配合 Read 读取。
-        "description": """List the most recently uploaded files, sorted by upload time (newest first).
+_LIST_UPLOADS_SCHEMA = {
+    # 列出最近上传的文件，按上传时间降序排列。
+    # 前置条件：无（uploads 目录不存在时返回空列表）。
+    # 调用效果：只读查询，无副作用。
+    # n: 返回数量，默认 10，最大 100。
+    # 返回：{ files: [{ filename, size, upload_time, mtime, path }] }。upload_time 从文件名前缀时间戳解析（格式 YYYYMMDD_HHMMSS_utc_rand），旧文件回退到 mtime。
+    # 典型场景：查看用户刚上传了哪些文件；获取文件路径后配合 Read 读取。
+    "description": """List the most recently uploaded files, sorted by upload time (newest first).
 
 ## Prerequisites
 None. Returns an empty list if the uploads directory does not exist yet.
@@ -135,18 +140,31 @@ Read-only query. No side effects.
 ## When to Use
 - Checking what files the user recently uploaded.
 - Getting file paths to use with `Read`.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "n": {
-                    "type": "integer",
-                    # 返回的最近文件数量。默认 10，最大 100。
-                    "description": """Number of most recent files to return. Default 10, max 100.""",
-                    "default": 10,
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "n": {
+                "type": "integer",
+                # 返回的最近文件数量。默认 10，最大 100。
+                "description": """Number of most recent files to return. Default 10, max 100.""",
+                "default": 10,
             },
         },
     },
-    handler=_handle_list_uploads,
-    danger_level=ToolDangerLevel.safe,
-)
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the ListUploads tool."""
+    del ui_events  # ListUploads has no UI event handler
+    registry.register(
+        name="ListUploads",
+        toolset="filesystem",
+        schema=_LIST_UPLOADS_SCHEMA,
+        handler=_handle_list_uploads,
+        danger_level=ToolDangerLevel.safe,
+    )

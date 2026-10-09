@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import registry, tool_result
+from abstract.tools.registry import ToolRegistry, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from custom_tools.memory_tools._store import (
     FALLBACK_SESSION,
     load_all_memory,
@@ -38,19 +39,23 @@ def _handle_forget(args: dict[str, Any], context: ToolContext | None = None) -> 
 
 # ── 注册 ─────────────────────────────────────────────────────
 
-registry.register(
-    name="Forget",
-    toolset="memory_tools",
-    schema={
-        # 从记忆存储中删除指定 id 的记忆项。
-        # 沿父会话引用链搜索：如果记忆来自父会话，则直接在父会话中删除，所有引用该父的子会话都会生效。
-        # 前置条件：无。
-        # 调用效果：沿父链 BFS 搜索，在第一个找到的 dict 中删除；否则返回错误。
-        # 返回值：{ success: bool, message: string }
-        # 何时使用：需要移除过期、错误或不再需要的记忆时。
-        # 副作用：修改磁盘上的记忆文件；删除后的条目不再被 remember_memory hook 召回。
-        #         如果删除的是父会话的记忆，所有继承该父的子会话也会失去该条目。
-        "description": """Remove a memory entry from long-term memory by id.
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register Forget tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="Forget",
+        toolset="memory_tools",
+        schema={
+            # 从记忆存储中删除指定 id 的记忆项。
+            # 沿父会话引用链搜索：如果记忆来自父会话，则直接在父会话中删除，所有引用该父的子会话都会生效。
+            # 前置条件：无。
+            # 调用效果：沿父链 BFS 搜索，在第一个找到的 dict 中删除；否则返回错误。
+            # 返回值：{ success: bool, message: string }
+            # 何时使用：需要移除过期、错误或不再需要的记忆时。
+            # 副作用：修改磁盘上的记忆文件；删除后的条目不再被 remember_memory hook 召回。
+            #         如果删除的是父会话的记忆，所有继承该父的子会话也会失去该条目。
+            "description": """Remove a memory entry from long-term memory by id.
 
 ## Prerequisites
 None.
@@ -74,18 +79,18 @@ When the id is not found:
 
 ## Side Effects
 Writes to the agent's memory file on disk. Deleted entries are no longer recalled by the remember_memory hook. If the deleted memory belonged to a parent session, all child sessions inheriting from that parent will also lose the entry.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string",
-                    # 要删除的记忆项的唯一标识符。可以是当前会话或任何父会话中的记忆。
-                    "description": """The unique identifier of the memory entry to delete. Can be a memory from the current session or any parent session in the inheritance chain.""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        # 要删除的记忆项的唯一标识符。可以是当前会话或任何父会话中的记忆。
+                        "description": """The unique identifier of the memory entry to delete. Can be a memory from the current session or any parent session in the inheritance chain.""",
+                    },
                 },
+                "required": ["id"],
             },
-            "required": ["id"],
         },
-    },
-    handler=_handle_forget,
-    is_async=False,
-)
+        handler=_handle_forget,
+        is_async=False,
+    )

@@ -19,10 +19,8 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
 )
 from system.modality_capability import (
-    ensure_modality_capability,
+    ModalityCapabilitySystem,
     resolve_active_model_base_url,
-    resolve_effective_modality_reference_profile,
-    forward_modality_to_ref_profile,
     wrap_forwarded_description,
 )
 
@@ -70,7 +68,9 @@ async def _forward_unsupported_block(
         return block.forward_result_content
 
     # 无已有描述 → 按活动 Profile 引用优先、全局回退引用次序解析目标。
-    _ref_profile = resolve_effective_modality_reference_profile(
+    _ref_profile = context.app.get_system(
+        ModalityCapabilitySystem
+    ).resolve_effective_modality_reference_profile(
         profile,
         media_type,
     )
@@ -116,7 +116,9 @@ async def _forward_unsupported_block(
         media_data = {"base64": block.data, "format": block.format}
 
     # 转发借用
-    description = await forward_modality_to_ref_profile(
+    description = await context.app.get_system(
+        ModalityCapabilitySystem
+    ).forward_modality_to_ref_profile(
         context, profile, media_data, media_type,
     )
 
@@ -175,7 +177,9 @@ async def preprocess_multimodal_blocks(
         return messages
 
     # 自动探查能力
-    capability = await ensure_modality_capability(context)
+    capability = await context.app.get_system(
+        ModalityCapabilitySystem
+    ).ensure_modality_capability(context)
 
     # 遍历处理每条消息
     result_messages: list[BaseMessage] = []

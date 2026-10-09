@@ -32,7 +32,11 @@ component/
 
 ### 注册与发现
 
-工具通过模块级 `registry.register()` 注册，启动时由 `abstract/tools/discover.py` 的 AST 扫描自动发现。来源包括：
+ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Application.current().get_system(ToolRegistry)` 取得唯一实例，声明期使用 `register_tools` 的显式参数。模块级 registry 单例与代理已移除。
+
+每个工具模块导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，工具和 UI 事件均在该入口内注册；导入期只定义函数/常量/类型，不取得 Application 或创建连接。`ToolDiscoverySystem` 通过 AST 按路径顺序发现、导入并显式调用，每次装配保留模块集合避免重复。语法、读取、导入、注册错误以及旧模块级注册直接失败；原 schema、危险等级、可用范围和同步/异步 handler 约定不变。
+
+工具来源包括：
 
 - `component/tools/` — 核心工具
 - `component/extools/` — 扩展工具
@@ -40,7 +44,7 @@ component/
 - `component/browser/` — 浏览器控制工具
 - `component/automation/` — 桌面自动化工具
 - `custom_tools/` — 用户自定义工具（若目录存在）
-- MCP server — 通过 `component/mcp_tools.py` 桥接
+- MCP server — 由 `MCPSystem` 连接和注册远程工具；`component/mcp_tools.py` 仅显式声明管理工具
 
 ### 核心工具（`component/tools/`）
 
@@ -61,6 +65,20 @@ component/
 | `compress_history.py` | `CompressHistory` | 会话历史压缩 |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
+
+### 多模态能力生命周期（S14）
+
+Read的能力缓存查询、自动探测与转发经 `get_system(ModalityCapabilitySystem)` 调用；System持有共享锁、探针媒体、缓存路径和完整请求任务，纯媒体内容块构造仍从模块导入。关闭封闭新模型请求并等待六路子探针真实结束后再释放锁；明确停止和生命周期异常不得转换为普通工具结果。缓存与Read的媒体协议保持。
+
+### BrowserSystem 生命周期迁移（S13）
+
+`component/browser/system.py::BrowserSystem` 依赖 RuntimeSystem，唯一持有 Playwright、CDP连接、当前端点及应用启动的无头进程。virtual_awake不加载Playwright或启动浏览器；工具运行期通过get_system(BrowserSystem)查询，原_connection仅保留无状态探测、标签页定位与DOM函数，常量由entity/constant/browser.py导出。
+
+连接请求经TaskOwner.run_request管理并以连接锁串行化，部分连接失败释放已取得资源。断连及原生进程回收各有明确持有的清理任务，取消调用方等待不取消真实释放；关闭超时/失败上报并保留资源引用。多次无头启动保留每个自有进程句柄，不覆盖丢失旧进程；只有这些登记进程会被终止，用户自己启动的浏览器不被杀死。最终注销先停止请求，再尝试独立资源释放并传播全部失败，main.py不再重复cleanup。工具handler任务与其他浏览器操作先由ToolRegistry收尾，应用级关闭编排由 Application 统一执行。
+
+### LSP 工具生命周期
+
+LSP工具与文件修改后的诊断附加统一通过 `Application.current().get_system(LSPManager)` 调用。System唤醒只绑定Runtime主loop与Sandbox，pyright仍由LSPStart按需启动；工具不再传入Sandbox或创建独立manager。启动/替换和关闭均确认进程及reader线程实际结局，关闭失败传播，main.py不再执行另一套cleanup。
 
 ### Read 正文单行限制
 
@@ -98,7 +116,9 @@ component/
 |----------|------|
 | `web_fetch.py` | 获取指定 URL 的网页内容 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
-| `dynamic_endpoint_tools.py` | 动态端点工具 |
+| `dynamic_endpoint_tools.py` | 动态端点工具（仅参数解析与 `DynamicEndpointSystem` 结果适配） |
+
+`component/dynamic_endpoints.py::DynamicEndpointSystem` 是依赖 `RuntimeSystem`、`SessionManager` 的 framework `AsyncSystem`，唯一持有动态端点字典、锁和 `dynamic_endpoints.json`。`virtual_awake` 严格恢复合法记录，缺失会话只跳过内存加载但保留磁盘条目；损坏文件、非法记录和持久化失败直接传播。工具、Gateway、会话删除和旋转只通过 `get_system(DynamicEndpointSystem)` 调用公开实例方法。`close_admission()` 只停止新注册、迁移和显式注销，不删除持久端点配置；永久删除会话的清理由独立公开清理方法负责。
 | `archive_tools.py` | 归档工具 |
 | `diff_tools.py` | diff 工具 |
 
@@ -168,7 +188,9 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 - `ProfileApprovalBackend`：通过 `LLMProfileStore` 读取 `LLMProfileData.approval_profile` 根对象引用，连接外部管理的 LLM Profile 端点。使用五字段连接指纹缓存客户端，Profile 内容变更时自动重建。
 - 不再有本地/远程双后端、`FailedApprovalBackend`、工厂函数或本地检测函数。
 
-审批后端的生命周期由 `system/application.py::ApprovalBackendManager` 管理（同步 get_backend/get_state/invalidate + 异步 shutdown）。
+审批进程生命周期由 `component/approval/system.py::ApprovalSystem`（AsyncSystem）统一管理，依赖 RuntimeSystem、LLMProfileStore。`mode_store`、`backend_manager`、`allowlist` 是它唯一持有的叶对象；原 ApprovalBackendManager 已移至 `component/approval/manager.py`，不再定义在 Application 中。后端 get_backend/get_state/invalidate 的业务语义保持。
+
+模型审批通过 `ApprovalSystem.chat()` 的 TaskOwner.run_request 登记，普通模型调用失败继续按原审批拒绝路径处理，用户取消不升级为进程失败；生命周期失败不能被拒绝结果吞掉。关闭先停止接收并取消等待审批请求，确认请求实际结束后再清除后端缓存引用，不停止用户外部模型服务。共享 Profile 查询与缓存更新使用 LLMProfileStore.locked()。
 
 #### `approval/core.py` — 统一审批入口
 
@@ -201,6 +223,8 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 #### `approval/allowlist.py` — 工具白名单
 
+白名单路径及RLock由 `ApprovalSystem.allowlist` 的唯一 `ToolAllowlistStore` 持有；模块中只保留无状态格式化和委托业务入口，没有独立锁或配置单例。原JSON格式与读取/尽力保存规则保持，不改变既有授权语义。
+
 - `is_allowed(tool_name, args)` / `add_allowed(tool_name, args)`：按工具名与规范化参数精确匹配；排除 `reason`、`_session_id`、`_pre_approved`、`_approval_action`，并非对该工具所有参数组合授权。主会话 critical 在手动/脱手模式不使用白名单。
 
 #### `approval/policy.py` — 审批策略
@@ -227,12 +251,9 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 ### `component/mcp_tools.py`
 
-- 从 `RuntimeContext.mcp_config_path`（默认 `workspace/mcp_config.json`）读取 MCP 配置。
-- 调用 `abstract/mcp/client.py` 的 `register_mcp_servers()` 连接 server。
-- 将 MCP server 提供的工具动态注册到 `ToolRegistry`，对主 Agent 可见。
-- 应用关闭时调用 `shutdown_mcp_servers()` 清理连接。
-- MCP 工具注册前由 `abstract/mcp/schema.py::normalize_mcp_input_schema()` 做 provider 兼容规范化：按 schema 结构位置递归处理 `properties`、`items`、组合分支、`$defs`/`definitions` 和 `additionalProperties`，不会把业务参数 `properties` 误当作 JSON Schema 映射表。
-- 规范化只作用于发送给 LLM 的 `function.parameters`；MCP handler 仍将模型生成的原始参数字典传递给 `session.call_tool()`，不使用规范化 schema 反向改写调用参数。
+- 只导出 `register_tools(registry, ui_events)`，注册安全的 `MCPRefresh` 异步工具；导入模块不创建连接、不安装回调、不持有 MCP 状态。
+- `MCPSystem` 的配置和 Core 边界已建立，远程工具沿用同一 `ToolRegistry`；运行期刷新保留新增/移除结果。OAuth、stdio 进程、连接请求和失败清理均经独立静态复核确认闭合；初始连接失败清理部分成功连接后传播。
+- MCP 连接和资源释放的目标所有者为 `MCPSystem`/`MCPCore`；本模块和 `main.py` 已删除重复清理。
 
 MCP 配置示例（`workspace/mcp_config.json`）：
 
@@ -249,11 +270,12 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 
 ### `component/cron_router.py`
 
-- `CronRouter` 接收 Cron 工具创建的后台任务。
-- 维护任务注册表（`_CronTask`）与触发调度。
-- 通过 SessionMessageQueue（主会话）或 inbox（子 Agent）将 Cron 结果投递到对应 loop。
-- 提供 REST API：`/api/sessions/{id}/cron-tasks/...`。
-- 生命周期由 `Application.shutdown()` 管理。
+- `CronRouter` 已改为依赖 RuntimeSystem、Sandbox、SubprocessRunner 的 AsyncSystem，经 `get_system(CronRouter)` 访问。`_CronTask` 与原时间解析迁至 `component/cron_tasks.py`；工具层只解析参数、调用公开 `schedule_task/reschedule_task/list/trigger/cancel` 方法并适配结果，不读取注册表或调用私有调度/持久化。
+- `virtual_awake` 严格加载原 JSON 并校验身份/调度；缺文件可初始化，已有文件损坏或任务非法直接失败。此阶段不安排 Timer；全应用 RUNNING 后由 `activate` 开放调度。
+- Timer 直接执行单次命令，所有真实 Timer（含已取消尚未退出）保留在实例集合中，只有 join/实际结束确认后移除。回调登记、立即触发与冻结受接收边界和实例锁协调；已被替换/取消的 Timer 不能执行另一轮。任务与运行中命令分别登记，删除会话或取消任务不会丢失尚在执行的进程所有权。
+- 命令统一通过 SubprocessRunner 执行，使用独立 `CRON_PROCESS_SESSION_PREFIX` 键；关闭先冻结和终止命令，再在线程中 join 全部 Timer。期限内未结束保留资源、错误汇总传播；不以清空集合宣告成功，主事件循环不阻塞 join。
+- 全局冻结不修改持久 `should_schedule`；已实际执行的一次性任务才提交计数/结束状态。JSON 快照及原子写全过程使用同一锁，持久化失败报告生命周期失败；会话迁移在同一锁内更新所属会话，继续持有正在运行的任务。关闭后的迟到输出仅保留执行结局/日志，不向模型投递新工作。
+- 结果仍经主会话队列或子会话 Inbox 投递；输入投递记录及只落History关闭在 S16/S17 完成，激活/停止由 Application 统一编排。REST 协议保持 `/api/sessions/{id}/cron-tasks/...`。
 
 ---
 

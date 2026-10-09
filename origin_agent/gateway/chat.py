@@ -178,13 +178,14 @@ class SessionManager:
 
     def load_from_disk(self) -> None:
         """从磁盘加载持久化的 session 到内存。"""
-        # 如果 configure_sessions 从未被调用（例如在代码进化期间丢失），
+        # 存储目录未显式设置时（例如在代码进化期间丢失），
         # 从 RuntimeContext 获取 workspace 路径。
         if self._store_dir is None:
             try:
-                from system.context import get_runtime_context
+                from system.application import Application
+                from system.runtime import RuntimeSystem
                 from entity.constant import SESSIONS_DIR_NAME
-                ws: Path = get_runtime_context().workspace
+                ws: Path = Application.current().get_system(RuntimeSystem).context.workspace
                 candidate: Path = ws / SESSIONS_DIR_NAME
                 if candidate.exists():
                     self._store_dir = candidate

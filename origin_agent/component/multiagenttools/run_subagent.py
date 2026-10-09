@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
 from subagent.profile import CharacterProfileError, CharacterProfileResolver
@@ -42,7 +43,9 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error("'message_type' must be 'direct' or 'overheard'")
 
     app = Application.current()
-    resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+    from system.sandbox import Sandbox
+    from system.llm_profile_store import LLMProfileStore
+    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
     try:
         profile = resolver.require(name)
     except CharacterProfileError as exc:
@@ -53,7 +56,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         if Path(history_path.split(":", 1)[-1]).suffix.lower() != ".es":
             return tool_error("history_path must point to an easysave .es history file")
         try:
-            resolved = app.sandbox.resolve_read(history_path)
+            resolved = app.get_system(Sandbox).resolve_read(history_path)
         except Exception as exc:
             return tool_error(f"Invalid history_path: {exc}")
         if not resolved.real.exists() or not resolved.real.is_file():
@@ -61,7 +64,8 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         resolved_history_path = str(resolved.real)
 
     try:
-        orch = app.subagent_orchestrator
+        from subagent.orchestrator import SubAgentOrchestrator
+        orch = app.get_system(SubAgentOrchestrator)
         result = await orch.launch(
             parent_session_id=parent_session_id,
             name=name,
@@ -77,35 +81,38 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Failed to launch subagent: {exc}")
 
 
-registry.register(
-    name="RunSubAgent",
-    toolset="multiagent",
-    schema={
-        # 从动态发现的角色档案启动一个子Agent会话。
-        #
-        # ## 前置条件
-        # name 对应的角色目录必须同时包含 profile.md 和 profile.md.meta；
-        # profile.md.meta 必须包含引用现有 LLM Profile 的 [llm_profile] 字段；可选的 [profile] 字段按行声明附加系统提示词路径。
-        # 角色名称跨 roleplay/task 全局唯一；无效或重名角色会拒绝启动。
-        #
-        # ## 调用效果
-        # 每次启动都会重新读取角色档案和当前引用的 LLM Profile，不需要显式注册。
-        # initial_prompt 是发送给子Agent的第一条消息。
-        # 不传 history_path 时不继承历史；传入时必须是 .es easysave 历史逻辑路径。
-        # 同一主会话下同一角色不能重复运行。
-        #
-        # ## 返回
-        # {"success": true, "session_id": "..."}
-        #
-        # ## 何时使用
-        # - 启动 roleplay 或 task 角色执行任务。
-        # - 显式传入 history_path 恢复已保存的 .es 历史。
-        #
-        # ## 副作用/注意
-        # - 角色档案缺失、元数据错误、Profile 不存在或名称冲突时不创建会话。
-        # - 省略 history_path 始终从空历史开始。
-        # - StopSubAgent 默认将历史保存到 ws:tmp/<session_id>.es。
-        "description": """Start a sub-agent from a dynamically discovered character profile.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register run subagent tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="RunSubAgent",
+        toolset="multiagent",
+        schema={
+            # 从动态发现的角色档案启动一个子Agent会话。
+            #
+            # ## 前置条件
+            # name 对应的角色目录必须同时包含 profile.md 和 profile.md.meta；
+            # profile.md.meta 必须包含引用现有 LLM Profile 的 [llm_profile] 字段；可选的 [profile] 字段按行声明附加系统提示词路径。
+            # 角色名称跨 roleplay/task 全局唯一；无效或重名角色会拒绝启动。
+            #
+            # ## 调用效果
+            # 每次启动都会重新读取角色档案和当前引用的 LLM Profile，不需要显式注册。
+            # initial_prompt 是发送给子Agent的第一条消息。
+            # 不传 history_path 时不继承历史；传入时必须是 .es easysave 历史逻辑路径。
+            # 同一主会话下同一角色不能重复运行。
+            #
+            # ## 返回
+            # {"success": true, "session_id": "..."}
+            #
+            # ## 何时使用
+            # - 启动 roleplay 或 task 角色执行任务。
+            # - 显式传入 history_path 恢复已保存的 .es 历史。
+            #
+            # ## 副作用/注意
+            # - 角色档案缺失、元数据错误、Profile 不存在或名称冲突时不创建会话。
+            # - 省略 history_path 始终从空历史开始。
+            # - StopSubAgent 默认将历史保存到 ws:tmp/<session_id>.es。
+            "description": """Start a sub-agent from a dynamically discovered character profile.
 
 ## Prerequisites
 The character directory must contain `profile.md` and `profile.md.meta`. The metadata must contain a valid `[llm_profile]` reference to an existing LLM Profile. An optional `[profile]` section can list additional sandbox namespace paths, one per line; each file is loaded as a separate system prompt after `profile.md`. Use `ListSubAgents` to inspect available characters and errors.
@@ -130,46 +137,46 @@ The sub-agent can use the tools available to the SUBAGENT scope. The same charac
 - Invalid, missing, or duplicate character profiles are rejected and do not create a session.
 - Omitting `history_path` always starts with an empty sub-agent history.
 - The default history saved by `StopSubAgent` is temporary and returned as `ws:tmp/<session_id>.es`.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                # 角色目录名，必须全局唯一。
-                "name": {
-                    "type": "string",
-                    "description": "Unique character directory name under ws:characters/.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    # 角色目录名，必须全局唯一。
+                    "name": {
+                        "type": "string",
+                        "description": "Unique character directory name under ws:characters/.",
+                    },
+                    # 采样温度，默认 1.0，取值范围 0.0–1.3。
+                    "temperature": {
+                        "type": "number",
+                        "description": "Sampling temperature. Default 1.0, clamped to 0.0–1.3.",
+                        "default": 1.0,
+                    },
+                    # 发送给子Agent的首条任务消息。
+                    "initial_prompt": {
+                        "type": "string",
+                        "description": "The first task message sent to the sub-agent.",
+                    },
+                    # 本轮消息发送者名称。
+                    "user_name": {
+                        "type": "string",
+                        "description": "The sender identity for this message.",
+                    },
+                    # 消息类型：direct 表示直接要求子Agent响应，overheard 表示旁听。
+                    "message_type": {
+                        "type": "string",
+                        "description": "Message type: direct or overheard.",
+                    },
+                    # 可选的 .es 历史逻辑路径；只有显式传入时才恢复历史。
+                    "history_path": {
+                        "type": "string",
+                        "description": "Optional logical path to an easysave .es history file. History is loaded only when this is explicitly provided.",
+                    },
                 },
-                # 采样温度，默认 1.0，取值范围 0.0–1.3。
-                "temperature": {
-                    "type": "number",
-                    "description": "Sampling temperature. Default 1.0, clamped to 0.0–1.3.",
-                    "default": 1.0,
-                },
-                # 发送给子Agent的首条任务消息。
-                "initial_prompt": {
-                    "type": "string",
-                    "description": "The first task message sent to the sub-agent.",
-                },
-                # 本轮消息发送者名称。
-                "user_name": {
-                    "type": "string",
-                    "description": "The sender identity for this message.",
-                },
-                # 消息类型：direct 表示直接要求子Agent响应，overheard 表示旁听。
-                "message_type": {
-                    "type": "string",
-                    "description": "Message type: direct or overheard.",
-                },
-                # 可选的 .es 历史逻辑路径；只有显式传入时才恢复历史。
-                "history_path": {
-                    "type": "string",
-                    "description": "Optional logical path to an easysave .es history file. History is loaded only when this is explicitly provided.",
-                },
+                "required": ["name", "initial_prompt", "user_name", "message_type"],
             },
-            "required": ["name", "initial_prompt", "user_name", "message_type"],
         },
-    },
-    handler=_handle_run_subagent,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN,
-)
+        handler=_handle_run_subagent,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN,
+    )

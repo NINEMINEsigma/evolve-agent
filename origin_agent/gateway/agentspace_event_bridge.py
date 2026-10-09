@@ -108,9 +108,32 @@ async def detach_agentspace_events(
     subscription_id: str | None,
     task: asyncio.Task[None] | None,
 ) -> None:
-    """幂等收割转发 task 并注销 EventHub 订阅。"""
+    """幂等收割转发 task 并注销 EventHub 订阅。
+
+    转发 task 已登记到 GatewaySystem 的 TaskOwner；取消必须经
+    ``owner.cancel`` 标记预期取消，不能让 Owner 看到未授权取消（RV11）。
+    应用关闭阶段 Owner 已在收尾时，任务由 cancel_and_wait 统一处理。
+    """
     if task is not None:
-        task.cancel()
+        from gateway.system import GatewaySystem
+        from system.application import Application
+        from system.lifecycle import LifecycleFailure
+
+        try:
+            owner = Application.current().get_system(GatewaySystem).task_owner
+        except Exception:
+            owner = None
+
+        cancelled = False
+        if owner is not None:
+            try:
+                cancelled = owner.cancel(task)
+            except LifecycleFailure:
+                # Owner 已在关闭（closing 或任务记录已结算），任务由
+                # cancel_and_wait 持有，不做第二次裸取消。
+                cancelled = True
+        if not cancelled and not task.done():
+            task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     if subscription_id is not None:
         service.unsubscribe_events(subscription_id)

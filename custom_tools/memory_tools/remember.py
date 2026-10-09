@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import registry, tool_result
+from abstract.tools.registry import ToolRegistry, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from custom_tools.memory_tools._store import (
     FALLBACK_SESSION,
     load_all_memory,
@@ -40,23 +41,27 @@ def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -
 
 # ── 注册 ─────────────────────────────────────────────────────
 
-registry.register(
-    name="Remember",
-    toolset="memory_tools",
-    schema={
-        # 将一条信息持久化到记忆存储，供后续会话通过 remember_memory hook 读取。
-        # 使用 id 作为唯一键，content 作为记忆内容。
-        # 若 id 已存在（含父会话继承的记忆）且 is_overwrite 为 false，则保留原内容并返回错误。
-        # 记忆按会话隔离：写入当前会话自身的存储，子会话通过引用继承。
-        # 前置条件：无。
-        # 调用效果：将 {id: content} 写入当前会话在 agentspace 记忆文件中的分区。
-        # 返回值：{ success: bool, message: string }
-        # 何时使用：
-        #   - 【最高优先级】用户表达愤怒、失望、强烈负面情绪时，必须立即记录错误和纠正要求。
-        #   - 保存用户偏好、长期事实、约定等需要跨会话保留的信息。
-        # 副作用：修改磁盘上的记忆文件；重复调用同一 id 可能在 is_overwrite=true 时覆盖旧数据。
-        # 提醒：用户负面情绪是强制信号，不得忽略或推迟记录。id 应使用 rule-never-* 或 correction-* 命名。
-        "description": """Persist a piece of information to long-term memory so it can be recalled in future sessions via the remember_memory hook.
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register Remember tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="Remember",
+        toolset="memory_tools",
+        schema={
+            # 将一条信息持久化到记忆存储，供后续会话通过 remember_memory hook 读取。
+            # 使用 id 作为唯一键，content 作为记忆内容。
+            # 若 id 已存在（含父会话继承的记忆）且 is_overwrite 为 false，则保留原内容并返回错误。
+            # 记忆按会话隔离：写入当前会话自身的存储，子会话通过引用继承。
+            # 前置条件：无。
+            # 调用效果：将 {id: content} 写入当前会话在 agentspace 记忆文件中的分区。
+            # 返回值：{ success: bool, message: string }
+            # 何时使用：
+            #   - 【最高优先级】用户表达愤怒、失望、强烈负面情绪时，必须立即记录错误和纠正要求。
+            #   - 保存用户偏好、长期事实、约定等需要跨会话保留的信息。
+            # 副作用：修改磁盘上的记忆文件；重复调用同一 id 可能在 is_overwrite=true 时覆盖旧数据。
+            # 提醒：用户负面情绪是强制信号，不得忽略或推迟记录。id 应使用 rule-never-* 或 correction-* 命名。
+            "description": """Persist a piece of information to long-term memory so it can be recalled in future sessions via the remember_memory hook.
 
 ## Prerequisites
 None.
@@ -91,30 +96,30 @@ This is **mandatory** — emotional negative feedback from the user is the stron
 
 ## Side Effects
 Writes to the agent's memory file on disk. Repeated calls with the same id may overwrite existing data when is_overwrite is true.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string",
-                    # 记忆项的唯一标识符。用于后续读取或删除。
-                    "description": """A unique identifier for this memory entry. Used for later recall or deletion.""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        # 记忆项的唯一标识符。用于后续读取或删除。
+                        "description": """A unique identifier for this memory entry. Used for later recall or deletion.""",
+                    },
+                    "content": {
+                        "type": "string",
+                        # 要保存的记忆内容。
+                        # 记录错误纠正时，必须包含三要素：(1) 具体错误行为，(2) 用户期望的正确做法，(3) "永远不要重复此错误"的约束。
+                        "description": """The content to remember. When recording a mistake correction, include: (1) the specific wrong behavior, (2) the expected correct behavior, (3) the constraint that this mistake must NEVER be repeated.""",
+                    },
+                    "is_overwrite": {
+                        "type": "boolean",
+                        # 当 id 已存在（含父会话继承的记忆）时，是否覆盖原有内容。默认 false。
+                        "description": """Whether to overwrite an existing entry with the same id (including inherited memories from parent sessions). Defaults to false.""",
+                        "default": False,
+                    },
                 },
-                "content": {
-                    "type": "string",
-                    # 要保存的记忆内容。
-                    # 记录错误纠正时，必须包含三要素：(1) 具体错误行为，(2) 用户期望的正确做法，(3) "永远不要重复此错误"的约束。
-                    "description": """The content to remember. When recording a mistake correction, include: (1) the specific wrong behavior, (2) the expected correct behavior, (3) the constraint that this mistake must NEVER be repeated.""",
-                },
-                "is_overwrite": {
-                    "type": "boolean",
-                    # 当 id 已存在（含父会话继承的记忆）时，是否覆盖原有内容。默认 false。
-                    "description": """Whether to overwrite an existing entry with the same id (including inherited memories from parent sessions). Defaults to false.""",
-                    "default": False,
-                },
+                "required": ["id", "content"],
             },
-            "required": ["id", "content"],
         },
-    },
-    handler=_handle_remember,
-    is_async=False,
-)
+        handler=_handle_remember,
+        is_async=False,
+    )

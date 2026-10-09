@@ -1,35 +1,26 @@
 #!/usr/bin/env python3
 """Central manager for per-server MCP OAuth state.
 
-One instance shared across the process. Holds per-server OAuth provider
-instances and coordinates:
+One instance per :class:`MCPCore`, created in ``MCPCore._run_loop`` on the
+MCP event loop thread with an explicit ``token_dir``. Holds per-server
+OAuth provider instances and coordinates:
 
-- **Cross-process token reload** via mtime-based disk watch. When an external
-  process (e.g. a user cron job) refreshes tokens on disk, the next auth flow
-  picks them up without requiring a process restart.
-- **401 deduplication** via in-flight futures. When N concurrent tool calls
-  all hit 401 with the same access_token, only one recovery attempt fires;
-  the rest await the same result.
-- **Reconnect signalling** for long-lived MCP sessions. The manager itself
-  does not drive reconnection — the `MCPServerTask` in `mcp_tool.py` does —
-  but the manager is the single source of truth that decides when reconnect
-  is warranted.
+- **Cross-process token reload** via mtime-based disk watch.
+- **401 deduplication** via in-flight futures keyed by failed access_token.
+- **Reconnect signalling** for long-lived MCP sessions.
+- **Lifecycle** via :meth:`close_admission` (sync, idempotent) and
+  :meth:`aclose` (async, repeatable, waits for real cleanup). The
+  :attr:`is_idle` property lets :class:`MCPCore` verify that all real
+  resources (pending tasks, callback servers/threads, cleanup task)
+  have exited.
 
-Replaces what used to be scattered across eight call sites in `mcp_oauth.py`,
-`mcp_tool.py`, and `component/mcp_tools.py`. This module is the ONLY place
-that instantiates the MCP SDK's `OAuthClientProvider` — all other code paths
-go through `get_manager()`.
+Thread-safety: ``_entries`` is guarded by ``_entries_lock`` for
+get-or-create semantics. Per-entry state is guarded by the entry's own
+``asyncio.Lock`` (used from the MCP event loop thread). Callback server
+registry is guarded by ``_callback_lock``.
 
-Design reference:
-
-- Claude Code's ``invalidateOAuthCacheIfDiskChanged``
-  (``claude-code/src/utils/auth.ts:1320``, CC-1096 / GH#24317). Identical
-  external-refresh staleness bug class.
-- Codex's ``refresh_oauth_if_needed`` / ``persist_if_needed``
-  (``codex-rs/rmcp-client/src/rmcp_client.rs:805``). We lean on the MCP SDK's
-  lazy refresh rather than calling refresh before every op, because one
-  ``stat()`` per tool call is cheaper than an ``await`` + potential refresh
-  round-trip, and the SDK's in-memory expiry path is already correct.
+OAuth errors (logic, storage, cleanup) propagate; the manager never
+silently swallows exceptions to fabricate success.
 """
 
 from __future__ import annotations
@@ -37,48 +28,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from functools import partial
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mcp.client.auth.oauth2 import OAuthClientProvider
 
 from .oauth import _OAUTH_CALLBACK_TIMEOUT
+from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
+from entity.puretype import MCPOAuthProviderEntry
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from .oauth_callback import OAuthCallbackServer
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Per-server entry
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ProviderEntry:
-    """Per-server OAuth state tracked by the manager.
-
-    Fields:
-        server_url: The MCP server URL used to build the provider. Tracked
-            so we can discard a cached provider if the URL changes.
-        oauth_config: Optional dict from ``mcp_servers.<name>.oauth``.
-        provider: The ``httpx.Auth``-compatible provider wrapping the MCP
-            SDK. None until first use.
-        last_mtime_ns: Last-seen ``st_mtime_ns`` of the on-disk tokens file.
-            Zero if never read. Used by :meth:`MCPOAuthManager.invalidate_if_disk_changed`
-            to detect external refreshes.
-        lock: Serialises concurrent access to this entry's state. Bound to
-            whichever asyncio loop first awaits it (the MCP event loop).
-        pending_401: In-flight 401-handler futures keyed by the failed
-            access_token, for deduplicating thundering-herd 401s. Mirrors
-            Claude Code's ``pending401Handlers`` map.
-    """
-
-    server_url: str
-    oauth_config: dict | None
-    provider: OAuthClientProvider | None = None
-    last_mtime_ns: int = 0
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    pending_401: dict[str, "asyncio.Future[bool]"] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +49,7 @@ class _ProviderEntry:
 # ---------------------------------------------------------------------------
 
 
-def _make_oauth_provider_class() -> type|None:
+def _make_oauth_provider_class(manager: "MCPOAuthManager") -> type | None:
     """Lazy-import the SDK base class and return our subclass.
 
     Wrapped in a function so this module imports cleanly even when the
@@ -122,31 +85,18 @@ def _make_oauth_provider_class() -> type|None:
             Also eagerly fetches OAuth authorization-server metadata (PRM +
             ASM) when we have stored tokens but no cached metadata, so the
             SDK's ``_refresh_token`` can build the correct token_endpoint
-            URL on the preemptive-refresh path. Without this, the SDK
-            falls back to ``{mcp_server_url}/token`` (wrong for providers
-            whose AS is a different origin — BetterStack's MCP lives at
-            ``https://mcp.betterstack.com`` but its token endpoint is at
-            ``https://betterstack.com/oauth/token``), the refresh 404s, and
-            we drop through to full browser reauth.
+            URL on the preemptive-refresh path.
 
             The SDK's base ``_initialize`` populates ``current_tokens`` but
             does NOT call ``update_token_expiry``, so ``token_expiry_time``
             stays ``None`` and ``is_token_valid()`` returns True for any
             loaded token regardless of actual age. After a process restart
-            this ships stale Bearer tokens to the server; some providers
-            return HTTP 401 (caught by the 401 handler), others return 200
-            with an app-level auth error (invisible to the transport layer,
-            e.g. BetterStack returning "No teams found. Please check your
-            authentication.").
+            this ships stale Bearer tokens to the server.
 
-            Seeding ``token_expiry_time`` from the reloaded token fixes that:
-            ``is_token_valid()`` correctly reports False for expired tokens,
-            ``async_auth_flow`` takes the ``can_refresh_token()`` branch,
-            and the SDK quietly refreshes before the first real request.
-
+            Seeding ``token_expiry_time`` from the reloaded token fixes that.
             Paired with :class:`McpTokenStorage` persisting an absolute
-            ``expires_at`` timestamp (``mcp_oauth.py:set_tokens``) so the
-            remaining TTL we compute here reflects real wall-clock age.
+            ``expires_at`` timestamp so the remaining TTL reflects real
+            wall-clock age.
             """
             await super()._initialize()
             tokens = self.context.current_tokens
@@ -154,10 +104,7 @@ def _make_oauth_provider_class() -> type|None:
                 self.context.update_token_expiry(tokens)
 
             # Cold-load: restore OAuth server metadata from disk before any
-            # refresh attempt. Without this, a restarted process with cached
-            # tokens but no in-memory metadata would fall back to the SDK's
-            # guessed ``{server_url}/token`` path (returns 404 on most real
-            # providers) and require a full browser re-authorization.
+            # refresh attempt.
             storage = self.context.storage
             from .oauth import McpTokenStorage
             if (
@@ -176,23 +123,11 @@ def _make_oauth_provider_class() -> type|None:
 
             # Pre-flight OAuth AS discovery so ``_refresh_token`` has a
             # correct ``token_endpoint`` before the first refresh attempt.
-            # Only runs when we have tokens on cold-load but no cached
-            # metadata — i.e. the exact scenario where the SDK's built-in
-            # 401-branch discovery hasn't had a chance to run yet.
             if (
                 tokens is not None
                 and self.context.oauth_metadata is None
             ):
-                try:
-                    await self._prefetch_oauth_metadata()
-                except Exception as exc:  # pragma: no cover — defensive
-                    # Non-fatal: if discovery fails, the SDK's normal 401-
-                    # branch discovery will run on the next request.
-                    logger.debug(
-                        "MCP OAuth '%s': pre-flight metadata discovery "
-                        "failed (non-fatal): %s",
-                        self._server_name, exc,
-                    )
+                await self._prefetch_oauth_metadata()
 
         async def _prefetch_oauth_metadata(self) -> None:
             """Fetch PRM + ASM from the well-known endpoints, cache on context.
@@ -219,14 +154,7 @@ def _make_oauth_provider_class() -> type|None:
                     None, server_url
                 ):
                     req = create_oauth_metadata_request(url)
-                    try:
-                        resp = await client.send(req)
-                    except httpx.HTTPError as exc:
-                        logger.debug(
-                            "MCP OAuth '%s': PRM discovery to %s failed: %s",
-                            self._server_name, url, exc,
-                        )
-                        continue
+                    resp = await client.send(req)
                     prm = await handle_protected_resource_response(resp)
                     if prm:
                         self.context.protected_resource_metadata = prm
@@ -242,14 +170,7 @@ def _make_oauth_provider_class() -> type|None:
                     self.context.auth_server_url, server_url
                 ):
                     req = create_oauth_metadata_request(url)
-                    try:
-                        resp = await client.send(req)
-                    except httpx.HTTPError as exc:
-                        logger.debug(
-                            "MCP OAuth '%s': ASM discovery to %s failed: %s",
-                            self._server_name, url, exc,
-                        )
-                        continue
+                    resp = await client.send(req)
                     ok, asm = await handle_auth_metadata_response(resp)
                     if not ok:
                         break
@@ -290,33 +211,21 @@ def _make_oauth_provider_class() -> type|None:
                 storage.save_oauth_metadata(meta)
 
         async def async_auth_flow(self, request):  # type: ignore[override]
-            # Pre-flow hook: ask the manager to refresh from disk if needed.
-            # Any failure here is non-fatal — we just log and proceed with
-            # whatever state the SDK already has.
-            try:
-                await get_manager().invalidate_if_disk_changed(
-                    self._server_name
-                )
-            except Exception as exc:  # pragma: no cover — defensive
-                logger.debug(
-                    "MCP OAuth '%s': pre-flow disk-watch failed (non-fatal): %s",
-                    self._server_name, exc,
-                )
+            manager.require_open()
+            await manager.invalidate_if_disk_changed(self._server_name)
 
-            # Manually bridge the bidirectional generator protocol. httpx's
-            # auth_flow driver (httpx._client._send_handling_auth) calls
-            # ``auth_flow.asend(response)`` to feed HTTP responses back into
-            # the generator. A naive wrapper using ``async for item in inner:
-            # yield item`` DISCARDS those .asend(response) values and resumes
-            # the inner generator with None, so the SDK's
-            # ``response = yield request`` branch in
-            # mcp/client/auth/oauth2.py sees response=None and crashes at
-            # ``if response.status_code == 401`` with AttributeError.
+            # Bridge the bidirectional generator protocol. httpx's
+            # auth_flow driver calls ``auth_flow.asend(response)`` to feed
+            # HTTP responses back into the generator. A naive wrapper using
+            # ``async for item in inner: yield item`` DISCARDS those
+            # .asend(response) values and resumes the inner generator with
+            # None, so the SDK's ``response = yield request`` branch sees
+            # response=None and crashes.
             #
             # The bridge below forwards each .asend() value into the inner
-            # generator via inner.asend(incoming), preserving the bidirectional
-            # contract. Regression from PR #11383 caught by
-            # tests/tools/test_mcp_oauth_bidirectional.py.
+            # generator via inner.asend(incoming), preserving the
+            # bidirectional contract. The finally clause ensures the inner
+            # generator is always closed, even on cancellation.
             inner = super().async_auth_flow(request)
             try:
                 outgoing = await inner.__anext__()
@@ -328,12 +237,16 @@ def _make_oauth_provider_class() -> type|None:
                 # 401 branch so a subsequent cold-load skips discovery.
                 self._persist_oauth_metadata_if_changed()
                 return
+            finally:
+                # Ensure the inner generator is always closed. If we exit
+                # normally (StopAsyncIteration) the generator is already
+                # exhausted and aclose is a no-op. If we exit via
+                # cancellation or exception, aclose propagates the
+                # cancellation into the inner generator so its finally
+                # blocks run and transport resources are released.
+                await inner.aclose()
 
     return McpOAuthProvider
-
-
-# Cached at import time. Tested and used by :class:`MCPOAuthManager`.
-_MCP_PROVIDER_CLS: type | None = _make_oauth_provider_class()
 
 
 # ---------------------------------------------------------------------------
@@ -344,14 +257,27 @@ _MCP_PROVIDER_CLS: type | None = _make_oauth_provider_class()
 class MCPOAuthManager:
     """Single source of truth for per-server MCP OAuth state.
 
+    Created by :class:`MCPCore` with an explicit ``token_dir``. The Core
+    calls ``close_admission()`` (sync) to stop new OAuth work, then
+    ``await aclose()`` to wait for real cleanup. The ``is_idle`` property
+    verifies that all pending tasks, callback servers/threads, and the
+    cleanup task itself have exited.
+
     Thread-safe: the ``_entries`` dict is guarded by ``_entries_lock`` for
     get-or-create semantics. Per-entry state is guarded by the entry's own
     ``asyncio.Lock`` (used from the MCP event loop thread).
     """
 
-    def __init__(self) -> None:
-        self._entries: dict[str, _ProviderEntry] = {}
+    def __init__(self, token_dir: Path) -> None:
+        self._token_dir = token_dir
+        self._entries: dict[str, MCPOAuthProviderEntry] = {}
         self._entries_lock = threading.Lock()
+        self._active_calls: set[asyncio.Task[Any]] = set()
+        self._callback_waits: dict[int, OAuthCallbackServer] = {}
+        self._loop = asyncio.get_running_loop()
+        self._closed = False
+        self._aclose_done = False
+        self._aclose_task: asyncio.Task[None] | None = None
 
     # -- Provider construction / caching -------------------------------------
 
@@ -369,6 +295,7 @@ class MCPOAuthManager:
 
         Returns None if the MCP SDK's OAuth support is unavailable.
         """
+        self.require_open()
         with self._entries_lock:
             entry = self._entries.get(server_name)
             if entry is not None and entry.server_url != server_url:
@@ -379,7 +306,7 @@ class MCPOAuthManager:
                 entry = None
 
             if entry is None:
-                entry = _ProviderEntry(
+                entry = MCPOAuthProviderEntry(
                     server_url=server_url,
                     oauth_config=oauth_config,
                 )
@@ -393,24 +320,22 @@ class MCPOAuthManager:
     def _build_provider(
         self,
         server_name: str,
-        entry: _ProviderEntry,
+        entry: MCPOAuthProviderEntry,
     ) -> OAuthClientProvider | None:
         """Build the underlying OAuth provider.
 
         Constructs :class:`McpOAuthProvider` directly using the helpers
-        extracted from ``tools.mcp_oauth``. The subclass injects a pre-flow
-        disk-watch hook so external token refreshes (cron, other CLI
-        instances) are visible to running MCP sessions.
+        from ``oauth.py``. The subclass injects a pre-flow disk-watch hook
+        so external token refreshes are visible to running MCP sessions.
+        The provider closure captures ``self`` (the manager) so callback
+        servers can be registered for shutdown cleanup.
 
         Returns None if the MCP SDK's OAuth support is unavailable.
         """
-        if _MCP_PROVIDER_CLS is None:
-            logger.warning(
-                "MCP OAuth '%s': SDK auth module unavailable", server_name,
-            )
-            return None
+        provider_cls = _make_oauth_provider_class(self)
+        if provider_cls is None:
+            raise ImportError(f"MCP OAuth SDK support is required for '{server_name}'")
 
-        # Local imports avoid circular deps at module import time.
         from .oauth import (
             McpTokenStorage,
             _OAUTH_AVAILABLE,
@@ -423,10 +348,10 @@ class MCPOAuthManager:
         )
 
         if not _OAUTH_AVAILABLE:
-            return None
+            raise ImportError(f"MCP OAuth SDK support is required for '{server_name}'")
 
         cfg = dict(entry.oauth_config or {})
-        storage = McpTokenStorage(server_name)
+        storage = McpTokenStorage(server_name, self._token_dir)
 
         if not _is_interactive() and not storage.has_cached_tokens():
             logger.warning(
@@ -436,30 +361,37 @@ class MCPOAuthManager:
                 server_name,
             )
 
-        _configure_callback_port(cfg)
+        port = _configure_callback_port(cfg)
+        entry.resolved_port = port
         client_metadata = _build_client_metadata(cfg)
         _maybe_preregister_client(storage, cfg, client_metadata)
 
-        return _MCP_PROVIDER_CLS(
+        return provider_cls(
             server_name=server_name,
             server_url=entry.server_url,
             client_metadata=client_metadata,
             storage=storage,
-            redirect_handler=_redirect_handler,
-            callback_handler=_wait_for_callback,
+            redirect_handler=partial(_redirect_handler, port=port),
+            callback_handler=partial(
+                _wait_for_callback,
+                manager=self,
+                port=port,
+                timeout=float(cfg.get("timeout", _OAUTH_CALLBACK_TIMEOUT)),
+            ),
             timeout=float(cfg.get("timeout", _OAUTH_CALLBACK_TIMEOUT)),
         )
 
     def remove(self, server_name: str) -> None:
         """Evict the provider from cache AND delete tokens from disk.
 
-        Called during forced re-auth to clear stale OAuth state.
+        Called during forced re-auth to clear stale OAuth state. This is a
+        user-initiated operation, not application shutdown.
         """
         with self._entries_lock:
             self._entries.pop(server_name, None)
 
-        from .oauth import remove_oauth_tokens
-        remove_oauth_tokens(server_name)
+        from .oauth import McpTokenStorage
+        McpTokenStorage(server_name, self._token_dir).remove()
         logger.info(
             "MCP OAuth '%s': evicted from cache and removed from disk",
             server_name,
@@ -476,27 +408,28 @@ class MCPOAuthManager:
         fresh tokens to disk, and on the next tool call the running MCP
         session picks them up without a restart.
         """
-        from .oauth import _get_token_dir, _safe_filename
+        self.require_open()
+        from .oauth import _safe_filename
 
         entry = self._entries.get(server_name)
         if entry is None or entry.provider is None:
             return False
 
         async with entry.lock:
-            tokens_path = _get_token_dir() / f"{_safe_filename(server_name)}.json"
+            tokens_path = self._token_dir / f"{_safe_filename(server_name)}.json"
             try:
                 mtime_ns = tokens_path.stat().st_mtime_ns
-            except (FileNotFoundError, OSError):
+            except FileNotFoundError:
                 return False
 
             if mtime_ns != entry.last_mtime_ns:
                 old = entry.last_mtime_ns
                 entry.last_mtime_ns = mtime_ns
                 # Force the SDK's OAuthClientProvider to reload from storage
-                # on its next auth flow. `_initialized` is private API but
-                # stable across the MCP SDK versions we pin (>=1.26.0).
-                if hasattr(entry.provider, "_initialized"):
-                    entry.provider._initialized = False  # noqa: SLF001
+                # on its next auth flow. ``_initialized`` is a known field on
+                # OAuthClientProvider (oauth2.py line 268), not a dynamic
+                # attribute; accessed directly per project no-reflection rule.
+                entry.provider._initialized = False  # noqa: SLF001
                 logger.info(
                     "MCP OAuth '%s': tokens file changed (mtime %d -> %d), "
                     "forcing reload",
@@ -518,87 +451,147 @@ class MCPOAuthManager:
             True  if a (possibly new) access token is now available — caller
                   should trigger a reconnect and retry the operation.
             False if no recovery path exists — caller should surface a
-                  ``needs_reauth`` error to the model so it stops hallucinating
-                  manual refresh attempts.
+                  ``needs_reauth`` error to the model.
 
         Thundering-herd protection: if N concurrent tool calls hit 401 with
         the same ``failed_access_token``, only one recovery attempt fires.
         Others await the same future.
+
+        The 401 handler task is owned by this manager and tracked in
+        ``_pending_tasks`` so :meth:`aclose` can cancel and await it. The
+        per-entry ``asyncio.Lock`` serialises concurrent 401 handling for
+        the same server so we don't race on provider state.
+
+        If the caller (a dedup waiter) is cancelled while awaiting the
+        shared future, the future itself is NOT cancelled — other waiters
+        still get their result. On shutdown, ``_release_pending_401``
+        cancels all shared futures so no waiter hangs.
         """
+        self._check_loop()
+        if self._closed:
+            return False
         entry = self._entries.get(server_name)
         if entry is None or entry.provider is None:
             return False
-
+        caller = asyncio.current_task()
+        if caller is None:
+            raise LifecycleFailure("OAuth recovery requires an owned calling task")
+        self._active_calls.add(caller)
         key = failed_access_token or "<unknown>"
-        loop = asyncio.get_running_loop()
-
-        async with entry.lock:
-            pending = entry.pending_401.get(key)
-            if pending is None:
-                pending = loop.create_future()
-                entry.pending_401[key] = pending
-
-                async def _do_handle() -> None:
-                    try:
-                        # Step 1: Did disk change? Picks up external refresh.
-                        disk_changed = await self.invalidate_if_disk_changed(
-                            server_name
-                        )
-                        if disk_changed:
-                            if not pending.done():
-                                pending.set_result(True)
-                            return
-
-                        # Step 2: No disk change — if the SDK can refresh
-                        # in-place, let the caller retry. The SDK's httpx.Auth
-                        # flow will issue the refresh on the next request.
-                        provider = entry.provider
-                        ctx = getattr(provider, "context", None)
-                        can_refresh = False
-                        if ctx is not None:
-                            can_refresh_fn = getattr(ctx, "can_refresh_token", None)
-                            if callable(can_refresh_fn):
-                                try:
-                                    can_refresh = bool(can_refresh_fn())
-                                except Exception:
-                                    can_refresh = False
-                        if not pending.done():
-                            pending.set_result(can_refresh)
-                    except Exception as exc:  # pragma: no cover — defensive
-                        logger.warning(
-                            "MCP OAuth '%s': 401 handler failed: %s",
-                            server_name, exc,
-                        )
-                        if not pending.done():
-                            pending.set_result(False)
-                    finally:
-                        entry.pending_401.pop(key, None)
-
-                asyncio.create_task(_do_handle(), name=f"mcp-oauth-401-{server_name}")
-
+        leader = False
+        pending: asyncio.Future[bool] | None = None
         try:
-            return await pending
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning(
-                "MCP OAuth '%s': awaiting 401 handler failed: %s",
-                server_name, exc,
+            async with entry.lock:
+                if self._closed:
+                    return False
+                pending = entry.pending_401.get(key)
+                if pending is None:
+                    pending = self._loop.create_future()
+                    pending.add_done_callback(self._observe_pending)
+                    entry.pending_401[key] = pending
+                    leader = True
+            if not leader:
+                return await asyncio.shield(pending)
+            # 第一位请求方直接负责真实操作，不另起无人等待的认证task。
+            # 其取消责任已经由Core的请求TaskOwner持有，其他等待方只共享结果。
+            changed = await self.invalidate_if_disk_changed(server_name)
+            value = changed or entry.provider.context.can_refresh_token()
+            if not pending.done():
+                pending.set_result(value)
+            return pending.result()
+        except asyncio.CancelledError:
+            if leader and pending is not None and not pending.done():
+                pending.set_exception(ApplicationStoppingError("OAuth recovery caller was cancelled"))
+            raise
+        except BaseException as error:
+            if leader and pending is not None and not pending.done():
+                pending.set_exception(error)
+            raise
+        finally:
+            if leader:
+                entry.pending_401.pop(key, None)
+            self._active_calls.discard(caller)
+
+    @staticmethod
+    def _observe_pending(future: asyncio.Future[bool]) -> None:
+        if not future.cancelled():
+            future.exception()
+
+    # -- Callback server registry (internal) --------------------------------
+
+    def _check_loop(self) -> None:
+        if asyncio.get_running_loop() is not self._loop:
+            raise LifecycleFailure("MCP OAuth manager used from a foreign loop")
+
+    def require_open(self) -> None:
+        self._check_loop()
+        if self._closed:
+            raise ApplicationStoppingError("MCP OAuth manager admission is closed")
+
+    def register_callback(self, callback: OAuthCallbackServer) -> None:
+        self._check_loop()
+        if self._closed:
+            raise ApplicationStoppingError("OAuth callback admission is closed")
+        self._callback_waits[id(callback)] = callback
+
+    def release_callback(self, callback: OAuthCallbackServer) -> None:
+        self._check_loop()
+        if callback.is_idle:
+            self._callback_waits.pop(id(callback), None)
+
+    def close_admission(self) -> None:
+        self._check_loop()
+        self._closed = True
+        for entry in self._entries.values():
+            for pending in entry.pending_401.values():
+                if not pending.done():
+                    pending.set_result(False)
+        for callback in tuple(self._callback_waits.values()):
+            callback.request_stop()
+
+    @property
+    def is_idle(self) -> bool:
+        self._check_loop()
+        return (
+            not self._active_calls
+            and all(callback.is_idle for callback in self._callback_waits.values())
+            and (self._aclose_task is None or self._aclose_task.done())
+        )
+
+    async def aclose(self) -> None:
+        self._check_loop()
+        if asyncio.current_task() in self._active_calls:
+            raise LifecycleFailure("OAuth recovery cannot wait for its own shutdown")
+        self.close_admission()
+        if self._aclose_task is None:
+            self._aclose_task = asyncio.create_task(self._do_aclose(), name="mcp-oauth-close")
+            self._aclose_task.add_done_callback(self._observe_close)
+        await asyncio.shield(self._aclose_task)
+
+    @staticmethod
+    def _observe_close(task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
+
+    async def _do_aclose(self) -> None:
+        errors: list[BaseException] = []
+        for callback in tuple(self._callback_waits.values()):
+            try:
+                await callback.aclose()
+            except BaseException as error:
+                errors.append(error)
+            self.release_callback(callback)
+        # 调用task归Core请求Owner，Manager不再对借用task发第二次取消。
+        # Core已停止请求/连接；此处只确认结果交接退出，不抢占其取消责任。
+        if self._active_calls:
+            _, pending = await asyncio.wait(
+                tuple(self._active_calls), timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS,
             )
-            return False
-
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
-
-
-_MANAGER: MCPOAuthManager | None = None
-_MANAGER_LOCK = threading.Lock()
-
-
-def get_manager() -> MCPOAuthManager:
-    """Return the process-wide :class:`MCPOAuthManager` singleton."""
-    global _MANAGER
-    with _MANAGER_LOCK:
-        if _MANAGER is None:
-            _MANAGER = MCPOAuthManager()
-        return _MANAGER
+            if pending:
+                errors.append(LifecycleFailure("OAuth request handoffs remain active"))
+                for task in pending:
+                    if not task.done():
+                        task.cancel()
+        if errors:
+            raise BaseExceptionGroup("MCP OAuth shutdown failed", errors)
+        self._entries.clear()

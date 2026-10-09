@@ -328,8 +328,6 @@ def _build_frontend(force: bool = False) -> bool:
 def main() -> int:
     cli: dict = _parse_cli()
     ctx: RuntimeContext = _build_context(cli)
-    from system.context import set_runtime_context
-    set_runtime_context(ctx)
 
     # 创建运行时标志文件, 可供hook判断启动时间等
     runtime_flag_file: Path = ctx.workspace / "flag.json"
@@ -366,6 +364,10 @@ def main() -> int:
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         exit_code = 0
+    finally:
+        # 硬截止 watchdog 覆盖 asyncio.run 内部的关闭窗口；
+        # 只在事件循环与其默认线程池结束后解除。
+        app.disarm_watchdog()
 
     logger.info("Evolve Agent exiting | code=%d", exit_code)
     return exit_code

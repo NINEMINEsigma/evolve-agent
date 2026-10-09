@@ -1,7 +1,7 @@
 """文件系统工具 — 所有路径均为逻辑路径（带命名空间前缀）。
 
-模块导入时通过 ``registry.register()`` 注册。
-每个工具 handler 通过 ``Application.current().sandbox`` 获取共享的 ``Sandbox`` 实例解析路径。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+每个工具 handler 通过 ``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例解析路径。
 
 路径格式：``namespace:relative/path``
   - ``fork:``    读写（进化代码目标）
@@ -26,7 +26,8 @@ import mimetypes
 import re
 from typing import Any, Dict, TYPE_CHECKING
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolDangerLevel
 from entity.constant import (
     EDIT_FILE_MAX_CHARS,
@@ -40,7 +41,6 @@ from entity.constant import (
 )
 from system.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import Access, Sandbox, SandboxError
-from system.context import get_runtime_context
 from system.text_codec import split_lf_lines
 from system.text_preview import truncate_lf_lines
 from pathlib import Path
@@ -55,15 +55,26 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, resolve_effective_modality_reference_profile, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
+from system.modality_capability import (
+    ModalityCapabilitySystem,
+    resolve_active_model_base_url,
+    wrap_forwarded_description,
+    forwarded_tag_for_media,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _s() -> Sandbox:
-    """委托到 Application.sandbox property。"""
+    """委托到 Application 已注册的 Sandbox System。"""
     from system.application import Application
-    return Application.current().sandbox
+    return Application.current().get_system(Sandbox)
+
+
+def _mcs() -> ModalityCapabilitySystem:
+    """委托到 Application 已注册的 ModalityCapabilitySystem。"""
+    from system.application import Application
+    return Application.current().get_system(ModalityCapabilitySystem)
 
 
 def _read_meta_fields(
@@ -81,8 +92,9 @@ def _read_meta_fields(
     logical = f"{namespace.strip()}:{'/'.join(parts)}"
     meta_path = logical + META_FILE_SUFFIX
     from system.application import Application
+    from system.agentspace import AgentspaceService
     from entity.constant import VISUAL_REDIRECT_KEY
-    visual_service = Application.current().session_visual_resource_service
+    visual_service = Application.current().get_system(AgentspaceService).visual_resources
     visual_source = visual_service.match_source_directory(logical) if is_directory else None
     try:
         sandbox = _s()
@@ -203,12 +215,10 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
     流程: notify_did_change → sleep → get_cached_diagnostics → 序列化。
     不满足条件或 LSP 未启动时返回 None（不附加字段）。
     """
-    try:
-        from system.lsp import get_lsp_manager
-        manager = get_lsp_manager()
-        if not manager.is_ready():
-            return None
-    except Exception:
+    from system.application import Application
+    from system.lsp import LSPManager
+    manager = Application.current().get_system(LSPManager)
+    if not manager.is_ready():
         return None
 
     # 检查文件扩展名
@@ -225,7 +235,12 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
 
     # 发送 didChange 通知
     uri = resolved.real.as_uri()
-    manager.notify_did_change(logical_path, content, _s())
+    from system.lifecycle import ApplicationStoppingError
+    try:
+        manager.notify_did_change(logical_path, content)
+    except ApplicationStoppingError:
+        # 写入已经完成；关闭只跳过可选诊断，不把真实写入改报失败。
+        return None
 
     # 短暂等待 diagnostics 推送
     import time as _time
@@ -310,23 +325,23 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "No LLM model configured; cannot determine vision capability.",
                     path=path,
                 )
-            tool_vision = get_cached_vision_support(model_name, base_url)
+            tool_vision = _mcs().get_cached_vision_support(model_name, base_url)
             if tool_vision is None:
                 # 缓存未命中 → 自动探查
-                capability = await ensure_modality_capability(context)
+                capability = await _mcs().ensure_modality_capability(context)
                 tool_vision = capability.vision
             if tool_vision is False:
                 # tool 消息不支持，检查 user 消息是否支持
-                user_vision = get_cached_user_vision_support(model_name, base_url)
+                user_vision = _mcs().get_cached_user_vision_support(model_name, base_url)
                 if user_vision is None:
                     # 缓存未命中（ensure_modality_capability 已探查，但可能只写了部分）
-                    capability = await ensure_modality_capability(context)
+                    capability = await _mcs().ensure_modality_capability(context)
                     user_vision = capability.user_vision
                 if user_vision is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_effective_modality_reference_profile(
+                        _mcs().resolve_effective_modality_reference_profile(
                             active_profile,
                             "image",
                         )
@@ -350,7 +365,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "read_image | path=%s mime=%s size=%d w=%s h=%s (forwarding to ref profile)",
                             path, mime_type, file_size, width, height,
                         )
-                        description = await forward_modality_to_ref_profile(
+                        description = await _mcs().forward_modality_to_ref_profile(
                             context, active_profile,
                             {"base64": b64, "mime_type": mime_type}, "image",
                         )
@@ -477,23 +492,23 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "No LLM model configured; cannot determine audio capability.",
                     path=path,
                 )
-            tool_audio = get_cached_audio_support(model_name, base_url)
+            tool_audio = _mcs().get_cached_audio_support(model_name, base_url)
             if tool_audio is None:
                 # 缓存未命中 → 自动探查
-                capability = await ensure_modality_capability(context)
+                capability = await _mcs().ensure_modality_capability(context)
                 tool_audio = capability.audio
             if tool_audio is False:
                 # tool 消息不支持，检查 user 消息是否支持
-                user_audio = get_cached_user_audio_support(model_name, base_url)
+                user_audio = _mcs().get_cached_user_audio_support(model_name, base_url)
                 if user_audio is None:
                     # 缓存未命中（ensure_modality_capability 已探查，但可能只写了部分）
-                    capability = await ensure_modality_capability(context)
+                    capability = await _mcs().ensure_modality_capability(context)
                     user_audio = capability.user_audio
                 if user_audio is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_effective_modality_reference_profile(
+                        _mcs().resolve_effective_modality_reference_profile(
                             active_profile,
                             "audio",
                         )
@@ -516,7 +531,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "read_audio | path=%s mime=%s size=%d format=%s (forwarding to ref profile)",
                             path, mime_type, file_size, audio_format,
                         )
-                        description = await forward_modality_to_ref_profile(
+                        description = await _mcs().forward_modality_to_ref_profile(
                             context, active_profile,
                             {"base64": b64, "format": audio_format}, "audio",
                         )
@@ -631,22 +646,22 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "No LLM model configured; cannot determine video capability.",
                     path=path,
                 )
-            tool_video = get_cached_video_support(model_name, base_url)
+            tool_video = _mcs().get_cached_video_support(model_name, base_url)
             if tool_video is None:
                 # 缓存未命中 → 自动探查
-                capability = await ensure_modality_capability(context)
+                capability = await _mcs().ensure_modality_capability(context)
                 tool_video = capability.video
             if tool_video is False:
                 # tool 消息不支持，检查 user 消息是否支持
-                user_video = get_cached_user_video_support(model_name, base_url)
+                user_video = _mcs().get_cached_user_video_support(model_name, base_url)
                 if user_video is None:
-                    capability = await ensure_modality_capability(context)
+                    capability = await _mcs().ensure_modality_capability(context)
                     user_video = capability.user_video
                 if user_video is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_effective_modality_reference_profile(
+                        _mcs().resolve_effective_modality_reference_profile(
                             active_profile,
                             "video",
                         )
@@ -668,7 +683,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "read_video | path=%s mime=%s size=%d (forwarding to ref profile)",
                             path, mime_type, file_size,
                         )
-                        description = await forward_modality_to_ref_profile(
+                        description = await _mcs().forward_modality_to_ref_profile(
                             context, active_profile,
                             {"base64": b64, "mime_type": mime_type}, "video",
                         )
@@ -909,9 +924,274 @@ def _handle_delete(
     return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
+# ---------------------------------------------------------------------------
+# PatchEdit / Copy / Move / SearchFiles / Grep handlers
+# ---------------------------------------------------------------------------
+
+
+def _find_ranges(
+    content: str, start_marker: str, end_marker: str,
+) -> list[tuple[int, int]]:
+    """扫描 content 中所有 start_marker..end_marker 区间（含标记本身）。
+
+    返回 [(start_idx, end_idx), ...]，其中 start_idx 是 start_marker 的起始位置，
+    end_idx 是 end_marker 结束后的位置（即区间为 content[start_idx:end_idx]）。
+    找到 start_marker 后从其后搜索最近的 end_marker；未配对的 start_marker 跳过。
+    """
+    ranges: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        s_idx = content.find(start_marker, search_from)
+        if s_idx == -1:
+            break
+        e_start = s_idx + len(start_marker)
+        e_idx = content.find(end_marker, e_start)
+        if e_idx == -1:
+            break
+        e_end = e_idx + len(end_marker)
+        ranges.append((s_idx, e_end))
+        search_from = e_end
+    return ranges
+
+
+def _handle_edit(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    """文本替换 — 支持 exact / regex / range 三种匹配模式。"""
+    path: str = str(args.get("path", "")).strip()
+    old_string: str = str(args.get("old_string", ""))
+    new_string: str = str(args.get("new_string", ""))
+    replace_all: bool = bool(args.get("replace_all", False))
+    match_mode: str = str(args.get("match_mode", "exact")).strip()
+    start_marker: str = str(args.get("start_marker", ""))
+    end_marker: str = str(args.get("end_marker", ""))
+
+    if not path:
+        return tool_error("path is required")
+
+    # --- 通用长度校验 ---
+    if len(new_string) > EDIT_FILE_MAX_CHARS:
+        return tool_error(
+            f"new_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(new_string)}). "
+            "Split the change into multiple sequential PatchEdit calls.",
+            path=path,
+        )
+
+    if match_mode == "range":
+        # range 模式：start_marker + end_marker + new_string 必填，old_string 忽略
+        if not start_marker:
+            return tool_error("start_marker is required when match_mode='range'", path=path)
+        if not end_marker:
+            return tool_error("end_marker is required when match_mode='range'", path=path)
+        if len(start_marker) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"start_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(start_marker)}).",
+                path=path,
+            )
+        if len(end_marker) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"end_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(end_marker)}).",
+                path=path,
+            )
+    else:
+        # exact / regex 模式：old_string + new_string 必填
+        if not old_string:
+            return tool_error("old_string is required")
+        if len(old_string) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"old_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(old_string)}). "
+                "Use a smaller, unique snippet with surrounding context instead.",
+                path=path,
+            )
+
+    if not _s().exists(path):
+        return tool_error("File not found — use Write to create it first", path=path)
+
+    try:
+        _track_agentspace_access(context, [(path, False)])
+        content: str = _s().read(path, limit=0, strict_utf8=True)
+    except Exception as exc:
+        return tool_error(str(exc), path=path)
+
+    # --- exact 模式：仅按原始文本匹配，替换文本原样写入 ---
+    if match_mode == "exact":
+        if old_string == new_string:
+            return tool_error("old_string and new_string are identical — nothing to change", path=path)
+        if old_string not in content:
+            return tool_error("old_string not found in file", path=path)
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+            diffs = []
+            search_from = 0
+            while True:
+                pos = content.find(old_string, search_from)
+                if pos == -1:
+                    break
+                start_line = content[:pos].count("\n") + 1
+                diffs.append([old_string, new_string, start_line])
+                search_from = pos + len(old_string)
+        else:
+            count = content.count(old_string)
+            if count > 1:
+                return tool_error(
+                    f"old_string matches {count} locations. Use more surrounding "
+                    f"context to make it unique, or set replace_all=true.",
+                    path=path, matches=count,
+                )
+            new_content = content.replace(old_string, new_string, 1)
+            start_pos = content.find(old_string)
+            start_line = content[:start_pos].count("\n") + 1
+            diffs = [[old_string, new_string, start_line]]
+
+    # --- regex 模式 ---
+    elif match_mode == "regex":
+        if old_string == new_string:
+            return tool_error("old_string and new_string are identical — nothing to change", path=path)
+        try:
+            pattern = re.compile(old_string)
+        except re.error as exc:
+            return tool_error(f"Invalid regex pattern: {exc}", path=path)
+        iter_matches = list(pattern.finditer(content))
+        if not iter_matches:
+            return tool_error("regex pattern did not match anything in file", path=path)
+        if replace_all:
+            new_content = pattern.sub(new_string, content)
+            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1] for m in iter_matches]
+        else:
+            if len(iter_matches) > 1:
+                return tool_error(
+                    f"regex matches {len(iter_matches)} locations. "
+                    f"Use replace_all=true or make the pattern more specific.",
+                    path=path, matches=len(iter_matches),
+                )
+            new_content = pattern.sub(new_string, content, count=1)
+            m = iter_matches[0]
+            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1]]
+
+    # --- range 模式：按原始文本匹配标记并原样写入替换文本 ---
+    elif match_mode == "range":
+        ranges = _find_ranges(content, start_marker, end_marker)
+        if not ranges:
+            if start_marker not in content:
+                return tool_error("start_marker not found in file", path=path)
+            return tool_error("end_marker not found after start_marker", path=path)
+        if not replace_all and len(ranges) > 1:
+            return tool_error(
+                f"range matches {len(ranges)} locations. "
+                f"Use replace_all=true or use more specific markers.",
+                path=path, matches=len(ranges),
+            )
+        target_ranges = ranges if replace_all else ranges[:1]
+        diffs = [[content[s:e], new_string, content[:s].count("\n") + 1] for s, e in target_ranges]
+        new_content = content
+        for start, end in reversed(target_ranges):
+            new_content = new_content[:start] + new_string + new_content[end:]
+
+    else:
+        return tool_error(
+            f"Invalid match_mode '{match_mode}'. Valid values: exact, regex, range.",
+            path=path,
+        )
+
+    try:
+        _s().write(path, new_content)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
+    result = tool_result(success=True, path=path, replaced=True, diffs=diffs)
+    if _lsp_diags is not None:
+        result["diagnostics"] = _lsp_diags
+    return result
+
+
+def _handle_copy(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    source: str = str(args.get("source", "")).strip()
+    destination: str = str(args.get("destination", "")).strip()
+    if not source:
+        return tool_error("source is required")
+    if not destination:
+        return tool_error("destination is required")
+    try:
+        resolved = _s().resolve_read(source)
+        if not resolved.real.exists():
+            return tool_error("Source not found", source=source)
+        is_directory = resolved.real.is_dir()
+        _track_agentspace_access(
+            context,
+            [(source, is_directory), (destination, is_directory)],
+        )
+        if resolved.real.is_file():
+            _s().copy(source, destination)
+        elif resolved.real.is_dir():
+            _s().copy_folder(source, destination)
+        else:
+            return tool_error("Source must be a file or directory", source=source)
+        return tool_result(success=True, source=source, destination=destination)
+    except Exception as exc:
+        return tool_error(str(exc), source=source, destination=destination)
+
+
+def _handle_move(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    source: str = str(args.get("source", "")).strip()
+    destination: str = str(args.get("destination", "")).strip()
+    if not source:
+        return tool_error("source is required")
+    if not destination:
+        return tool_error("destination is required")
+    try:
+        resolved = _s().resolve_read(source)
+        if not resolved.real.exists():
+            return tool_error("Source not found", source=source)
+        is_directory = resolved.real.is_dir()
+        _track_agentspace_access(
+            context,
+            [(source, is_directory), (destination, is_directory)],
+        )
+        _s().move(source, destination)
+        return tool_result(success=True, source=source, destination=destination)
+    except Exception as exc:
+        return tool_error(str(exc), source=source, destination=destination)
+
+
+async def _handle_search_files(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    from system.search_engine import search_files
+
+    return await search_files(args, context)
+
+
+async def _handle_grep(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if path:
+        try:
+            resolved = _s().resolve_read(path)
+            if resolved.real.is_file():
+                _track_agentspace_access(context, [(path, False)])
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
+        except Exception as exc:
+            return tool_error(f"Agentspace access lock failed: {exc}", path=path)
+
+    from system.search_engine import grep
+
+    return await grep(args, context)
+
 
 # ---------------------------------------------------------------------------
-# 注册（模块导入时执行）
+# 工具字段、schema 常量和处理函数只在本模块声明；ToolDiscoverySystem 显式调用 register_tools。
 # ---------------------------------------------------------------------------
 
 
@@ -948,10 +1228,12 @@ def _param_paths(paths_desc: str) -> dict[str, Any]:
 
 
 # -- Read 工具（统一文件/目录/图片读取）
-registry.register(
-    name="Read",
-    toolset="filesystem",
-    schema={
+
+# ---------------------------------------------------------------------------
+# schema constants
+# ---------------------------------------------------------------------------
+
+_READ_SCHEMA = {
         # 读取文件文本（保留 CRLF/LF/孤立 CR 和末尾换行，超长行截断展示）、列出目录条目、或读取图片/音频/视频文件。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
         # 文本按 offset/limit 分页，再按 max_line_chars 截断；目录和媒体忽略这些参数的有效值。
@@ -1143,18 +1425,10 @@ Video branch (user-message fallback path):
             },
             "required": ["path"],
         },
-    },
-    handler=_handle_read,
-    no_timeout=True,
-    is_async=True,
-)
+    }
 
 
-# -- Write
-registry.register(
-    name="Write",
-    toolset="filesystem",
-    schema={
+_WRITE_SCHEMA = {
         # 将内容写入文件（覆写或追加），或在省略 content 时创建目录。路径必须使用命名空间前缀。
         #
         # ## 前置条件
@@ -1268,40 +1542,10 @@ Directory creation (content omitted):
             },
             "required": ["path"],
         },
-    },
-    handler=_handle_write,
-    danger_level=ToolDangerLevel.write,
-)
+    }
 
 
-# -- Delete
-# 删除多个文件或目录。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
-# 根据路径类型自动分流：文件 → 直接删除；目录 → 递归删除整个目录树。
-#
-# ## 前置条件
-# - 路径必须存在。
-# - 路径必须使用可写命名空间前缀。
-#
-# ## 调用效果
-# 逐个删除指定路径。文件分支删除单个文件；目录分支递归删除目录及其所有内容。
-# 部分路径失败不影响其他路径的删除。
-#
-# ## 返回
-# ```json
-# {"results": [{"path": "ws:a.txt", "success": true, "deleted": true}, {"path": "ws:b.txt", "success": false, "error": "File not found"}], "summary": {"total": 2, "succeeded": 1, "failed": 1}}
-# ```
-#
-# ## 何时使用
-# - 删除不再需要的文件或目录。
-# - 清理 workspace 中的临时文件/目录。
-#
-# ## 副作用/注意
-# - ⚠️ 危险操作：删除后无法恢复（沙箱无回收站）；目录分支为递归删除。
-# - 只读命名空间返回访问错误。
-registry.register(
-    name="Delete",
-    toolset="filesystem",
-    schema={
+_DELETE_SCHEMA = {
         "description": """Delete multiple files or directories. Only writable namespaces are allowed (ws:, fork:, fix:, skills:). The branch is auto-detected from the path type: files are deleted directly; directories are deleted recursively with all their contents. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
@@ -1327,193 +1571,10 @@ Deletes each specified path. File branch deletes a single file; directory branch
   or a temporary directory (e.g. ``ws:tmp/``) first, so the content remains recoverable. Only use
   ``Delete`` for confirmed cleanup of trash/temp directories or when the content is certain to be unneeded.""",
         "parameters": _param_paths("files or directories to delete"),
-    },
-    handler=_handle_delete,
-    danger_level=ToolDangerLevel.write,
-)
+    }
 
 
-def _find_ranges(
-    content: str, start_marker: str, end_marker: str,
-) -> list[tuple[int, int]]:
-    """扫描 content 中所有 start_marker..end_marker 区间（含标记本身）。
-
-    返回 [(start_idx, end_idx), ...]，其中 start_idx 是 start_marker 的起始位置，
-    end_idx 是 end_marker 结束后的位置（即区间为 content[start_idx:end_idx]）。
-    找到 start_marker 后从其后搜索最近的 end_marker；未配对的 start_marker 跳过。
-    """
-    ranges: list[tuple[int, int]] = []
-    search_from = 0
-    while True:
-        s_idx = content.find(start_marker, search_from)
-        if s_idx == -1:
-            break
-        e_start = s_idx + len(start_marker)
-        e_idx = content.find(end_marker, e_start)
-        if e_idx == -1:
-            break
-        e_end = e_idx + len(end_marker)
-        ranges.append((s_idx, e_end))
-        search_from = e_end
-    return ranges
-
-
-def _handle_edit(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
-    """文本替换 — 支持 exact / regex / range 三种匹配模式。"""
-    path: str = str(args.get("path", "")).strip()
-    old_string: str = str(args.get("old_string", ""))
-    new_string: str = str(args.get("new_string", ""))
-    replace_all: bool = bool(args.get("replace_all", False))
-    match_mode: str = str(args.get("match_mode", "exact")).strip()
-    start_marker: str = str(args.get("start_marker", ""))
-    end_marker: str = str(args.get("end_marker", ""))
-
-    if not path:
-        return tool_error("path is required")
-
-    # --- 通用长度校验 ---
-    if len(new_string) > EDIT_FILE_MAX_CHARS:
-        return tool_error(
-            f"new_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(new_string)}). "
-            "Split the change into multiple sequential PatchEdit calls.",
-            path=path,
-        )
-
-    if match_mode == "range":
-        # range 模式：start_marker + end_marker + new_string 必填，old_string 忽略
-        if not start_marker:
-            return tool_error("start_marker is required when match_mode='range'", path=path)
-        if not end_marker:
-            return tool_error("end_marker is required when match_mode='range'", path=path)
-        if len(start_marker) > EDIT_FILE_MAX_CHARS:
-            return tool_error(
-                f"start_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(start_marker)}).",
-                path=path,
-            )
-        if len(end_marker) > EDIT_FILE_MAX_CHARS:
-            return tool_error(
-                f"end_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(end_marker)}).",
-                path=path,
-            )
-    else:
-        # exact / regex 模式：old_string + new_string 必填
-        if not old_string:
-            return tool_error("old_string is required")
-        if len(old_string) > EDIT_FILE_MAX_CHARS:
-            return tool_error(
-                f"old_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(old_string)}). "
-                "Use a smaller, unique snippet with surrounding context instead.",
-                path=path,
-            )
-
-    if not _s().exists(path):
-        return tool_error("File not found — use Write to create it first", path=path)
-
-    try:
-        _track_agentspace_access(context, [(path, False)])
-        content: str = _s().read(path, limit=0, strict_utf8=True)
-    except Exception as exc:
-        return tool_error(str(exc), path=path)
-
-    # --- exact 模式：仅按原始文本匹配，替换文本原样写入 ---
-    if match_mode == "exact":
-        if old_string == new_string:
-            return tool_error("old_string and new_string are identical — nothing to change", path=path)
-        if old_string not in content:
-            return tool_error("old_string not found in file", path=path)
-        if replace_all:
-            new_content = content.replace(old_string, new_string)
-            diffs = []
-            search_from = 0
-            while True:
-                pos = content.find(old_string, search_from)
-                if pos == -1:
-                    break
-                start_line = content[:pos].count("\n") + 1
-                diffs.append([old_string, new_string, start_line])
-                search_from = pos + len(old_string)
-        else:
-            count = content.count(old_string)
-            if count > 1:
-                return tool_error(
-                    f"old_string matches {count} locations. Use more surrounding "
-                    f"context to make it unique, or set replace_all=true.",
-                    path=path, matches=count,
-                )
-            new_content = content.replace(old_string, new_string, 1)
-            start_pos = content.find(old_string)
-            start_line = content[:start_pos].count("\n") + 1
-            diffs = [[old_string, new_string, start_line]]
-
-    # --- regex 模式 ---
-    elif match_mode == "regex":
-        if old_string == new_string:
-            return tool_error("old_string and new_string are identical — nothing to change", path=path)
-        try:
-            pattern = re.compile(old_string)
-        except re.error as exc:
-            return tool_error(f"Invalid regex pattern: {exc}", path=path)
-        iter_matches = list(pattern.finditer(content))
-        if not iter_matches:
-            return tool_error("regex pattern did not match anything in file", path=path)
-        if replace_all:
-            new_content = pattern.sub(new_string, content)
-            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1] for m in iter_matches]
-        else:
-            if len(iter_matches) > 1:
-                return tool_error(
-                    f"regex matches {len(iter_matches)} locations. "
-                    f"Use replace_all=true or make the pattern more specific.",
-                    path=path, matches=len(iter_matches),
-                )
-            new_content = pattern.sub(new_string, content, count=1)
-            m = iter_matches[0]
-            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1]]
-
-    # --- range 模式：按原始文本匹配标记并原样写入替换文本 ---
-    elif match_mode == "range":
-        ranges = _find_ranges(content, start_marker, end_marker)
-        if not ranges:
-            if start_marker not in content:
-                return tool_error("start_marker not found in file", path=path)
-            return tool_error("end_marker not found after start_marker", path=path)
-        if not replace_all and len(ranges) > 1:
-            return tool_error(
-                f"range matches {len(ranges)} locations. "
-                f"Use replace_all=true or use more specific markers.",
-                path=path, matches=len(ranges),
-            )
-        target_ranges = ranges if replace_all else ranges[:1]
-        diffs = [[content[s:e], new_string, content[:s].count("\n") + 1] for s, e in target_ranges]
-        new_content = content
-        for start, end in reversed(target_ranges):
-            new_content = new_content[:start] + new_string + new_content[end:]
-
-    else:
-        return tool_error(
-            f"Invalid match_mode '{match_mode}'. Valid values: exact, regex, range.",
-            path=path,
-        )
-
-    try:
-        _s().write(path, new_content)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-    _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
-    result = tool_result(success=True, path=path, replaced=True, diffs=diffs)
-    if _lsp_diags is not None:
-        result["diagnostics"] = _lsp_diags
-    return result
-
-
-registry.register(
-    name="PatchEdit",
-    toolset="filesystem",
-    schema={
+_PATCHEDIT_SCHEMA = {
         # 通过替换匹配文本为 new_string 来编辑文件。支持三种匹配模式：
         #   - exact（默认）：old_string 按原文逐字符匹配，必须唯一出现或设置 replace_all=true。
         #     new_string 原样写入，绝不自动转换换行；CRLF 文件的跨行片段需显式使用 \r\n。
@@ -1641,77 +1702,10 @@ Errors:
             },
             "required": ["path", "new_string"],
         },
-    },
-    handler=_handle_edit,
-    danger_level=ToolDangerLevel.write,
-)
+    }
 
 
-
-# -- Copy
-def _handle_copy(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
-    source: str = str(args.get("source", "")).strip()
-    destination: str = str(args.get("destination", "")).strip()
-    if not source:
-        return tool_error("source is required")
-    if not destination:
-        return tool_error("destination is required")
-    try:
-        resolved = _s().resolve_read(source)
-        if not resolved.real.exists():
-            return tool_error("Source not found", source=source)
-        is_directory = resolved.real.is_dir()
-        _track_agentspace_access(
-            context,
-            [(source, is_directory), (destination, is_directory)],
-        )
-        if resolved.real.is_file():
-            _s().copy(source, destination)
-        elif resolved.real.is_dir():
-            _s().copy_folder(source, destination)
-        else:
-            return tool_error("Source must be a file or directory", source=source)
-        return tool_result(success=True, source=source, destination=destination)
-    except Exception as exc:
-        return tool_error(str(exc), source=source, destination=destination)
-
-
-# -- copy_file
-# 复制文件或目录。源路径和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
-# 支持跨命名空间复制（如从 fork: 复制到 ws:）。
-# 根据源路径类型自动分流：
-#   - 文件分支：目标已存在则被覆盖。
-#   - 目录分支：递归复制整个目录树，目标路径必须**不存在**（shutil.copytree 限制），需先 Delete 再 Copy。
-#
-# ## 前置条件
-# - 源文件或目录必须存在。
-# - 目标路径不能与源路径相同。
-# - 目标路径所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 将源文件/目录复制到目标路径。文件分支目标已存在则覆盖；目录分支目标必须不存在。
-# 返回 source 和 destination 确认路径。
-#
-# ## 返回
-# ```json
-# {"success": true, "source": "fork:src/a.py", "destination": "ws:a.py"}
-# ```
-#
-# ## 何时使用
-# - 在不同命名空间之间复制文件/目录（如从 fork: 复制到 ws:）。
-# - 备份文件/目录到同一命名空间下的不同路径。
-#
-# ## 副作用/注意
-# - 写入文件系统。文件分支目标已存在则被覆盖。
-# - 目录分支目标路径必须**不存在**（与文件分支不同，copytree 不覆盖）。
-# - 跨命名空间复制时，目标命名空间必须可写。
-registry.register(
-    name="Copy",
-    toolset="filesystem",
-    schema={
+_COPY_SCHEMA = {
         "description": """Copy a file or directory. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying (e.g. from fork: to ws:). The branch is auto-detected from the source type:
 - **File branch**: copies a single file; the destination is overwritten if it already exists.
 - **Directory branch**: recursively copies the whole directory tree; the destination must **not** already exist (shutil.copytree limitation) — delete it first with Delete if needed.
@@ -1753,71 +1747,10 @@ Copies the source file/directory to the destination path. File branch overwrites
             },
             "required": ["source", "destination"],
         },
-    },
-    handler=_handle_copy,
-    danger_level=ToolDangerLevel.write,
-)
+    }
 
 
-
-
-# -- move_file
-def _handle_move(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
-    source: str = str(args.get("source", "")).strip()
-    destination: str = str(args.get("destination", "")).strip()
-    if not source:
-        return tool_error("source is required")
-    if not destination:
-        return tool_error("destination is required")
-    try:
-        resolved = _s().resolve_read(source)
-        if not resolved.real.exists():
-            return tool_error("Source not found", source=source)
-        is_directory = resolved.real.is_dir()
-        _track_agentspace_access(
-            context,
-            [(source, is_directory), (destination, is_directory)],
-        )
-        _s().move(source, destination)
-        return tool_result(success=True, source=source, destination=destination)
-    except Exception as exc:
-        return tool_error(str(exc), source=source, destination=destination)
-
-
-# -- Move
-# 移动或重命名文件/目录。目标路径可包含新名称，从而实现重命名。
-# 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
-# 支持跨命名空间移动（实现为复制+删除，非原子操作）。
-#
-# ## 前置条件
-# - 源文件或目录必须存在。
-# - 目标路径所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 将源文件或目录移动到目标路径。如果目标路径包含不同的文件名，同时完成重命名。
-# 如果目标已存在且为文件，会被覆盖。
-#
-# ## 返回
-# ```json
-# {"success": true, "source": "ws:src/old.py", "destination": "ws:src/new.py"}
-# ```
-#
-# ## 何时使用
-# - 将文件/目录移动到不同路径。
-# - 同时移动并重命名文件。
-# - 整理目录结构。
-#
-# ## 副作用/注意
-# - 写入文件系统。目标已存在则被覆盖。
-# - 源路径在移动后不再存在。
-# - 跨命名空间移动使用 shutil.move（内部复制后删除），不是原子操作。
-registry.register(
-    name="Move",
-    toolset="filesystem",
-    schema={
+_MOVE_SCHEMA = {
         "description": """Move or rename a file/directory. The destination can include a new name, effectively renaming. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace moving (implemented as copy + delete, not atomic).
 
 ## Prerequisites
@@ -1857,31 +1790,10 @@ Moves a file or directory to the destination path. If the destination includes a
             },
             "required": ["source", "destination"],
         },
-    },
-    handler=_handle_move,
-    danger_level=ToolDangerLevel.write,
-)
+    }
 
 
-
-
-# -- search_files
-async def _handle_search_files(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
-    from system.search_engine import search_files
-
-    return await search_files(args, context)
-
-
-# -- search_files
-# 通过统一搜索引擎按文件名 glob 递归搜索。默认遵循 ignore 文件并跳过隐藏路径；
-# full_scan 可包含被过滤路径，exhaustive 可完整扫描并在超限时写入日志。
-registry.register(
-    name="SearchFiles",
-    toolset="filesystem",
-    schema={
+_SEARCHFILES_SCHEMA = {
         "description": """Recursively search for files matching a filename glob pattern in a directory. Uses bundled ripgrep on supported Windows x64 builds and falls back to Python when ripgrep is unavailable. By default, respects .gitignore/.ignore/.rgignore and skips hidden paths. Set full_scan=true to include ignored and hidden paths. The limit is a real result cap unless exhaustive=true.
 
 ## Prerequisites
@@ -1939,40 +1851,10 @@ Fallback results include warning and engine="python".
             },
             "required": ["path", "pattern"],
         },
-    },
-    handler=_handle_search_files,
-    is_async=True,
-)
+    }
 
 
-# -- grep
-async def _handle_grep(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if path:
-        try:
-            resolved = _s().resolve_read(path)
-            if resolved.real.is_file():
-                _track_agentspace_access(context, [(path, False)])
-        except SandboxError as exc:
-            return tool_error(str(exc), path=path)
-        except Exception as exc:
-            return tool_error(f"Agentspace access lock failed: {exc}", path=path)
-
-    from system.search_engine import grep
-
-    return await grep(args, context)
-
-
-# -- grep
-# 通过统一搜索引擎递归搜索文本内容。默认遵循 ignore 文件并跳过隐藏路径；
-# 支持固定字符串、真实 limit 截断和 exhaustive 完整扫描。
-registry.register(
-    name="Grep",
-    toolset="filesystem",
-    schema={
+_GREP_SCHEMA = {
         "description": f"""Recursively search text file contents in a directory or a single file. Uses bundled ripgrep on supported Windows x64 builds and falls back to Python when ripgrep is unavailable or a single query is incompatible. By default, respects .gitignore/.ignore/.rgignore, skips hidden paths, skips binary files, and skips files larger than max_file_size. The limit is a real result cap unless exhaustive=true.
 
 ## Prerequisites
@@ -2050,8 +1932,79 @@ Fallback results include warning and engine="python".
             },
             "required": ["path", "pattern"],
         },
-    },
-    handler=_handle_grep,
-    is_async=True,
-)
+    }
+
+
+# ---------------------------------------------------------------------------
+# register
+# ---------------------------------------------------------------------------
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register filesystem tools."""
+    del ui_events
+
+    registry.register(
+        name="Read",
+        toolset="filesystem",
+        schema=_READ_SCHEMA,
+        handler=_handle_read,
+        no_timeout=True,
+        is_async=True,
+    )
+
+    registry.register(
+        name="Write",
+        toolset="filesystem",
+        schema=_WRITE_SCHEMA,
+        handler=_handle_write,
+        danger_level=ToolDangerLevel.write,
+    )
+
+    registry.register(
+        name="Delete",
+        toolset="filesystem",
+        schema=_DELETE_SCHEMA,
+        handler=_handle_delete,
+        danger_level=ToolDangerLevel.write,
+    )
+
+    registry.register(
+        name="PatchEdit",
+        toolset="filesystem",
+        schema=_PATCHEDIT_SCHEMA,
+        handler=_handle_edit,
+        danger_level=ToolDangerLevel.write,
+    )
+
+    registry.register(
+        name="Copy",
+        toolset="filesystem",
+        schema=_COPY_SCHEMA,
+        handler=_handle_copy,
+        danger_level=ToolDangerLevel.write,
+    )
+
+    registry.register(
+        name="Move",
+        toolset="filesystem",
+        schema=_MOVE_SCHEMA,
+        handler=_handle_move,
+        danger_level=ToolDangerLevel.write,
+    )
+
+    registry.register(
+        name="SearchFiles",
+        toolset="filesystem",
+        schema=_SEARCHFILES_SCHEMA,
+        handler=_handle_search_files,
+        is_async=True,
+    )
+
+    registry.register(
+        name="Grep",
+        toolset="filesystem",
+        schema=_GREP_SCHEMA,
+        handler=_handle_grep,
+        is_async=True,
+    )
 

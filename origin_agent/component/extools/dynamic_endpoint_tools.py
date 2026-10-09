@@ -1,6 +1,7 @@
 """动态端点工具 — agent 为自身注册 HTTP POST 端点，供前端按钮触发回调。
 
-属于 extools，模块导入时通过 ``registry.register()`` 注册三个工具：
+属于 extools，注册入口为顶层 ``register_tools(registry, ui_events)``，由
+ToolDiscoverySystem 显式调用。注册三个工具：
 
   - ``RegisterDynamicEndpoint``   — 注册端点，返回 URL
   - ``UnregisterDynamicEndpoint`` — 解除注册
@@ -29,268 +30,45 @@ block 数组严格校验，任一 block 不合法返回 400 并指明 block 索�
 
 from __future__ import annotations
 
-import json
 import logging
-import threading
-import time
-from pathlib import Path
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entry.base_agent_loop import ToolContext
-from entity.constant import DYNAMIC_ENDPOINTS_STORE_FILENAME
 from entity.puretype import ToolAvailability, ToolDangerLevel, DynamicEndpointInfo
-from system.atomic_io import write_text_atomic
+from system.application import Application
+from component.dynamic_endpoints import DynamicEndpointSystem
 
 logger = logging.getLogger(__name__)
 
-# ── 内存注册表 ───────────────────────────────────────────────
-# endpoint_name → DynamicEndpointInfo
-# 磁盘镜像：workspace/dynamic_endpoints.json（name-keyed dict）。
-# key 是 endpoint name（即 URL 路径段），全局唯一。
-
-_dynamic_endpoints: dict[str, DynamicEndpointInfo] = {}
-_endpoint_lock = threading.Lock()
+# 动态端点状态由 DynamicEndpointSystem 唯一持有；本模块只保留工具协议适配。
 
 
-# ── 公开 API（供 gateway/server.py 调用）────────────────────
+# ── System适配入口 ─────────────────────────────────────────
+
+def _endpoint_system() -> DynamicEndpointSystem:
+    return Application.current().get_system(DynamicEndpointSystem)
 
 
 def lookup_endpoint(endpoint_name: str) -> DynamicEndpointInfo | None:
-    """查注册表，返回 ``DynamicEndpointInfo`` 或 ``None``。
-
-    线程安全，持锁读取后立即释放。
-    """
-    with _endpoint_lock:
-        return _dynamic_endpoints.get(endpoint_name)
-
-
-# ── 持久化 ──────────────────────────────────────────────────
-
-
-def _get_dynamic_endpoints_store_path() -> Path:
-    """返回动态端点持久化文件路径。
-
-    从 ``RuntimeContext.workspace`` 获取实际工作空间路径。
-    RuntimeContext 未初始化时抛出 RuntimeError。
-    """
-    from system.context import get_runtime_context
-
-    ctx = get_runtime_context()
-    return ctx.workspace / DYNAMIC_ENDPOINTS_STORE_FILENAME
-
-
-def _save_all_endpoints() -> None:
-    """将内存注册表持久化到磁盘（原子写入）。
-
-    合并式写盘：读现有磁盘文件，保留其中不在内存的幽灵条目
-    （属于已删除/无效会话，恢复时被过滤跳过的部分），与内存条目
-    合并后整体写回 — 保证"资源保留在硬盘上"的语义，unregister
-    的显式删除走 ``_delete_endpoint_on_disk``。
-
-    磁盘 schema：``{"<name>": {"session_id": ..., "agent_name": ..., "name": ..., "created_at": ...}}``，
-    同名 key 以内存条目为准（覆盖磁盘）。
-    """
-    try:
-        store_path = _get_dynamic_endpoints_store_path()
-        store_path.parent.mkdir(parents=True, exist_ok=True)
-        with _endpoint_lock:
-            payload: dict[str, dict[str, Any]] = {}
-            for eid, info in _dynamic_endpoints.items():
-                payload[eid] = info.model_dump()
-            # 保留磁盘上未加载的幽灵条目
-            if store_path.exists():
-                try:
-                    raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
-                    for eid, data in raw.items():
-                        if eid not in payload:
-                            payload[eid] = data
-                except Exception:
-                    logger.warning("Failed to read existing dynamic endpoints store, skipping ghost merge", exc_info=True)
-            write_text_atomic(
-                store_path,
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                tmp_suffix=".tmp",
-            )
-    except Exception as exc:
-        logger.error("Failed to save dynamic endpoints: %s", exc)
-
-
-def _delete_endpoint_on_disk(name: str) -> None:
-    """从磁盘持久化文件显式删除单条记录（unregister 专用）。
-
-    与 ``_save_all_endpoints`` 的合并语义配合：若走合并式写盘，
-    被 unregister 的条目会被当作幽灵条目保留，故此处显式删除。
-    """
-    try:
-        store_path = _get_dynamic_endpoints_store_path()
-        if not store_path.exists():
-            return
-        with _endpoint_lock:
-            raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
-            removed = raw.pop(name, None)
-            if removed is None:
-                return
-            write_text_atomic(
-                store_path,
-                json.dumps(raw, ensure_ascii=False, indent=2),
-                tmp_suffix=".tmp",
-            )
-    except Exception as exc:
-        logger.warning("Failed to delete dynamic endpoint %s from disk: %s", name, exc)
-
-
-def _load_all_endpoints() -> None:
-    """进程重启后从磁盘恢复动态端点。
-
-    恢复时检查会话是否存在：仅加载 ``Application.current().session_manager.exists(sid)``
-    为真的端点；已删除/无效会话的条目跳过加载，但保留在磁盘文件中，
-    待下一次写盘时作为幽灵条目留存。
-    """
-    try:
-        store_path = _get_dynamic_endpoints_store_path()
-    except RuntimeError:
-        return
-    if not store_path.exists():
-        return
-    try:
-        raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("Failed to load dynamic endpoints: %s", exc)
-        return
-
-    from system.application import Application
-    sm = Application.current().session_manager
-    restored = 0
-    skipped = 0
-    with _endpoint_lock:
-        for eid, data in raw.items():
-            try:
-                info = DynamicEndpointInfo.model_validate(data)
-                if sm is not None and sm.exists(info.session_id):
-                    _dynamic_endpoints[eid] = info
-                    restored += 1
-                else:
-                    skipped += 1
-            except Exception as exc:
-                logger.warning("Failed to restore dynamic endpoint %s: %s", eid, exc)
-    if restored or skipped:
-        logger.info(
-            "Dynamic endpoints restored | loaded=%d skipped=%d (invalid/deleted sessions, kept on disk)",
-            restored, skipped,
-        )
-
-
-# ── 会话级查询与迁移 ────────────────────────────────────────
+    return _endpoint_system().lookup_endpoint(endpoint_name)
 
 
 def list_session_endpoints(session_id: str, agent_name: str | None = None) -> list[dict[str, Any]]:
-    """返回指定会话的所有动态端点（序列化列表，供 API 层消费）。
-
-    返回 ``[{name, url, absolute_url, agent_name, created_at}]``，url 由会话与角色派生。
-    ``agent_name`` 非空时仅返回该 agent 的端点；为 None 时返回全部（向后兼容）。
-    线程安全，持锁读取后立即释放。
-    """
-    from system.context import get_runtime_context
-    ctx = get_runtime_context()
-    with _endpoint_lock:
-        return [
-            {
-                "name": info.name,
-                "url": f"/dynamic/{info.session_id}/{info.agent_name}/{info.name}",
-                "absolute_url": f"http://{ctx.gateway_host}:{ctx.gateway_port}/dynamic/{info.session_id}/{info.agent_name}/{info.name}",
-                "agent_name": info.agent_name,
-                "created_at": info.created_at,
-            }
-            for info in _dynamic_endpoints.values()
-            if info.session_id == session_id
-            and (agent_name is None or info.agent_name == agent_name)
-        ]
+    return _endpoint_system().list_session_endpoints(session_id, agent_name)
 
 
 def migrate_session_endpoints(old_sid: str, new_sid: str) -> int:
-    """将会话旋转（上下文超限续写）时的动态端点迁移到继承会话。
-
-    仅更新条目 ``session_id`` 字段（key 不变），随后持久化。
-    手动终结（terminate）路径不调用本函数，端点不继承。
-    """
-    count = 0
-    with _endpoint_lock:
-        for info in _dynamic_endpoints.values():
-            if info.session_id == old_sid:
-                info.session_id = new_sid
-                count += 1
-    if count:
-        logger.info(
-            "Migrated %d dynamic endpoints | old=%s new=%s", count, old_sid, new_sid,
-        )
-        _save_all_endpoints()
-    return count
+    return _endpoint_system().migrate_session_endpoints(old_sid, new_sid)
 
 
 def cleanup_session_endpoints(session_id: str) -> int:
-    """删除指定会话的所有动态端点（内存 + 磁盘），返回移除数量。
-
-    与 ``migrate_session_endpoints`` 对称，语义为彻底删除而非迁移。
-    内存：移除 ``_dynamic_endpoints`` 中 ``info.session_id == session_id``
-    的条目。磁盘：读 ``dynamic_endpoints.json``，按 ``session_id`` 过滤剔除
-    （含幽灵条目——重启时被 ``_load_all_endpoints`` 跳过但保留在磁盘的部分），
-    原子写回。
-
-    关键差异 vs ``_save_all_endpoints``：本函数采用"读-过滤-写"删除语义，
-    不走合并保留——否则被删会话的幽灵端点会被合并式写盘保留回来。
-
-    单次持 ``_endpoint_lock`` 完成内存 + 磁盘操作，与 ``_save_all_endpoints``
-    持锁做磁盘 IO 的风格一致。整段 try/except 容错，失败 ``logger.warning``，
-    返回已统计数。
-
-    由 ``cleanup_session_resources`` 在会话永久删除时调用。动态端点与
-    Shell会话互不引用，可在 Cron 清理后独立删除。
-    """
-    in_memory = 0
-    on_disk = 0
-    try:
-        store_path = _get_dynamic_endpoints_store_path()
-        with _endpoint_lock:
-            # 内存：pop 该会话的端点
-            ghost_eids = [
-                eid for eid, info in _dynamic_endpoints.items()
-                if info.session_id == session_id
-            ]
-            for eid in ghost_eids:
-                _dynamic_endpoints.pop(eid, None)
-                in_memory += 1
-            # 磁盘：读-过滤-写，剔除该会话全部条目（含幽灵）
-            if store_path.exists():
-                try:
-                    raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
-                except Exception:
-                    raw = {}
-                kept: dict[str, Any] = {
-                    eid: data for eid, data in raw.items()
-                    if not (isinstance(data, dict) and data.get("session_id") == session_id)
-                }
-                on_disk = len(raw) - len(kept)
-                if on_disk:
-                    write_text_atomic(
-                        store_path,
-                        json.dumps(kept, ensure_ascii=False, indent=2),
-                        tmp_suffix=".tmp",
-                    )
-        if in_memory or on_disk:
-            logger.info(
-                "Cleaned up session endpoints | session=%s in_memory=%d on_disk=%d",
-                session_id, in_memory, on_disk,
-            )
-    except Exception as exc:
-        logger.warning(
-            "Failed to cleanup session endpoints for session=%s: %s",
-            session_id, exc, exc_info=True,
-        )
-    return max(in_memory, on_disk)
+    return _endpoint_system().cleanup_session_endpoints(session_id)
 
 
 # ── handler ─────────────────────────────────────────────────
+
 
 
 async def _handle_register_dynamic_endpoint(
@@ -340,29 +118,12 @@ async def _handle_register_dynamic_endpoint(
     if not safe_name or any(c in safe_name for c in "{}<>\"#?"):
         return tool_error(f"'name' contains invalid characters for URL path: {name!r}")
 
-    # 同一 session+agent 下 name 必须唯一
-    with _endpoint_lock:
-        for info in _dynamic_endpoints.values():
-            if (info.session_id == session_id
-                    and info.agent_name == agent_name
-                    and info.name == safe_name):
-                return tool_error(
-                    f"Endpoint name '{safe_name}' already registered for this session+agent"
-                )
+    info = _endpoint_system().register_endpoint(session_id, agent_name, safe_name)
+    url: str = f"/dynamic/{session_id}/{agent_name}/{info.name}"
 
-        _dynamic_endpoints[safe_name] = DynamicEndpointInfo(
-            session_id=session_id,
-            agent_name=agent_name,
-            name=safe_name,
-            created_at=time.time(),
-        )
-
-    _save_all_endpoints()
-
-    url: str = f"/dynamic/{session_id}/{agent_name}/{safe_name}"
-
-    from system.context import get_runtime_context
-    ctx = get_runtime_context()
+    from system.application import Application
+    from system.runtime import RuntimeSystem
+    ctx = Application.current().get_system(RuntimeSystem).context
     absolute_url: str = f"http://{ctx.gateway_host}:{ctx.gateway_port}{url}"
 
     logger.info(
@@ -395,13 +156,10 @@ async def _handle_unregister_dynamic_endpoint(
     if not name:
         return tool_error("'name' is required")
 
-    with _endpoint_lock:
-        removed = _dynamic_endpoints.pop(name, None)
-
-    if removed is None:
+    try:
+        removed = _endpoint_system().unregister_endpoint(name)
+    except LookupError:
         return tool_error(f"Endpoint not found: {name}")
-
-    _delete_endpoint_on_disk(name)
 
     logger.info(
         "Dynamic endpoint unregistered | name=%s session=%s agent=%s",
@@ -441,49 +199,53 @@ async def _handle_list_dynamic_endpoints(
 
 # ── 注册 ─────────────────────────────────────────────────────
 
-registry.register(
-    name="RegisterDynamicEndpoint",
-    toolset="dynamic",
-    schema={
-        # 注册一个动态 HTTP POST 端点，返回 URL 供 agent 在消息中渲染可点击按钮。
-        #
-        # ## 前置条件
-        # 无特殊前置条件，任意会话中的 agent 均可调用。
-        # 当前 agent 角色名和 session_id 从 ToolContext 自动获取，无需传入。
-        #
-        # ## 调用效果
-        # 在注册表中创建一条端点记录，路径格式为
-        # /dynamic/{session_id}/{agent_name}/{endpoint_id}。
-        # 注册表持久化至 workspace/dynamic_endpoints.json，
-        # 进程重启后按会话存在性恢复，unregister 后端点立即失效。
-        #
-        # ## 返回
-        # ```json
-        # {"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
-        # ```
-        #
-        # ## 何时使用
-        # - 需要用户通过点击按钮触发回调时。
-        # - 需要向自己投递一条自定义内容的系统消息时。
-        #
-        # ## 副作用/注意
-        # - 注册写入持久化文件（workspace 下），重启后可恢复。
-        # - agent 输出按钮时必须包含 <script> 标签才能触发 SafeHtml iframe 渲染路径，
-        #   纯 <button onclick="..."> 不含 <script> 时走 ReactMarkdown 路径，onclick 不生效。
-        # - POST body 支持两种内容载体：
-        #   message (str)：纯文本消息（向后兼容，watching service 等既有调用方使用）。
-        #   content (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
-        #     block 数组中每项为 {type:"text", text:"..."}、
-        #     {type:"image_url", image_url:{url:"data:image/...;base64,..."}}、
-        #     {type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}、
-        #     {type:"video_url", video_url:{url:"data:video/...;base64,..."}}。
-        #     也可以是纯字符串（等价于 message）。
-        # - content 优先于 message；content 为空数组或空白字符串时回退到 message。
-        # - block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
-        # - 投递的消息格式为 [dynamic-endpoint] {endpoint_id}\n{message}；
-        #   使用 content block 数组时，前缀作为独立的首个 text block 注入。
-        # - 端点无鉴权，与现有 API 一致（localhost 信任模型）。
-        "description": """Register a dynamic HTTP POST endpoint that delivers a self-visible system message when triggered.
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register dynamic endpoint tools into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="RegisterDynamicEndpoint",
+        toolset="dynamic",
+        schema={
+            # 注册一个动态 HTTP POST 端点，返回 URL 供 agent 在消息中渲染可点击按钮。
+            #
+            # ## 前置条件
+            # 无特殊前置条件，任意会话中的 agent 均可调用。
+            # 当前 agent 角色名和 session_id 从 ToolContext 自动获取，无需传入。
+            #
+            # ## 调用效果
+            # 在注册表中创建一条端点记录，路径格式为
+            # /dynamic/{session_id}/{agent_name}/{endpoint_id}。
+            # 注册表持久化至 workspace/dynamic_endpoints.json，
+            # 进程重启后按会话存在性恢复，unregister 后端点立即失效。
+            #
+            # ## 返回
+            # ```json
+            # {"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
+            # ```
+            #
+            # ## 何时使用
+            # - 需要用户通过点击按钮触发回调时。
+            # - 需要向自己投递一条自定义内容的系统消息时。
+            #
+            # ## 副作用/注意
+            # - 注册写入持久化文件（workspace 下），重启后可恢复。
+            # - agent 输出按钮时必须包含 <script> 标签才能触发 SafeHtml iframe 渲染路径，
+            #   纯 <button onclick="..."> 不含 <script> 时走 ReactMarkdown 路径，onclick 不生效。
+            # - POST body 支持两种内容载体：
+            #   message (str)：纯文本消息（向后兼容，watching service 等既有调用方使用）。
+            #   content (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
+            #     block 数组中每项为 {type:"text", text:"..."}、
+            #     {type:"image_url", image_url:{url:"data:image/...;base64,..."}}、
+            #     {type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}、
+            #     {type:"video_url", video_url:{url:"data:video/...;base64,..."}}。
+            #     也可以是纯字符串（等价于 message）。
+            # - content 优先于 message；content 为空数组或空白字符串时回退到 message。
+            # - block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
+            # - 投递的消息格式为 [dynamic-endpoint] {endpoint_id}\n{message}；
+            #   使用 content block 数组时，前缀作为独立的首个 text block 注入。
+            # - 端点无鉴权，与现有 API 一致（localhost 信任模型）。
+            "description": """Register a dynamic HTTP POST endpoint that delivers a self-visible system message when triggered.
 
 ## Prerequisites
 No special prerequisites. Any agent in any session can call this. The current agent name and session_id are automatically obtained from the ToolContext.
@@ -512,55 +274,55 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
 - The delivered message format is: [dynamic-endpoint] {name}\\n{message}; when using `content` blocks, the prefix is injected as a separate leading text block.
 - Endpoints have no authentication, consistent with existing APIs (localhost trust model).
 - Use unregister_dynamic_endpoint to remove the endpoint when no longer needed.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string",
-                    # 注册此端点的原因说明。
-                    "description": """Reason for registering this dynamic endpoint.""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        # 注册此端点的原因说明。
+                        "description": """Reason for registering this dynamic endpoint.""",
+                    },
+                    "name": {
+                        "type": "string",
+                        # 端点名称，直接作为 URL 路径段。同一 session+agent 下必须唯一。
+                        "description": """Name for the endpoint, used directly as the URL path segment (/dynamic/{session_id}/{agent_name}/{name}). Must be unique per session+agent. Allowed characters: alphanumeric, hyphens, underscores.""",
+                    },
                 },
-                "name": {
-                    "type": "string",
-                    # 端点名称，直接作为 URL 路径段。同一 session+agent 下必须唯一。
-                    "description": """Name for the endpoint, used directly as the URL path segment (/dynamic/{session_id}/{agent_name}/{name}). Must be unique per session+agent. Allowed characters: alphanumeric, hyphens, underscores.""",
-                },
+                "required": ["reason", "name"],
             },
-            "required": ["reason", "name"],
         },
-    },
-    handler=_handle_register_dynamic_endpoint,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+        handler=_handle_register_dynamic_endpoint,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
 
-registry.register(
-    name="UnregisterDynamicEndpoint",
-    toolset="dynamic",
-    schema={
-        # 解除注册指定端点，后续 POST 请求将返回 404。
-        #
-        # ## 前置条件
-        # name 必须是由 register_dynamic_endpoint 注册的有效端点名称。
-        #
-        # ## 调用效果
-        # 从注册表删除该端点并同步移除持久化记录，
-        # 后续 POST 请求将因找不到注册而返回 404。
-        #
-        # ## 返回
-        # ```json
-        # {"success": true, "unregistered": true, "name": "my-button", "message": "..."}
-        # ```
-        #
-        # ## 何时使用
-        # - 端点不再需要时。
-        # - 防止旧端点被意外触发时。
-        #
-        # ## 副作用/注意
-        # - 同时从持久化文件（workspace 下）删除该记录。
-        # - 已经发出的 POST 请求不受影响（在途请求仍会处理）。
-        "description": """Unregister a dynamic endpoint by its name. Subsequent POST requests to it will return 404.
+    registry.register(
+        name="UnregisterDynamicEndpoint",
+        toolset="dynamic",
+        schema={
+            # 解除注册指定端点，后续 POST 请求将返回 404。
+            #
+            # ## 前置条件
+            # name 必须是由 register_dynamic_endpoint 注册的有效端点名称。
+            #
+            # ## 调用效果
+            # 从注册表删除该端点并同步移除持久化记录，
+            # 后续 POST 请求将因找不到注册而返回 404。
+            #
+            # ## 返回
+            # ```json
+            # {"success": true, "unregistered": true, "name": "my-button", "message": "..."}
+            # ```
+            #
+            # ## 何时使用
+            # - 端点不再需要时。
+            # - 防止旧端点被意外触发时。
+            #
+            # ## 副作用/注意
+            # - 同时从持久化文件（workspace 下）删除该记录。
+            # - 已经发出的 POST 请求不受影响（在途请求仍会处理）。
+            "description": """Unregister a dynamic endpoint by its name. Subsequent POST requests to it will return 404.
 
 ## Prerequisites
 name must be a valid endpoint name returned by register_dynamic_endpoint.
@@ -580,50 +342,50 @@ Removes the endpoint from the registry and its persisted record. Subsequent POST
 ## Side Effects / Notes
 - The persisted record is also removed from disk; the endpoint cannot be restored after restart.
 - In-flight POST requests that have already been received are not affected.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # register_dynamic_endpoint 注册时使用的端点名称。
-                    "description": """Name of the endpoint to unregister (same name used in register_dynamic_endpoint).""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        # register_dynamic_endpoint 注册时使用的端点名称。
+                        "description": """Name of the endpoint to unregister (same name used in register_dynamic_endpoint).""",
+                    },
                 },
+                "required": ["name"],
             },
-            "required": ["name"],
         },
-    },
-    handler=_handle_unregister_dynamic_endpoint,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+        handler=_handle_unregister_dynamic_endpoint,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
 
-registry.register(
-    name="ListDynamicEndpoints",
-    toolset="dynamic",
-    schema={
-        # 列出当前 agent 自己注册的动态端点（按 agent 过滤，看不到其他 agent 的端点）。
-        #
-        # ## 前置条件
-        # 无。
-        #
-        # ## 调用效果
-        # 返回当前 agent 自己注册的所有动态端点，包括 name、url 等信息。
-        # 在多 agent 模式下，只能看到自己注册的端点，看不到其他 agent 的端点。
-        #
-        # ## 返回
-        # ```json
-        # {"success": true, "count": 2, "endpoints": [{"name": "...", "url": "/dynamic/sid/agent/eid", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
-        # ```
-        #
-        # ## 何时使用
-        # - 查看自己当前有哪些动态端点。
-        # - 获取 endpoint_id 以便取消注册。
-        #
-        # ## 副作用/注意
-        # - 纯查询，不会修改端点状态。
-        # - 只返回当前 agent 自己注册的端点，不含其他 agent 的端点。
-        "description": """List dynamic endpoints registered by the current agent (not all agents' endpoints).
+    registry.register(
+        name="ListDynamicEndpoints",
+        toolset="dynamic",
+        schema={
+            # 列出当前 agent 自己注册的动态端点（按 agent 过滤，看不到其他 agent 的端点）。
+            #
+            # ## 前置条件
+            # 无。
+            #
+            # ## 调用效果
+            # 返回当前 agent 自己注册的所有动态端点，包括 name、url 等信息。
+            # 在多 agent 模式下，只能看到自己注册的端点，看不到其他 agent 的端点。
+            #
+            # ## 返回
+            # ```json
+            # {"success": true, "count": 2, "endpoints": [{"name": "...", "url": "/dynamic/sid/agent/eid", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
+            # ```
+            #
+            # ## 何时使用
+            # - 查看自己当前有哪些动态端点。
+            # - 获取 endpoint_id 以便取消注册。
+            #
+            # ## 副作用/注意
+            # - 纯查询，不会修改端点状态。
+            # - 只返回当前 agent 自己注册的端点，不含其他 agent 的端点。
+            "description": """List dynamic endpoints registered by the current agent (not all agents' endpoints).
 
 ## Prerequisites
 None.
@@ -643,13 +405,13 @@ Returns metadata for all dynamic endpoints registered by the current agent, incl
 ## Side Effects / Notes
 - Read-only query; does not modify endpoint state.
 - Only returns the current agent's own endpoints, not those of other agents.""",
-        "parameters": {
-            "type": "object",
-            "properties": {},
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
         },
-    },
-    handler=_handle_list_dynamic_endpoints,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+        handler=_handle_list_dynamic_endpoints,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )

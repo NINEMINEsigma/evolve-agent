@@ -28,7 +28,6 @@ from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
 from system.sandbox import Sandbox
-from system.modality_capability import build_modality_prompt_block
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
@@ -151,9 +150,11 @@ def build_subagent_catalog_block() -> str:
 
     try:
         from system.application import Application
+        from system.sandbox import Sandbox
+        from system.llm_profile_store import LLMProfileStore
 
         app = Application.current()
-        resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+        resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
         profiles = resolver.discover()
     except Exception:
         logger.warning("Failed to build sub-agent catalog prompt", exc_info=True)
@@ -302,9 +303,15 @@ def build_system_prompt(
 
     # 3b. 多模态能力与转发配置 — 有活跃 profile 时注入（只读探测缓存，不触发探测）
     if profile is not None:
-        modality_block: str = build_modality_prompt_block(
-            profile,
-            Path(agentspace) if agentspace else None,
+        from system.application import Application
+        from system.modality_capability import ModalityCapabilitySystem
+        modality_block: str = (
+            Application.current()
+            .get_system(ModalityCapabilitySystem)
+            .build_modality_prompt_block(
+                profile,
+                Path(agentspace) if agentspace else None,
+            )
         )
         if modality_block:
             blocks.append(modality_block)

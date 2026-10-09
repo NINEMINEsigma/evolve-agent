@@ -153,7 +153,8 @@ class LoopSessionManager:
             )
 
         warnings: list[str] = []
-        metadata_service = self._loop.app.session_metadata_service
+        from system.session_metadata import SessionMetadataService
+        metadata_service = self._loop.app.get_system(SessionMetadataService)
         try:
             await metadata_service.ensure_summary(session_id)
         except Exception as exc:
@@ -180,7 +181,8 @@ class LoopSessionManager:
 
         sm.archive(session_id, continuation_sid=None)
         try:
-            await self._loop.app.shell_manager.stop_session(session_id)
+            from system.shell_manager import ShellManager
+            await self._loop.app.get_system(ShellManager).stop_session(session_id)
         except Exception as exc:
             logger.exception(
                 "Failed to stop Shell sessions during termination | session=%s",
@@ -234,11 +236,12 @@ class LoopSessionManager:
             )
 
         try:
+            from system.session_metadata import SessionMetadataService
             new_sid = await terminate_and_rotate_session(
                 session_id=session_id,
                 session_store=self._loop.session_store,
                 session_manager=sm,
-                metadata_service=self._loop.app.session_metadata_service,
+                metadata_service=self._loop.app.get_system(SessionMetadataService),
                 loop_meta=loop_meta,
                 current_character_agent=self._loop.current_character_agent,
             )
@@ -271,7 +274,8 @@ class LoopSessionManager:
             )
 
         try:
-            tags = await self._loop.app.session_metadata_service.generate_tags(
+            from system.session_metadata import SessionMetadataService
+            tags = await self._loop.app.get_system(SessionMetadataService).generate_tags(
                 session_id,
                 sm.get_all_tags(),
             )
@@ -384,28 +388,18 @@ async def terminate_and_rotate_session(
 
     session_manager.archive(old_sid, continuation_sid=new_sid)
 
-    try:
-        from component.extools import cron_tools
+    from component.cron_router import CronRouter
+    from system.application import Application
+    Application.current().get_system(CronRouter).migrate_session_cron_jobs(old_sid, new_sid)
 
-        cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
-    except Exception:
-        logger.exception(
-            "Failed to migrate cron jobs from %s to %s", old_sid, new_sid
-        )
-
-    try:
-        from component.extools.dynamic_endpoint_tools import migrate_session_endpoints
-
-        migrate_session_endpoints(old_sid, new_sid)
-    except Exception:
-        logger.exception(
-            "Failed to migrate dynamic endpoints from %s to %s", old_sid, new_sid
-        )
+    from component.dynamic_endpoints import DynamicEndpointSystem
+    Application.current().get_system(DynamicEndpointSystem).migrate_session_endpoints(old_sid, new_sid)
 
     try:
         from system.application import Application
+        from system.shell_manager import ShellManager
 
-        migrated_shells = Application.current().shell_manager.migrate_session(
+        migrated_shells = Application.current().get_system(ShellManager).migrate_session(
             old_sid,
             new_sid,
         )

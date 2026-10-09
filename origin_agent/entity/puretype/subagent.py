@@ -26,6 +26,14 @@ class SubAgentFeedback(BaseModel):
     character_name: str | None = None
 
 
+class SubAgentFeedbackDelivery(BaseModel):
+    """子会话反馈的进程内交接记录，不写入持久化消息格式。"""
+
+    sequence: int = Field(gt=0)
+    text: str
+    delivered: bool = False
+
+
 class SubAgentPendingApproval(BaseModel):
     """子Agent等待父Agent审批的工具调用。"""
 

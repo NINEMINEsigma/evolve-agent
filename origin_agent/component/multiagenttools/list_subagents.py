@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_result
+from abstract.tools.registry import ToolRegistry, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
 from subagent.profile import CharacterProfileResolver
@@ -20,7 +21,8 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     name_to_session: dict[str, dict[str, Any]] = {}
     if parent_session_id:
         try:
-            orch = Application.current().subagent_orchestrator
+            from subagent.orchestrator import SubAgentOrchestrator
+            orch = Application.current().get_system(SubAgentOrchestrator)
             snapshot = orch.get_snapshot(parent_session_id=parent_session_id)
             for session_id, info in snapshot.subagents.items():
                 name = info.name
@@ -42,7 +44,9 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
             )
 
     app = Application.current()
-    resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+    from system.sandbox import Sandbox
+    from system.llm_profile_store import LLMProfileStore
+    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
     agents: list[dict[str, Any]] = []
     for profile in resolver.discover():
         agents.append({
@@ -63,34 +67,37 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="ListSubAgents",
-    toolset="multiagent",
-    schema={
-        # 动态扫描所有角色档案，并返回当前主会话下的子Agent运行状态。
-        #
-        # ## 前置条件
-        # 无。每次调用都会重新扫描 ws:characters/roleplay/ 和 ws:characters/task/。
-        #
-        # ## 调用效果
-        # 纯查询，不修改角色目录、profile.md、profile.md.meta 或 LLM Profile。
-        # agents 使用数组而不是以名称为 key 的字典，以保留重名错误条目。
-        # 每个条目只返回角色名称、类型、profile.md 路径、简介、LLM Profile 引用名称、
-        # 可用性、错误和当前会话状态，不返回 api_key 或完整模型配置。
-        #
-        # ## 返回
-        # {"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "description": "负责实现和审查 Python 代码。", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
-        #
-        # ## 何时使用
-        # - 启动 RunSubAgent 前查看可用角色。
-        # - 查看 profile.md、profile.md.meta（包括 [profile] 系统提示词路径）或 LLM Profile 引用错误。
-        # - 查看当前主会话下角色是否已有运行中的子Agent。
-        #
-        # ## 副作用/注意
-        # - 纯查询，无副作用。
-        # - 缺失、无效和重名角色仍会展示，但不能启动。
-        # - 返回结果不包含 API 密钥和完整模型配置。
-        "description": """List dynamically discovered sub-agent character profiles and their current session status.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register list subagents tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="ListSubAgents",
+        toolset="multiagent",
+        schema={
+            # 动态扫描所有角色档案，并返回当前主会话下的子Agent运行状态。
+            #
+            # ## 前置条件
+            # 无。每次调用都会重新扫描 ws:characters/roleplay/ 和 ws:characters/task/。
+            #
+            # ## 调用效果
+            # 纯查询，不修改角色目录、profile.md、profile.md.meta 或 LLM Profile。
+            # agents 使用数组而不是以名称为 key 的字典，以保留重名错误条目。
+            # 每个条目只返回角色名称、类型、profile.md 路径、简介、LLM Profile 引用名称、
+            # 可用性、错误和当前会话状态，不返回 api_key 或完整模型配置。
+            #
+            # ## 返回
+            # {"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "description": "负责实现和审查 Python 代码。", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
+            #
+            # ## 何时使用
+            # - 启动 RunSubAgent 前查看可用角色。
+            # - 查看 profile.md、profile.md.meta（包括 [profile] 系统提示词路径）或 LLM Profile 引用错误。
+            # - 查看当前主会话下角色是否已有运行中的子Agent。
+            #
+            # ## 副作用/注意
+            # - 纯查询，无副作用。
+            # - 缺失、无效和重名角色仍会展示，但不能启动。
+            # - 返回结果不包含 API 密钥和完整模型配置。
+            "description": """List dynamically discovered sub-agent character profiles and their current session status.
 
 ## Prerequisites
 None.
@@ -123,13 +130,13 @@ The `agents` result is an array so duplicate names and their individual errors r
 - Read-only query; does not create or modify character profiles.
 - Invalid and duplicate-name profiles remain visible with an `error` field but cannot be started.
 - The returned list does not contain API keys or complete model configurations.""",
-        "parameters": {
-            "type": "object",
-            "properties": {},
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
         },
-    },
-    handler=_handle_list_subagents,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN,
-)
+        handler=_handle_list_subagents,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN,
+    )

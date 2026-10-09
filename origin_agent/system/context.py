@@ -73,25 +73,3 @@ class RuntimeContext(BaseModel):
 
     merge_concat_threshold: int = MERGE_CONCAT_THRESHOLD
     """会话合并时直接拼接摘要的字符阈值，超过则截断。"""
-
-
-# ---------------------------------------------------------------------------
-# 全局 RuntimeContext 单例
-# ---------------------------------------------------------------------------
-
-_runtime_ctx: RuntimeContext | None = None
-
-
-def set_runtime_context(ctx: RuntimeContext) -> None:
-    """设置进程级全局 RuntimeContext 单例。"""
-    global _runtime_ctx
-    _runtime_ctx = ctx
-
-
-def get_runtime_context() -> RuntimeContext:
-    """返回全局 RuntimeContext，必须确保在 set 之后调用。"""
-    if _runtime_ctx is None:
-        raise RuntimeError(
-            "RuntimeContext not set. Call set_runtime_context(ctx) during startup."
-        )
-    return _runtime_ctx

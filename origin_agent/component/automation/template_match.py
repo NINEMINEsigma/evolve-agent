@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from system.sandbox import SandboxError
 
 if TYPE_CHECKING:
@@ -38,14 +39,14 @@ def _check_cv2() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 沙箱引用
+# 沙箱引用（通过 Application 已注册的 Sandbox System）
 # ---------------------------------------------------------------------------
-
-from component.tools.filesystem import _s as _get_sandbox  # noqa: E402
 
 
 def _s():
-    return _get_sandbox()
+    from system.application import Application
+    from system.sandbox import Sandbox
+    return Application.current().get_system(Sandbox)
 
 
 def _imread_unicode(path: str, flags: int) -> "MatLike | None":
@@ -255,10 +256,13 @@ def _nms(matches: list[dict], tw: int, th: int, overlap_thresh: float = 0.5) -> 
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="TemplateMatch",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register TemplateMatch into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="TemplateMatch",
+        toolset="automation",
+        schema={
         # 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
         # 前置条件：需安装 opencv-python；图片和模板须在沙箱（ws:）中。
         # 调用效果：对每张模板执行 cv2.matchTemplate，返回阈值以上的所有匹配并按分数降序排列。
@@ -360,4 +364,4 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the sou
     },
     handler=_handle_template_match,
     check_fn=_check_cv2,
-)
+    )

@@ -15,16 +15,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from abstract.llm.loader import create_llm_client
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-from system.context import get_runtime_context
+from system.runtime import RuntimeSystem
 from system.templates import get_templates_dir
 from entry.multi_agent_loop import MultiAgentLoop
+
+from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +39,17 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         agents: list[str] — 可选，参与协作的 Agent 角色名列表。
                   缺省时自动使用全部动态发现且有效的子Agent。
     """
+    from system.application import Application
+
     session_id: str = str(args.get("_session_id", "")).strip()
 
     if not session_id:
         return tool_error("'_session_id' is required")
 
     app = Application.current()
-    if app.session_manager is None:
-        return tool_error("SessionManager not available")
 
     # 获取当前 ParentAgentLoop
-    _parent_loop = app.session_manager.get_loop(session_id)
+    _parent_loop = app.get_system(SessionManager).get_loop(session_id)
     if _parent_loop is None:
         return tool_error(f"No active loop found for session {session_id}")
     elif isinstance(_parent_loop.loop, ParentAgentLoop):
@@ -58,7 +61,9 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
     # 动态扫描角色档案。无参进入过滤无效/重名角色；显式名称严格校验。
     from subagent.profile import CharacterProfileResolver
-    resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+    from system.sandbox import Sandbox
+    from system.llm_profile_store import LLMProfileStore
+    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
     all_profiles = resolver.discover()
     explicit_agents: list[str] = args.get("agents") or []
     profiles: dict[str, Any] = {}
@@ -98,8 +103,9 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         agents.insert(0, main_agent_name)
 
     # 停止所有子 Agent
-    if app.subagent_orchestrator is not None:
-        await app.subagent_orchestrator.shutdown(session_id)
+    from subagent.orchestrator import SubAgentOrchestrator
+    if app.get_system(SubAgentOrchestrator):
+        await app.get_system(SubAgentOrchestrator).shutdown(session_id)
 
     # 加载多 Agent 系统提示词模板
     template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
@@ -107,14 +113,17 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         system_prompt_template = f.read()
 
     # 获取父 Agent 的 LLM client 和工具定义
-    from abstract.tools.registry import registry as tool_registry
+    from abstract.tools.registry import ToolRegistry
+    from system.application import Application
     from component.multiagenttools.profile_builder import (
         build_multi_agent_tools,
         build_agent_profiles,
     )
+    tool_registry = Application.current().get_system(ToolRegistry)
     tools = build_multi_agent_tools(tool_registry)
-    parent_ctx = get_runtime_context()
-    sandbox = app.sandbox
+    parent_ctx = app.get_system(RuntimeSystem).context
+    from system.sandbox import Sandbox
+    sandbox = app.get_system(Sandbox)
 
     from entity.puretype import LLMProfile as _LlmProfile
     # 从 loop active profile 获取主 agent 的 LlmProfile
@@ -164,7 +173,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
     # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
     # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
-    await app.session_manager.replace_loop(session_id, multi_loop)
+    await app.get_system(SessionManager).replace_loop(session_id, multi_loop)
 
     return tool_result(
         success=True,
@@ -174,59 +183,62 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="EnterMultiAgent",
-    toolset="multiagent",
-    availability=ToolAvailability.MAIN,
-    danger_level=ToolDangerLevel.safe,
-    schema={
-        # 将当前主会话切换到多 Agent 协作模式。
-        #
-        # ## 功能
-        # 把当前活跃主会话从 ParentAgentLoop 切换到 MultiAgentLoop。
-        # 进入后所有已注册子 Agent 自动全部参与协作，共享同一份对话历史。
-        # 用户每条消息触发一轮串行级联响应：
-        # 初始 response_characters 组成队列，Agent 逐个执行，每个完成后可通过
-        # response_characters 动态指定后续响应者（已在队列中则移到队首，不在则加到队尾），
-        # 级联持续直到队列清空或达到最大深度。
-        # 可通过 ExitMultiAgent 退出回普通模式。
-        #
-        # ## 前置条件
-        # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
-        # - 至少有一个有效的动态角色档案。
-        #
-        # ## 调用效果
-        # - 所有活跃子 Agent 将被停止并清理。
-        # - multiagent 工具集（run_subagent、chat_subagent 等）将被禁用。
-        # - 此后所有用户消息由 MultiAgentLoop 处理：所有 Agent 共享同一 History，
-        #   每条消息触发一轮串行级联响应：Agent 按队列逐个执行，
-        #   通过 visible_characters 控制消息可见性，通过 response_characters 动态指定后续响应的 Agent。
-        # - 级联按轮次进行，直到没有 Agent 指定下一响应者，或达到最大深度限制。
-        #
-        # ## 返回
-        # ```json
-        # { "success": true, "mode": "multi_agent", "agents": ["...", "..."], "message": "..." }
-        # ```
-        #
-        # ## 何时使用
-        # - 用户明确要求进入多 Agent 协作模式时。
-        # - 已有至少一个已注册子 Agent，无需手动指定列表。
-        #
-        # ## 副作用 / 注意
-        # - 当前会话的 loop 从 ParentAgentLoop 替换为 MultiAgentLoop。
-        # - 所有活跃子 Agent 被停止并清理。
-        # - multiagent 工具集被禁用。
-        # - 主 Agent 会被无条件加入参与者列表。
-        # - 可通过 ExitMultiAgent 退出回普通模式。
-        # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
-        #
-        # ## 用户侧控制
-        # - 用户每次发送消息时可从前端指定 visible_characters（消息对哪些 Agent 可见）
-        #   和 response_characters（哪些 Agent 需要响应此消息）。
-        # - 未指定时默认对所有 Agent 可见、所有 Agent 参与响应。
-        # - 指定 @response(none) 或空列表时该消息不触发任何 Agent 响应。
-        # - 因此并非每条消息都会触发全体级联——级联的参与者由用户指定的 response_characters 决定。
-        "description": """Switch the current main session to multi-agent collaboration mode.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register enter multi-agent tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="EnterMultiAgent",
+        toolset="multiagent",
+        availability=ToolAvailability.MAIN,
+        danger_level=ToolDangerLevel.safe,
+        schema={
+            # 将当前主会话切换到多 Agent 协作模式。
+            #
+            # ## 功能
+            # 把当前活跃主会话从 ParentAgentLoop 切换到 MultiAgentLoop。
+            # 进入后所有已注册子 Agent 自动全部参与协作，共享同一份对话历史。
+            # 用户每条消息触发一轮串行级联响应：
+            # 初始 response_characters 组成队列，Agent 逐个执行，每个完成后可通过
+            # response_characters 动态指定后续响应者（已在队列中则移到队首，不在则加到队尾），
+            # 级联持续直到队列清空或达到最大深度。
+            # 可通过 ExitMultiAgent 退出回普通模式。
+            #
+            # ## 前置条件
+            # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
+            # - 至少有一个有效的动态角色档案。
+            #
+            # ## 调用效果
+            # - 所有活跃子 Agent 将被停止并清理。
+            # - multiagent 工具集（run_subagent、chat_subagent 等）将被禁用。
+            # - 此后所有用户消息由 MultiAgentLoop 处理：所有 Agent 共享同一 History，
+            #   每条消息触发一轮串行级联响应：Agent 按队列逐个执行，
+            #   通过 visible_characters 控制消息可见性，通过 response_characters 动态指定后续响应的 Agent。
+            # - 级联按轮次进行，直到没有 Agent 指定下一响应者，或达到最大深度限制。
+            #
+            # ## 返回
+            # ```json
+            # { "success": true, "mode": "multi_agent", "agents": ["...", "..."], "message": "..." }
+            # ```
+            #
+            # ## 何时使用
+            # - 用户明确要求进入多 Agent 协作模式时。
+            # - 已有至少一个已注册子 Agent，无需手动指定列表。
+            #
+            # ## 副作用 / 注意
+            # - 当前会话的 loop 从 ParentAgentLoop 替换为 MultiAgentLoop。
+            # - 所有活跃子 Agent 被停止并清理。
+            # - multiagent 工具集被禁用。
+            # - 主 Agent 会被无条件加入参与者列表。
+            # - 可通过 ExitMultiAgent 退出回普通模式。
+            # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
+            #
+            # ## 用户侧控制
+            # - 用户每次发送消息时可从前端指定 visible_characters（消息对哪些 Agent 可见）
+            #   和 response_characters（哪些 Agent 需要响应此消息）。
+            # - 未指定时默认对所有 Agent 可见、所有 Agent 参与响应。
+            # - 指定 @response(none) 或空列表时该消息不触发任何 Agent 响应。
+            # - 因此并非每条消息都会触发全体级联——级联的参与者由用户指定的 response_characters 决定。
+            "description": """Switch the current main session to multi-agent collaboration mode.
 
 ## Prerequisites
 - Only an active main session can call this; sub-agent sessions are not supported.
@@ -263,17 +275,17 @@ registry.register(
 - If not specified, the message is visible to all agents and all agents participate in the cascade.
 - Specifying `@response(none)` or an empty list means no agent responds to that message.
 - Therefore, not every message triggers a full cascade — the participants are determined by the user-specified `response_characters`.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agents": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional list of dynamically discovered character names to participate. If omitted, all valid character profiles are included.",
-                }
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agents": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional list of dynamically discovered character names to participate. If omitted, all valid character profiles are included.",
+                    }
+                },
             },
         },
-    },
-    handler=_handle_enter_multi_agent,
-    is_async=True,
-)
+        handler=_handle_enter_multi_agent,
+        is_async=True,
+    )

@@ -1,5 +1,6 @@
 """全局动态沙盒空间管理工具。
 
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
 两个工具仅在 fast 模式可见，均为 critical；普通模式主Agent与多Agent模式
 主Agent可调用。随意聊聊会话不加载 ``sandbox`` 工具集。
 """
@@ -8,11 +9,13 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.constant import MAIN_AGENT_CHARACTER_NAME
 from entity.puretype import DynamicSandboxSpace, ToolAvailability, ToolDangerLevel
 from system.application import Application
-from system.context import get_runtime_context
+from system.runtime import RuntimeSystem
+from system.sandbox import Sandbox
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -20,7 +23,7 @@ if TYPE_CHECKING:
 
 def _fast_mode_available() -> bool:
     """仅在 fast 模式暴露动态空间管理工具。"""
-    return get_runtime_context().mode == "fast"
+    return Application.current().get_system(RuntimeSystem).context.mode == "fast"
 
 
 def _require_main_agent(context: ToolContext | None) -> str | None:
@@ -80,7 +83,7 @@ def _handle_add_sandbox_space(
     if type(is_readonly) is not bool:
         return tool_error("'is_readonly' is required and must be a boolean")
 
-    sandbox = Application.current().sandbox
+    sandbox = Application.current().get_system(Sandbox)
     try:
         normalized_path = sandbox.normalize_dynamic_space_path(path)
     except (TypeError, ValueError) as exc:
@@ -128,7 +131,7 @@ def _handle_remove_sandbox_space(
     _ = reason
 
     try:
-        removed = Application.current().sandbox.remove_dynamic_space(
+        removed = Application.current().get_system(Sandbox).remove_dynamic_space(
             name,
             session_id=context.session_id if context is not None else "",
         )
@@ -137,71 +140,82 @@ def _handle_remove_sandbox_space(
     return tool_result(success=True, removed=removed, name=name)
 
 
-registry.register(
-    name="AddSandboxSpace",
-    toolset="sandbox",
-    schema={
-        "description": """Add a persistent global dynamic sandbox namespace in fast mode.
+# ── schema 常量 ─────────────────────────────────────────────
+
+_ADD_SANDBOX_SPACE_SCHEMA = {
+    "description": """Add a persistent global dynamic sandbox namespace in fast mode.
 
 This critical operation changes the filesystem scope shared by all Agents. Manual and handsfree modes require direct user approval; YOLO mode follows the global automatic-approval rule. The path must be an already normalized absolute directory path, but the directory may currently be absent. Names omit the trailing colon. Existing names are never overwritten: identical configuration is an idempotent success, while different configuration is rejected. To change a space, remove it and add it again.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Namespace name without a colon. Use ASCII letters, digits, and underscores; start with a letter or underscore.",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Normalized absolute directory path. The directory may currently be absent.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Required user-facing description of this space's purpose, up to 1000 characters.",
-                },
-                "is_readonly": {
-                    "type": "boolean",
-                    "description": "Required explicit permission choice. True means Sandbox file APIs are read-only; this is not an OS-level ACL.",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Why this global filesystem scope is required; shown in the critical approval request.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Namespace name without a colon. Use ASCII letters, digits, and underscores; start with a letter or underscore.",
             },
-            "required": ["name", "path", "description", "is_readonly", "reason"],
+            "path": {
+                "type": "string",
+                "description": "Normalized absolute directory path. The directory may currently be absent.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Required user-facing description of this space's purpose, up to 1000 characters.",
+            },
+            "is_readonly": {
+                "type": "boolean",
+                "description": "Required explicit permission choice. True means Sandbox file APIs are read-only; this is not an OS-level ACL.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why this global filesystem scope is required; shown in the critical approval request.",
+            },
         },
+        "required": ["name", "path", "description", "is_readonly", "reason"],
     },
-    handler=_handle_add_sandbox_space,
-    check_fn=_fast_mode_available,
-    danger_level=ToolDangerLevel.critical,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+}
 
-
-registry.register(
-    name="RemoveSandboxSpace",
-    toolset="sandbox",
-    schema={
-        "description": """Remove a persistent global dynamic sandbox namespace in fast mode.
+_REMOVE_SANDBOX_SPACE_SCHEMA = {
+    "description": """Remove a persistent global dynamic sandbox namespace in fast mode.
 
 This critical operation revokes future logical-path resolution for the named space. It does not stop subprocesses that already resolved the path. Removing a missing name is an idempotent success.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Dynamic namespace name without the trailing colon.",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Why this global filesystem scope should be revoked; shown in the critical approval request.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Dynamic namespace name without the trailing colon.",
             },
-            "required": ["name", "reason"],
+            "reason": {
+                "type": "string",
+                "description": "Why this global filesystem scope should be revoked; shown in the critical approval request.",
+            },
         },
+        "required": ["name", "reason"],
     },
-    handler=_handle_remove_sandbox_space,
-    check_fn=_fast_mode_available,
-    danger_level=ToolDangerLevel.critical,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register dynamic sandbox space management tools."""
+    del ui_events  # sandbox space tools have no UI event handlers
+    registry.register(
+        name="AddSandboxSpace",
+        toolset="sandbox",
+        schema=_ADD_SANDBOX_SPACE_SCHEMA,
+        handler=_handle_add_sandbox_space,
+        check_fn=_fast_mode_available,
+        danger_level=ToolDangerLevel.critical,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
+
+    registry.register(
+        name="RemoveSandboxSpace",
+        toolset="sandbox",
+        schema=_REMOVE_SANDBOX_SPACE_SCHEMA,
+        handler=_handle_remove_sandbox_space,
+        check_fn=_fast_mode_available,
+        danger_level=ToolDangerLevel.critical,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )

@@ -14,7 +14,7 @@ from entity.messages import (
     CharacterConversationMessage,
     CharacterMessage,
     ImageBlock,
-    MessageBlock,
+    TextBlock,
     SystemStatusMessage,
     ToolResultMessage,
     VideoBlock,
@@ -373,8 +373,8 @@ def project_history_resources(messages: list[BaseMessage], session_id: str) -> S
             for block in content:
                 if isinstance(block, ImageBlock):
                     _append_image(images, image_seen, block.image_url, "", history_index)
-                elif isinstance(block, MessageBlock) and hasattr(block, "text"):
-                    _scan_markdown_images(str(getattr(block, "text")), images, image_seen, history_index)
+                elif isinstance(block, TextBlock):
+                    _scan_markdown_images(block.text, images, image_seen, history_index)
                 elif isinstance(block, dict):
                     if block.get("type") == "image_url":
                         image_url = block.get("image_url")

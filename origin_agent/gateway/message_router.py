@@ -4,8 +4,13 @@
 ws_chat 仅保留 WebSocket 连接生命周期管理，通过 ``MessageRouter.route()``
 委托消息处理。
 
+USER_MESSAGE 在 route 内同步完成目标校验与输入登记（S21/RV5/RV9）：
+主会话登记 ``QueuedMessage``，子会话经编排器同步接收接口登记 Inbox
+记录，全部成功后才启动仅处理已登记输入的后台准备任务；关闭刷新按
+记录只落 History，不再生成。
+
 消息类型与处理方法映射：
-    USER_MESSAGE      → handle_user_message（后台 task）
+    USER_MESSAGE      → 同步登记 + 后台准备任务
     CONFIRM_RESPONSE  → handle_confirm_response
     ASK_RESPONSE      → handle_ask_response
     INTERRUPT         → handle_interrupt
@@ -26,6 +31,7 @@ import logging
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import *
@@ -34,13 +40,21 @@ from fastapi import WebSocket
 
 from .chat import Message, MessageType
 from entity.constant import (
+    SYSTEM_CHARACTER_NAME,
     UPLOAD_FILENAME_TIME_FORMAT,
     UPLOADS_DIR_NAME,
     UPLOADS_WS_PREFIX,
     USER_CHARACTER_NAME,
 )
-from entity.puretype import SessionInfo, SessionStatus, ClientInfo, MessageContent
+from entity.puretype import (
+    ClientInfo,
+    QueuedMessage,
+    SessionInfo,
+    SessionStatus,
+)
 from entry.agent_support.multimodal import summarize_message_for_log
+from system.lifecycle import ApplicationStoppingError
+from system.llm_profile_store import ProfileNotFoundError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -48,6 +62,8 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
     from gateway.session_manager import SessionManager
     from subagent.orchestrator import SubAgentOrchestrator
+
+from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +92,7 @@ def _observe_background_interrupt(task: asyncio.Task) -> None:
 def _get_sm() -> SessionManager | None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
-    return Application.current().session_manager
+    return Application.current().get_system(SessionManager)
 
 
 def _get_loop(session_id: str) -> IMainSessionLoop | None:
@@ -88,8 +104,9 @@ def _get_loop(session_id: str) -> IMainSessionLoop | None:
 def _get_ws(session_id: str) -> WebSocket | None:
     """返回指定 session 的 WebSocket sink。"""
     from system.application import Application
-    sink = Application.current().frontend_sink
-    return sink.get_ws(session_id) if sink else None
+    from entry.agent_sink import FrontendSink
+    sink = Application.current().get_system(FrontendSink)
+    return sink.get_ws(session_id)
 
 
 def _extract_text(content: Any) -> str:
@@ -108,12 +125,23 @@ def _extract_text(content: Any) -> str:
 def get_subagent_orchestrator() -> SubAgentOrchestrator | None:
     """返回 SubAgentOrchestrator 单例。"""
     from system.application import Application
-    return Application.current().subagent_orchestrator
+    from subagent.orchestrator import SubAgentOrchestrator
+    return Application.current().get_system(SubAgentOrchestrator)
 
 
 # ---------------------------------------------------------------------------
 # MessageRouter
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _AcceptedUserMessage:
+    """route 内同步接收的非持久化结果；sequence 为主会话已登记记录。"""
+
+    sequence: int | None
+    archived: bool = False
+    content: Any = ""
+    target_sessions: tuple[str, ...] = ()
 
 
 class MessageRouter:
@@ -123,11 +151,9 @@ class MessageRouter:
     实例持有 WebSocket 引用和当前 session_id（session 旋转时会更新）。
     """
 
-    def __init__(self, ws: WebSocket, sid: str, agentspace_path: Path | None = None,
-                 conn_token: str = ""):
+    def __init__(self, ws: WebSocket, sid: str, conn_token: str = ""):
         self.ws = ws
         self.sid = sid
-        self.agentspace_path = agentspace_path
         self.conn_token = conn_token
 
     # -- 主分发入口 --------------------------------------------------------
@@ -139,23 +165,30 @@ class MessageRouter:
         msg.session_id = self.sid  # 信任 server 而非 client
 
         if msg.type == MessageType.USER_MESSAGE:
-            if _get_loop(self.sid) is None:
-                logger.error("ParentAgentLoop not configured; cannot handle chat messages")
+            # 同步接收登记；非法目标在产生任何记录之前明确拒绝。
+            try:
+                accepted, reject_reason = self._accept_user_message(msg)
+            except ApplicationStoppingError:
                 await self.ws.send_text(
                     json.dumps(
                         Message(
                             type=MessageType.ERROR,
                             session_id=self.sid,
-                            message="Agent loop not ready. Please wait and try again.",
+                            message="Application is shutting down; the message was not accepted.",
                         ).model_dump(exclude_none=True),
                         ensure_ascii=False,
                     )
                 )
-                return False
-            # 后台执行，不阻塞 WebSocket 消息循环
-            asyncio.create_task(
-                self.handle_user_message(msg),
-                name=f"user-msg-{self.sid[:8]}",
+                return True
+            if accepted is None:
+                if reject_reason is not None:
+                    await self._send_router_error(reject_reason)
+                return True
+            from system.application import Application
+            from gateway.system import GatewaySystem
+            Application.current().get_system(GatewaySystem).spawn_work(
+                self._prepare_user_message(msg, accepted),
+                name=f"user-msg-prepare-{self.sid[:8]}",
             )
 
         elif msg.type == MessageType.CONFIRM_RESPONSE:
@@ -192,147 +225,185 @@ class MessageRouter:
 
     # -- 消息处理方法 ------------------------------------------------------
 
-    async def handle_user_message(self, msg: Message) -> None:
-        """处理用户消息：自动标题、归档检查、子Agent转发、主会话处理。
-
-        此方法作为后台 task 运行，不阻塞 WebSocket 消息循环。
-        session 旋转时会更新 ``self.sid``。
-        """
-        try:
-            # 拦截 archived 会话的新消息。
-            session_info = _get_sm().get(self.sid)
-            if session_info and session_info.status == SessionStatus.archived:
-                await self.ws.send_text(
-                    json.dumps(
-                        Message(
-                            type=MessageType.ERROR,
-                            session_id=self.sid,
-                            message="This session has been archived. Please switch to the continuation session or create a new one.",
-                        ).model_dump(exclude_none=True),
-                        ensure_ascii=False,
-                    )
-                )
-                return
-
-            loop = _get_loop(self.sid)
-            if loop is None:
-                return
-            if (
-                "llm_profile_name" not in msg.model_fields_set
-                or not isinstance(msg.llm_profile_name, str)
-            ):
-                await self.ws.send_text(
-                    json.dumps(
-                        Message(
-                            type=MessageType.ERROR,
-                            session_id=self.sid,
-                            message="llm_profile_name must be provided as a string",
-                        ).model_dump(exclude_none=True),
-                        ensure_ascii=False,
-                    )
-                )
-                return
-
-            target_sessions: list[str] = msg.target_sessions or ["main"]
-            content = msg.content or ""
-
-            # 空闲主会话尽早切换；忙碌会话仅把名称保留到 FIFO 消息中。
-            if "main" in target_sessions and not loop.loop.is_processing():
-                try:
-                    from system.application import Application
-                    application = Application.current()
-                    with application.profile_lock:
-                        selected = application.llm_profile_store.resolve_profile_name(
-                            msg.llm_profile_name,
-                        )
-                        loop.set_profile(selected)
-                except Exception as exc:
-                    logger.exception(
-                        "Failed to select LLM Profile before enqueue | session=%s name=%r",
-                        self.sid,
-                        msg.llm_profile_name,
-                    )
-                    await self.ws.send_text(
-                        json.dumps(
-                            Message(
-                                type=MessageType.ERROR,
-                                session_id=self.sid,
-                                message=f"LLM Profile 切换失败：{exc}",
-                            ).model_dump(exclude_none=True),
-                            ensure_ascii=False,
-                        )
-                    )
-                    return
-
-            self._auto_generate_title(msg.content)
-            _get_sm().update_last_activity(self.sid)
-
-            # 提取前端携带的客户端信息并合并 IP
-            if msg.client_info:
-                sm = _get_sm()
-                if sm is not None:
-                    existing = sm.get_client_info(self.sid)
-                    current_ip = existing.client_ip if existing else ""
-                    sm.set_client_info(self.sid, ClientInfo(
-                        device_type=str(msg.client_info.get("device_type", "")),
-                        browser=str(msg.client_info.get("browser", "")),
-                        client_ip=current_ip,
-                        frontend_version=str(msg.client_info.get("frontend_version", "")),
-                        screen_orientation=str(msg.client_info.get("screen_orientation", "")),
-                    ))
-
-
-            # 分派子 Agent 消息（父→子方向，不动）
-            subagent_tasks, sub_ids, name_map = await self._dispatch_subagent_messages(
-                content, target_sessions,
+    async def _send_router_error(self, message: str) -> None:
+        await self.ws.send_text(
+            json.dumps(
+                Message(
+                    type=MessageType.ERROR,
+                    session_id=self.sid,
+                    message=message,
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
             )
+        )
 
-            # 主会话：注册轮次后回调 + 入队（SP-5 D2/D3）
-            if "main" in target_sessions:
-                loop.set_on_round_done(self._make_on_round_done())
-                loop.loop._message_queue.push(
-                    content,
-                    character_name=USER_CHARACTER_NAME,
-                    source="ws",
-                    client_message_id=msg.client_message_id,
-                    visible_characters=msg.visible_characters,
-                    response_characters=msg.response_characters,
-                    llm_profile_name=msg.llm_profile_name,
-                )
+    def _accept_user_message(self, msg: Message) -> "tuple[_AcceptedUserMessage | None, str | None]":
+        """同步完成目标/字段/Profile 检查并登记全部输入记录。
 
-            # 等待子会话转发完成
-            if subagent_tasks:
-                results = await asyncio.gather(*subagent_tasks, return_exceptions=True)
-                for idx, res in enumerate(results):
-                    if isinstance(res, Exception):
-                        logger.warning("Subagent forward failed: %s", res)
+        返回 ``(None, reason)`` 表示同步可判定的用户错误且未登记任何记录；
+        抛出的 ``ApplicationStoppingError`` 由调用方转换为关闭中拒绝。
+        本方法不 await、不做模型或文件 I/O。
+        """
+        from datetime import datetime
+        from system.application import Application
+        from system.llm_profile_store import LLMProfileStore
 
-        except Exception as exc:
-            logger.exception("User message handler error for session=%s: %s", self.sid, exc)
+        sm = _get_sm()
+        session_info = sm.get(self.sid) if sm is not None else None
+        if session_info is None:
+            logger.error("User message for unknown session=%s", self.sid)
+            raise ApplicationStoppingError(f"Session does not exist: {self.sid}")
+        if session_info.status == SessionStatus.archived:
+            # 归档目标由后台准备任务按原协议回送错误，不产生输入记录。
+            return _AcceptedUserMessage(sequence=None, archived=True), None
+
+        loop = _get_loop(self.sid)
+        if loop is None:
+            logger.error("Main session loop not configured | session=%s", self.sid)
+            raise ApplicationStoppingError(f"Main session loop not ready: {self.sid}")
+        if (
+            "llm_profile_name" not in msg.model_fields_set
+            or not isinstance(msg.llm_profile_name, str)
+        ):
+            return None, "llm_profile_name must be provided as a string"
+
+        target_sessions: list[str] = msg.target_sessions or ["main"]
+        content = msg.content or ""
+
+        # 指定 Profile 必须命中；未命中不产生任何记录。
+        if msg.llm_profile_name:
+            store = Application.current().get_system(LLMProfileStore)
+            try:
+                store.get_profile(msg.llm_profile_name)
+            except ProfileNotFoundError:
+                return None, f"LLM Profile 不存在：{msg.llm_profile_name}"
+
+        main_sequence: int | None = None
+        if "main" in target_sessions:
+            item = QueuedMessage(
+                content=content,
+                character_name=USER_CHARACTER_NAME,
+                source="ws",
+                timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                client_message_id=msg.client_message_id,
+                visible_characters=msg.visible_characters,
+                response_characters=msg.response_characters,
+                llm_profile_name=msg.llm_profile_name,
+            )
+            main_sequence = loop.loop.message_queue.accept(item, ready=False)
+
+        return _AcceptedUserMessage(
+            sequence=main_sequence,
+            content=content,
+            target_sessions=tuple(target_sessions),
+        ), None
+
+    async def _prepare_user_message(self, msg: Message, accepted: "_AcceptedUserMessage") -> None:
+        """只处理已登记输入的后台准备：Profile 就绪、标题、客户端信息、子会话转发。
+
+        非取消异常按 RV9 进入应用失败关闭；记录保留由关闭刷新只落 History。
+        """
+        from system.application import Application
+        from system.llm_profile_store import LLMProfileStore
+        from system.runtime import RuntimeSystem
+        runtime = Application.current().get_system(RuntimeSystem)
+        try:
+            await self._prepare_user_message_inner(msg, accepted)
+            if accepted.sequence is not None:
+                loop = _get_loop(self.sid)
+                if loop is None:
+                    raise ApplicationStoppingError(
+                        f"Main session loop disappeared before input ready: {self.sid}"
+                    )
+                loop.loop.message_queue.mark_ready(accepted.sequence)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:
+            runtime.record_failure(error)
+            raise
+
+    async def _prepare_user_message_inner(
+        self, msg: Message, accepted: "_AcceptedUserMessage",
+    ) -> None:
+        if accepted.archived:
+            await self._send_router_error(
+                "This session has been archived. Please switch to the continuation session or create a new one."
+            )
+            return
+        from system.application import Application
+        from system.llm_profile_store import LLMProfileStore
+
+        loop = _get_loop(self.sid)
+        if loop is None:
+            raise ApplicationStoppingError(f"Main session loop not ready: {self.sid}")
+
+        content = accepted.content
+
+        # 空闲主会话尽早切换；忙碌会话仅把名称保留到 FIFO 消息中。
+        if "main" in accepted.target_sessions and not loop.loop.is_processing():
+            store = Application.current().get_system(LLMProfileStore)
+            with store.locked():
+                selected = store.resolve_profile_name(msg.llm_profile_name or "")
+                loop.set_profile(selected)
+
+        self._auto_generate_title(content)
+        _get_sm().update_last_activity(self.sid)
+
+        # 提取前端携带的客户端信息并合并 IP
+        if msg.client_info:
+            sm = _get_sm()
+            if sm is not None:
+                existing = sm.get_client_info(self.sid)
+                current_ip = existing.client_ip if existing else ""
+                sm.set_client_info(self.sid, ClientInfo(
+                    device_type=str(msg.client_info.get("device_type", "")),
+                    browser=str(msg.client_info.get("browser", "")),
+                    client_ip=current_ip,
+                    frontend_version=str(msg.client_info.get("frontend_version", "")),
+                    screen_orientation=str(msg.client_info.get("screen_orientation", "")),
+                ))
+
+        # 分派子 Agent 消息（父→子方向，不动）
+        subagent_tasks, sub_ids, name_map = await self._dispatch_subagent_messages(
+            content, list(accepted.target_sessions),
+        )
+
+        # 主会话：注册轮次后回调；输入记录已在接收阶段登记。
+        if "main" in accepted.target_sessions:
+            loop.set_on_round_done(self._make_on_round_done())
+
+        # 等待子会话转发完成
+        if subagent_tasks:
+            results = await asyncio.gather(*subagent_tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception):
+                    logger.warning("Subagent forward failed: %s", res)
 
     async def handle_confirm_response(self, msg: Message) -> None:
         """处理审批响应。"""
         if msg.request_id is not None and msg.action is not None:
             logger.info("WS confirm response | session=%s request_id=%s action=%s", self.sid, msg.request_id, msg.action)
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink:
-                sink.resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
+            from entry.agent_sink import FrontendSink
+            sink = Application.current().get_system(FrontendSink)
+            sink.resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
 
     async def handle_ask_response(self, msg: Message) -> None:
         """处理提问响应。"""
         if msg.request_id is not None:
             logger.info("WS ask response | session=%s request_id=%s", self.sid, msg.request_id)
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink:
-                sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
+            from entry.agent_sink import FrontendSink
+            sink = Application.current().get_system(FrontendSink)
+            sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
 
     async def handle_interrupt(self) -> None:
         """处理中断请求：与 HTTP 中断统一走 request_interrupt()。"""
         loop = _get_loop(self.sid)
         if loop is not None and loop.loop is not None:
-            task = asyncio.create_task(
+            from system.application import Application
+            from gateway.system import GatewaySystem
+            task = Application.current().get_system(GatewaySystem).spawn_work(
                 loop.request_interrupt(reason="user"),
                 name=f"ws-interrupt-{self.sid[:8]}",
             )
@@ -360,21 +431,12 @@ class MessageRouter:
         timestamp: str = datetime.now(timezone.utc).strftime(UPLOAD_FILENAME_TIME_FORMAT)
         unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
 
-        if not self.agentspace_path:
-            logger.error("agentspace path not set, cannot accept file uploads")
-            await self.ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=self.sid,
-                        content=json.dumps({"uploaded": False, "error": "agentspace_not_configured"}),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
-            )
-            return
-
-        upload_dir: Path = self.agentspace_path / UPLOADS_DIR_NAME
+        from system.application import Application
+        from system.runtime import RuntimeSystem
+        agentspace_path: Path = (
+            Application.current().get_system(RuntimeSystem).context.agentspace
+        )
+        upload_dir: Path = agentspace_path / UPLOADS_DIR_NAME
         upload_dir.mkdir(parents=True, exist_ok=True)
         dest: Path = upload_dir / unique_name
 
@@ -597,6 +659,10 @@ class MessageRouter:
             sub_ids = [t for t in target_sessions if t != "main"]
             also_main = "main" in target_sessions
 
+            from system.application import Application
+            from gateway.system import GatewaySystem
+            gateway = Application.current().get_system(GatewaySystem)
+
             # 建立 session_id → name 映射
             try:
                 snapshot = orch.get_snapshot(parent_session_id=self.sid)
@@ -620,7 +686,7 @@ class MessageRouter:
                 if also_main:
                     other_names.append("the Parent Agent (main session)")
                 subagent_tasks.append(
-                    asyncio.create_task(
+                    gateway.spawn_work(
                         orch.chat_user_direct(
                             parent_session_id=self.sid,
                             session_id=sub_id,
@@ -638,16 +704,15 @@ class MessageRouter:
     # -- SP-5 D2：轮次后编排回调 ------------------------------------------
 
     async def _on_round_done_cb(self, loop: IMainSessionLoop) -> None:
-        """轮次后编排：WS 重映射 + token 推送 + 进化触发。
+        """轮次后编排：WS 重映射 + token 推送 + 正典历史同步。
 
         由 run_pending_round 锁外末尾调用；回复推送已由 run_pending_round 内部
         emit_assistant_message 覆盖（parent 版），multi 版各 agent 独立流式推送。
+        进化关闭由 Loop 在工具结果严格保存后自行请求，不再经 Gateway 文本回调。
         """
         await self._handle_session_rotation(loop)
         await self._send_token_update(loop)
         await self._send_history_sync(loop)
-        from main import trigger_evolution_shutdown
-        trigger_evolution_shutdown()
 
     def _make_on_round_done(self):
         """返回捕获 self 的 async callable（幂等覆盖；WS 重连时新 router 覆盖注册）。
@@ -667,25 +732,23 @@ class MessageRouter:
             return
 
         from system.application import Application
-        sink = Application.current().frontend_sink
-        if sink:
-            sink.unregister_ws(_old)
-            sink.register_ws(_rotated, self.ws, self.conn_token)
+        from entry.agent_sink import FrontendSink
+        sink = Application.current().get_system(FrontendSink)
+        sink.unregister_ws(_old)
+        sink.register_ws(_rotated, self.ws, self.conn_token)
         self.sid = _rotated
 
         try:
             await self.ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        content=json.dumps({
-                            "action": "session_rotated",
-                            "new_sid": self.sid,
-                            "old_sid": _old,
-                        }),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=self.sid,
+                    content=json.dumps({
+                        "action": "session_rotated",
+                        "new_sid": self.sid,
+                        "old_sid": _old,
+                    }),
+                ).model_dump_json(exclude_none=True)
             )
         except Exception:
             logger.debug(
@@ -698,11 +761,11 @@ class MessageRouter:
         if not reply:
             return
         from system.application import Application
-        sink = Application.current().frontend_sink
-        if sink is not None:
-            await sink.emit_assistant_message(
-                self.sid, reply, loop.current_character_agent,
-            )
+        from entry.agent_sink import FrontendSink
+        sink = Application.current().get_system(FrontendSink)
+        await sink.emit_assistant_message(
+            self.sid, reply, loop.current_character_agent,
+        )
 
     async def _send_history_sync(self, loop: IMainSessionLoop) -> None:
         """在一轮 History 写入完成后推送正典历史同步元数据。"""
@@ -740,9 +803,8 @@ class MessageRouter:
         send_text 触发 RuntimeError 并产生 ERROR 级 traceback 噪声。
         """
         from system.application import Application
-        sink = Application.current().frontend_sink
-        if sink is None:
-            return
+        from entry.agent_sink import FrontendSink
+        sink = Application.current().get_system(FrontendSink)
         await sink.emit_usage_update(
             self.sid, loop.get_token_usage(), loop.get_context_tokens(),
         )

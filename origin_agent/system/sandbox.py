@@ -27,7 +27,9 @@ import tempfile
 import threading
 from enum import Enum
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import Callable
+
+from framework import AsyncSystem
 
 from easysave import contains, load, save
 from entity.typeref import make_config
@@ -46,15 +48,13 @@ from entity.puretype import (
     ProcessLineStreamResult,
 )
 from system.atomic_io import replace_atomic
-from system.context import get_runtime_context
+from system.context import RuntimeContext
 from system.pathutils import find_repo_root
+from system.runtime import RuntimeSystem
+from system.subprocess_utils import SubprocessRunner
 from system.text_codec import decode_text, split_lf_lines
 
 from pydantic import BaseModel, ConfigDict
-
-if TYPE_CHECKING:
-    from system.context import RuntimeContext
-    from system.subprocess_utils import SubprocessRunner
 
 logger = logging.getLogger(__name__)
 
@@ -138,21 +138,31 @@ class ResolvedPath(BaseModel):
     namespace: str  # 不带冒号的内置或动态命名空间名
 
 
-class Sandbox:
-    """Application 持有的路径安全边界与动态空间管理单例。"""
+class Sandbox(AsyncSystem):
+    """Application 持有的路径安全边界与动态空间管理单例。
 
-    def __init__(
-        self,
-        ctx: RuntimeContext,
-        runner: SubprocessRunner | None = None,
-    ) -> None:
-        self._ctx: RuntimeContext = ctx
-        self._runner: SubprocessRunner | None = runner
-        self._dynamic_spaces_path: Path = (
-            self._ctx.workspace / DYNAMIC_SANDBOX_SPACES_ES_FILENAME
-        )
+    注册为 framework AsyncSystem，依赖 RuntimeSystem 与 SubprocessRunner；
+    由 Application 在 P22 装配后经 ``app.get_system(Sandbox)`` 取得。
+    virtual_awake 取得 RuntimeContext 与 SubprocessRunner，并加载动态空间。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem, SubprocessRunner))
+        self._ctx: RuntimeContext
+        self._runner: SubprocessRunner
+        self._dynamic_spaces_path: Path
         self._dynamic_spaces_lock: threading.RLock = threading.RLock()
         self._dynamic_space_availability: dict[str, bool] = {}
+        self._dynamic_spaces_data: DynamicSandboxSpaceData = DynamicSandboxSpaceData()
+
+    async def virtual_awake(self) -> None:
+        runtime = self.get_system(RuntimeSystem)
+        runner = self.get_system(SubprocessRunner)
+        self._ctx = runtime.context
+        self._runner = runner
+        self._dynamic_spaces_path = (
+            self._ctx.workspace / DYNAMIC_SANDBOX_SPACES_ES_FILENAME
+        )
         if self._ctx.mode == "fast":
             with self._dynamic_spaces_lock:
                 self._dynamic_spaces_data = self._load_dynamic_spaces_unlocked()
@@ -165,34 +175,35 @@ class Sandbox:
                         space.is_readonly,
                         available,
                     )
-        else:
-            # fallback 模式不读取、不校验也不启用 fast 的动态空间配置。
-            self._dynamic_spaces_data = DynamicSandboxSpaceData()
+        # fallback 模式不读取、不校验也不启用 fast 的动态空间配置。
 
-    def _get_runner(self) -> SubprocessRunner:
-        """返回注入的 runner，或惰性获取 Application 全局单例。"""
-        if self._runner is not None:
-            return self._runner
-        from system.application import Application
-        return Application.current().subprocess_runner
+    @property
+    def context(self) -> RuntimeContext:
+        return self._ctx
+
+    async def virtual_shotdown(self) -> None:
+        """关闭：Sandbox 无外部线程/进程/句柄资源，子进程归 SubprocessRunner。
+        不删除动态空间数据或映射文件。动态空间锁不需释放。
+        """
 
     # -- 动态空间持久化与校验 --------------------------------------
 
     def _static_namespace_bases(self) -> dict[str, Path]:
         """返回当前模式全部内置命名空间的 base 映射。"""
+        ctx = self.context
         repo_root = find_repo_root()
         return {
             ns: base for ns, base in {
-                Namespace.FORK.value: self._ctx.fork_path,
-                Namespace.WS.value: self._ctx.agentspace,
-                Namespace.FIX.value: self._ctx.fix_path,
+                Namespace.FORK.value: ctx.fork_path,
+                Namespace.WS.value: ctx.agentspace,
+                Namespace.FIX.value: ctx.fix_path,
                 Namespace.SKILLS.value: repo_root / Namespace.SKILLS.value,
                 Namespace.THIRD.value: repo_root / Namespace.THIRD.value,
                 Namespace.CUSTOM_HOOKS.value: repo_root / Namespace.CUSTOM_HOOKS.value,
                 Namespace.CUSTOM_LLM_CLIENT.value: repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
                 Namespace.CUSTOM_TOOLS.value: repo_root / Namespace.CUSTOM_TOOLS.value,
             }.items()
-            if base is not None and ns in _PERMISSIONS.get(self._ctx.mode, {})
+            if base is not None and ns in _PERMISSIONS.get(ctx.mode, {})
         }
 
     def _normalize_dynamic_path(self, raw_path: str) -> Path:
@@ -616,7 +627,7 @@ class Sandbox:
         """返回指定命名空间的物理根目录。
 
         供需要物理路径的外部消费者（importlib 注册、工具发现等）使用，
-        而非沙盒文件操作。调用方应通过 ``Application.current().sandbox``
+        而非沙盒文件操作。调用方应通过 ``Application.current().get_system(Sandbox)``
         或等价途径获取 Sandbox 实例。
         """
         base: Path | None = self.namespace_bases().get(ns.value)
@@ -646,7 +657,7 @@ class Sandbox:
         *session_id* — 发起会话 ID，用于中断路径按会话终止活动进程。
         """
         if timeout is None:
-            timeout = get_runtime_context().tool_timeout
+            timeout = self._ctx.tool_timeout
 
         if not args:
             raise SandboxError("subprocess args must not be empty")
@@ -665,7 +676,7 @@ class Sandbox:
                     f"Got: {arg!r}"
                 )
 
-        return self._get_runner().run(
+        return self._runner.run(
             args, cwd=str(cwd_r.real), timeout=timeout,
             extra_env=extra_env, session_id=session_id,
         )
@@ -685,7 +696,7 @@ class Sandbox:
         ``asyncio.create_subprocess_exec`` 协程挂起，事件循环保持响应。
         """
         if timeout is None:
-            timeout = get_runtime_context().tool_timeout
+            timeout = self._ctx.tool_timeout
 
         if not args:
             raise SandboxError("subprocess args must not be empty")
@@ -704,7 +715,7 @@ class Sandbox:
                     f"Got: {arg!r}"
                 )
 
-        return await self._get_runner().run_async(
+        return await self._runner.run_async(
             args, cwd=str(cwd_r.real), timeout=timeout,
             extra_env=extra_env, session_id=session_id,
         )
@@ -726,7 +737,7 @@ class Sandbox:
         实际逐行执行委托给 ``SubprocessRunner``。
         """
         if timeout is None:
-            timeout = get_runtime_context().tool_timeout
+            timeout = self._ctx.tool_timeout
 
         if not args:
             raise SandboxError("subprocess args must not be empty")
@@ -743,7 +754,7 @@ class Sandbox:
                     f"Got: {arg!r}"
                 )
 
-        return await self._get_runner().run_async_line_processor(
+        return await self._runner.run_async_line_processor(
             args,
             cwd=str(cwd_r.real),
             on_stdout_line=on_stdout_line,
@@ -755,7 +766,7 @@ class Sandbox:
 
     def kill_active(self, session_id: str) -> None:
         """终止指定 session 登记的所有活动子进程树（委托 SubprocessRunner）。"""
-        self._get_runner().kill_active(session_id)
+        self._runner.kill_active(session_id)
 
     # -- 工具辅助方法 --------------------------------------------------
 

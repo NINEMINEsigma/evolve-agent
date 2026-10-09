@@ -13,10 +13,21 @@ import os
 import subprocess  # nosec
 import sys
 import threading
-from typing import Any, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager, contextmanager
+from typing import Any, AsyncIterator, Callable, Iterator, Mapping, Sequence
 
-from entity.constant import SEARCH_PROCESS_STDERR_MAX_BYTES
+from framework import AsyncSystem
+
+from concurrent.futures import Future
+from entity.constant import (
+    ApplicationState,
+    SEARCH_PROCESS_STDERR_MAX_BYTES,
+    SUBPROCESS_SOFT_CLEANUP_WAIT_TIME,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
+)
 from entity.puretype import ProcessLineStreamResult
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -173,18 +184,225 @@ def _kill_proc_tree(pid: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
-class SubprocessRunner:
+class SubprocessRunner(AsyncSystem):
     """子进程执行的唯一实现层，持有活动进程登记表与进程树终止逻辑。
 
-    由 ``Application`` 持有全局单例，并在 ``init()`` 中注入 ``Sandbox``。
-    提供同步 ``run()``（任意线程可用）与真异步 ``run_async()``（事件循环内 await）。
-    活动进程按 ``session_id`` 分桶登记，供中断路径 ``kill_active()`` 按会话终止。
+    注册为 framework AsyncSystem，依赖 RuntimeSystem；由 Application 在
+    P22 装配后经 ``app.get_system(SubprocessRunner)`` 取得。提供同步
+    ``run()``（任意线程可用）与真异步 ``run_async()``（事件循环内 await）。
+   活动进程按 ``session_id`` 分桶登记，供中断路径 ``kill_active()`` 按会话终止。
     """
 
     def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem,))
         # session_id -> [Popen | asyncio.subprocess.Process]；kill_active 终止用。
         self._active_procs: dict[str, list[subprocess.Popen | asyncio.subprocess.Process]] = {}
         self._procs_lock: threading.Lock = threading.Lock()
+        self._operations: set[Future[None]] = set()
+        self._spawning: set[asyncio.Task[asyncio.subprocess.Process]] = set()
+        self._idle = threading.Event()
+        self._idle.set()
+        self._cleanup_failures: list[BaseException] = []
+        self._admission_closed = False
+        self._runtime: RuntimeSystem | None = None
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("SubprocessRunner has not been awakened")
+        return self._runtime
+
+    def _begin_operation(self) -> Future[None]:
+        with self.runtime.admission():
+            with self._procs_lock:
+                if self._admission_closed:
+                    raise ApplicationStoppingError("Subprocess admission has been closed")
+                operation: Future[None] = Future()
+                self._operations.add(operation)
+                self._idle.clear()
+                return operation
+
+    def _finish_operation(self, operation: Future[None]) -> None:
+        with self._procs_lock:
+            self._operations.remove(operation)
+            operation.set_result(None)
+            if not self._operations and not self._active_procs and not self._spawning:
+                self._idle.set()
+
+    def _register_process(
+        self, session_id: str, proc: subprocess.Popen | asyncio.subprocess.Process,
+    ) -> bool:
+        with self._procs_lock:
+            self._active_procs.setdefault(session_id, []).append(proc)
+            self._idle.clear()
+            closed = self._admission_closed
+        # 创建期间可能已STOPPING且kill_active快照尚看不到此进程。
+        # 先登记再核对Runtime，保证迟到进程由创建方立即收回；不反转锁序。
+        return closed or self.runtime.state != ApplicationState.RUNNING
+
+    def _forget_process(
+        self, session_id: str, proc: subprocess.Popen | asyncio.subprocess.Process,
+    ) -> None:
+        with self._procs_lock:
+            processes = self._active_procs[session_id]
+            processes.remove(proc)
+            if not processes:
+                del self._active_procs[session_id]
+            if not self._operations and not self._active_procs and not self._spawning:
+                self._idle.set()
+
+    def _record_cleanup_failure(self, error: BaseException) -> None:
+        with self._procs_lock:
+            self._cleanup_failures.append(error)
+        self.runtime.record_failure(error)
+
+    @staticmethod
+    def _reap_sync(proc: subprocess.Popen) -> None:
+        if proc.poll() is None:
+            _kill_proc_tree(proc.pid)
+            proc.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+
+    @staticmethod
+    async def _reap_async(proc: asyncio.subprocess.Process) -> None:
+        if proc.returncode is None:
+            await asyncio.to_thread(_kill_proc_tree, proc.pid)
+            await asyncio.wait_for(proc.wait(), SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+
+    def close_admission(self) -> None:
+        with self._procs_lock:
+            self._admission_closed = True
+
+    async def terminate_all(self) -> None:
+        """关闭接收并终止已登记进程；启动中的操作会在登记后自行终止。"""
+        self.close_admission()
+        with self._procs_lock:
+            processes = [proc for bucket in self._active_procs.values() for proc in bucket]
+        failures: list[BaseException] = []
+        for proc in processes:
+            try:
+                if isinstance(proc, subprocess.Popen):
+                    await asyncio.to_thread(self._reap_sync, proc)
+                else:
+                    await self._reap_async(proc)
+            except BaseException as exc:
+                self._record_cleanup_failure(exc)
+                failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("Subprocess termination failed", failures)
+
+    async def wait_idle(self) -> None:
+        self.close_admission()
+        idle = await asyncio.to_thread(self._idle.wait, SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+        with self._procs_lock:
+            failures = list(self._cleanup_failures)
+        if not idle:
+            failures.append(LifecycleFailure("Subprocess operations did not finish before the deadline"))
+        if failures:
+            raise BaseExceptionGroup("Subprocess cleanup failed", failures)
+
+    async def _spawn_async(
+        self, args: list[str], popen_kwargs: dict, session_id: str,
+    ) -> asyncio.subprocess.Process:
+        """由实际创建任务登记进程，调用方取消不会遗漏已创建的进程。"""
+        async def spawn() -> asyncio.subprocess.Process:
+            proc = await asyncio.create_subprocess_exec(*args, **popen_kwargs)
+            closing = self._register_process(session_id, proc)
+            if closing:
+                try:
+                    await self._reap_async(proc)
+                except BaseException as exc:
+                    self._record_cleanup_failure(exc)
+                    raise
+                finally:
+                    if proc.returncode is not None:
+                        self._forget_process(session_id, proc)
+                raise ApplicationStoppingError("Subprocess created while application was stopping")
+            return proc
+
+        task = asyncio.create_task(spawn(), name="subprocess-create")
+        with self._procs_lock:
+            self._spawning.add(task)
+            self._idle.clear()
+        task.add_done_callback(self._spawn_finished)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            try:
+                proc = await asyncio.shield(task)
+                await self._reap_async(proc)
+                self._forget_process(session_id, proc)
+            except ApplicationStoppingError:
+                pass
+            except BaseException as cleanup_error:
+                self._record_cleanup_failure(cleanup_error)
+                raise BaseExceptionGroup(
+                    "Subprocess creation cancellation failed", [cancelled, cleanup_error]
+                ) from None
+            raise
+
+    def _spawn_finished(self, task: asyncio.Task[asyncio.subprocess.Process]) -> None:
+        if not task.cancelled():
+            task.exception()  # 创建失败也由等待该任务的调用方取得；不能遗留未观察异常。
+        with self._procs_lock:
+            self._spawning.remove(task)
+            if not self._operations and not self._active_procs and not self._spawning:
+                self._idle.set()
+
+    @contextmanager
+    def _sync_process(
+        self, args: list[str], popen_kwargs: dict, session_id: str,
+    ) -> Iterator[subprocess.Popen]:
+        operation = self._begin_operation()
+        proc: subprocess.Popen | None = None
+        try:
+            proc = subprocess.Popen(args, **popen_kwargs)
+            if self._register_process(session_id, proc):
+                raise ApplicationStoppingError("Subprocess created while application was stopping")
+            yield proc
+        finally:
+            original = sys.exception()
+            try:
+                if proc is not None:
+                    self._reap_sync(proc)
+                    for stream in (proc.stdout, proc.stderr, proc.stdin):
+                        if stream is not None:
+                            stream.close()
+            except BaseException as cleanup_error:
+                self._record_cleanup_failure(cleanup_error)
+                if original is not None:
+                    raise BaseExceptionGroup("Subprocess cleanup failed", [original, cleanup_error]) from None
+                raise
+            finally:
+                if proc is not None and proc.poll() is not None:
+                    self._forget_process(session_id, proc)
+                self._finish_operation(operation)
+
+    @asynccontextmanager
+    async def _async_process(
+        self, args: list[str], popen_kwargs: dict, session_id: str,
+    ) -> AsyncIterator[asyncio.subprocess.Process]:
+        operation = self._begin_operation()
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await self._spawn_async(args, popen_kwargs, session_id)
+            yield proc
+        finally:
+            original = sys.exception()
+            try:
+                if proc is not None:
+                    await self._reap_async(proc)
+            except BaseException as cleanup_error:
+                self._record_cleanup_failure(cleanup_error)
+                if original is not None:
+                    raise BaseExceptionGroup("Subprocess cleanup failed", [original, cleanup_error]) from None
+                raise
+            finally:
+                if proc is not None and proc.returncode is not None:
+                    self._forget_process(session_id, proc)
+                self._finish_operation(operation)
 
     # -- 同步入口（任意线程） ----------------------------------------------- #
 
@@ -211,9 +429,7 @@ class SubprocessRunner:
 
         logger.debug("SubprocessRunner.run | cwd=%s cmd=%s", cwd, args)
 
-        # 使用 Popen 以支持超时时强制终止整个进程树。
-        # subprocess.run(timeout=...) 在 Windows 上不能可靠地
-        # 终止子进程（例如 pnpm 生成的 node 进程）。
+        # 操作在创建进程前登记；同步创建和 communicate 都受关闭所有权覆盖。
         popen_kwargs: dict = {
             "cwd": cwd,
             "stdout": subprocess.PIPE,
@@ -222,44 +438,18 @@ class SubprocessRunner:
             "env": env,
         }
         if sys.platform == "win32":
-            # CREATE_NEW_PROCESS_GROUP 允许发送 CTRL_BREAK_EVENT，
-            # 但我们将使用 taskkill 进行更可靠的进程树终止。
             popen_kwargs["creationflags"] = windows_process_group_flags()
-        proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs)  # nosec
-        with self._procs_lock:
-            self._active_procs.setdefault(session_id, []).append(proc)
-        stdout: bytes
-        stderr: bytes
-        try:
-            if timeout is not None:
-                stdout, stderr = proc.communicate(timeout=timeout)
-            else:
-                stdout, stderr = proc.communicate()
-        except subprocess.TimeoutExpired:
-            _kill_proc_tree(proc.pid)
-            stdout, stderr = b"", b""
+        with self._sync_process(args, popen_kwargs, session_id) as proc:
             try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=timeout if timeout is not None else 0, output="", stderr="",
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                raise subprocess.TimeoutExpired(
+                    cmd=args[0], timeout=timeout if timeout is not None else 0,
+                    output="", stderr="",
+                ) from exc
+            return completed_process_from_bytes(
+                args=args, returncode=proc.returncode, stdout=stdout, stderr=stderr,
             )
-        finally:
-            # 移除登记。kill_active 可能已清空整个 key（列表为空或 key 已删），须判空。
-            with self._procs_lock:
-                proc_list = self._active_procs.get(session_id)
-                if proc_list and proc in proc_list:
-                    proc_list.remove(proc)
-                    if not proc_list:
-                        self._active_procs.pop(session_id, None)
-
-        return completed_process_from_bytes(
-            args=args,
-            returncode=proc.returncode,
-            stdout=stdout,
-            stderr=stderr,
-        )
 
     # -- 真异步入口（事件循环内 await） ------------------------------------- #
 
@@ -299,49 +489,17 @@ class SubprocessRunner:
         }
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = windows_process_group_flags()
-        proc: asyncio.subprocess.Process = await asyncio.create_subprocess_exec(
-            *args, **popen_kwargs,
-        )  # nosec
-        with self._procs_lock:
-            self._active_procs.setdefault(session_id, []).append(proc)
-        stdout: bytes
-        stderr: bytes
-        try:
-            if timeout is not None:
+        async with self._async_process(args, popen_kwargs, session_id) as proc:
+            try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
-            else:
-                stdout, stderr = await proc.communicate()
-        except asyncio.TimeoutError:
-            _kill_proc_tree(proc.pid)
-            try:
-                await asyncio.wait_for(proc.wait(), 5)
-            except asyncio.TimeoutError:
-                pass
-            raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=timeout if timeout is not None else 0, output="", stderr="",
+            except asyncio.TimeoutError as exc:
+                raise subprocess.TimeoutExpired(
+                    cmd=args[0], timeout=timeout if timeout is not None else 0,
+                    output="", stderr="",
+                ) from exc
+            return completed_process_from_bytes(
+                args=args, returncode=proc.returncode, stdout=stdout, stderr=stderr,
             )
-        except asyncio.CancelledError:
-            _kill_proc_tree(proc.pid)
-            try:
-                await asyncio.wait_for(proc.wait(), 5)
-            except (asyncio.TimeoutError, Exception):
-                pass
-            raise
-        finally:
-            # 移除登记。kill_active 可能已清空整个 key（列表为空或 key 已删），须判空。
-            with self._procs_lock:
-                proc_list = self._active_procs.get(session_id)
-                if proc_list and proc in proc_list:
-                    proc_list.remove(proc)
-                    if not proc_list:
-                        self._active_procs.pop(session_id, None)
-
-        return completed_process_from_bytes(
-            args=args,
-            returncode=proc.returncode,
-            stdout=stdout,
-            stderr=stderr,
-        )
 
     async def run_async_line_processor(
         self,
@@ -375,141 +533,103 @@ class SubprocessRunner:
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = windows_process_group_flags()
 
-        proc: asyncio.subprocess.Process = await asyncio.create_subprocess_exec(
-            *args, **popen_kwargs,
-        )  # nosec
-        with self._procs_lock:
-            self._active_procs.setdefault(session_id, []).append(proc)
+        async with self._async_process(args, popen_kwargs, session_id) as proc:
+            stderr_chunks: list[bytes] = []
+            stderr_seen = 0
+            stderr_truncated = False
+            stdout_line_count = 0
+            truncated = False
 
-        stderr_chunks: list[bytes] = []
-        stderr_seen: int = 0
-        stderr_truncated: bool = False
-        stdout_line_count: int = 0
-        truncated: bool = False
+            async def read_stderr() -> None:
+                nonlocal stderr_seen, stderr_truncated
+                if proc.stderr is None:
+                    raise LifecycleFailure("Subprocess stderr pipe was not created")
+                while chunk := await proc.stderr.read(4096):
+                    if stderr_seen < stderr_byte_limit:
+                        stderr_chunks.append(chunk[:stderr_byte_limit - stderr_seen])
+                    stderr_seen += len(chunk)
+                    stderr_truncated = stderr_seen > stderr_byte_limit
 
-        async def _read_stderr() -> None:
-            nonlocal stderr_seen, stderr_truncated
-            if proc.stderr is None:
-                return
-            while True:
-                chunk = await proc.stderr.read(4096)
-                if not chunk:
-                    return
-                if stderr_seen < stderr_byte_limit:
-                    remaining = stderr_byte_limit - stderr_seen
-                    stderr_chunks.append(chunk[:remaining])
-                stderr_seen += len(chunk)
-                if stderr_seen > stderr_byte_limit:
-                    stderr_truncated = True
+            async def read_stdout() -> None:
+                nonlocal stdout_line_count, truncated
+                if proc.stdout is None:
+                    raise LifecycleFailure("Subprocess stdout pipe was not created")
+                while line := await proc.stdout.readline():
+                    stdout_line_count += 1
+                    if not on_stdout_line(line):
+                        truncated = True
+                        await asyncio.to_thread(_kill_proc_tree, proc.pid)
+                        return
 
-        async def _read_stdout() -> None:
-            nonlocal stdout_line_count, truncated
-            if proc.stdout is None:
-                return
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    return
-                stdout_line_count += 1
-                keep_going = on_stdout_line(line)
-                if not keep_going:
-                    truncated = True
-                    _kill_proc_tree(proc.pid)
-                    return
-
-        stderr_task = asyncio.create_task(_read_stderr())
-        stdout_task = asyncio.create_task(_read_stdout())
-        try:
-            await asyncio.wait_for(stdout_task, timeout=timeout)
-            if truncated and proc.returncode is None:
-                try:
-                    await asyncio.wait_for(proc.wait(), 5)
-                except asyncio.TimeoutError:
-                    pass
-            else:
-                await asyncio.wait_for(proc.wait(), timeout=timeout)
-            await asyncio.wait_for(stderr_task, timeout=5)
-        except asyncio.TimeoutError:
-            _kill_proc_tree(proc.pid)
+            stderr_task = asyncio.create_task(read_stderr(), name="subprocess-stderr")
+            stdout_task = asyncio.create_task(read_stdout(), name="subprocess-stdout")
             try:
-                await asyncio.wait_for(proc.wait(), 5)
-            except asyncio.TimeoutError:
-                pass
-            raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=timeout if timeout is not None else 0, output="", stderr="",
+                await asyncio.wait_for(stdout_task, timeout=timeout)
+                await asyncio.wait_for(
+                    proc.wait(),
+                    SUBPROCESS_SOFT_CLEANUP_WAIT_TIME if truncated else timeout,
+                )
+                await asyncio.wait_for(stderr_task, SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+            except asyncio.TimeoutError as exc:
+                raise subprocess.TimeoutExpired(
+                    cmd=args[0], timeout=timeout if timeout is not None else 0,
+                    output="", stderr="",
+                ) from exc
+            finally:
+                original = sys.exception()
+                for task in (stdout_task, stderr_task):
+                    if not task.done():
+                        task.cancel()
+                results = await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+                failures = [
+                    result for result in results
+                    if isinstance(result, BaseException)
+                    and not isinstance(result, asyncio.CancelledError)
+                    and result is not original
+                ]
+                if failures:
+                    if original is not None:
+                        failures.insert(0, original)
+                    raise BaseExceptionGroup("Subprocess output processing failed", failures)
+
+            stderr_text = safe_decode(b"".join(stderr_chunks))
+            if stderr_truncated:
+                stderr_text += "\n[stderr truncated]"
+            return ProcessLineStreamResult(
+                returncode=proc.returncode,
+                stderr=stderr_text,
+                truncated=truncated,
+                stdout_line_count=stdout_line_count,
             )
-        except asyncio.CancelledError:
-            _kill_proc_tree(proc.pid)
-            try:
-                await asyncio.wait_for(proc.wait(), 5)
-            except (asyncio.TimeoutError, Exception):
-                pass
-            raise
-        except Exception:
-            if proc.returncode is None:
-                _kill_proc_tree(proc.pid)
-                try:
-                    await asyncio.wait_for(proc.wait(), 5)
-                except (asyncio.TimeoutError, Exception):
-                    pass
-            raise
-        finally:
-            if not stdout_task.done():
-                stdout_task.cancel()
-            if not stderr_task.done():
-                stderr_task.cancel()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            with self._procs_lock:
-                proc_list = self._active_procs.get(session_id)
-                if proc_list and proc in proc_list:
-                    proc_list.remove(proc)
-                    if not proc_list:
-                        self._active_procs.pop(session_id, None)
-
-        stderr_bytes = b"".join(stderr_chunks)
-        stderr_text = safe_decode(stderr_bytes)
-        if stderr_truncated:
-            stderr_text += "\n[stderr truncated]"
-
-        return ProcessLineStreamResult(
-            returncode=proc.returncode,
-            stderr=stderr_text,
-            truncated=truncated,
-            stdout_line_count=stdout_line_count,
-        )
 
     # -- 中断终止 ---------------------------------------------------------- #
 
     def kill_active(self, session_id: str) -> None:
-        """终止指定 session 登记的所有活动子进程树；session_id 为空串时终止全部。
+        """请求终止匹配会话的进程树；空会话 ID 表示全部。
 
-        在事件循环线程调用（ToolExecutor / SubAgentLoop 中断路径）。
-        duck-type 兼容 ``subprocess.Popen``（同步 ``run()`` 产出）与
-        ``asyncio.subprocess.Process``（``run_async()`` 产出）：
-        - Popen：``poll() is None`` 判活 → 杀树 + ``wait(timeout=1)`` 收割。
-        - asyncio Process：``returncode is None`` 判活 → 仅杀树（收割由
-          ``run_async`` 的 ``CancelledError`` 分支 ``await proc.wait()`` 负责）。
-        幂等：仅终止仍存活的进程。
+        此同步入口不提前移除登记。进程的等待及管道回收由原 run 操作
+        完成，应用关闭再通过 terminate_all/wait_idle 确认真实退出。
         """
         with self._procs_lock:
             if session_id:
-                procs = self._active_procs.pop(session_id, [])
+                processes = list(self._active_procs.get(session_id, ()))
             else:
-                procs = [p for v in self._active_procs.values() for p in v]
-                self._active_procs.clear()
-        for proc in procs:
-            # duck-type 判活：Popen.poll() vs asyncio Process.returncode
-            if isinstance(proc, subprocess.Popen):
-                # subprocess.Popen（同步 run() 产出）
-                if proc.poll() is None:
+                processes = [proc for bucket in self._active_procs.values() for proc in bucket]
+        failures: list[BaseException] = []
+        for proc in processes:
+            alive = proc.poll() is None if isinstance(proc, subprocess.Popen) else proc.returncode is None
+            if alive:
+                try:
                     _kill_proc_tree(proc.pid)
-                    try:
-                        proc.wait(timeout=1)
-                    except Exception:
-                        pass
-            else:
-                # asyncio.subprocess.Process（run_async() 产出）
-                if proc.returncode is None:
-                    _kill_proc_tree(proc.pid)
-                    # 不 await wait —— kill_active 为同步方法；
-                    # 收割由 run_async 取消分支的 await proc.wait() 负责。
+                except BaseException as exc:
+                    self._record_cleanup_failure(exc)
+                    failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("Subprocess interruption failed", failures)
+
+    async def virtual_shotdown(self) -> None:
+        """关闭：先禁止新进程，再终止所有活动进程并等待真正退出。
+
+        错误直接上抛；不吞掉清理失败或覆盖为成功。
+        """
+        await close_resources((self.terminate_all, self.wait_idle))

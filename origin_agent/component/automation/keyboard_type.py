@@ -25,7 +25,8 @@ import time
 from ctypes import wintypes
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -347,10 +348,13 @@ def _handle_keyboard_type(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="KeyboardType",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register KeyboardType into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="KeyboardType",
+        toolset="automation",
+        schema={
         # 模拟键盘输入文本，支持前台和后台两种模式。
         # 前置条件：前台模式需 pyautogui 且输入框已聚焦；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：前台 ASCII 用 pyautogui.write；前台非 ASCII 用 SendInput+KEYEVENTF_UNICODE；
@@ -422,4 +426,4 @@ The window can be obscured or in the background — no foreground focus needed.
     },
     handler=_handle_keyboard_type,
     check_fn=_check_pyautogui,
-)
+    )

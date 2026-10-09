@@ -9,23 +9,31 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs."
 )
 
 _VALID_STATES: tuple[str, ...] = ("attached", "detached", "visible", "hidden")
 _DEFAULT_TIMEOUT_MS: int = 2000
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _handle_browser_wait(args: dict[str, Any]) -> dict:
@@ -42,8 +50,10 @@ async def _handle_browser_wait(args: dict[str, Any]) -> dict:
         return tool_error("timeout_ms cannot be negative")
 
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserWait: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
@@ -65,10 +75,13 @@ async def _handle_browser_wait(args: dict[str, Any]) -> dict:
     return tool_result(waited=True, condition=selector or "networkidle", state=state if selector else None)
 
 
-registry.register(
-    name="BrowserWait",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserWait into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserWait",
+        toolset="browser",
+        schema={
         # 等待页面或元素达到指定状态。
         #
         # ## 调用效果
@@ -129,4 +142,4 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

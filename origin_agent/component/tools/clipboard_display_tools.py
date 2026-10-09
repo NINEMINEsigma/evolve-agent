@@ -1,6 +1,6 @@
 """剪贴板展示工具 — 在前端顶部显示可一键复制的文本区域。
 
-模块导入时通过 ``registry.register()`` 注册 2 个工具：
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 2 个工具：
   - ``SetClipboardDisplay``  — 创建或更新可复制展示区域
   - ``ClearClipboardDisplay`` — 清除展示区域
 
@@ -13,9 +13,9 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
-from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -110,22 +110,19 @@ async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolCon
     )
 
 
-# ── 注册 ────────────────────────────────────────────────────────────
+# ── schema 常量 ────────────────────────────────────────────────────
 
-registry.register(
-    name="SetClipboardDisplay",
-    toolset="clipboard",
-    schema={
-        # 在前端顶部创建或更新可一键复制的展示区域。
-        # 前置条件：无（前端在线即可）。display_id 重复使用会覆盖更新而非追加。
-        # 调用效果：前端顶部出现可复制文本卡片，用户点击即可复制。
-        # 返回：{ display_id, label, content }
-        # 使用限制：最多同时保留 2 个展示区域，除非用户明确要求更多。
-        #   内容发生变化时应主动调用本工具更新对应 display_id 的卡片。
-        #   感觉用户已不再需要某卡片时应主动调用 ClearClipboardDisplay 关闭。
-        # 典型场景：用户要求复制内容、生成长文本（代码、配置、标签列表）时。
-        # 副作用：仅影响前端 UI，不涉及文件系统。不会将内容写入剪贴板。
-        "description": """Create or update a one-click copy area in the frontend top panel.
+_SET_CLIPBOARD_DISPLAY_SCHEMA = {
+    # 在前端顶部创建或更新可一键复制的展示区域。
+    # 前置条件：无（前端在线即可）。display_id 重复使用会覆盖更新而非追加。
+    # 调用效果：前端顶部出现可复制文本卡片，用户点击即可复制。
+    # 返回：{ display_id, label, content }
+    # 使用限制：最多同时保留 2 个展示区域，除非用户明确要求更多。
+    #   内容发生变化时应主动调用本工具更新对应 display_id 的卡片。
+    #   感觉用户已不再需要某卡片时应主动调用 ClearClipboardDisplay 关闭。
+    # 典型场景：用户要求复制内容、生成长文本（代码、配置、标签列表）时。
+    # 副作用：仅影响前端 UI，不涉及文件系统。不会将内容写入剪贴板。
+    "description": """Create or update a one-click copy area in the frontend top panel.
 
 ## Prerequisites
 None (frontend must be online).
@@ -150,45 +147,36 @@ A copyable text card appears at the top of the frontend. The user can copy with 
 
 ## Side Effects
 Frontend UI only. Does not write to the system clipboard. Reusing the same `display_id` overwrites the previous card.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "display_id": {
-                    "type": "string",
-                    # 展示区域唯一标识。重复使用同一 id 会覆盖更新。
-                    "description": """Unique identifier for this display area. Reusing the same ID overwrites the existing card instead of creating a new one.""",
-                },
-                "label": {
-                    "type": "string",
-                    # 展示区域标题/描述。
-                    "description": """Human-readable title shown above the content.""",
-                },
-                "content": {
-                    "type": "string",
-                    # 要展示的文本内容，用户点击即可复制。
-                    "description": """The text content to display. The user can copy it with a single click.""",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "display_id": {
+                "type": "string",
+                # 展示区域唯一标识。重复使用同一 id 会覆盖更新。
+                "description": """Unique identifier for this display area. Reusing the same ID overwrites the existing card instead of creating a new one.""",
             },
-            "required": ["display_id", "label", "content"],
+            "label": {
+                "type": "string",
+                # 展示区域标题/描述。
+                "description": """Human-readable title shown above the content.""",
+            },
+            "content": {
+                "type": "string",
+                # 要展示的文本内容，用户点击即可复制。
+                "description": """The text content to display. The user can copy it with a single click.""",
+            },
         },
+        "required": ["display_id", "label", "content"],
     },
-    handler=_handle_set_clipboard_display,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
-ui_event_router.register("SetClipboardDisplay", _emit_clipboard_display)
+}
 
-registry.register(
-    name="ClearClipboardDisplay",
-    toolset="clipboard",
-    schema={
-        # 移除前端展示区域。
-        # display_id: 要清除的展示区域 id。不传则清除当前会话全部展示区域。
-        # 调用效果：前端对应卡片消失。
-        # 返回：{ success, cleared: [...], message }
-        # 使用规则：当感觉用户不再需要某卡片时，应主动调用本工具清理，保持面板整洁。
-        "description": """Remove a clipboard display area from the frontend.
+_CLEAR_CLIPBOARD_DISPLAY_SCHEMA = {
+    # 移除前端展示区域。
+    # display_id: 要清除的展示区域 id。不传则清除当前会话全部展示区域。
+    # 调用效果：前端对应卡片消失。
+    # 返回：{ success, cleared: [...], message }
+    # 使用规则：当感觉用户不再需要某卡片时，应主动调用本工具清理，保持面板整洁。
+    "description": """Remove a clipboard display area from the frontend.
 
 ## Effect
 The corresponding card disappears from the frontend top panel.
@@ -203,21 +191,42 @@ The corresponding card disappears from the frontend top panel.
 
 ## Usage Rule
 Proactively call this tool when you sense the user no longer needs a card, to keep the panel clean.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "display_id": {
-                    "type": "string",
-                    # 要清除的展示区域 id。省略则清除当前会话全部。
-                    "description": """ID of the display area to clear. Omit to clear all areas for the current session.""",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "display_id": {
+                "type": "string",
+                # 要清除的展示区域 id。省略则清除当前会话全部。
+                "description": """ID of the display area to clear. Omit to clear all areas for the current session.""",
             },
-            "required": [],
         },
+        "required": [],
     },
-    handler=_handle_clear_clipboard_display,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
-ui_event_router.register("ClearClipboardDisplay", _emit_clipboard_display)
+}
+
+
+# ── 注册 ────────────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register clipboard display tools and their UI event handlers."""
+    registry.register(
+        name="SetClipboardDisplay",
+        toolset="clipboard",
+        schema=_SET_CLIPBOARD_DISPLAY_SCHEMA,
+        handler=_handle_set_clipboard_display,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
+    ui_events.register("SetClipboardDisplay", _emit_clipboard_display)
+
+    registry.register(
+        name="ClearClipboardDisplay",
+        toolset="clipboard",
+        schema=_CLEAR_CLIPBOARD_DISPLAY_SCHEMA,
+        handler=_handle_clear_clipboard_display,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )
+    ui_events.register("ClearClipboardDisplay", _emit_clipboard_display)

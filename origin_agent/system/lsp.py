@@ -1,11 +1,11 @@
 """LSP (Language Server Protocol) 客户端 — pyright 子进程管理 + JSON-RPC over stdio。
 
-全局共享单例，懒启动。agent 通过 ``LSPStart`` 工具指定根目录并启动 pyright 后，
+由 Application 注册的 AsyncSystem，pyright 按需启动。Agent 通过 ``LSPStart`` 指定根目录后
 才能使用 ``LSPReferences``、``LSPDefinition``、``LSPDiagnostics``、
 ``LSPSymbols``、``LSPRefresh`` 等查询能力。
 
 无 ``lsp_stop``；重复 ``LSPStart`` 直接替换根目录并重启 pyright 进程。
-agent 进程退出时由 ``main.py`` 调用 ``cleanup_lsp()`` 强制清理。
+最终关闭由 framework 的 ``virtual_shotdown`` 确认进程与读取线程均已结束。
 
 通信模型：JSON-RPC 2.0 over stdio，帧格式 ``Content-Length: N\\r\\n\\r\\n{json}``。
 独立的 daemon 线程持续读取 pyright stdout，按 ``id`` 分发响应，按 ``method`` 路由通知。
@@ -17,14 +17,18 @@ import asyncio
 import json
 import logging
 import shutil
-import struct
 import subprocess  # nosec
 import sys
 import threading
 from pathlib import Path
 from typing import Any
 
+from framework import AsyncSystem
+
+from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -65,7 +69,7 @@ _SYMBOL_KIND_MAP: dict[int, str] = {
 # LSPManager
 # ---------------------------------------------------------------------------
 
-class LSPManager:
+class LSPManager(AsyncSystem):
     """pyright LSP server 的全局单例管理器。
 
     生命周期: IDLE → STARTING → READY → (lsp_start 替换) → STARTING → READY → ...
@@ -73,7 +77,13 @@ class LSPManager:
     """
 
     def __init__(self) -> None:
-        self._lock: threading.Lock = threading.Lock()
+        super().__init__(dependencies=(RuntimeSystem, Sandbox))
+        self._lock = threading.RLock()
+        self._operation_lock = threading.Lock()
+        self._admission_closed = threading.Event()
+        self._runtime: RuntimeSystem | None = None
+        self._request_waiters: set[asyncio.Task[Any]] = set()
+        self._cleanup_task: asyncio.Task[int] | None = None
         self._state: LSPState = LSPState.IDLE
         self._process: subprocess.Popen | None = None
         self._root_path: Path | None = None
@@ -85,6 +95,93 @@ class LSPManager:
         self._reader_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._sandbox = self.get_system(Sandbox)
+        self._loop = self._runtime.loop
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("LSPManager has not been awakened")
+        return self._runtime
+
+    @property
+    def sandbox(self) -> Sandbox:
+        if self._sandbox is None:
+            raise LifecycleFailure("LSPManager has not been awakened")
+        return self._sandbox
+
+    def _require_running(self) -> None:
+        self.runtime.require_running()
+        if self._admission_closed.is_set():
+            raise ApplicationStoppingError("LSP no longer accepts operations")
+
+    def close_admission(self) -> None:
+        self._admission_closed.set()
+        with self._lock:
+            for pending in self._pending.values():
+                pending["error"] = "LSP is stopping"
+                pending["event"].set()
+
+    def _observe_waiter(self, task: asyncio.Task[Any]) -> None:
+        self._request_waiters.discard(task)
+        if task.cancelled():
+            self.runtime.record_failure(LifecycleFailure("Native LSP wait was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self.runtime.record_failure(error)
+
+    async def virtual_shotdown(self) -> None:
+        self.close_admission()
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(
+                asyncio.to_thread(self._cleanup), name="lsp-native-cleanup",
+            )
+            self._cleanup_task.add_done_callback(self._observe_cleanup)
+        await close_resources((self._wait_cleanup, self._wait_response_threads))
+
+    async def _wait_cleanup(self) -> None:
+        task = self._cleanup_task
+        if task is None:
+            raise LifecycleFailure("LSP cleanup has not been started")
+        done, _ = await asyncio.wait(
+            {task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS,
+        )
+        if not done:
+            failure = LifecycleFailure("LSP native cleanup did not finish")
+            self.runtime.record_failure(failure)
+            raise failure
+        task.result()
+
+    async def _wait_response_threads(self) -> None:
+        waiters = tuple(self._request_waiters)
+        if waiters:
+            done, pending = await asyncio.wait(waiters, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+            failures: list[BaseException] = []
+            for task in done:
+                if task.cancelled():
+                    failures.append(LifecycleFailure("Native LSP wait was cancelled"))
+                else:
+                    error = task.exception()
+                    if error is not None:
+                        failures.append(error)
+            if pending:
+                failures.append(LifecycleFailure("LSP response waiters did not finish"))
+            if failures:
+                for failure in failures:
+                    self.runtime.record_failure(failure)
+                raise BaseExceptionGroup("LSP response cleanup failed", failures)
+
+    def _observe_cleanup(self, task: asyncio.Task[int]) -> None:
+        if task.cancelled():
+            self.runtime.record_failure(LifecycleFailure("LSP cleanup was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self.runtime.record_failure(error)
 
     # -- 公开属性 --------------------------------------------------
 
@@ -103,18 +200,20 @@ class LSPManager:
 
     # -- start -----------------------------------------------------
 
-    def start(self, root_logical: str, sandbox: Sandbox) -> dict:
+    def start(self, root_logical: str) -> dict:
         """启动或替换 pyright 实例。
 
         *root_logical* — 逻辑路径（如 ``"fork:"``），通过 sandbox 解析为真实路径。
-        *sandbox* — 当前 Sandbox 实例，用于路径映射。
+        路径映射使用唤醒时取得的唯一 Sandbox。
 
         返回 dict:
         - 成功: ``{"started": true, "root": "<逻辑路径>", "root_uri": "<file URI>"}`
         - 替换: 额外包含 ``"replaced": true, "previous_root": "<旧逻辑路径>"}``
         - 失败: ``{"error": "..."}``
         """
-        with self._lock:
+        with self._operation_lock:
+            self._require_running()
+            sandbox = self.sandbox
             # 解析根目录
             try:
                 resolved = sandbox.resolve_read(root_logical)
@@ -140,20 +239,12 @@ class LSPManager:
             self._state = LSPState.STARTING
             self._root_path = root_path
             self._root_uri = root_path.as_uri()
-            self._sandbox = sandbox
             self._diagnostics_cache.clear()
             self._pending.clear()
             self._next_id = 1
 
-            # 获取或创建事件循环
-            try:
-                self._loop = asyncio.get_running_loop()
-                if self._loop is None:
-                    raise RuntimeError("No running event loop found")
-            except RuntimeError:
-                self._loop = asyncio.new_event_loop()
-                if self._loop is None:
-                    raise RuntimeError("Failed to create new event loop")
+            # 始终复用 Runtime 主事件循环，禁止从工具线程新建无所有者 loop。
+            self._loop = self.runtime.loop
 
             # 启动子进程
             try:
@@ -174,39 +265,31 @@ class LSPManager:
                 self._state = LSPState.IDLE
                 return {"error": f"Failed to start pyright: {exc}"}
 
-            # 启动 stderr 读取线程（stderr 不与 stdout 竞争，可以立即启动）
-            self._stderr_thread = threading.Thread(
-                target=self._stderr_loop,
-                name="lsp-stderr",
-                daemon=True,
-            )
-            self._stderr_thread.start()
-
-            # 初始化握手（同步读取 stdout，此时 reader 线程尚未启动）
             try:
+                self._stderr_thread = threading.Thread(
+                    target=self._stderr_loop, name="lsp-stderr", daemon=True,
+                )
+                self._stderr_thread.start()
+                # 握手同样由唯一 reader 读取；同步调用等待 Event，截止不会被
+                # 阻塞的 readline 绕过。状态锁不覆盖 Event.wait 或 thread.join。
+                self._reader_thread = threading.Thread(
+                    target=self._read_loop, name="lsp-reader", daemon=True,
+                )
+                self._reader_thread.start()
                 self._do_initialize()
-            except Exception as exc:
-                self._state = LSPState.IDLE
-                self._kill_existing()
-                return {"error": f"LSP initialization failed: {exc}"}
-
-            # sanity check
-            try:
                 self._do_sanity_check()
-            except Exception as exc:
+                self._require_running()
+            except BaseException as error:
+                try:
+                    self._kill_existing()
+                except BaseException as cleanup_error:
+                    raise BaseExceptionGroup(
+                        "LSP initialization and cleanup failed", [error, cleanup_error],
+                    )
                 self._state = LSPState.IDLE
-                self._kill_existing()
-                return {"error": f"LSP sanity check failed: {exc}"}
-
-            self._state = LSPState.READY
-
-            # 初始化完成，现在启动 stdout reader 线程处理后续消息
-            self._reader_thread = threading.Thread(
-                target=self._read_loop,
-                name="lsp-reader",
-                daemon=True,
-            )
-            self._reader_thread.start()
+                raise
+            with self._lock:
+                self._state = LSPState.READY
 
             result: dict = {
                 "started": True,
@@ -221,8 +304,10 @@ class LSPManager:
     # -- 查询方法 --------------------------------------------------
 
     async def references(
-        self, logical_path: str, line: int, column: int, sandbox: Sandbox
+        self, logical_path: str, line: int, column: int
     ) -> list[LSPReference]:
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return []
         uri = self._resolve_to_uri(logical_path, sandbox)
@@ -244,8 +329,10 @@ class LSPManager:
         return refs
 
     async def definition(
-        self, logical_path: str, line: int, column: int, sandbox: Sandbox
+        self, logical_path: str, line: int, column: int
     ) -> LSPDefinition | None:
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return None
         uri = self._resolve_to_uri(logical_path, sandbox)
@@ -265,8 +352,10 @@ class LSPManager:
         return self._location_to_definition(loc, sandbox)
 
     async def diagnostics(
-        self, logical_path: str, sandbox: Sandbox
+        self, logical_path: str
     ) -> list[LSPDiagnostic]:
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return []
         uri = self._resolve_to_uri(logical_path, sandbox)
@@ -276,8 +365,10 @@ class LSPManager:
             return list(self._diagnostics_cache.get(uri, []))
 
     async def symbols(
-        self, logical_path: str, sandbox: Sandbox
+        self, logical_path: str
     ) -> list[LSPSymbol]:
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return []
         uri = self._resolve_to_uri(logical_path, sandbox)
@@ -290,8 +381,10 @@ class LSPManager:
         return [self._to_symbol(s) for s in result if isinstance(s, dict)]
 
     async def refresh(
-        self, logical_path: str | None, sandbox: Sandbox
+        self, logical_path: str | None
     ) -> dict:
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return {"error": "LSP not started. Call lsp_start first."}
         if logical_path is not None:
@@ -320,11 +413,13 @@ class LSPManager:
 
     # -- didChange + diagnostics 附加 (供 filesystem.py 调用) -----------
 
-    def notify_did_change(self, logical_path: str, content: str, sandbox: Sandbox) -> None:
+    def notify_did_change(self, logical_path: str, content: str) -> None:
         """通知 LSP 文件内容已变更。
 
         如果 LSP 未启动或文件不在 workspace 范围内，静默忽略。
         """
+        self._require_running()
+        sandbox = self.sandbox
         if not self.is_ready():
             return
         uri = self._resolve_to_uri(logical_path, sandbox)
@@ -355,15 +450,13 @@ class LSPManager:
 
     # -- cleanup ---------------------------------------------------
 
-    def cleanup(self) -> int:
-        """强制终止 pyright 进程。返回 killed count。"""
-        with self._lock:
-            if self._process is None:
-                self._state = LSPState.IDLE
-                return 0
+    def _cleanup(self) -> int:
+        """在线程内等待正在进行的替换操作并确认资源实际结束。"""
+        with self._operation_lock:
             killed = self._kill_existing()
-            self._state = LSPState.IDLE
-            return 1 if killed else 0
+            with self._lock:
+                self._state = LSPState.IDLE
+            return int(killed)
 
     # -- 内部方法 --------------------------------------------------
 
@@ -430,19 +523,21 @@ class LSPManager:
 
     async def _request(self, method: str, params: dict) -> Any:
         """发送请求并在线程池中同步等待响应（带超时）。"""
+        self._require_running()
         with self._lock:
+            if self._admission_closed.is_set():
+                raise ApplicationStoppingError("LSP no longer accepts requests")
             if self._state != LSPState.READY:
                 return None
             if self._process is None or self._process.poll() is not None:
                 self._state = LSPState.IDLE
                 return None
             msg_id = self._send_request(method, params)
+            pending = self._pending[msg_id]
 
-        # 在线程池中等待 Event 被设置，避免阻塞事件循环
+        # 在线程池中等待 Event 被设置，避免阻塞事件循环。
+        # 先保留请求对象，响应线程可以从索引移除而不丢失实际结果。
         def _wait() -> Any:
-            pending = self._pending.get(msg_id)
-            if pending is None:
-                return None
             event: threading.Event = pending["event"]
             if event.wait(timeout=_LSP_REQUEST_TIMEOUT):
                 if pending["error"] is not None:
@@ -455,7 +550,10 @@ class LSPManager:
                     self._pending.pop(msg_id, None)
                 return None
 
-        return await asyncio.to_thread(_wait)
+        task = asyncio.create_task(asyncio.to_thread(_wait), name=f"lsp-response-{msg_id}")
+        self._request_waiters.add(task)
+        task.add_done_callback(self._observe_waiter)
+        return await asyncio.shield(task)
 
     def _notify(self, method: str, params: dict) -> None:
         """发送 JSON-RPC 通知（无 id，无响应）。"""
@@ -505,8 +603,8 @@ class LSPManager:
                 # 跳过无法解析的消息，不终止 reader 线程
                 logger.debug("LSP: skipped unparseable message", exc_info=True)
                 continue
-            except Exception:
-                logger.warning("LSP read loop error", exc_info=True)
+            except Exception as error:
+                self.runtime.record_failure(error)
                 break
         # 进程退出，标记所有 pending 请求为 error
         with self._lock:
@@ -620,7 +718,8 @@ class LSPManager:
                 decoded = line.decode("utf-8", errors="replace").strip()
                 stderr_lines.append(decoded)
                 logger.info("[pyright-stderr] %s", decoded)
-            except Exception:
+            except Exception as error:
+                self.runtime.record_failure(error)
                 break
         # 进程退出后输出最后 20 行 stderr 帮助诊断
         if stderr_lines:
@@ -655,44 +754,33 @@ class LSPManager:
             "workspaceFolders": [{"uri": self._root_uri, "name": "root"}],
         }
 
-        # 使用同步方式发送（STARTING 阶段无事件循环可用）
-        msg_id = self._next_id
-        self._next_id += 1
-        message = {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": "initialize",
-            "params": init_params,
-        }
-        self._write_message(message)
-
-        # 等待 initialize 响应（同步读取，因为 reader 线程已启动但 loop 可能未运行）
-        response = self._wait_for_response_sync(msg_id, timeout=_LSP_START_TIMEOUT)
+        response = self._request_sync("initialize", init_params, timeout=_LSP_START_TIMEOUT)
         if response is None:
             raise RuntimeError("initialize request timed out")
+        if "error" in response:
+            raise RuntimeError(f"LSP initialize failed: {response['error']}")
 
         # 发送 initialized 通知
         self._notify("initialized", {})
 
-    def _wait_for_response_sync(self, msg_id: int, timeout: float) -> dict | None:
-        """在 STARTING 阶段同步等待特定 id 的响应。
-
-        直接从 stdout 读取并解析消息，绕过 reader 线程。
-        """
-        import time as _time
-        start = _time.monotonic()
-        while _time.monotonic() - start < timeout:
-            if self._process is None or self._process.poll() is not None:
+    def _request_sync(self, method: str, params: dict, *, timeout: float) -> dict | None:
+        """启动线程等待唯一 reader 的结果，不另建事件循环或第二个读者。"""
+        with self._lock:
+            if self._admission_closed.is_set():
+                raise ApplicationStoppingError("LSP initialization was stopped")
+            msg_id = self._send_request(method, params)
+            pending = self._pending[msg_id]
+        try:
+            if not pending["event"].wait(timeout=timeout):
                 return None
-            msg = self._read_message()
-            if msg is None:
-                continue
-            if msg.get("id") == msg_id and ("result" in msg or "error" in msg):
-                return msg
-            # 如果是通知，交给 dispatch 处理
-            if "method" in msg:
-                self._dispatch_message(msg)
-        return None
+            if self._admission_closed.is_set():
+                raise ApplicationStoppingError("LSP initialization was stopped")
+            if pending["error"] is not None:
+                return {"error": pending["error"]}
+            return {"result": pending["result"]}
+        finally:
+            with self._lock:
+                self._pending.pop(msg_id, None)
 
     def _do_sanity_check(self) -> None:
         """对根目录中首个 .py 文件发 documentSymbol 请求验证 LSP 可用。"""
@@ -723,19 +811,10 @@ class LSPManager:
             },
         })
 
-        # 发送 documentSymbol 请求
-        msg_id = self._next_id
-        self._next_id += 1
-        message = {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": "textDocument/documentSymbol",
-            "params": {"textDocument": {"uri": test_uri}},
-        }
-        self._write_message(message)
-
-        # 等待响应（10s 超时）
-        response = self._wait_for_response_sync(msg_id, timeout=10.0)
+        response = self._request_sync(
+            "textDocument/documentSymbol", {"textDocument": {"uri": test_uri}},
+            timeout=_LSP_REQUEST_TIMEOUT,
+        )
         if response is None:
             raise RuntimeError("sanity check documentSymbol request timed out")
         if "error" in response:
@@ -743,23 +822,45 @@ class LSPManager:
         # 响应可以为空列表（文件无符号），不强制非空
 
     def _kill_existing(self) -> bool:
-        """终止当前 pyright 进程。返回是否确实杀死了进程。"""
-        if self._process is None:
+        try:
+            return self._release_existing()
+        except LifecycleFailure:
+            raise
+        except Exception as error:
+            raise LifecycleFailure("LSP resource release failed") from error
+
+    def _release_existing(self) -> bool:
+        """终止并 join 后才释放句柄；调用方持有 operation 锁而非状态锁。"""
+        proc = self._process
+        if proc is None:
             return False
         from system.subprocess_utils import _kill_proc_tree
+        if proc.poll() is None:
+            _kill_proc_tree(proc.pid)
         try:
-            _kill_proc_tree(self._process.pid)
-            try:
-                self._process.wait(timeout=_KILL_WAIT_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                logger.warning("pyright process %d did not exit within %ds", self._process.pid, _KILL_WAIT_TIMEOUT)
-        except Exception as exc:
-            logger.warning("Failed to kill pyright process: %s", exc)
-        killed = self._process.poll() is not None
-        self._process = None
-        self._root_path = None
-        self._root_uri = None
-        return killed
+            proc.wait(timeout=_KILL_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired as error:
+            raise LifecycleFailure("LSP process did not exit after termination") from error
+        for thread in (self._reader_thread, self._stderr_thread):
+            if thread is not None and thread.ident is not None:
+                thread.join(timeout=_KILL_WAIT_TIMEOUT)
+                if thread.is_alive():
+                    raise LifecycleFailure(f"LSP thread {thread.name} did not exit")
+        # 读取线程已结束，关闭管道不会与 readline 并发。
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+        with self._lock:
+            for pending in self._pending.values():
+                pending["error"] = "LSP process stopped"
+                pending["event"].set()
+            self._pending.clear()
+            self._process = None
+            self._reader_thread = None
+            self._stderr_thread = None
+            self._root_path = None
+            self._root_uri = None
+        return True
 
     # -- LSP 响应转换 ----------------------------------------------
 
@@ -830,23 +931,3 @@ class LSPManager:
         )
 
 
-# ---------------------------------------------------------------------------
-# 模块级单例
-# ---------------------------------------------------------------------------
-
-_lsp_manager: LSPManager | None = None
-
-
-def get_lsp_manager() -> LSPManager:
-    global _lsp_manager
-    if _lsp_manager is None:
-        _lsp_manager = LSPManager()
-    return _lsp_manager
-
-
-def cleanup_lsp() -> int:
-    """强制清理 LSP 进程。供 main.py 在 agent 关闭时调用。返回 killed count。"""
-    global _lsp_manager
-    if _lsp_manager is None:
-        return 0
-    return _lsp_manager.cleanup()

@@ -11,25 +11,33 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
-    "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs; "
+    "if the target page is not listed, ask the user to open or switch to it manually, then retry."
 )
 
 _VALID_WAIT: tuple[str, ...] = ("commit", "domcontentloaded", "load", "networkidle")
 _DEFAULT_WAIT: str = "networkidle"
 _DEFAULT_TIMEOUT_MS: int = 30000
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _resolve_page(args: dict[str, Any]) -> tuple[Any, str]:
@@ -38,8 +46,10 @@ async def _resolve_page(args: dict[str, Any]) -> tuple[Any, str]:
     if not tab:
         return None, "tab is required"
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("navigate: reconnect failed: %s: %s", type(exc).__name__, exc)
         return None, _NOT_CONNECTED
     page = await _connection.find_page(browser, tab)
@@ -142,10 +152,13 @@ Navigates to `url`, waiting for the given load state (default networkidle). Retu
 - Do NOT use for destructive flows without user consent."""
 
 
-registry.register(
-    name="BrowserGoto",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register browser navigate tools into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserGoto",
+        toolset="browser",
+        schema={
         # 导航当前标签页到指定 URL 并等待加载完成。
         #
         # ## 行为规范
@@ -185,12 +198,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )
 
-registry.register(
-    name="BrowserRefresh",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserRefresh",
+        toolset="browser",
+        schema={
         # 刷新当前页面并等待网络空闲。可逆状态变更。
         "description": "Reloads the current page and waits for network idle. Returns the resulting URL and title. Reversible state change.",
         "parameters": {
@@ -208,12 +221,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )
 
-registry.register(
-    name="BrowserBack",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserBack",
+        toolset="browser",
+        schema={
         # 历史后退。返回跳转后 URL 与标题；无历史时报错。
         "description": "Navigates back in history. Returns the resulting URL and title; errors when there is no history.",
         "parameters": {
@@ -231,12 +244,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )
 
-registry.register(
-    name="BrowserForward",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserForward",
+        toolset="browser",
+        schema={
         # 历史前进。返回跳转后 URL 与标题；无前向历史时报错。
         "description": "Navigates forward in history. Returns the resulting URL and title; errors when there is no forward history.",
         "parameters": {
@@ -254,4 +267,4 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

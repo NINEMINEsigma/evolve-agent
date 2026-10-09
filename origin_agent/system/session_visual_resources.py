@@ -223,7 +223,10 @@ class SessionVisualResourceService:
                             raise SessionVisualVersionUnavailable("目录签名扫描超出预算")
                         info = item.stat(follow_symlinks=False)
                         # Windows junction 与其他 reparse point 均不能递归跟随。
-                        if item.is_symlink() or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                        if item.is_symlink() or (
+                            os.name == "nt"
+                            and info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                        ):
                             continue
                         path = Path(item.path)
                         relative = path.relative_to(root).as_posix()

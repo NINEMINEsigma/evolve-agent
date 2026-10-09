@@ -25,7 +25,7 @@ from entity.constant import (
     SUBAGENT_TEMP_DIR_NAME,
     SUBAGENT_HISTORY_SUFFIX,
 )
-from entity.messages import CharacterConversationMessage, ToolResultMessage
+from entity.messages import CharacterMessage, CharacterConversationMessage, ToolResultMessage
 from entity.puretype import (
     Role,
     ToolAvailability,
@@ -41,11 +41,25 @@ from entity.puretype import (
     SubAgentSnapshot,
     SubAgentSnapshotResponse,
     SubAgentUpdate,
+    QueuedMessage,
 )
-from abstract.tools.registry import registry as tool_registry
-from system.context import get_runtime_context
+from framework import AsyncSystem
+from component.approval.system import ApprovalSystem
+from abstract.tools.registry import ToolRegistry
+from abstract.tools.ui_event_router import UIEventRouter
+from component.cron_router import CronRouter
+from system.agentspace import AgentspaceService
+from system.sandbox import Sandbox
+from system.llm_profile_store import LLMProfileStore
+from system.session_metadata import SessionMetadataService
+from system.shell_manager import ShellManager
+from system.modality_capability import ModalityCapabilitySystem
+from gateway.session_manager import SessionManager
+from system.runtime import RuntimeSystem
 from system.templates import read_template
+from entry.agent_sink import FrontendSink
 from entry.base_agent_loop import IMainSessionLoop
+from entity.puretype import SubAgentFeedbackDelivery
 
 from .context import build_subagent_context, build_taskagent_context
 from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
@@ -65,17 +79,27 @@ def _parse_tool_arguments(arguments: str) -> dict[str, Any]:
 class _OrchestratorContext:
     """单个主会话的子 Agent 上下文。"""
 
-    def __init__(self, parent_session_id: str, agent_loop: IMainSessionLoop) -> None:
+    def __init__(self, parent_session_id: str, session_manager: SessionManager) -> None:
         self._parent_session_id: str = parent_session_id
-        self._agent_loop: IMainSessionLoop = agent_loop
+        self._session_manager = session_manager
         self._active: dict[str, SubAgentLoop] = {}
         self._active_task: dict[str, asyncio.Task] = {}
         self._subagent_names: dict[str, str] = {}  # session_id -> registry_name
         self._starting: dict[str, str] = {}  # session_id -> registry_name, startup registration
         self._startup_tasks: dict[str, asyncio.Task] = {}
         self._waiter_tasks: dict[str, asyncio.Task] = {}  # SP-5 D4：per-subagent event waiter
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._interrupted: bool = False
         self._shutting_down: bool = False
+
+    def _create_background(self, coro: Coroutine[Any, Any, Any], *, name: str) -> asyncio.Task[Any]:
+        if self._shutting_down:
+            coro.close()
+            raise ApplicationStoppingError("Sub-agent context is shutting down")
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     # ── 启动 ────────────────────────────────────────────────────────
 
@@ -186,22 +210,22 @@ class _OrchestratorContext:
         profile: LLMProfile,
     ) -> None:
         """创建 TaskAgentLoop 并以 asyncio.Task 启动。"""
-        parent_ctx = get_runtime_context()
+        parent_ctx = self._require_agent_loop().loop.app.get_system(RuntimeSystem).context
         ctx = await build_taskagent_context(profile, parent_ctx)
 
         tools = self._build_task_tool_set()
 
         def _push_msg(event: dict[str, Any]) -> None:
-            asyncio.create_task(self._push_subagent_ws(
+            self._create_background(self._push_subagent_ws(
                 session_id, "taskagent", event,
                 interactive=False,
-            ))
+            ), name=f"subagent-ws-{session_id[:16]}")
 
         loop = TaskAgentLoop(
             ctx, session_id, tools, MAX_TOOL_TURNS,
             on_message=_push_msg,
             parent_session_id=self._parent_session_id,
-            parent_character_agent=self._agent_loop.current_character_agent,
+            parent_character_agent=self._require_agent_loop().current_character_agent,
             name="taskagent",
         )
         # TODO: 后续可按任务类型或调用方声明为临时Agent预加载工具集，
@@ -221,18 +245,18 @@ class _OrchestratorContext:
 
             # 推送 initial_prompt 到前端面板
             wrapped_initial = format_user_message(
-                self._agent_loop.current_character_agent, "direct", prompt,
+                self._require_agent_loop().current_character_agent, "direct", prompt,
             )
             await self._push_subagent_ws(
                 session_id,
                 "taskagent",
                 {"role": "user", "content": wrapped_initial,
-                 "character_name": self._agent_loop.current_character_agent},
+                 "character_name": self._require_agent_loop().current_character_agent},
                 interactive=False,
             )
 
             task = asyncio.create_task(
-                loop.run(prompt, self._agent_loop.current_character_agent, "direct"),
+                loop.run(prompt, self._require_agent_loop().current_character_agent, "direct"),
                 name=f"taskagent-{session_id[:16]}",
             )
             self._active_task[session_id] = task
@@ -273,19 +297,20 @@ class _OrchestratorContext:
                 error="Task-agent already completed.",
             )
 
-        # 强制停止
+        sub.freeze_inputs()
         sub.stop()
+        task = self._active_task.get(session_id)
+        if task is not None and not task.done():
+            await task
+        await sub.flush_pending_inputs(persist=False)
 
-        # 清理（不保存历史）
         self._active.pop(session_id, None)
-        task = self._active_task.pop(session_id, None)
-        if task and not task.done():
-            task.cancel()
+        self._active_task.pop(session_id, None)
         self._subagent_names.pop(session_id, None)
-        # SP-5 D4：清理 waiter task
         waiter = self._waiter_tasks.pop(session_id, None)
-        if waiter and not waiter.done():
+        if waiter is not None and not waiter.done():
             waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
 
         logger.info("Taskagent stopped | session=%s", session_id)
 
@@ -306,8 +331,28 @@ class _OrchestratorContext:
     # ── 交互 ────────────────────────────────────────────────────────
 
     def _drain_outbox(self, sub: SubAgentLoop) -> list[str]:
-        """清空并返回子 Agent 的发件箱内容。"""
-        return sub.get_outbox()
+        """将反馈作为显式交付返回给调用方并确认一次。"""
+        items = sub.get_pending_feedback()
+        if not items:
+            return []
+        sub.mark_feedback_delivered([item.sequence for item in items])
+        return [item.text for item in items]
+
+    def enqueue_user_input(self, session_id: str, message: QueuedMessage) -> int:
+        sub = self._active.get(session_id)
+        if sub is None:
+            raise LookupError(f"Sub-agent does not exist: {session_id}")
+        if sub.completed or sub.terminated or sub.inbox.frozen:
+            raise ApplicationStoppingError(f"Sub-agent no longer accepts input: {session_id}")
+        content = message.content if isinstance(message.content, str) else str(message.content)
+        from entry.base_agent_loop import UserMessage
+        return sub.enqueue_inbox_message(
+            UserMessage(
+                content=content,
+                character_name=message.character_name or USER_CHARACTER_NAME,
+            ),
+            from_parent=message.source != "user",
+        )
 
     async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         """最终用户直接向子会话发送消息。"""
@@ -374,7 +419,7 @@ class _OrchestratorContext:
                 note="Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
             )
         # 没有未送达反馈，正常发送
-        character_name = self._agent_loop.current_character_agent
+        character_name = self._require_agent_loop().current_character_agent
         sub.inject_parent_message(
             message, user_name, message_type, co_recipients, character_name=character_name
         )
@@ -414,7 +459,7 @@ class _OrchestratorContext:
         )
 
     async def stop(self, session_id: str) -> SubAgentStopResult:
-        """停止子 Agent 会话。"""
+        """先停止并等待子Agent任务，再刷新Inbox并保存普通子Agent历史。"""
         if session_id in self._starting:
             return SubAgentStopResult(
                 success=False,
@@ -423,58 +468,34 @@ class _OrchestratorContext:
             )
         sub = self._active.get(session_id)
         if sub is None:
-            return SubAgentStopResult(
-                success=False,
-                session_id=session_id,
-                error="Sub-agent not found.",
-            )
-
+            return SubAgentStopResult(success=False, session_id=session_id, error="Sub-agent not found.")
         if sub.completed:
-            return SubAgentStopResult(
-                success=False,
-                session_id=session_id,
-                error="Sub-agent has already completed.",
-            )
+            return SubAgentStopResult(success=False, session_id=session_id, error="Sub-agent has already completed.")
 
-        # 强制停止
-        sub.stop()
-
-        # 保存会话历史到工作空间临时目录。
         name = self._subagent_names.get(session_id, "")
         session_path = self._history_path(session_id)
-        history_logical_path = (
-            f"ws:{SUBAGENT_TEMP_DIR_NAME}/{session_id}{SUBAGENT_HISTORY_SUFFIX}"
-        )
-        try:
-            sub.save_history(session_path)
-        except Exception as exc:
-            logger.exception("Failed to save subagent history for %s: %s", session_id, exc)
-            return SubAgentStopResult(
-                success=False,
-                session_id=session_id,
-                error=f"Failed to save history: {exc}",
-            )
+        history_logical_path = f"ws:{SUBAGENT_TEMP_DIR_NAME}/{session_id}{SUBAGENT_HISTORY_SUFFIX}"
+        sub.freeze_inputs()
+        sub.stop()
+        task = self._active_task.get(session_id)
+        if task is not None and not task.done():
+            await task
+        await sub.flush_pending_inputs(persist=True, history_path=session_path)
 
-        # 清理
         self._active.pop(session_id, None)
-        task = self._active_task.pop(session_id, None)
-        if task and not task.done():
-            task.cancel()
-        # SP-5 D4：清理 waiter task
+        self._active_task.pop(session_id, None)
         waiter = self._waiter_tasks.pop(session_id, None)
-        if waiter and not waiter.done():
+        if waiter is not None and not waiter.done():
             waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
+        self._subagent_names.pop(session_id, None)
 
         logger.info("Subagent stopped | session=%s path=%s", session_id, history_logical_path)
-
-        # 推送 terminated 状态到前端面板
         await self._push_subagent_ws(
-            session_id,
-            self._subagent_names.get(session_id, ""),
+            session_id, name,
             {"role": "terminated", "content": "sub-agent stopped"},
             status_override="terminated",
         )
-
         return SubAgentStopResult(
             success=True,
             session_id=session_id,
@@ -498,7 +519,7 @@ class _OrchestratorContext:
             for msg in sub.history.iter_messages():
                 if msg.role == Role.SYSTEM:
                     continue
-                character_name = getattr(msg, "character_name", None)
+                character_name = msg.character_name if isinstance(msg, CharacterMessage) else None
                 if msg.role == Role.USER:
                     feedback.append(SubAgentFeedback(
                         role="user",
@@ -555,12 +576,50 @@ class _OrchestratorContext:
             subagents=snapshots,
         )
 
-    async def shutdown(self) -> None:
-        """关闭本上下文的所有活跃子 Agent。"""
+    def freeze_inputs(self) -> None:
         self._shutting_down = True
+        for sub in self._active.values():
+            sub.freeze_inputs()
 
-        # 先取消仍在执行的初始化任务，避免 shutdown 与 startup 交叉提交状态。
-        startup_tasks = list(self._startup_tasks.values())
+    async def stop_rounds(self) -> None:
+        """先请求所有子Agent收尾，再等待其真实运行任务结束。"""
+        tasks: list[asyncio.Task[Any]] = []
+        for sub in tuple(self._active.values()):
+            sub.stop()
+        for task in self._active_task.values():
+            if not task.done():
+                tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks)
+        waiters = tuple(self._waiter_tasks.values())
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.cancel()
+        if waiters:
+            await asyncio.gather(*waiters, return_exceptions=True)
+        self._waiter_tasks.clear()
+
+    async def flush_inputs(self) -> None:
+        """运行任务完全结束后，提交普通子Agent Inbox并保存历史。"""
+        for session_id, sub in tuple(self._active.items()):
+            await sub.flush_pending_inputs(
+                persist=not isinstance(sub, TaskAgentLoop),
+                history_path=None if isinstance(sub, TaskAgentLoop) else self._history_path(session_id),
+            )
+
+    async def transfer_shutdown_feedback(self) -> None:
+        """把已生成但尚未交接的反馈一次性交给父会话关闭批次。"""
+        items: list[SubAgentFeedbackDelivery] = []
+        for sub in self._active.values():
+            items.extend(sub.get_pending_feedback())
+        if items:
+            self._session_manager.accept_shutdown_feedback(self._parent_session_id, items)
+
+    async def shutdown(self) -> None:
+        """冻结输入、等待任务、刷新历史并完成反馈交接。"""
+        self.freeze_inputs()
+
+        startup_tasks = tuple(self._startup_tasks.values())
         for task in startup_tasks:
             if not task.done():
                 task.cancel()
@@ -568,17 +627,19 @@ class _OrchestratorContext:
             await asyncio.gather(*startup_tasks, return_exceptions=True)
         self._starting.clear()
 
-        # SP-5 D4：取消所有 waiter task
-        for waiter in self._waiter_tasks.values():
-            if not waiter.done():
-                waiter.cancel()
-        self._waiter_tasks.clear()
+        await self.stop_rounds()
+        await self.flush_inputs()
+        await self.transfer_shutdown_feedback()
+
+        for task in tuple(self._background_tasks):
+            if not task.done():
+                task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*tuple(self._background_tasks), return_exceptions=True)
+        self._background_tasks.clear()
         logger.info("Subagent context shutdown | parent=%s active=%d", self._parent_session_id, len(self._active))
-        for session_id in list(self._active.keys()):
-            await self.stop(session_id)
 
     # ── 内部 ────────────────────────────────────────────────────────
-
     async def _push_subagent_ws(
         self,
         session_id: str,
@@ -691,20 +752,20 @@ class _OrchestratorContext:
         历史文件与前端回放事件先在未提交状态中准备；只有全部准备成功后，
         才将实例登记为 active。登记后若启动阶段失败，则统一回滚运行态对象。
         """
-        parent_ctx = get_runtime_context()
+        parent_ctx = self._require_agent_loop().loop.app.get_system(RuntimeSystem).context
         ctx = await build_subagent_context(profile, temperature, parent_ctx)
         tools = self._build_tool_set()
 
         def _push_msg(event: dict[str, Any]) -> None:
-            asyncio.create_task(self._push_subagent_ws(
+            self._create_background(self._push_subagent_ws(
                 session_id, name, event,
-            ))
+            ), name=f"subagent-ws-{session_id[:16]}")
 
         loop = SubAgentLoop(
             ctx, session_id, tools, MAX_TOOL_TURNS,
             on_message=_push_msg,
             parent_session_id=self._parent_session_id,
-            parent_character_agent=self._agent_loop.current_character_agent,
+            parent_character_agent=self._require_agent_loop().current_character_agent,
             name=name,
         )
 
@@ -780,7 +841,7 @@ class _OrchestratorContext:
             initial_character_name = (
                 USER_CHARACTER_NAME
                 if message_type == "user_direct"
-                else self._agent_loop.current_character_agent
+                else self._require_agent_loop().current_character_agent
             )
             await self._push_subagent_ws(
                 session_id,
@@ -813,6 +874,9 @@ class _OrchestratorContext:
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
+        from system.application import Application
+        from abstract.tools.registry import ToolRegistry
+        tool_registry = Application.current().get_system(ToolRegistry)
         return tool_registry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
 
     def _build_task_tool_set(self) -> list[dict[str, Any]]:
@@ -821,6 +885,9 @@ class _OrchestratorContext:
         复用 get_definitions_for_availability 获取 OpenAI 包装格式的 schema，
         然后按 danger_level 过滤为 safe。
         """
+        from system.application import Application
+        from abstract.tools.registry import ToolRegistry
+        tool_registry = Application.current().get_system(ToolRegistry)
         all_defs: list[dict] = tool_registry.get_definitions_for_availability(
             ToolAvailability.TASKAGENT,
         )
@@ -834,27 +901,16 @@ class _OrchestratorContext:
         return result
 
     def _get_agent_loop(self) -> IMainSessionLoop | None:
-        """解析当前父 session 对应的真实主会话 loop（SP-5 D6：移除 isinstance 门）。
+        """只从SessionManager取得当前仍存在的真实父会话Loop。"""
+        return self._session_manager.get_loop(self._parent_session_id)
 
-        Orchestrator 在启动时拿到的是 __bootstrap__ loop，而每个真实 session
-        都由 SessionManager 维护独立的 loop，因此需要动态解析。
-        ParentAgentLoop 与 MultiAgentLoop 均持有 _message_queue，均可接收子 agent 反馈。
-        """
-        try:
-            from system.application import Application
-            sm = Application.current().session_manager
-            if sm is not None:
-                loop = sm.get_loop(self._parent_session_id)
-                if loop is None:
-                    return None
-                return loop
-        except Exception:
-            logger.warning(
-                "Failed to resolve real loop for parent=%s; falling back to bootstrap loop",
-                self._parent_session_id,
-                exc_info=True,
+    def _require_agent_loop(self) -> IMainSessionLoop:
+        loop = self._get_agent_loop()
+        if loop is None:
+            raise LookupError(
+                f"Parent session does not exist: {self._parent_session_id}"
             )
-        return self._agent_loop
+        return loop
 
     # ── SP-5 D4：事件驱动子→主投递 ──────────────────────────────────
 
@@ -867,14 +923,15 @@ class _OrchestratorContext:
         """
         try:
             while True:
-                await sub._outbox_event.wait()
-                sub._outbox_event.clear()
-                # 先 flush（drain outbox + pending → push 父队列）
+                await sub.feedback_event.wait()
+                sub.feedback_event.clear()
+                if self._shutting_down:
+                    break
+                # 正常运行期间才把反馈投递到父队列；关闭阶段由专用交接处理。
                 await self._flush_subagent_message(session_id, sub)
-                # 后 break-check（独占出口判定）
-                if self._shutting_down or sub.completed or sub.terminated:
-                    # taskagent cleanup（原 _collect_and_inject 末尾逻辑）
+                if sub.completed or sub.terminated:
                     if isinstance(sub, TaskAgentLoop) and sub.completed:
+                        await sub.flush_pending_inputs(persist=False)
                         self._cleanup_taskagent(session_id)
                     self._waiter_tasks.pop(session_id, None)
                     break
@@ -883,14 +940,14 @@ class _OrchestratorContext:
 
     async def _flush_subagent_message(self, session_id: str, sub: SubAgentLoop) -> None:
         """收集单个子 Agent 的 outbox + pending 快照，格式化为 [subagent-result] 并 push 父队列。"""
-        outbox = sub.get_outbox()
+        feedback = sub.get_pending_feedback()
         pending = sub.pending_approvals_info
-        if not outbox and not pending:
+        if not feedback and not pending:
             return
         parts: list[str] = []
         parts.append(f"session_id: {session_id}")
-        if outbox:
-            merged = SUB_MESSAGE_SEPARATOR.join(outbox)
+        if feedback:
+            merged = SUB_MESSAGE_SEPARATOR.join(item.text for item in feedback)
             parts.append(f"feedback:\n  {merged}")
         if pending:
             parts.append("pending_approvals:")
@@ -900,19 +957,15 @@ class _OrchestratorContext:
                 parts.append(f"    arguments: {json.dumps(p.arguments, ensure_ascii=False)}")
         full_message = read_template("subagent/result_message.txt") + "\n\n" + "\n".join(parts)
         loop = self._get_agent_loop()
-        if loop is None or loop.loop is None or loop.loop._message_queue is None:
+        if loop is None or loop.loop.message_queue is None:
             logger.warning("Cannot flush subagent message: parent queue unavailable | session=%s", session_id)
             return
-        try:
-            loop.loop._message_queue.push(
-                full_message, character_name=SYSTEM_CHARACTER_NAME, source="subagent",
-            )
-            logger.debug("Subagent result pushed to parent queue | parent=%s session=%s", self._parent_session_id, session_id)
-        except Exception as exc:
-            logger.exception(
-                "Failed to push subagent result for parent=%s session=%s: %s",
-                self._parent_session_id, session_id, exc,
-            )
+        loop.loop.message_queue.push(
+            full_message, character_name=SYSTEM_CHARACTER_NAME, source="subagent",
+        )
+        if feedback:
+            sub.mark_feedback_delivered([item.sequence for item in feedback])
+        logger.debug("Subagent result pushed to parent queue | parent=%s session=%s", self._parent_session_id, session_id)
 
     def _cleanup_taskagent(self, session_id: str) -> None:
         """清理已完成的 taskagent。"""
@@ -926,31 +979,73 @@ class _OrchestratorContext:
     @staticmethod
     def _history_path(session_id: str) -> Path:
         """普通子Agent历史的临时 easysave 路径。"""
-        ctx = get_runtime_context()
+        from system.application import Application
+        ctx = Application.current().get_system(RuntimeSystem).context
         directory = ctx.agentspace / SUBAGENT_TEMP_DIR_NAME
         directory.mkdir(parents=True, exist_ok=True)
         return directory / f"{session_id}{SUBAGENT_HISTORY_SUFFIX}"
 
 
-class SubAgentOrchestrator:
-    """按主会话管理多个子 Agent 上下文。"""
+class SubAgentOrchestrator(AsyncSystem):
+    """按主会话管理多个子Agent上下文，并拥有其全部后台任务。"""
 
     def __init__(self) -> None:
-        self._agent_loop: IMainSessionLoop | None = None
+        super().__init__(dependencies=(
+            RuntimeSystem, SessionManager, ApprovalSystem, FrontendSink,
+            ToolRegistry, UIEventRouter, CronRouter, AgentspaceService,
+            Sandbox, LLMProfileStore, ModalityCapabilitySystem,
+        ))
+        self._runtime: RuntimeSystem | None = None
+        self._session_manager: SessionManager | None = None
         self._contexts: dict[str, _OrchestratorContext] = {}
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._frozen = False
 
-    def set_agent_loop(self, agent_loop: IMainSessionLoop) -> None:
-        """注入父 AgentLoop 引用。"""
-        self._agent_loop = agent_loop
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._session_manager = self.get_system(SessionManager)
+
+    async def virtual_shotdown(self) -> None:
+        await self.shutdown_all()
+        if self._background_tasks:
+            await asyncio.gather(*tuple(self._background_tasks))
+        self._runtime = None
+        self._session_manager = None
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("SubAgentOrchestrator has not been awakened")
+        return self._runtime
+
+    @property
+    def session_manager(self) -> SessionManager:
+        if self._session_manager is None:
+            raise LifecycleFailure("SubAgentOrchestrator has not been awakened")
+        return self._session_manager
+
+    def _track_background(self, task: asyncio.Task[Any]) -> None:
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    def _create_background(self, coro: Coroutine[Any, Any, Any], *, name: str) -> asyncio.Task[Any]:
+        if self._frozen:
+            coro.close()
+            raise ApplicationStoppingError("SubAgentOrchestrator has frozen input")
+        task = asyncio.create_task(coro, name=name)
+        self._track_background(task)
+        return task
 
     def _get_context(self, parent_session_id: str) -> _OrchestratorContext:
-        """获取或创建指定父会话的上下文。"""
-        if parent_session_id not in self._contexts:
-            assert self._agent_loop is not None, "set_agent_loop() must be called before any context operation"
-            ctx = _OrchestratorContext(parent_session_id, self._agent_loop)
-            self._contexts[parent_session_id] = ctx
-            # SP-5 D4：事件驱动 waiter 由 _start_subagent/_start_taskagent 启动，无需后台周期任务
-        return self._contexts[parent_session_id]
+        if self._frozen:
+            raise ApplicationStoppingError("SubAgentOrchestrator has frozen input")
+        if not self.session_manager.exists(parent_session_id):
+            raise LookupError(f"Parent session does not exist: {parent_session_id}")
+        context = self._contexts.get(parent_session_id)
+        if context is None:
+            context = _OrchestratorContext(parent_session_id, self.session_manager)
+            self._contexts[parent_session_id] = context
+        return context
 
     # ── 公共代理方法 ─────────────────────────────────────────────────
 
@@ -994,14 +1089,33 @@ class SubAgentOrchestrator:
             return SubAgentSnapshotResponse(session_id=parent_session_id)
         return ctx.get_snapshot()
 
+    def enqueue_user_input(self, parent_session_id: str, session_id: str, message: QueuedMessage) -> int:
+        return self._get_context(parent_session_id).enqueue_user_input(session_id, message)
+
+    def freeze_inputs(self) -> None:
+        self._frozen = True
+        for context in self._contexts.values():
+            context.freeze_inputs()
+
+    async def stop_rounds(self) -> None:
+        self.freeze_inputs()
+        await asyncio.gather(*(context.stop_rounds() for context in self._contexts.values()))
+
+    async def flush_inputs(self):
+        await asyncio.gather(*(context.flush_inputs() for context in self._contexts.values()))
+
+    async def transfer_shutdown_feedback(self) -> None:
+        await asyncio.gather(*(context.transfer_shutdown_feedback() for context in self._contexts.values()))
+
     async def shutdown_all(self) -> None:
-        """关闭所有上下文的子 Agent。"""
-        for ctx in list(self._contexts.values()):
-            await ctx.shutdown()
+        """按冻结→停止→刷新→反馈交接顺序关闭所有上下文。"""
+        self.freeze_inputs()
+        contexts = tuple(self._contexts.values())
+        await asyncio.gather(*(context.shutdown() for context in contexts))
         self._contexts.clear()
 
     async def shutdown(self, parent_session_id: str) -> None:
-        """关闭指定父会话的所有子 Agent 并清理上下文。"""
-        ctx = self._contexts.pop(parent_session_id, None)
-        if ctx is not None:
-            await ctx.shutdown()
+        """关闭指定父会话的所有子Agent并清理上下文。"""
+        context = self._contexts.pop(parent_session_id, None)
+        if context is not None:
+            await context.shutdown()

@@ -59,8 +59,9 @@ class RipgrepFatalError(RuntimeError):
 
 def _s():
     from system.application import Application
+    from system.sandbox import Sandbox
 
-    return Application.current().sandbox
+    return Application.current().get_system(Sandbox)
 
 
 def parse_bool_arg(args: dict[str, Any], name: str, default: bool = False) -> bool:
@@ -651,7 +652,7 @@ async def search_files(args: dict[str, Any], context: ToolContext | None = None)
     limit = normalize_search_limit(args.get("limit", SEARCH_RESULT_LIMIT_DEFAULT))
     full_scan = parse_bool_arg(args, "full_scan", False)
     exhaustive = parse_bool_arg(args, "exhaustive", False)
-    session_id = getattr(context, "session_id", "") if context is not None else ""
+    session_id = context.session_id if context is not None else ""
 
     if not path:
         return tool_error("path is required")
@@ -729,7 +730,7 @@ async def grep(args: dict[str, Any], context: ToolContext | None = None) -> dict
     full_scan = parse_bool_arg(args, "full_scan", False)
     exhaustive = parse_bool_arg(args, "exhaustive", False)
     literal = parse_bool_arg(args, "literal", False)
-    session_id = getattr(context, "session_id", "") if context is not None else ""
+    session_id = context.session_id if context is not None else ""
 
     if not path:
         return tool_error("path is required")

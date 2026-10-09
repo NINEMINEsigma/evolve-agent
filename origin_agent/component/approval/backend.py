@@ -77,42 +77,44 @@ class ProfileApprovalBackend(ApprovalBackend):
         ))
 
     def _get_client(self) -> BaseLLMClient:
-        profile = self._llm_profile_store.get_approval_profile()
-        if profile is None:
-            raise RuntimeError("Approval Profile is not configured")
-        missing = [
-            field
-            for field in ("llm_client_name", "base_url", "model")
-            if not str(getattr(profile, field, "")).strip()
-        ]
-        if missing:
-            raise ValueError(
-                f"Approval Profile {profile.name!r} is missing required fields: "
-                + ", ".join(missing)
-            )
+        with self._llm_profile_store.locked():
+            profile = self._llm_profile_store.get_approval_profile()
+            if profile is None:
+                raise RuntimeError("Approval Profile is not configured")
+            missing = [
+                name
+                for name, value in (
+                    ("llm_client_name", profile.llm_client_name),
+                    ("base_url", profile.base_url),
+                    ("model", profile.model),
+                )
+                if not value.strip()
+            ]
+            if missing:
+                raise ValueError(
+                    f"Approval Profile {profile.name!r} is missing required fields: "
+                    + ", ".join(missing)
+                )
+            fingerprint = self._connection_fingerprint(profile)
+            if self._client is None or self._client_fingerprint != fingerprint:
+                from abstract.llm.loader import create_llm_client
 
-        fingerprint = self._connection_fingerprint(profile)
-        if self._client is None or self._client_fingerprint != fingerprint:
-            from abstract.llm.loader import create_llm_client
-
-            approval_profile = self._approval_profile(profile)
-            self._client = create_llm_client(
-                approval_profile.llm_client_name,
-                self._ctx,
-                approval_profile,
-            )
-            self._client_fingerprint = fingerprint
-            logger.debug(
-                "Approval client (re)created | profile=%s model=%s",
-                profile.name,
-                profile.model,
-            )
-        return self._client
+                approval_profile = self._approval_profile(profile)
+                self._client = create_llm_client(
+                    approval_profile.llm_client_name, self._ctx, approval_profile,
+                )
+                self._client_fingerprint = fingerprint
+                logger.debug(
+                    "Approval client (re)created | profile=%s model=%s",
+                    profile.name, profile.model,
+                )
+            return self._client
 
     def invalidate(self) -> None:
         """使缓存客户端失效；下次审批按当前 Profile 重建。"""
-        self._client = None
-        self._client_fingerprint = None
+        with self._llm_profile_store.locked():
+            self._client = None
+            self._client_fingerprint = None
 
     async def chat(self, messages: list[BaseMessage]) -> str:
         client = self._get_client()

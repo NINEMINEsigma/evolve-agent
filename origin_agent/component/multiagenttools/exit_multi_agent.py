@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME, MAIN_AGENT_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
@@ -18,6 +19,8 @@ from entry.agent_sink import FrontendSink
 from entry.multi_agent_loop import MultiAgentLoop
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
+
+from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +36,9 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
         return tool_error("'_session_id' is required")
 
     app = Application.current()
-    if app.session_manager is None:
-        return tool_error("SessionManager not available")
 
     # 获取当前 MultiAgentLoop
-    _multi_loop = app.session_manager.get_loop(session_id)
+    _multi_loop = app.get_system(SessionManager).get_loop(session_id)
     if _multi_loop is None:
         return tool_error(f"No active loop found for session {session_id}")
     elif isinstance(_multi_loop.loop, MultiAgentLoop):
@@ -59,7 +60,7 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
         frontend_sink=sink,
         history_store_dir=history_store_dir,
     )
-    parent_loop.set_session_manager(app.session_manager)
+    parent_loop.set_session_manager(app.get_system(SessionManager))
 
     # 用多 Agent 模式的共享历史覆盖 ParentAgentLoop 初始化时从磁盘加载的历史
     parent_loop.load_history(history)
@@ -71,7 +72,7 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
     # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
     # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
     # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
-    await app.session_manager.replace_loop(session_id, parent_loop)
+    await app.get_system(SessionManager).replace_loop(session_id, parent_loop)
 
     return tool_result(
         success=True,
@@ -80,42 +81,45 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="ExitMultiAgent",
-    toolset="multiagent",
-    availability=ToolAvailability.MULTI_AGENT,
-    danger_level=ToolDangerLevel.safe,
-    schema={
-        # 退出多 Agent 协作模式，回到普通模式。
-        #
-        # ## 功能
-        # 将当前 MultiAgentLoop 替换为 ParentAgentLoop。
-        # 共享对话历史保留不变，用户可继续以普通模式对话。
-        # multiagent 工具集（run_subagent、chat_subagent 等）重新可用。
-        #
-        # ## 前置条件
-        # - 当前会话必须处于多 Agent 协作模式。
-        #
-        # ## 调用效果
-        # - 当前 MultiAgentLoop 被中断并替换为 ParentAgentLoop。
-        # - 共享对话历史保留，无缝继续。
-        # - multiagent 工具集重新可用。
-        #
-        # ## 返回
-        # ```json
-        # { "success": true, "mode": "normal", "message": "..." }
-        # ```
-        #
-        # ## 何时使用
-        # - 用户明确要求退出多 Agent 模式时。
-        # - 需要回到普通模式使用 run_subagent 等工具时。
-        #
-        # ## 副作用 / 注意
-        # - 当前会话的 loop 从 MultiAgentLoop 替换为 ParentAgentLoop。
-        # - 正在进行的级联响应会被中断。
-        # - 共享历史保留，但多 Agent 特有的 visible_characters / response_characters 元数据在普通模式下被忽略。
-        # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
-        "description": """Exit multi-agent collaboration mode and return to normal mode.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register exit multi-agent tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="ExitMultiAgent",
+        toolset="multiagent",
+        availability=ToolAvailability.MULTI_AGENT,
+        danger_level=ToolDangerLevel.safe,
+        schema={
+            # 退出多 Agent 协作模式，回到普通模式。
+            #
+            # ## 功能
+            # 将当前 MultiAgentLoop 替换为 ParentAgentLoop。
+            # 共享对话历史保留不变，用户可继续以普通模式对话。
+            # multiagent 工具集（run_subagent、chat_subagent 等）重新可用。
+            #
+            # ## 前置条件
+            # - 当前会话必须处于多 Agent 协作模式。
+            #
+            # ## 调用效果
+            # - 当前 MultiAgentLoop 被中断并替换为 ParentAgentLoop。
+            # - 共享对话历史保留，无缝继续。
+            # - multiagent 工具集重新可用。
+            #
+            # ## 返回
+            # ```json
+            # { "success": true, "mode": "normal", "message": "..." }
+            # ```
+            #
+            # ## 何时使用
+            # - 用户明确要求退出多 Agent 模式时。
+            # - 需要回到普通模式使用 run_subagent 等工具时。
+            #
+            # ## 副作用 / 注意
+            # - 当前会话的 loop 从 MultiAgentLoop 替换为 ParentAgentLoop。
+            # - 正在进行的级联响应会被中断。
+            # - 共享历史保留，但多 Agent 特有的 visible_characters / response_characters 元数据在普通模式下被忽略。
+            # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
+            "description": """Exit multi-agent collaboration mode and return to normal mode.
 
 ## Prerequisites
 - The current session must be in multi-agent collaboration mode.
@@ -139,11 +143,11 @@ registry.register(
 - Any in-progress cascade response is interrupted.
 - Shared history is preserved, but multi-agent specific metadata (visible_characters / response_characters) is ignored in normal mode.
 - After this tool returns success, the mode switch takes effect after your current reply completes. Simply give the user a brief confirmation and do NOT call any other tools in your response. The normal single-agent loop will handle all subsequent user messages.""",
-        "parameters": {
-            "type": "object",
-            "properties": {},
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
         },
-    },
-    handler=_handle_exit_multi_agent,
-    is_async=True,
-)
+        handler=_handle_exit_multi_agent,
+        is_async=True,
+    )

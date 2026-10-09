@@ -13,12 +13,14 @@ from entity.constant import (
     AGENTSPACE_ATOMIC_TMP_SUFFIX,
     AGENTSPACE_INTERNAL_DIR_NAME,
     AGENTSPACE_TRASH_DIR_NAME,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.puretype import (
     AgentspaceEvent,
     AgentspaceEventKind,
     AgentspaceEventSource,
 )
+from system.lifecycle import LifecycleFailure
 from .event_hub import AgentspaceEventHub
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,9 @@ class AgentspaceWatcher:
         self._ignored_roots = ignored_relative_roots
         self._observer: Any | None = None
         self._timers: dict[str, threading.Timer] = {}
+        self._live_timers: set[threading.Timer] = set()
         self._timer_lock = threading.Lock()
+        self._stopping = False
 
     def start(self, loop: Any) -> None:
         del loop  # EventHub 已绑定；参数保留为明确生命周期合同。
@@ -65,21 +69,40 @@ class AgentspaceWatcher:
                 watcher._handle_move(event.src_path, event.dest_path, event.is_directory)
 
         observer = Observer()
+        self._observer = observer
         observer.schedule(Handler(), str(self._root), recursive=True)
         observer.start()
-        self._observer = observer
 
     def stop(self) -> None:
         with self._timer_lock:
-            timers = list(self._timers.values())
+            self._stopping = True
+            timers = tuple(self._live_timers)
             self._timers.clear()
         for timer in timers:
             timer.cancel()
+        failures: list[BaseException] = []
         observer = self._observer
-        self._observer = None
         if observer is not None:
-            observer.stop()
-            observer.join(timeout=5)
+            try:
+                observer.stop()
+                if observer.ident is not None:
+                    observer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+                if observer.is_alive():
+                    raise LifecycleFailure("Agentspace observer did not stop")
+                self._observer = None
+            except BaseException as exc:
+                failures.append(exc)
+        for timer in timers:
+            try:
+                timer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+                if timer.is_alive():
+                    raise LifecycleFailure("Agentspace debounce timer did not stop")
+                with self._timer_lock:
+                    self._live_timers.discard(timer)
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            raise BaseExceptionGroup("Agentspace watcher cleanup failed", failures)
 
     def _relative(self, raw_path: str) -> str | None:
         try:
@@ -162,22 +185,33 @@ class AgentspaceWatcher:
         is_directory: bool,
     ) -> None:
         def emit() -> None:
-            with self._timer_lock:
-                self._timers.pop(relative, None)
-            self._publish(
-                AgentspaceEventKind.MODIFIED,
-                relative,
-                raw_path,
-                is_directory,
-            )
+            try:
+                with self._timer_lock:
+                    if self._stopping:
+                        return
+                    if self._timers.get(relative) is timer:
+                        self._timers.pop(relative)
+                self._publish(
+                    AgentspaceEventKind.MODIFIED,
+                    relative,
+                    raw_path,
+                    is_directory,
+                )
+            finally:
+                with self._timer_lock:
+                    self._live_timers.discard(timer)
 
         with self._timer_lock:
+            if self._stopping:
+                return
             previous = self._timers.pop(relative, None)
             if previous is not None:
                 previous.cancel()
+            self._live_timers = {item for item in self._live_timers if item.is_alive()}
             timer = threading.Timer(self._debounce_seconds, emit)
             timer.daemon = True
             self._timers[relative] = timer
+            self._live_timers.add(timer)
             timer.start()
 
     def _publish(

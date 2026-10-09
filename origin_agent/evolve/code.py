@@ -1,12 +1,13 @@
-"""代码进化编排器 — 验证 fork 然后触发交换。
+"""代码进化编排器 — 验证 fork 并在通过时登记调用级进化意图。
 
 此模块由 ``EvolveCode`` 工具 handler 在 LLM 已将
 进化源码写入 fork: 命名空间后调用。
 
 流程：
     1. 验证 fork: 中所有 .py 文件（语法 + 可选编译检查）
-    2. 如果通过 → 通知 App 以退出码 -1 退出
-    3. 编排器（run.py）捕获 -1，执行 slow→fast 交换，重启
+    2. 如果通过 → 在本次 ToolContext 上登记进化意图
+    3. 所属 Loop 在工具结果严格保存成功后请求进化关闭；
+       编排器（run.py）捕获退出码 -1，执行 slow→fast 交换，重启
 """
 
 from __future__ import annotations
@@ -17,27 +18,29 @@ from abstract.tools.registry import tool_result, tool_error
 from evolve.validator import validate_directory, summary
 from system.sandbox import Sandbox
 from system.templates import read_template
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
-# 告知编排器执行 slow→fast 交换的退出码。
-_EXIT_CODE_EVOLVED: int = -1
+logger = logging.getLogger(__name__)
 
 
 def finalize_evolution(
     sandbox: Sandbox,
+    ctx: ToolContext,
     *,
     deep: bool = True,
     compile_timeout: int = SUBPROCESS_TIMEOUT_DEFAULT,
 ) -> dict:
-    """验证 fork 目录，所有检查通过后触发热替换。
+    """验证 fork 目录；通过后仅在本次工具调用上登记进化意图。
 
-    返回适合 LLM 工具响应的 JSON 结果字符串：
+    实际的关闭请求由所属 Loop 在本工具结果严格保存后发出（D6）；
+    本函数不直接操作任何运行器或全局退出状态。
 
     - 成功：``{"evolved": true, "validation": {"valid": true, ...}}``
-      （返回后进程立即退出）
+      （Loop 保存成功后请求进化关闭，由编排器执行 slow→fast 交换）
     - 失败：``{"evolved": false, "validation": {"valid": false, ...}}``
       （LLM 可以修复问题后重试）
 
@@ -74,16 +77,12 @@ def finalize_evolution(
             _note=read_template("evolve/evolution_failed_hint.txt"),
         )
 
-    # ---- 2. 验证通过 — 触发交换 ----
+    # ---- 2. 验证通过 — 登记调用级进化意图，由 Loop 保存后请求关闭 ----
     logger.info(
-        "Evolution validation PASSED (%d files ok). Triggering swap.",
+        "Evolution validation PASSED (%d files ok). Requesting evolution.",
         report["total"],
     )
-
-    # 在此处导入避免模块级循环依赖。
-    from main import request_evolution
-
-    request_evolution()
+    ctx.request_evolution()
 
     return tool_result(
         evolved=True,

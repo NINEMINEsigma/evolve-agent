@@ -15,8 +15,9 @@ This module provides the glue:
       survive across process restarts.
     - Callback server: ephemeral localhost HTTP server to capture the OAuth
       redirect with the authorization code.
-    - ``build_oauth_auth()``: entry point called by ``mcp_tool.py`` that wires
-      everything together and returns the ``httpx.Auth`` object.
+    - Provider factory helpers used by :class:`MCPOAuthManager` to build
+      the ``httpx.Auth`` object with per-provider callback ports and
+      explicit token directories.
 
 Configuration in config.yaml::
 
@@ -32,6 +33,8 @@ Configuration in config.yaml::
           client_name: "My Custom Client"       # default: "Evolve-Agent"
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -41,19 +44,24 @@ import secrets
 import socket
 import stat
 import sys
-import threading
 import time
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
 from system.atomic_io import replace_atomic
 
-# OAuth 回调等待超时（秒）— 等待用户在浏览器中完成授权的时间
-_OAUTH_CALLBACK_TIMEOUT: float = 300.0
+# OAuth lifecycle constants from entity.constant
+from entity.constant.mcp_oauth import (
+    OAUTH_CALLBACK_TIMEOUT as _OAUTH_CALLBACK_TIMEOUT,
+)
+
+if TYPE_CHECKING:
+    from .oauth_manager import MCPOAuthManager
 
 # ---------------------------------------------------------------------------
 # Lazy imports -- MCP SDK with OAuth support is optional
@@ -92,24 +100,9 @@ class OAuthNonInteractiveError(RuntimeError):
 # Module-level state
 # ---------------------------------------------------------------------------
 
-# Port used by the most recent build_oauth_auth() call.  Exposed so that
-# tests can verify the callback server and the redirect_uri share a port.
-_oauth_port: int | None = None
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_token_dir() -> Path:
-    """Return the directory for MCP OAuth token files.
-
-    Layout: ``agentspace/mcp-tokens/``
-    """
-    from system.context import get_runtime_context
-    ctx = get_runtime_context()
-    return ctx.agentspace / "mcp-tokens"
 
 
 def _safe_filename(name: str) -> str:
@@ -152,14 +145,15 @@ def _can_open_browser() -> bool:
 
 
 def _read_json(path: Path) -> dict | None:
-    """Read a JSON file, returning None if it doesn't exist or is invalid."""
-    if not path.exists():
-        return None
+    """Read existing credentials strictly; only a missing file is optional."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return None
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise TypeError(f"OAuth JSON root must be an object: {path}")
+    return data
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -173,12 +167,9 @@ def _write_json(path: Path, data: dict) -> None:
     in ``agent/google_oauth.py`` (#19673).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Tighten parent dir to 0o700 so siblings can't traverse to the creds.
-    # No-op on Windows (POSIX mode bits aren't enforced); ignore failures.
-    try:
+    # POSIX权限收紧属于凭据写入要求，失败不能伪装成功。
+    if os.name != "nt":
         os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
     # Per-process random suffix avoids collisions between concurrent
     # writers and stale leftovers from a prior crashed write.
     tmp = path.with_suffix(f".tmp.{os.getpid()}.{secrets.token_hex(4)}")
@@ -193,11 +184,11 @@ def _write_json(path: Path, data: dict) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         replace_atomic(tmp, path)
-    except OSError:
+    except BaseException as original:
         try:
             tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except BaseException as cleanup:
+            raise BaseExceptionGroup("OAuth write and temporary cleanup failed", [original, cleanup])
         raise
 
 
@@ -216,17 +207,18 @@ class McpTokenStorage:
         agentspace/mcp-tokens/<server_name>.meta.json     -- oauth server metadata
     """
 
-    def __init__(self, server_name: str):
+    def __init__(self, server_name: str, token_dir: Path):
         self._server_name = _safe_filename(server_name)
+        self._token_dir = token_dir
 
     def _tokens_path(self) -> Path:
-        return _get_token_dir() / f"{self._server_name}.json"
+        return self._token_dir / f"{self._server_name}.json"
 
     def _client_info_path(self) -> Path:
-        return _get_token_dir() / f"{self._server_name}.client.json"
+        return self._token_dir / f"{self._server_name}.client.json"
 
     def _meta_path(self) -> Path:
-        return _get_token_dir() / f"{self._server_name}.meta.json"
+        return self._token_dir / f"{self._server_name}.meta.json"
 
     # -- tokens ------------------------------------------------------------
 
@@ -253,21 +245,10 @@ class McpTokenStorage:
         if absolute_expiry is not None:
             data["expires_in"] = int(max(absolute_expiry - time.time(), 0))
         elif data.get("expires_in") is not None:
-            try:
-                file_mtime = self._tokens_path().stat().st_mtime
-            except OSError:
-                file_mtime = None
-            if file_mtime is not None:
-                try:
-                    implied_expiry = file_mtime + int(data["expires_in"])
-                    data["expires_in"] = int(max(implied_expiry - time.time(), 0))
-                except (TypeError, ValueError):
-                    pass
-        try:
-            return OAuthToken.model_validate(data)
-        except (ValueError, TypeError, KeyError) as exc:
-            logger.warning("Corrupt tokens at %s -- ignoring: %s", self._tokens_path(), exc)
-            return None
+            file_mtime = self._tokens_path().stat().st_mtime
+            implied_expiry = file_mtime + int(data["expires_in"])
+            data["expires_in"] = int(max(implied_expiry - time.time(), 0))
+        return OAuthToken.model_validate(data)
 
     async def set_tokens(self, tokens: "OAuthToken") -> None:
         payload = tokens.model_dump(mode="json", exclude_none=True)
@@ -280,12 +261,7 @@ class McpTokenStorage:
         # ``OAuthTokens.expiresAt`` persistence (auth.ts ~180).
         expires_in = payload.get("expires_in")
         if expires_in is not None:
-            try:
-                payload["expires_at"] = time.time() + int(expires_in)
-            except (TypeError, ValueError):
-                # Mock tokens or unusual shapes: skip the expires_at write
-                # rather than fail persistence.
-                pass
+            payload["expires_at"] = time.time() + int(expires_in)
         _write_json(self._tokens_path(), payload)
         logger.debug("OAuth tokens saved for %s", self._server_name)
 
@@ -295,11 +271,7 @@ class McpTokenStorage:
         data = _read_json(self._client_info_path())
         if data is None:
             return None
-        try:
-            return OAuthClientInformationFull.model_validate(data)
-        except (ValueError, TypeError, KeyError) as exc:
-            logger.warning("Corrupt client info at %s -- ignoring: %s", self._client_info_path(), exc)
-            return None
+        return OAuthClientInformationFull.model_validate(data)
 
     async def set_client_info(self, client_info: "OAuthClientInformationFull") -> None:
         _write_json(self._client_info_path(), client_info.model_dump(mode="json", exclude_none=True))
@@ -321,11 +293,7 @@ class McpTokenStorage:
         data = _read_json(self._meta_path())
         if data is None:
             return None
-        try:
-            return OAuthMetadata.model_validate(data)
-        except (ValueError, TypeError, KeyError) as exc:
-            logger.warning("Corrupt OAuth metadata at %s -- ignoring: %s", self._meta_path(), exc)
-            return None
+        return OAuthMetadata.model_validate(data)
 
     # -- cleanup -----------------------------------------------------------
 
@@ -388,7 +356,7 @@ def _make_callback_handler() -> tuple[type, dict]:
 # ---------------------------------------------------------------------------
 
 
-async def _redirect_handler(authorization_url: str) -> None:
+async def _redirect_handler(authorization_url: str, *, port: int | None = None) -> None:
     """Show the authorization URL to the user.
 
     Opens the browser automatically when possible; always prints the URL
@@ -405,14 +373,15 @@ async def _redirect_handler(authorization_url: str) -> None:
     # http://127.0.0.1:<port>/callback, which reaches the callback server on
     # the *remote* machine — not the user's local machine where the browser
     # opened.  Print a port-forward hint so the user knows to tunnel first.
-    if _oauth_port and (os.getenv("SSH_CLIENT") or os.getenv("SSH_TTY")):
+    callback_port = port
+    if callback_port and (os.getenv("SSH_CLIENT") or os.getenv("SSH_TTY")):
         print(
             f"  Remote session detected. The OAuth provider will redirect your browser to\n"
-            f"    http://127.0.0.1:{_oauth_port}/callback\n"
+            f"    http://127.0.0.1:{callback_port}/callback\n"
             f"  which the callback listener on THIS machine is waiting on. If your browser\n"
             f"  is on a different machine, forward the port first in a separate terminal:\n"
             f"\n"
-            f"    ssh -N -L {_oauth_port}:127.0.0.1:{_oauth_port} <user>@<this-host>\n"
+            f"    ssh -N -L {callback_port}:127.0.0.1:{callback_port} <user>@<this-host>\n"
             f"\n"
             f"  Then open the URL above.\n",
             file=sys.stderr,
@@ -431,65 +400,45 @@ async def _redirect_handler(authorization_url: str) -> None:
         print("  (Headless environment detected — open the URL manually.)\n", file=sys.stderr)
 
 
-async def _wait_for_callback() -> tuple[str, str | None]:
-    """Wait for the OAuth callback to arrive on the local callback server.
+async def _wait_for_callback(
+    *, port: int, timeout: float = _OAUTH_CALLBACK_TIMEOUT,
+    manager: MCPOAuthManager,
+) -> tuple[str, str | None]:
+    """Await one owned listener and confirm native cleanup before release."""
+    from .oauth_callback import OAuthCallbackServer
+    from system.lifecycle import ApplicationStoppingError
+    import anyio
 
-    Uses the module-level ``_oauth_port`` which is set by ``build_oauth_auth``
-    before this is ever called.  Polls for the result without blocking the
-    event loop.
-
-    Raises:
-        OAuthNonInteractiveError: If the callback times out (no user present
-            to complete the browser auth).
-        RuntimeError: If ``_oauth_port`` has not been set, which would indicate
-            that ``build_oauth_auth`` was skipped — the asserting form below
-            was a silent bug when running Python with ``-O``/``-OO``.
-    """
-    if _oauth_port is None:
-        raise RuntimeError(
-            "OAuth callback port not set — build_oauth_auth must be called "
-            "before _wait_for_oauth_callback"
-        )
-
-    # The callback server is already running (started in build_oauth_auth).
-    # We just need to poll for the result.
-    handler_cls, result = _make_callback_handler()
-
-    # Start a temporary server on the known port
+    manager.require_open()
+    handler, result = _make_callback_handler()
+    callback = OAuthCallbackServer(port, handler, result)
+    manager.register_callback(callback)
+    original: BaseException | None = None
     try:
-        server = HTTPServer(("127.0.0.1", _oauth_port), handler_cls)
-    except OSError:
-        # Port already in use — the server from build_oauth_auth is running.
-        # Fall back to polling the server started by build_oauth_auth.
-        raise OAuthNonInteractiveError(
-            "OAuth callback timed out — could not bind callback port. "
-            "Complete the authorization in a browser first, then retry."
-        )
-
-    server_thread = threading.Thread(target=server.handle_request, daemon=True)
-    server_thread.start()
-
-    timeout = _OAUTH_CALLBACK_TIMEOUT
-    poll_interval = 0.5
-    elapsed = 0.0
-    try:
-        while elapsed < timeout:
-            if result["auth_code"] is not None or result["error"] is not None:
-                break
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+        callback.start()
+        try:
+            await callback.wait(timeout)
+        except TimeoutError as error:
+            raise OAuthNonInteractiveError("OAuth callback timed out without an authorization code") from error
+        if result["error"]:
+            raise RuntimeError(f"OAuth authorization failed: {result['error']}")
+        if result["auth_code"] is None:
+            raise ApplicationStoppingError("OAuth callback stopped before authorization completed")
+        return result["auth_code"], result["state"]
+    except BaseException as error:
+        original = error
+        raise
     finally:
-        server.server_close()
-
-    if result["error"]:
-        raise RuntimeError(f"OAuth authorization failed: {result['error']}")
-    if result["auth_code"] is None:
-        raise OAuthNonInteractiveError(
-            "OAuth callback timed out — no authorization code received. "
-            "Ensure you completed the browser authorization flow."
-        )
-
-    return result["auth_code"], result["state"]
+        try:
+            # SDK传输取消作用域已取消时，仍等待独立且受持有的原生join任务。
+            with anyio.CancelScope(shield=True):
+                await callback.aclose()
+        except BaseException as cleanup:
+            if original is not None:
+                raise BaseExceptionGroup("OAuth callback and cleanup failed", [original, cleanup])
+            raise
+        finally:
+            manager.release_callback(callback)
 
 
 # ---------------------------------------------------------------------------
@@ -497,40 +446,36 @@ async def _wait_for_callback() -> tuple[str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def remove_oauth_tokens(server_name: str) -> None:
-    """Delete stored OAuth tokens and client info for a server."""
-    storage = McpTokenStorage(server_name)
+def remove_oauth_tokens(server_name: str, token_dir: Path) -> None:
+    """Delete stored OAuth tokens and client info for a server.
+
+    This is a user-initiated re-authorization operation; application shutdown
+    must NOT call this — tokens are preserved across restarts.
+    """
+    storage = McpTokenStorage(server_name, token_dir)
     storage.remove()
     logger.info("OAuth tokens removed for '%s'", server_name)
 
 
 # ---------------------------------------------------------------------------
-# Extracted helpers (Task 3 of MCP OAuth consolidation)
+# Provider factory helpers
 #
-# These compose into ``build_oauth_auth`` below, and are also used by
-# ``abstract.mcp.oauth_manager.MCPOAuthManager._build_provider`` so the two
-# construction paths share one implementation.
+# These compose into the MCPOAuthManager._build_provider path. They are
+# module-level pure functions that take explicit parameters; no global
+# state is read or written.
 # ---------------------------------------------------------------------------
 
 
 def _configure_callback_port(cfg: dict) -> int:
-    """Pick or validate the OAuth callback port.
+    """Pick a callback port for one OAuth provider configuration.
 
-    Stores the resolved port into ``cfg['_resolved_port']`` so sibling
-    helpers (and the manager) can read it from the same dict. Returns the
-    resolved port.
-
-    NOTE: also sets the legacy module-level ``_oauth_port`` so existing
-    calls to ``_wait_for_callback`` keep working. The legacy global is
-    the root cause of issue #5344 (port collision on concurrent OAuth
-    flows); replacing it with a ContextVar is out of scope for this
-    consolidation PR.
+    Mutates the local ``cfg`` copy by setting ``_resolved_port`` so downstream
+    helpers can read it. Each provider gets its own port; no module-level
+    port state is involved.
     """
-    global _oauth_port
     requested = int(cfg.get("redirect_port", 0))
     port = _find_free_port() if requested == 0 else requested
     cfg["_resolved_port"] = port
-    _oauth_port = port  # legacy consumer: _wait_for_callback reads this
     return port
 
 
@@ -593,57 +538,3 @@ def _maybe_preregister_client(
     client_info = OAuthClientInformationFull.model_validate(info_dict)
     _write_json(storage._client_info_path(), client_info.model_dump(mode="json", exclude_none=True))
     logger.debug("Pre-registered client_id=%s for '%s'", client_id, storage._server_name)
-
-
-def build_oauth_auth(
-    server_name: str,
-    server_url: str,
-    oauth_config: dict | None = None,
-) -> "OAuthClientProvider | None":
-    """Build an ``httpx.Auth``-compatible OAuth handler for an MCP server.
-
-    Public API preserved for backwards compatibility. New code should use
-    :func:`abstract.mcp.oauth_manager.get_manager` so OAuth state is shared
-    across config-time, runtime, and reconnect paths.
-
-    Args:
-        server_name: Server key in mcp_servers config (used for storage).
-        server_url: MCP server endpoint URL.
-        oauth_config: Optional dict from the ``oauth:`` block in config.yaml.
-
-    Returns:
-        An ``OAuthClientProvider`` instance, or None if the MCP SDK lacks
-        OAuth support.
-    """
-    if not _OAUTH_AVAILABLE:
-        logger.warning(
-            "MCP OAuth requested for '%s' but SDK auth types are not available. "
-            "Install with: pip install 'mcp>=1.26.0'",
-            server_name,
-        )
-        return None
-
-    cfg = dict(oauth_config or {})  # copy — we mutate _resolved_port
-    storage = McpTokenStorage(server_name)
-
-    if not _is_interactive() and not storage.has_cached_tokens():
-        logger.warning(
-            "MCP OAuth for '%s': non-interactive environment and no cached tokens "
-            "found. The OAuth flow requires browser authorization. Run "
-            "interactively first to complete the initial authorization, then "
-            "cached tokens will be reused.",
-            server_name,
-        )
-
-    _configure_callback_port(cfg)
-    client_metadata = _build_client_metadata(cfg)
-    _maybe_preregister_client(storage, cfg, client_metadata)
-
-    return OAuthClientProvider(
-        server_url=server_url,
-        client_metadata=client_metadata,
-        storage=storage,
-        redirect_handler=_redirect_handler,
-        callback_handler=_wait_for_callback,
-        timeout=float(cfg.get("timeout", _OAUTH_CALLBACK_TIMEOUT)),
-    )

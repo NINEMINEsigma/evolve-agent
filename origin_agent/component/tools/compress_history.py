@@ -1,6 +1,6 @@
 """历史压缩工具 — agent 主动调用，用 agent 撰写的摘要替换旧消息。
 
-模块导入时通过 ``registry.register()`` 注册 ``CompressHistory`` 工具。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 ``CompressHistory`` 工具。
 danger_level 为 critical：操作本身可能安全，但用户必须亲自许可，不可由模型代审批。
 """
 
@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.messages import CharacterConversationMessage
 from entity.constant import (
@@ -116,17 +117,16 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     )
 
 
-registry.register(
-    name="CompressHistory",
-    toolset="core",
-    schema={
-        # 用 agent 撰写的摘要替换旧消息，保留最近 N 轮对话。
-        # 前置条件：会话历史至少 COMPRESS_HISTORY_MIN_MESSAGES 条消息。
-        # 调用效果：截断旧消息并插入摘要，不可逆。
-        # 返回格式：{ success, compressed, remaining }
-        # 典型场景：用户要求压缩历史；agent 感知上下文丢失或响应质量下降时主动压缩。
-        # 注意：此操作为 critical 级别，始终需要用户亲自审批，即使在脱手模式下也不走审批模型。
-        "description": f"""Compress conversation history by replacing older messages with a summary you write, keeping recent rounds intact.
+# ── schema 常量 ─────────────────────────────────────────────
+
+_COMPRESS_HISTORY_SCHEMA = {
+    # 用 agent 撰写的摘要替换旧消息，保留最近 N 轮对话。
+    # 前置条件：会话历史至少 COMPRESS_HISTORY_MIN_MESSAGES 条消息。
+    # 调用效果：截断旧消息并插入摘要，不可逆。
+    # 返回格式：{ success, compressed, remaining }
+    # 典型场景：用户要求压缩历史；agent 感知上下文丢失或响应质量下降时主动压缩。
+    # 注意：此操作为 critical 级别，始终需要用户亲自审批，即使在脱手模式下也不走审批模型。
+    "description": f"""Compress conversation history by replacing older messages with a summary you write, keeping recent rounds intact.
 
 ## Prerequisites
 - The session must have at least {COMPRESS_HISTORY_MIN_MESSAGES} messages in history.
@@ -158,26 +158,37 @@ Replaces all messages before the kept rounds with your summary. This is irrevers
 - The summary is your only record of the compressed conversation — you cannot access the original messages after compression.
 - Must include: key decisions, file changes, user preferences, current task state, open issues, errors and lessons learned.
 - Be information-dense: every sentence should preserve context that would otherwise be lost.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    # agent 撰写的历史摘要文本，应包含关键上下文、决策和当前状态。
-                    "description": "A structured summary of the conversation being compressed. Cover key topics, decisions, user preferences, and current task state.",
-                },
-                "keep_recent_rounds": {
-                    "type": "integer",
-                    "default": COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS,
-                    # 保留最近多少轮原始对话（一轮 = 一条 user 消息及其后的 assistant/tool 消息）。
-                    "description": f"Number of recent conversation rounds to preserve. Must be between {COMPRESS_HISTORY_MIN_KEEP_ROUNDS} and {COMPRESS_HISTORY_MAX_KEEP_ROUNDS}. Default is {COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS}.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                # agent 撰写的历史摘要文本，应包含关键上下文、决策和当前状态。
+                "description": "A structured summary of the conversation being compressed. Cover key topics, decisions, user preferences, and current task state.",
             },
-            "required": ["summary"],
+            "keep_recent_rounds": {
+                "type": "integer",
+                "default": COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS,
+                # 保留最近多少轮原始对话（一轮 = 一条 user 消息及其后的 assistant/tool 消息）。
+                "description": f"Number of recent conversation rounds to preserve. Must be between {COMPRESS_HISTORY_MIN_KEEP_ROUNDS} and {COMPRESS_HISTORY_MAX_KEEP_ROUNDS}. Default is {COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS}.",
+            },
         },
+        "required": ["summary"],
     },
-    handler=_handle_compress_history,
-    is_async=True,
-    danger_level=ToolDangerLevel.critical,
-    availability=ToolAvailability.MAIN,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the CompressHistory tool."""
+    del ui_events  # CompressHistory has no UI event handler
+    registry.register(
+        name="CompressHistory",
+        toolset="core",
+        schema=_COMPRESS_HISTORY_SCHEMA,
+        handler=_handle_compress_history,
+        is_async=True,
+        danger_level=ToolDangerLevel.critical,
+        availability=ToolAvailability.MAIN,
+    )

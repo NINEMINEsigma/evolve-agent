@@ -9,20 +9,28 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
-    "若 connect 曾返回指引，请先按指引让用户完成操作。"
+    "Browser not connected or CDP endpoint unreachable. Call BrowserConnect first; "
+    "if BrowserConnect returned guidance, follow those steps before retrying."
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
+    "Tab not found. Use BrowserListTabs to confirm existing tabs."
 )
+
+
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
 
 
 async def _handle_browser_open_tab(args: dict[str, Any]) -> dict:
@@ -31,8 +39,10 @@ async def _handle_browser_open_tab(args: dict[str, Any]) -> dict:
         return tool_error("url is required")
 
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserOpenTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
@@ -61,8 +71,10 @@ async def _handle_browser_activate_tab(args: dict[str, Any]) -> dict:
     if not tab:
         return tool_error("tab is required")
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserActivateTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
@@ -87,8 +99,10 @@ async def _handle_browser_close_tab(args: dict[str, Any]) -> dict:
     if not tab:
         return tool_error("tab is required")
     try:
-        browser = await _connection.get_browser()
+        browser = await _browser_system().get_browser()
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserCloseTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
@@ -107,10 +121,13 @@ async def _handle_browser_close_tab(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="BrowserOpenTab",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register tab lifecycle tools into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserOpenTab",
+        toolset="browser",
+        schema={
         # 在浏览器中新开标签页并导航到指定 URL。
         #
         # ## 行为规范
@@ -149,12 +166,12 @@ The new tab's index can be queried afterwards with BrowserListTabs.""",
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )
 
-registry.register(
-    name="BrowserActivateTab",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserActivateTab",
+        toolset="browser",
+        schema={
         # 激活/切换到指定标签页（bring to front），不改变导航状态。
         "description": """Brings the target tab to the front (activates it) without changing its navigation state.""",
         "parameters": {
@@ -173,12 +190,12 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )
 
-registry.register(
-    name="BrowserCloseTab",
-    toolset="browser",
-    schema={
+    registry.register(
+        name="BrowserCloseTab",
+        toolset="browser",
+        schema={
         # 关闭指定标签页。
         #
         # ## 行为规范
@@ -203,4 +220,4 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

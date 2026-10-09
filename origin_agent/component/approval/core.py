@@ -28,8 +28,9 @@ async def request_user_confirm(
         )
 
     from system.application import Application
+    from entry.agent_sink import FrontendSink
 
-    return await Application.current().frontend_sink.request_approval(
+    return await Application.current().get_system(FrontendSink).request_approval(
         tool_name=tool_name,
         args=args,
         reason=reason,

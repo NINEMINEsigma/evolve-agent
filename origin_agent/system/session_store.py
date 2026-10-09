@@ -23,8 +23,24 @@ from easysave import save, load, contains
 from entity.typeref import make_config
 
 from system.atomic_io import write_text_atomic
+from system.lifecycle import LifecycleFailure
 
 logger = logging.getLogger(__name__)
+
+
+class HistoryPersistenceError(LifecycleFailure):
+    """History 写盘失败；保留原始 cause，禁止被普通工具错误吞没。
+
+    继承 ``LifecycleFailure``，使所有涉及本次提交的宽泛捕获（如
+    ``except Exception``）仍能通过 ``contains_lifecycle_failure`` 识别
+    并让该错误继续传播，不被转换为成功的应用关闭。
+    """
+
+    def __init__(self, session_id: str, cause: BaseException) -> None:
+        super().__init__(
+            f"Failed to persist history for session {session_id}: {cause}"
+        )
+        self.__cause__ = cause
 
 
 class SessionStore:
@@ -94,14 +110,18 @@ class SessionStore:
         return data
 
     def write_history(self, session_id: str, history: History) -> None:
-        """将 History 实例以 easysave 多态序列化写入磁盘。"""
+        """将 History 实例以 easysave 多态序列化写入磁盘。
+
+        失败时抛 ``HistoryPersistenceError``（继承 ``LifecycleFailure``），
+        保留原始 cause；调用方不得将其吞没为普通工具错误或成功关闭。
+        """
         path = self.history_path(session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            path.parent.mkdir(parents=True, exist_ok=True)
             save(__SessionStore_Version__, make_config(path), history)
         except Exception as exc:
             logger.exception("Failed to save history for session %s: %s", session_id, exc)
-            raise
+            raise HistoryPersistenceError(session_id, exc) from exc
 
     def write_token_usage(self, session_id: str, record: TokenUsageRecord) -> None:
         payload = record.model_dump_json()

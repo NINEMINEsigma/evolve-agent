@@ -9,37 +9,51 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
+from component.browser.system import BrowserSystem
+from entity.constant import CDP_ENDPOINT_DEFAULT, EDGE_DEBUG_GUIDE
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
 
+def _browser_system() -> BrowserSystem:
+    return Application.current().get_system(BrowserSystem)
+
+
 async def _handle_browser_connect(args: dict[str, Any]) -> dict:
-    endpoint: str = str(args.get("endpoint", "")).strip() or _connection.CDP_ENDPOINT_DEFAULT
+    endpoint: str = str(args.get("endpoint", "")).strip() or CDP_ENDPOINT_DEFAULT
 
     try:
-        browser = await _connection.get_browser(endpoint)
+        browser = await _browser_system().get_browser(endpoint)
     except Exception as exc:
+        if requires_lifecycle_propagation(exc):
+            raise
         logger.warning("BrowserConnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(
-            _connection.EDGE_DEBUG_GUIDE,
+            EDGE_DEBUG_GUIDE,
             endpoint=endpoint,
             detail=f"{type(exc).__name__}: {exc}",
         )
 
     return tool_result(
         connected=True,
-        endpoint=_connection.current_endpoint(),
+        endpoint=_browser_system().current_endpoint(),
         tab_count=len(_connection.all_pages(browser)),
     )
 
 
-registry.register(
-    name="BrowserConnect",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserConnect into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserConnect",
+        toolset="browser",
+        schema={
         # 通过 CDP 接管用户真实浏览器，获得其全部标签页的访问权（含登录态、Cookie、本地存储）。
         # 只建立连接：不关闭/修改浏览器，不自动打开页面。
         #
@@ -107,4 +121,4 @@ Attaches to the running browser over CDP. All existing tabs become accessible to
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.safe,
-)
+    )

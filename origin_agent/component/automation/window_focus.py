@@ -14,7 +14,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +129,13 @@ def _handle_window_focus(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="WindowFocus",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register WindowFocus into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="WindowFocus",
+        toolset="automation",
+        schema={
         # 通过 HWND 将窗口设为前台焦点。
         # 前置条件：仅 Windows；需先用 WindowFind 获取 HWND。
         # 调用效果：恢复最小化/最大化窗口并强制置顶到前台，采用多级降级策略。
@@ -174,4 +178,4 @@ Restores the window (if minimized/maximized) and brings it to the foreground usi
         },
     },
     handler=_handle_window_focus,
-)
+    )

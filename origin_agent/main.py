@@ -1,14 +1,14 @@
 """应用生命周期 — agent 进程的唯一异步入口点。
 
-不在模块级别导入任何重型子系统。所有组件在 ``App.run()``
-内部延迟加载，使导入错误能够干净地暴露。
+App 只负责：创建唯一 Application、平台信号处理、等待关闭请求、
+调用 Application.start/shutdown、把关闭结果映射为既有退出码。
+所有子系统装配、Gateway 启动与资源释放由 Application 协调。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 import signal
 from typing import TYPE_CHECKING
 
@@ -17,334 +17,95 @@ from system.application import Application
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
-from entity.constant import GATEWAY_SHUTDOWN_TIMEOUT_SECONDS, Namespace
+from entity.constant import EXIT_FAILURE, EXIT_NORMAL, ShutdownReason
 
 logger = logging.getLogger(__name__)
-
-# 模块级引用，指向运行中的 App 实例。
-# 在 App.__init__ 中设置，在 shutdown 时清除。
-# 进化子系统通过它请求以退出码 -1 进行受控关闭。
-_app: App | None = None
-
-
-def request_evolution() -> None:
-    """标记运行中的 App 以退出码 -1 退出并立即触发关闭。
-
-    由 ``evolve.code.finalize_evolution`` 在 fork 目录
-    通过所有验证检查后调用。直接触发关闭事件，
-    不需要等待 gateway 的 WebSocket 回调（后者在
-    WebSocket 提前断开时无法可靠抵达）。
-    """
-    global _app
-    if _app is not None:
-        _app._exit_code = -1
-        _app._shutdown_event.set()
-        logger.info("Evolution triggered — exiting with code -1")
-
-
-def trigger_evolution_shutdown() -> None:
-    """如果已请求进化，触发实际关闭。
-
-    由 gateway 在发送可能完成代码进化周期的响应后调用。
-    如果退出码为 -1，设置关闭事件使 ``App.run()`` 返回，
-    编排器（run.py）执行 slow→fast 交换。
-    """
-    global _app
-    if _app is not None and _app._exit_code == -1:
-        _app._shutdown_event.set()
-        logger.info("Evolution shutdown triggered — exiting with code -1")
 
 
 class App:
     """轻量异步运行器。由 __main__.py 使用 RuntimeContext 创建，
-    然后 ``await app.run()`` 阻塞直到关闭。
+    然后 ``await app.run()`` 阻塞直到关闭并返回退出码。
     """
 
     def __init__(self, ctx: RuntimeContext) -> None:
-        global _app
-        self.ctx: RuntimeContext = ctx
-        # 关闭信号事件，set 后 run() 返回
-        self._shutdown_event: asyncio.Event = asyncio.Event()
-        # 进程退出码，-1 表示需要进化交换
-        self._exit_code: int = 0
-        # uvicorn Server 实例
-        self._gateway_server: object | None = None
-        # gateway 后台 asyncio task
-        self._gateway_task: asyncio.Task[None] | None = None
-        _app = self
+        self._ctx: RuntimeContext = ctx
+        self._application: Application | None = None
+        self._wake_task: asyncio.Task[None] | None = None
 
     async def run(self) -> int:
-        """阻塞直到请求关闭。返回退出码。"""
+        """阻塞直到关闭完成；失败关闭返回 1，绝不返回进化成功。"""
         logger.info(
             "App starting | mode=%s workspace=%s agentspace=%s fork=%s",
-            self.ctx.mode,
-            self.ctx.workspace,
-            self.ctx.agentspace,
-            self.ctx.fork_path,
+            self._ctx.mode,
+            self._ctx.workspace,
+            self._ctx.agentspace,
+            self._ctx.fork_path,
         )
 
-        # ---- 启动 gateway ----
-        await self._start_gateway()
+        self._application = Application(self._ctx)
+        application = self._application
 
-        # ---- 信号处理 ----
+        try:
+            await application.start()
+        except Exception as exc:
+            # 端口占用是启动前的明确业务拒绝：按普通停止退出，不进入 fallback。
+            from gateway.system import GatewayPortBusyError
+            if _contains_port_busy(exc):
+                logger.error("Gateway port unavailable — normal stop: %s", exc)
+                return EXIT_NORMAL
+            logger.critical("Application startup failed: %s", exc, exc_info=True)
+            return EXIT_FAILURE
+
+        from system.runtime import RuntimeSystem
+        runtime = application.get_system(RuntimeSystem)
+
+        # ---- 信号处理（与 RuntimeSystem 共享同一关闭请求通道）----
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(sig, self._request_shutdown)
+                loop.add_signal_handler(
+                    sig, runtime.request_shutdown, ShutdownReason.NORMAL,
+                )
             except NotImplementedError:
                 # Windows：add_signal_handler 不支持 — 使用 signal.signal
                 try:
-                    signal.signal(sig, lambda signum, frame: self._request_shutdown())
+                    signal.signal(
+                        sig,
+                        lambda signum, frame: runtime.request_shutdown(ShutdownReason.NORMAL),
+                    )
                 except (ValueError, OSError):
                     logger.warning(
                         "Cannot register signal handler for %s on this platform", sig
                     )
 
-        await self._shutdown_event.wait()
-
-        # ---- 停止 gateway ----
-        await self._stop_gateway()
-
-        # ---- 排空后台任务 ----
-        await self._drain_background_tasks()
-
-        # ---- 清理 LSP 进程 ----
-        try:
-            from system.lsp import cleanup_lsp
-            killed = await asyncio.to_thread(cleanup_lsp)
-            if killed:
-                logger.info("Cleaned up LSP server process")
-        except Exception as exc:
-            logger.warning("LSP cleanup failed: %s", exc)
-
-        # ---- 清理无头浏览器进程 ----
-        # 无头模式下浏览器窗口不可见，用户无法手动关闭，
-        # 必须在应用退出时强制终止，否则成为孤儿进程。
-        try:
-            from component.browser._connection import cleanup_headless_browser
-            killed = await asyncio.to_thread(cleanup_headless_browser)
-            if killed:
-                logger.info("Cleaned up headless browser process")
-        except Exception as exc:
-            logger.warning("Headless browser cleanup failed: %s", exc)
-
-        # ---- 关闭 Application 子系统 ----
-        try:
-            await Application.current().shutdown()
-        except Exception as exc:
-            logger.warning("Application shutdown failed: %s", exc)
-
-        logger.info("App shutdown complete")
-        return self._exit_code
-
-    def _request_shutdown(self) -> None:
-        logger.info("Shutdown requested")
-        self._shutdown_event.set()
-
-    # -- gateway 生命周期 --------------------------------------------------
-
-    async def _start_gateway(self) -> None:
-        """创建 uvicorn server 并作为后台 task 运行。"""
-        try:
-            from gateway.server import create_server, set_agentspace_path, check_port_available
-        except ImportError as exc:
-            logger.warning("Gateway unavailable (import error): %s", exc)
-            self._shutdown_event.set()
-            return
-
-        # ---- 端口可用性检查（早失败，避免无效初始化）----
-        host: str = self.ctx.gateway_host
-        port: int = self.ctx.gateway_port
-        if not check_port_available(host, port):
-            logger.error(
-                "Gateway port %d on %s is already in use — aborting "
-                "(exit 0, no fallback)",
-                port, host,
-            )
-            self._exit_code = 0
-            self._shutdown_event.set()
-            return
-
-        # ---- 创建 Application 单例并初始化子系统 ----
-        from system.application import Application
-
-        app = Application(self.ctx)
-        app.link_shutdown_event(self._shutdown_event)
-        app.init()
-        await app.agentspace_service.start()
-
-        # ---- 确保 colloquy session 存在 ----
-        if app.session_manager is not None:
-            app.session_manager.ensure_colloquy_session()
-
-        # ---- 工具发现 ----
-        try:
-            import component.tools.filesystem as _fs
-            from abstract.tools.discover import discover_builtin_tools
-            from system.pathutils import find_repo_root, get_agent_dir
-            import sys
-            _agent_root: Path = get_agent_dir()
-            _root: Path = find_repo_root()
-            if str(_root) not in sys.path:
-                sys.path.insert(0, str(_root))
-            discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
-            discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
-            discover_builtin_tools(str(_agent_root / "component" / "multiagenttools"), "component.multiagenttools")
-            discover_builtin_tools(str(_agent_root / "component" / "automation"), "component.automation")
-            discover_builtin_tools(str(_agent_root / "component" / "browser"), "component.browser")
-            _custom_tools: Path = Application.current().sandbox.get_base(Namespace.CUSTOM_TOOLS)
-            if _custom_tools.exists():
-                discover_builtin_tools(str(_custom_tools), Namespace.CUSTOM_TOOLS.value)
-            # 注册内置工具集描述
-            from abstract.tools.toolsets_meta import register_builtin_toolset_descriptions
-            register_builtin_toolset_descriptions()
-            # 注册 MCP 工具（桥接 + 连接 server）
-            import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
-            component.mcp_tools.init_mcp(self.ctx)
-            _all_tools: int = len(_fs.registry.get_all_tool_names())
-            logger.info("Sandbox + %d tools initialized | mode=%s",
-                        _all_tools, self.ctx.mode)
-        except Exception as exc:
-            logger.warning("Sandbox/tools unavailable: %s", exc)
-            self._shutdown_event.set()
-
-        # ---- 创建 agent 循环 ----
-        agent_loop: AgentLoop | None = None
-        try:
-            from entry.parent_agent_loop import ParentAgentLoop as AgentLoop
-            from entity.constant import SESSIONS_DIR_NAME
-            history_path: str = str(self.ctx.workspace / SESSIONS_DIR_NAME)
-            agent_loop = AgentLoop(
-                Application.current(),
-                session_id="__bootstrap__",
-                frontend_sink=Application.current().frontend_sink,
-                history_store_dir=Path(history_path) if history_path else None,
-            )
-
-            # ParentAgentLoop 构造时已通过全局名称指针恢复 Profile。
-
-            # 流式与工具事件由注入的 FrontendSink 直接发送。
-            set_agentspace_path(self.ctx.agentspace)
-
-            # ---- 创建 SubAgentOrchestrator ----
-            try:
-                from subagent.orchestrator import SubAgentOrchestrator
-                orch = SubAgentOrchestrator()
-                orch.set_agent_loop(agent_loop)
-                Application.current().subagent_orchestrator = orch
-                logger.info("SubAgentOrchestrator initialized")
-            except Exception as exc:
-                logger.debug("SubAgentOrchestrator not available: %s", exc)
-
-            logger.info("AgentLoop initialized | session=__bootstrap__")
-        except Exception as exc:
-            logger.warning("AgentLoop unavailable: %s", exc)
-            # Gateway 将回退到 echo 模式
-
-        self._gateway_server = create_server(host=host, port=port)
-        self._gateway_task = asyncio.create_task(
-            self._gateway_server.serve(),  # type: ignore[union-attr]
-            name="gateway-server",
+        self._wake_task = asyncio.create_task(
+            runtime.shutdown_event.wait(), name="app-shutdown-wait",
         )
-        # 给 server 一点时间完成端口绑定
-        await asyncio.sleep(0.5)
+        await self._wake_task
 
-        logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
-        logger.info("WebPage on http://127.0.0.1:%d", port)
+        # ---- 统一关闭（业务停止 + History 提交 + 逆拓扑注销）----
+        shutdown_failed = False
+        try:
+            await application.shutdown()
+        except BaseException as exc:
+            shutdown_failed = True
+            logger.critical("Application shutdown failed: %s", exc, exc_info=True)
 
-        # ---- 自动打开浏览器 ----
-        # import webbrowser
-        # _browser_host: str = "127.0.0.1" if host in ("0.0.0.0", "::") else host
-        # _url: str = f"http://{_browser_host}:{port}"
-        # try:
-        #     webbrowser.open(_url)
-        #     logger.info("Browser opened: %s", _url)
-        # except Exception as exc:
-        #     logger.warning("Failed to open browser: %s", exc)
+        if shutdown_failed or runtime.exit_code == EXIT_FAILURE:
+            return EXIT_FAILURE
+        return runtime.exit_code
 
-    async def _stop_gateway(self) -> None:
-        """优雅停止 gateway server。"""
-        if self._gateway_server is None or self._gateway_task is None:
+    def disarm_watchdog(self) -> None:
+        """仅由 __main__ 在 asyncio.run 及线程池清理完成后调用。"""
+        if self._application is None:
             return
-        logger.info("Gateway shutting down...")
-        # 先停止所有子 Agent 会话
-        try:
-            from gateway.server import shutdown_subagent_orchestrator
-            await shutdown_subagent_orchestrator()
-        except Exception:
-            logger.warning("Failed to shutdown subagent orchestrator", exc_info=True)
-        # 关闭 MCP server 连接（释放子进程、后台线程）
-        try:
-            import component.mcp_tools
-            component.mcp_tools.shutdown_mcp()
-        except Exception:
-            logger.warning("Failed to shutdown MCP tools", exc_info=True)
-        self._gateway_server.should_exit = True  # type: ignore[union-attr]
-        # App._shutdown_event 已设置，Agentspace SSE 会通过 Application 的共享事件退出。
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(self._gateway_task),
-                timeout=GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Gateway did not stop within %.1f seconds; cancelling it",
-                GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
-            )
-            self._gateway_task.cancel()
-            try:
-                await self._gateway_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.warning("Gateway task failed while being cancelled", exc_info=True)
-        except asyncio.CancelledError:
-            if not self._gateway_task.cancelled():
-                raise
-        except Exception:
-            logger.warning("Failed to await gateway task during shutdown", exc_info=True)
-        logger.info("Gateway stopped")
+        self._application.disarm_shutdown_deadline()
 
-    async def _drain_background_tasks(self, timeout: float = 5.0) -> None:
-        """返回前等待所有待处理 asyncio task 完成。
 
-        防止进程以退出码 -1（进化）退出时，
-        正在进行的 I/O（session 索引写入、消息持久化、
-        工具事件流等）被截断。
-        """
-        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        pending: list[asyncio.Task] = [
-            t for t in asyncio.all_tasks(loop)
-            if t is not asyncio.current_task() and not t.done()
-        ]
-        if not pending:
-            return
-
-        for t in pending:
-            name = t.get_name()
-            if not name or name.startswith("Task-") or name == "Task":
-                coro = t.get_coro()
-                name = getattr(coro, "__qualname__", None) or getattr(coro, "__name__", repr(coro))
-            logger.info("  pending background task: %s", name)
-
-        logger.info("Draining %d background task(s)...", len(pending))
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*pending, return_exceptions=True),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            still_pending = [
-                t for t in asyncio.all_tasks(loop)
-                if t is not asyncio.current_task() and not t.done()
-            ]
-            for t in still_pending:
-                name = t.get_name()
-                if not name or name.startswith("Task-") or name == "Task":
-                    coro = t.get_coro()
-                    name = getattr(coro, "__qualname__", None) or getattr(coro, "__name__", repr(coro))
-                logger.warning("  task still running after timeout: %s", name)
-            logger.warning(
-                "Some background tasks did not complete within %.1fs",
-                timeout,
-            )
+def _contains_port_busy(error: BaseException) -> bool:
+    from gateway.system import GatewayPortBusyError
+    if isinstance(error, GatewayPortBusyError):
+        return True
+    return isinstance(error, BaseExceptionGroup) and any(
+        _contains_port_busy(member) for member in error.exceptions
+    )

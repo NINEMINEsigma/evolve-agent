@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry as tool_registry
-from entity.puretype import Role, ToolAvailability, MessageContent, SessionTerminationResult
+from abstract.tools.registry import ToolRegistry
+from entity.puretype import Role, ToolAvailability, SessionTerminationResult
 from entity.constant import (
     COLLOQUY_COMPRESS_RATIO,
     COLLOQUY_TOOLSET_WHITELIST,
@@ -45,6 +45,8 @@ class ColloquyLoop(ParentAgentLoop):
         叠加 ColloquyLoop 工具集白名单过滤。
         """
         definitions: list[dict] = self._get_effective_tool_definitions()
+        from system.application import Application
+        tool_registry = Application.current().get_system(ToolRegistry)
         filtered: list[dict] = []
         for d in definitions:
             func = d.get("function") or {}
@@ -59,11 +61,11 @@ class ColloquyLoop(ParentAgentLoop):
     # ========================================================================
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: MessageContent | None,
+        self, sid: str, move_last_user_message: bool,
     ) -> str:
         """process_message 入口处的超限检查：超限时滑动窗口压缩，返回原 sid。
 
-        user_message 为 None 表示队列路径（SP-4），滑窗路径忽略该参数。
+        滑窗路径不使用 move_last_user_message；它只影响父类旋转路径。
         """
         if self._lifecycle.is_context_over_limit():
             await self._compress_sliding_window(sid)
@@ -107,7 +109,8 @@ class ColloquyLoop(ParentAgentLoop):
 
         # 5. 全局元数据服务生成摘要
         try:
-            summary = await self.app.session_metadata_service.generate_summary(
+            from system.session_metadata import SessionMetadataService
+            summary = await self.app.get_system(SessionMetadataService).generate_summary(
                 sid,
                 temp_history,
             )

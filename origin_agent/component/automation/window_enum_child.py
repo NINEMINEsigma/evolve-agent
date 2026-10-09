@@ -17,7 +17,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ _user32.GetWindowTextW.restype = ctypes.c_int
 _user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(_RECT)]
 _user32.GetWindowRect.restype = ctypes.c_bool
 
+_user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
+_user32.GetWindowTextLengthW.restype = ctypes.c_int
 _user32.IsWindow.argtypes = [ctypes.c_void_p]
 _user32.IsWindow.restype = ctypes.c_bool
 
@@ -87,9 +90,7 @@ def _get_class_name(hwnd: int) -> str:
 
 def _get_window_text(hwnd: int) -> str:
     """获取窗口文本（标题 / 控件内容）。"""
-    length = _user32.GetWindowTextLengthW(hwnd) if hasattr(_user32, "GetWindowTextLengthW") else 0
-    # GetWindowTextLengthW 不在 argtypes 中，直接调用
-    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+    length = _user32.GetWindowTextLengthW(hwnd)
     if length == 0:
         return ""
     buf = ctypes.create_unicode_buffer(length + 1)
@@ -182,10 +183,13 @@ def _handle_window_enum_child(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="WindowEnumChild",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register WindowEnumChild into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="WindowEnumChild",
+        toolset="automation",
+        schema={
         # 枚举指定窗口的所有子窗口，返回每个子窗口的 HWND、类名、文本、可见性等。
         # 前置条件：仅 Windows；hwnd 必须是有效的窗口句柄（来自 WindowFind）。
         # 调用效果：遍历 hwnd 的所有直接子窗口，返回详细信息列表。
@@ -250,4 +254,4 @@ Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. R
         },
     },
     handler=_handle_window_enum_child,
-)
+    )

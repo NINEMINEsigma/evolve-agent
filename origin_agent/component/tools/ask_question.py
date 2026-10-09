@@ -1,6 +1,6 @@
 """提问工具 — agent 向用户提问，提供预设选项和/或自定义输入。
 
-模块导入时通过 ``registry.register()`` 注册。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 函数。
 工作流程：
   1. agent 调用 ask_question，传入问题、选项列表和是否允许自定义输入
   2. 服务端通过 WebSocket 向前端推送 ask_request 消息
@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,11 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
     if not session_id:
         return tool_error("Missing session_id, cannot send question")
 
-    sink = Application.current().frontend_sink
-    if sink is None:
+    # QUESTION: 按时序必须是注册完成的
+    from entry.agent_sink import FrontendSink
+    try:
+        sink = Application.current().get_system(FrontendSink)
+    except RuntimeError:
         return tool_error("FrontendSink not available")
 
     result = await sink.ask_question(
@@ -77,22 +81,19 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
     )
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── schema 常量 ─────────────────────────────────────────────
 
-registry.register(
-    name="Ask",
-    toolset="core",
-    schema={
-        # 向当前用户提问，支持预设选项和自定义输入。
-        # 前置条件：必须有活跃的 WebSocket 连接（前端在线）。无连接时调用会失败。
-        # 调用效果：agent 阻塞等待用户回答（永不超时）。阻塞期间 agent 不处理其他任务。
-        # 字段指南：question 为简短纯文本标题（不用 markdown），detail 为可选的 markdown 详细说明。
-        # 返回格式：{ question, option: 选中项的 value, custom_text: 自由文本, answered: bool }
-        # 未选择也未输入时 answered=false。
-        # 典型场景：需要用户决策（文件处理方式、多选一）、收集偏好、确认操作。
-        # 副作用：agent 线程阻塞直到用户响应，不应在后台任务中调用。
-        # 备注：用户始终可以自定义输入回答，不受 options 限制。
-        "description": """Ask the current user a question with preset options to choose from. The user can always type a custom answer regardless of the preset options.
+_ASK_SCHEMA = {
+    # 向当前用户提问，支持预设选项和自定义输入。
+    # 前置条件：必须有活跃的 WebSocket 连接（前端在线）。无连接时调用会失败。
+    # 调用效果：agent 阻塞等待用户回答（永不超时）。阻塞期间 agent 不处理其他任务。
+    # 字段指南：question 为简短纯文本标题（不用 markdown），detail 为可选的 markdown 详细说明。
+    # 返回格式：{ question, option: 选中项的 value, custom_text: 自由文本, answered: bool }
+    # 未选择也未输入时 answered=false。
+    # 典型场景：需要用户决策（文件处理方式、多选一）、收集偏好、确认操作。
+    # 副作用：agent 线程阻塞直到用户响应，不应在后台任务中调用。
+    # 备注：用户始终可以自定义输入回答，不受 options 限制。
+    "description": """Ask the current user a question with preset options to choose from. The user can always type a custom answer regardless of the preset options.
 
 ## Prerequisites
 An active WebSocket connection is required (the frontend must be online). Calling without one will fail.
@@ -117,42 +118,53 @@ The agent blocks and waits for the user's response indefinitely (no timeout). Th
 
 ## Side Effects
 The agent thread blocks until the user responds. Do not call this inside background tasks.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    # 显示给用户的问题标题。简短纯文本，不应使用 markdown 格式。必需。
-                    "description": """The question text to display to the user. Required.""",
-                },
-                "detail": {
-                    "type": "string",
-                    # 问题的详细说明，支持 markdown 格式渲染。可选。
-                    # 当问题需要复杂描述（多段文本、代码块、表格、列表等）时使用。
-                    "description": """Optional detailed explanation of the question, rendered as markdown. Use this for complex context, code blocks, tables, or multi-paragraph descriptions. Keep `question` short and plain.""",
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "label": {"type": "string", "description": """Display text for the option."""},
-                            "value": {"type": "string", "description": """Value of the option."""},
-                        },
-                        "required": ["label", "value"],
-                    },
-                    # 预设选项列表。每项包含 label（显示文本）和 value（返回值）。
-                    # 用户始终可以自定义输入回答，与预设选项并存。
-                    "description": """List of preset options, each with a `label` (display text) and `value` (returned value). The user can always type a custom answer regardless.""",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                # 显示给用户的问题标题。简短纯文本，不应使用 markdown 格式。必需。
+                "description": """The question text to display to the user. Required.""",
             },
-            "required": ["question"],
+            "detail": {
+                "type": "string",
+                # 问题的详细说明，支持 markdown 格式渲染。可选。
+                # 当问题需要复杂描述（多段文本、代码块、表格、列表等）时使用。
+                "description": """Optional detailed explanation of the question, rendered as markdown. Use this for complex context, code blocks, tables, or multi-paragraph descriptions. Keep `question` short and plain.""",
+            },
+            "options": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string", "description": """Display text for the option."""},
+                        "value": {"type": "string", "description": """Value of the option."""},
+                    },
+                    "required": ["label", "value"],
+                },
+                # 预设选项列表。每项包含 label（显示文本）和 value（返回值）。
+                # 用户始终可以自定义输入回答，与预设选项并存。
+                "description": """List of preset options, each with a `label` (display text) and `value` (returned value). The user can always type a custom answer regardless.""",
+            },
         },
+        "required": ["question"],
     },
-    handler=_handle_ask_question,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    no_timeout=True,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    resets_turn_counter=True,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the Ask tool into the explicit runtime registry."""
+    del ui_events  # Ask has no UI event handler
+    registry.register(
+        name="Ask",
+        toolset="core",
+        schema=_ASK_SCHEMA,
+        handler=_handle_ask_question,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        no_timeout=True,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        resets_turn_counter=True,
+    )

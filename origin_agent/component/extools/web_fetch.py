@@ -1,6 +1,7 @@
 """Web fetch tool — fetches a URL and returns its content as plain text.
 
-Module-import-time registration via ``registry.register()``.
+注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
+显式调用。
 """
 
 from __future__ import annotations
@@ -11,8 +12,8 @@ import urllib.request
 from html.parser import HTMLParser
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
-from component.tools.filesystem import _s as _get_sandbox
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.constant import DEFAULT_USER_AGENT, TOOL_RESULT_PREVIEW_CHARS, WEB_FETCH_MAX_CHARS
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,9 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
             if oversized:
                 import uuid
                 save_path = f"ws:logs/web_fetch/{uuid.uuid4().hex[:12]}.txt"
-                _get_sandbox().write(save_path, text)
+                from system.application import Application
+                from system.sandbox import Sandbox
+                Application.current().get_system(Sandbox).write(save_path, text)
                 preview = text[:TOOL_RESULT_PREVIEW_CHARS]
                 return tool_result(
                     preview=preview,
@@ -131,45 +134,48 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
 # Registration
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="WebFetch",
-    toolset="extools",
-    schema={
-        # 获取指定 URL 的内容并以纯文本形式返回。
-        # HTML 页面会自动转换为文本（去除 script、style、noscript 标签）。
-        # 内容超过 {WEB_FETCH_MAX_CHARS} 字符时，完整内容保存到 ws:logs/web_fetch/ 文件，
-        # 仅返回前 {TOOL_RESULT_PREVIEW_CHARS} 字符的预览和文件路径。
-        #
-        # ## 前置条件
-        # - url 必须以 http:// 或 https:// 开头。
-        # - 目标 URL 必须可达（网络连接正常）。
-        #
-        # ## 调用效果
-        # 发送 GET 请求获取 URL 内容。HTML 自动转纯文本，其他类型直接返回。
-        # 内容超过 {WEB_FETCH_MAX_CHARS} 字符时，完整内容写入 ws:logs/web_fetch/{{uuid}}.txt，
-        # 返回结果中包含 saved_to（文件路径）和 preview（前 {TOOL_RESULT_PREVIEW_CHARS} 字符）。
-        # 未超限时直接返回完整 content。
-        # 超时时间为 15 秒。
-        #
-        # ## 返回
-        # 未超限时：
-        # ```json
-        # {"content": "...", "url": "https://example.com", "content_type": "text/html", "status": 200}
-        # ```
-        # 超限时：
-        # ```json
-        # {"preview": "...", "url": "https://example.com", "content_type": "text/html", "status": 200, "saved_to": "ws:logs/web_fetch/abc123.txt", "total_chars": 60000}
-        # ```
-        #
-        # ## 何时使用
-        # - 读取网页内容、API 响应、在线文档。
-        # - 获取已知 URL 的页面详情。
-        #
-        # ## 副作用/注意
-        # - 依赖外部网络服务，可能因网络或反爬策略失败。
-        # - HTML 转文本是尽力而为，复杂页面可能格式混乱。
-        # - 超大内容自动保存为文件，需用 Read 读取完整内容。
-        "description": f"""Fetches a URL and returns its content as plain text. HTML pages are automatically converted to text (scripts and styles stripped). Useful for reading web pages, API responses, documentation, etc. Content exceeding {WEB_FETCH_MAX_CHARS} characters is saved to a file and a preview is returned.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register web fetch tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="WebFetch",
+        toolset="extools",
+        schema={
+            # 获取指定 URL 的内容并以纯文本形式返回。
+            # HTML 页面会自动转换为文本（去除 script、style、noscript 标签）。
+            # 内容超过 {WEB_FETCH_MAX_CHARS} 字符时，完整内容保存到 ws:logs/web_fetch/ 文件，
+            # 仅返回前 {TOOL_RESULT_PREVIEW_CHARS} 字符的预览和文件路径。
+            #
+            # ## 前置条件
+            # - url 必须以 http:// 或 https:// 开头。
+            # - 目标 URL 必须可达（网络连接正常）。
+            #
+            # ## 调用效果
+            # 发送 GET 请求获取 URL 内容。HTML 自动转纯文本，其他类型直接返回。
+            # 内容超过 {WEB_FETCH_MAX_CHARS} 字符时，完整内容写入 ws:logs/web_fetch/{{uuid}}.txt，
+            # 返回结果中包含 saved_to（文件路径）和 preview（前 {TOOL_RESULT_PREVIEW_CHARS} 字符）。
+            # 未超限时直接返回完整 content。
+            # 超时时间为 15 秒。
+            #
+            # ## 返回
+            # 未超限时：
+            # ```json
+            # {"content": "...", "url": "https://example.com", "content_type": "text/html", "status": 200}
+            # ```
+            # 超限时：
+            # ```json
+            # {"preview": "...", "url": "https://example.com", "content_type": "text/html", "status": 200, "saved_to": "ws:logs/web_fetch/abc123.txt", "total_chars": 60000}
+            # ```
+            #
+            # ## 何时使用
+            # - 读取网页内容、API 响应、在线文档。
+            # - 获取已知 URL 的页面详情。
+            #
+            # ## 副作用/注意
+            # - 依赖外部网络服务，可能因网络或反爬策略失败。
+            # - HTML 转文本是尽力而为，复杂页面可能格式混乱。
+            # - 超大内容自动保存为文件，需用 Read 读取完整内容。
+            "description": f"""Fetches a URL and returns its content as plain text. HTML pages are automatically converted to text (scripts and styles stripped). Useful for reading web pages, API responses, documentation, etc. Content exceeding {WEB_FETCH_MAX_CHARS} characters is saved to a file and a preview is returned.
 
 ## Prerequisites
 - The URL must start with http:// or https://.
@@ -196,17 +202,17 @@ Oversized:
 - Depends on external network services; may fail due to network issues or anti-bot measures.
 - HTML-to-text conversion is best-effort; complex pages may have poor formatting.
 - Oversized content is automatically saved as a file; use Read to retrieve the full content.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    # 要获取的 URL。必须以 http:// 或 https:// 开头。
-                    "description": "The URL to fetch. Must start with http:// or https://.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        # 要获取的 URL。必须以 http:// 或 https:// 开头。
+                        "description": "The URL to fetch. Must start with http:// or https://.",
+                    },
                 },
+                "required": ["url"],
             },
-            "required": ["url"],
         },
-    },
-    handler=_handle_web_fetch,
-)
+        handler=_handle_web_fetch,
+    )

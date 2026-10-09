@@ -1,6 +1,6 @@
 """Skill 管理工具 — 让 agent 学习、列出和遗忘 skill。
 
-模块导入时通过 ``registry.register()`` 注册。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
 Skill 存储在 ``<project_root>/skills/``（Path.cwd() / "skills"）下。
 """
 
@@ -13,7 +13,8 @@ from typing import Any, Dict, List
 
 from abstract.skills.manager import create_skill, update_skill, write_skill_file
 from abstract.skills.loader import list_skills, load_skill
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,9 @@ logger = logging.getLogger(__name__)
 def _skills_dir() -> Path:
     """返回规范的 skill 目录（通过 Sandbox 获取）。"""
     from system.application import Application
+    from system.sandbox import Sandbox
     from entity.constant import Namespace
-    return Application.current().sandbox.get_base(Namespace.SKILLS)
+    return Application.current().get_system(Sandbox).get_base(Namespace.SKILLS)
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> dict:
@@ -153,45 +155,41 @@ def _handle_recall_skill(args: dict[str, Any]) -> dict:
 
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── schema 常量 ─────────────────────────────────────────────────────
 
-
-registry.register(
-    name="CreateSkill",
-    toolset="core",
-    schema={
-        # 创建新 skill 或对已有 skill 进行较大程度的更改。Skill 是以目录形式存储在
-        # project-root/skills/ 下的可复用知识模块，包含 SKILL.md 主文档及可选的
-        # scripts/、references/、templates/、assets/ 等附属文件。
-        #
-        # ## 前置条件
-        # 必须确实了解了一个具有模板意义的工作流程，其中的细节对其他类似任务具有指导意义。
-        # 不应为琐碎或一次性操作创建 skill。
-        #
-        # ## 调用效果
-        # 若同名 skill 不存在则创建，已存在则覆盖更新（适合较大程度的内容替换）。
-        # 通过 `files` 参数可一次性写入附属文件（脚本、参考文档等）。
-        #
-        # ## 返回
-        # ```json
-        # {"created": true, "name": "my-skill", "path": "/path/to/skills/my-skill", "files_written": [{"path": "scripts/hello.py"}], "file_errors": null}
-        # ```
-        #
-        # ## 何时使用
-        # - 创建全新 skill。
-        # - 对已有 skill 的主体内容进行较大程度更改。
-        # - 小范围修改或追加内容应使用沙箱内置的 PatchEdit 或 Write，路径使用 `skills:` 前缀（如 `skills:my-skill/SKILL.md`）。
-        #
-        # ## 语言规范（重要）
-        # Skills 是共享知识产物，不是个人表达。编写所有 skill 内容——Markdown 正文、描述、
-        # 脚本、参考文档——时使用通用、中立的语言，独立于你的 SOUL 人格。采用技术文档
-        # 写作风格，而非你的个人语气或人格。Skills 必须能被任何 agent 理解和复用。
-        #
-        # ## 副作用/注意
-        # - 写入 project-root/skills/ 下的文件系统。
-        # - 同名 skill 会被覆盖更新，谨慎使用。
-        # - `name` 推荐使用简短 kebab-case。
-        "description": """Create a new skill or make significant changes to an existing one. A skill is a reusable knowledge module stored as a directory under project-root/skills/, containing a SKILL.md main document and optional scripts/, references/, templates/, assets/ and other ancillary files.
+_CREATE_SKILL_SCHEMA = {
+    # 创建新 skill 或对已有 skill 进行较大程度的更改。Skill 是以目录形式存储在
+    # project-root/skills/ 下的可复用知识模块，包含 SKILL.md 主文档及可选的
+    # scripts/、references/、templates/、assets/ 等附属文件。
+    #
+    # ## 前置条件
+    # 必须确实了解了一个具有模板意义的工作流程，其中的细节对其他类似任务具有指导意义。
+    # 不应为琐碎或一次性操作创建 skill。
+    #
+    # ## 调用效果
+    # 若同名 skill 不存在则创建，已存在则覆盖更新（适合较大程度的内容替换）。
+    # 通过 `files` 参数可一次性写入附属文件（脚本、参考文档等）。
+    #
+    # ## 返回
+    # ```json
+    # {"created": true, "name": "my-skill", "path": "/path/to/skills/my-skill", "files_written": [{"path": "scripts/hello.py"}], "file_errors": null}
+    # ```
+    #
+    # ## 何时使用
+    # - 创建全新 skill。
+    # - 对已有 skill 的主体内容进行较大程度更改。
+    # - 小范围修改或追加内容应使用沙箱内置的 PatchEdit 或 Write，路径使用 `skills:` 前缀（如 `skills:my-skill/SKILL.md`）。
+    #
+    # ## 语言规范（重要）
+    # Skills 是共享知识产物，不是个人表达。编写所有 skill 内容——Markdown 正文、描述、
+    # 脚本、参考文档——时使用通用、中立的语言，独立于你的 SOUL 人格。采用技术文档
+    # 写作风格，而非你的个人语气或人格。Skills 必须能被任何 agent 理解和复用。
+    #
+    # ## 副作用/注意
+    # - 写入 project-root/skills/ 下的文件系统。
+    # - 同名 skill 会被覆盖更新，谨慎使用。
+    # - `name` 推荐使用简短 kebab-case。
+    "description": """Create a new skill or make significant changes to an existing one. A skill is a reusable knowledge module stored as a directory under project-root/skills/, containing a SKILL.md main document and optional scripts/, references/, templates/, assets/ and other ancillary files.
 
 ## Prerequisites
 The agent must have genuinely understood a workflow that has template value, where the details are instructive for other similar tasks. Do not create skills for trivial or one-off operations.
@@ -217,97 +215,91 @@ Skills are shared knowledge artifacts, not personal expression. Write all skill 
 - Writes to the file system under project-root/skills/.
 - Skills with the same name are overwritten; use with caution.
 - `name` should use short kebab-case.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # Skill 名称（简短，kebab-case）。
-                    "description": "Skill name (short, kebab-case).",
-                },
-                "description": {
-                    "type": "string",
-                    # 一行描述，说明 skill 的功能。
-                    "description": "A one-line description explaining the skill's purpose.",
-                },
-                "content": {
-                    "type": "string",
-                    # Skill 的 Markdown 正文。
-                    "description": "The Markdown body of the skill.",
-                },
-                "category": {
-                    "type": "string",
-                    # 必填分类（如 'utility'、'knowledge'）。skill 创建于 skills/<category>/<name>/。
-                    "description": "Required category (e.g. 'utility', 'knowledge'). The skill is created under skills/<category>/<name>/.",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    # 必填的标签列表（非空数组）。
-                    "description": "Required filtering tags (non-empty array).",
-                },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                # 相对于 skill 目录的路径，如 scripts/hello.py
-                                "description": "Path relative to the skill directory, e.g. scripts/hello.py",
-                            },
-                            "content": {
-                                "type": "string",
-                                # 文件内容。
-                                "description": "File content.",
-                            },
-                        },
-                        "required": ["path", "content"],
-                    },
-                    # 可选。要一同写入 skill 包的附属文件列表（脚本、参考文档等）。每项需提供 `path`（相对路径，如 scripts/hello.py）和 `content`（文件内容）。
-                    "description": "Optional. List of ancillary files (scripts, reference docs, etc.) to write into the skill package. Each item requires 'path' (relative path, e.g. scripts/hello.py) and 'content' (file content).",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                # Skill 名称（简短，kebab-case）。
+                "description": "Skill name (short, kebab-case).",
             },
-            "required": ["name", "content", "category", "tags"],
+            "description": {
+                "type": "string",
+                # 一行描述，说明 skill 的功能。
+                "description": "A one-line description explaining the skill's purpose.",
+            },
+            "content": {
+                "type": "string",
+                # Skill 的 Markdown 正文。
+                "description": "The Markdown body of the skill.",
+            },
+            "category": {
+                "type": "string",
+                # 必填分类（如 'utility'、'knowledge'）。skill 创建于 skills/<category>/<name>/。
+                "description": "Required category (e.g. 'utility', 'knowledge'). The skill is created under skills/<category>/<name>/.",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                # 必填的标签列表（非空数组）。
+                "description": "Required filtering tags (non-empty array).",
+            },
+            "files": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            # 相对于 skill 目录的路径，如 scripts/hello.py
+                            "description": "Path relative to the skill directory, e.g. scripts/hello.py",
+                        },
+                        "content": {
+                            "type": "string",
+                            # 文件内容。
+                            "description": "File content.",
+                        },
+                    },
+                    "required": ["path", "content"],
+                },
+                # 可选。要一同写入 skill 包的附属文件列表（脚本、参考文档等）。每项需提供 `path`（相对路径，如 scripts/hello.py）和 `content`（文件内容）。
+                "description": "Optional. List of ancillary files (scripts, reference docs, etc.) to write into the skill package. Each item requires 'path' (relative path, e.g. scripts/hello.py) and 'content' (file content).",
+            },
         },
+        "required": ["name", "content", "category", "tags"],
     },
-    handler=_handle_learn_skill,
-)
+}
 
-
-registry.register(
-    name="RecallSkill",
-    toolset="core",
-    schema={
-        # 加载 skill 的完整内容，或在无参数时列举全部可用 skill。
-        #
-        # ## 前置条件
-        # 无。
-        #
-        # ## 调用效果
-        # - 无 `name`：列举分支。返回所有已注册 skill 的 {name, description, category, tags, path}，
-        #   其中 path 为 skill 目录的沙箱路径（如 `skills:utility/foo/`），可直接用于 Read / CreateSkill / Delete。
-        # - 有 `name`：加载分支。返回该 skill 的完整内容（SKILL.md 正文、linked_files 等结构化信息），注入对话上下文。
-        #
-        # ## 返回
-        # 列举分支：
-        # ```json
-        # {"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...], "path": "skills:..."}], "total": N}
-        # ```
-        # 加载分支：
-        # ```json
-        # {"name": "...", "description": "...", "category": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
-        # ```
-        #
-        # ## 何时使用
-        # - 先列举确认可用的 skill 及其路径。
-        # - 任务匹配某个 skill 时，传入 name 加载完整知识。
-        # - 对尚未加载过的 skill 应积极加载，尤其是提到相关关键词时。
-        #
-        # ## 副作用/注意
-        # - 加载分支会把 skill 内容注入对话上下文，消耗 token 预算。
-        # - 加载不存在的 skill 返回错误。
-        "description": """Load the full content of a skill, or list all available skills when called without a name.
+_RECALL_SKILL_SCHEMA = {
+    # 加载 skill 的完整内容，或在无参数时列举全部可用 skill。
+    #
+    # ## 前置条件
+    # 无。
+    #
+    # ## 调用效果
+    # - 无 `name`：列举分支。返回所有已注册 skill 的 {name, description, category, tags, path}，
+    #   其中 path 为 skill 目录的沙箱路径（如 `skills:utility/foo/`），可直接用于 Read / CreateSkill / Delete。
+    # - 有 `name`：加载分支。返回该 skill 的完整内容（SKILL.md 正文、linked_files 等结构化信息），注入对话上下文。
+    #
+    # ## 返回
+    # 列举分支：
+    # ```json
+    # {"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...], "path": "skills:..."}], "total": N}
+    # ```
+    # 加载分支：
+    # ```json
+    # {"name": "...", "description": "...", "category": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
+    # ```
+    #
+    # ## 何时使用
+    # - 先列举确认可用的 skill 及其路径。
+    # - 任务匹配某个 skill 时，传入 name 加载完整知识。
+    # - 对尚未加载过的 skill 应积极加载，尤其是提到相关关键词时。
+    #
+    # ## 副作用/注意
+    # - 加载分支会把 skill 内容注入对话上下文，消耗 token 预算。
+    # - 加载不存在的 skill 返回错误。
+    "description": """Load the full content of a skill, or list all available skills when called without a name.
 
 ## Prerequisites
 None.
@@ -334,18 +326,37 @@ Load branch:
 ## Side Effects / Notes
 - The load branch injects skill content into the conversation context, consuming token budget.
 - Loading a non-existent skill returns an error.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # 要加载的 skill 名称（省略则列举全部 skill 及其沙箱路径）。
-                    "description": "The name of the skill to load (omit to list all skills with their sandbox paths).",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                # 要加载的 skill 名称（省略则列举全部 skill 及其沙箱路径）。
+                "description": "The name of the skill to load (omit to list all skills with their sandbox paths).",
             },
         },
     },
-    handler=_handle_recall_skill,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register skill management tools."""
+    del ui_events  # skill tools have no UI event handlers
+    registry.register(
+        name="CreateSkill",
+        toolset="core",
+        schema=_CREATE_SKILL_SCHEMA,
+        handler=_handle_learn_skill,
+    )
+
+    registry.register(
+        name="RecallSkill",
+        toolset="core",
+        schema=_RECALL_SKILL_SCHEMA,
+        handler=_handle_recall_skill,
+    )
+
 
 

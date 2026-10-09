@@ -20,7 +20,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -161,10 +162,13 @@ def _handle_mouse_click(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="MouseClick",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register MouseClick into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="MouseClick",
+        toolset="automation",
+        schema={
         # 模拟鼠标点击，支持屏幕坐标点击和窗口后台点击两种模式。
         # 前置条件：屏幕模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：屏幕模式移动光标到坐标并点击；后台模式通过 PostMessage 发送点击消息。
@@ -247,4 +251,4 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
     },
     handler=_handle_mouse_click,
     check_fn=_check_pyautogui,
-)
+    )

@@ -1,6 +1,6 @@
 """LoadToolset — 按需加载工具集到当前会话。
 
-模块导入时通过 ``registry.register()`` 注册。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
 属于 core 工具集，始终对当前 Loop 可见（availability=EVERY）。
 """
 
@@ -8,11 +8,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
+
+
+def _get_registry():
+    """运行期取得唯一 ToolRegistry System 实例。"""
+    from system.application import Application
+    from abstract.tools.registry import ToolRegistry
+    return Application.current().get_system(ToolRegistry)
 
 
 def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = None) -> dict:
@@ -29,6 +37,7 @@ def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = Non
     if loop is None:
         return tool_error("No loop context available")
 
+    tool_registry = _get_registry()
     results: dict[str, Any] = {}
     loaded: list[str] = []
 
@@ -39,14 +48,14 @@ def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = Non
             continue
 
         # 检查工具集是否已注册
-        ts_entry = registry.get_toolset_entry(name)
-        if ts_entry is None and name not in registry.get_registered_toolset_names():
+        ts_entry = tool_registry.get_toolset_entry(name)
+        if ts_entry is None and name not in tool_registry.get_registered_toolset_names():
             results[name] = {"loaded": False, "code": "unknown_toolset", "error": f"Unknown toolset: {name}"}
             continue
 
         # 加载工具集（幂等）
         newly = loop.load_toolsets([name])
-        tool_names = registry.get_tool_names_for_toolset(name)
+        tool_names = tool_registry.get_tool_names_for_toolset(name)
         results[name] = {
             "loaded": True,
             "tools": tool_names,
@@ -57,7 +66,7 @@ def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = Non
     return tool_result(loaded=loaded, results=results)
 
 
-def _build_load_toolset_description() -> str:
+def _build_load_toolset_description(registry: ToolRegistry) -> str:
     """构建 LoadToolset 的描述，包含当前已注册的工具集名称列表。"""
     base = """Load toolsets into the current session so their tools become available in subsequent LLM requests.
 
@@ -87,7 +96,6 @@ Adds the named toolsets to the session's loaded set. Loading a toolset does not 
 The returned tool names are discovery information for all registered members of each toolset; they are not a guarantee that every listed tool is visible or callable in the current Loop. Full schemas become available in subsequent LLM requests only for tools that pass all current Loop filters. The ``core`` toolset is always loaded and cannot be unloaded."""
 
     # 动态追加当前已注册的工具集名称
-    from abstract.tools.registry import registry
     catalog = registry.get_registered_toolset_names()
     if catalog:
         base += "\n\n## Available Toolsets\n"
@@ -102,24 +110,36 @@ The returned tool names are discovery information for all registered members of 
     return base
 
 
-registry.register(
-    name="LoadToolset",
-    toolset="core",
-    schema={
-        "description": _build_load_toolset_description(),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of toolset names to load. Each name must match a registered toolset.",
-                },
+# ── schema 常量 ─────────────────────────────────────────────
+
+_LOAD_TOOLSET_SCHEMA_BASE = {
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of toolset names to load. Each name must match a registered toolset.",
             },
-            "required": ["names"],
         },
+        "required": ["names"],
     },
-    handler=_handle_load_toolset,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.EVERY,
-)
+}
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the LoadToolset tool with a dynamically built description."""
+    del ui_events  # LoadToolset has no UI event handler
+    registry.register(
+        name="LoadToolset",
+        toolset="core",
+        schema={
+            **_LOAD_TOOLSET_SCHEMA_BASE,
+            "description": _build_load_toolset_description(registry),
+        },
+        handler=_handle_load_toolset,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.EVERY,
+    )

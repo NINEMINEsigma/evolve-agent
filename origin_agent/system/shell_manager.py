@@ -11,9 +11,11 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any
+from functools import wraps
+from typing import Any, Awaitable, Callable, Concatenate, ParamSpec, TypeVar
 
 from entity.constant import (
+    ApplicationState,
     SHELL_DEFAULT_COLS,
     SHELL_DEFAULT_ROWS,
     SHELL_DEFAULT_TYPE,
@@ -26,8 +28,12 @@ from entity.constant import (
     SHELL_SUPPORTED_TYPES,
     SHELL_TEXT_BUFFER_MAX_CHARS,
     SHELL_WAIT_TIMEOUT_SECONDS,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.puretype import ShellInfo, ShellOutputSlice
+from framework import AsyncSystem
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox, SandboxError
 from system.shell_text import ShellTextNormalizer
 from system.subprocess_utils import _kill_proc_tree
@@ -217,16 +223,97 @@ class _ShellSession:
             )
 
 
-class ShellManager:
-    """Application 持有的唯一 Shell会话管理器。"""
+ShellParams = ParamSpec("ShellParams")
+ShellResult = TypeVar("ShellResult")
 
-    _conpty_spawn_lock: threading.Lock = threading.Lock()
 
-    def __init__(self, sandbox: Sandbox) -> None:
-        self._sandbox = sandbox
+def _tracked_operation(
+    method: Callable[Concatenate[ShellManager, ShellParams], Awaitable[ShellResult]],
+) -> Callable[Concatenate[ShellManager, ShellParams], Awaitable[ShellResult]]:
+    """登记整个业务操作，关闭时同时覆盖锁等待和原生调用等待。"""
+    @wraps(method)
+    async def invoke(
+        self: ShellManager, *args: ShellParams.args, **kwargs: ShellParams.kwargs,
+    ) -> ShellResult:
+        task = asyncio.current_task()
+        if task is None:
+            raise LifecycleFailure("Shell operation requires an asyncio task")
+        with self.runtime.admission():
+            with self._registry_lock:
+                if self._admission_closed:
+                    raise ApplicationStoppingError("Shell admission has been closed")
+                self._operations.add(task)
+        try:
+            return await method(self, *args, **kwargs)
+        finally:
+            self._operations.discard(task)
+    return invoke
+
+
+class ShellManager(AsyncSystem):
+    """Application 持有的唯一 Shell会话管理器。
+
+    注册为 framework AsyncSystem，依赖 RuntimeSystem 与 Sandbox；由 Application
+    在 P22 装配后经 ``app.get_system(ShellManager)`` 取得。virtual_awake 只取得
+    Sandbox 依赖，不强制创建 Shell 或导入不可用平台的 PTY。关闭接收后不再允
+    许新建 Shell 会话；应用关闭时停止每个 Shell 仍在 finally 执行 reader 回
+    收和 PTY 释放，失败聚合上抛，不记录假成功。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(dependencies=(RuntimeSystem, Sandbox))
+        self._sandbox: Sandbox | None = None
+        self._runtime: RuntimeSystem | None = None
+        self._conpty_spawn_lock = threading.Lock()
+        self._operations: set[asyncio.Task[Any]] = set()
+        self._native_tasks: set[asyncio.Task[Any]] = set()
+        self._stop_tasks: dict[str, asyncio.Task[None]] = {}
+        self._cleanup_failures: list[BaseException] = []
         self._shells: dict[str, _ShellSession] = {}
         self._session_aliases: dict[str, str] = {}
         self._registry_lock = threading.RLock()
+        self._admission_closed = False
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._sandbox = self.get_system(Sandbox)
+
+    @property
+    def runtime(self) -> RuntimeSystem:
+        if self._runtime is None:
+            raise LifecycleFailure("ShellManager has not been awakened")
+        return self._runtime
+
+    async def _native_call(self, fn: Callable[..., ShellResult], *args: Any) -> ShellResult:
+        task = asyncio.create_task(asyncio.to_thread(fn, *args), name="shell-native-call")
+        self._native_tasks.add(task)
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._native_tasks.discard(task)
+            else:
+                task.add_done_callback(self._native_finished)
+
+    def _native_finished(self, task: asyncio.Task[Any]) -> None:
+        self._native_tasks.discard(task)
+        if task.cancelled():
+            self.runtime.record_failure(LifecycleFailure("Shell native operation was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None and not isinstance(error, (EOFError, ApplicationStoppingError)):
+                self.runtime.record_failure(error)
+
+    @property
+    def sandbox(self) -> Sandbox:
+        if self._sandbox is None:
+            raise LifecycleFailure("ShellManager has not been awakened")
+        return self._sandbox
+
+    def close_admission(self) -> None:
+        """关闭后不再允许新建 Shell 会话；已持有 Shell 仍可自然结束或被停止。"""
+        with self._registry_lock:
+            self._admission_closed = True
 
     @staticmethod
     def is_available() -> bool:
@@ -239,6 +326,7 @@ class ShellManager:
         except Exception:
             return False
 
+    @_tracked_operation
     async def start_shell(
         self,
         owner_session_id: str,
@@ -247,6 +335,9 @@ class ShellManager:
         cwd: str,
         command: str,
     ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
+        with self._registry_lock:
+            if self._admission_closed:
+                raise ShellError("Shell admission has been closed")
         self._validate_owner(owner_session_id, character_name)
         shell_type = shell_type.strip().lower() or SHELL_DEFAULT_TYPE
         if shell_type not in SHELL_SUPPORTED_TYPES:
@@ -261,7 +352,7 @@ class ShellManager:
             )
 
         try:
-            resolved = self._sandbox.resolve_read(cwd)
+            resolved = self.sandbox.resolve_read(cwd)
         except SandboxError as exc:
             raise ShellError(f"cwd resolution failed: {exc}") from exc
         if not resolved.real.is_dir():
@@ -296,26 +387,52 @@ class ShellManager:
                     else:
                         os.environ["PYWINPTY_BACKEND"] = previous_backend
 
-        pty = await asyncio.to_thread(_spawn)
-        state = _ShellSession(
-            shell_id=shell_id,
-            pty=pty,
-            pid=pty.pid,
-            session_id=owner_session_id,
-            character_name=character_name,
-            shell_type=shell_type,
-            cwd=cwd,
-            event_loop=event_loop,
-        )
-        with self._registry_lock:
-            self._shells[shell_id] = state
-        state.reader_thread = threading.Thread(
-            target=self._reader_loop,
-            args=(state,),
-            daemon=True,
-            name=f"shell-reader-{shell_id}",
-        )
-        state.reader_thread.start()
+        abandoned = False
+
+        async def create_state() -> _ShellSession:
+            pty = await asyncio.to_thread(_spawn)
+            state = _ShellSession(
+                shell_id=shell_id,
+                pty=pty,
+                pid=pty.pid,
+                session_id=owner_session_id,
+                character_name=character_name,
+                shell_type=shell_type,
+                cwd=cwd,
+                event_loop=event_loop,
+            )
+            with self._registry_lock:
+                self._shells[shell_id] = state
+                closing = self._admission_closed
+            try:
+                if abandoned or closing or self.runtime.state != ApplicationState.RUNNING:
+                    raise ApplicationStoppingError("Shell created after its operation stopped")
+                state.reader_thread = threading.Thread(
+                    target=self._reader_loop,
+                    args=(state,),
+                    daemon=True,
+                    name=f"shell-reader-{shell_id}",
+                )
+                state.reader_thread.start()
+                return state
+            except BaseException:
+                await self._remove_and_stop(state)
+                raise
+
+        startup = asyncio.create_task(create_state(), name=f"shell-create-{shell_id}")
+        self._native_tasks.add(startup)
+        try:
+            state = await asyncio.shield(startup)
+        except asyncio.CancelledError:
+            abandoned = True
+            if startup.done() and not startup.cancelled() and startup.exception() is None:
+                await self._remove_and_stop(startup.result())
+            raise
+        finally:
+            if startup.done():
+                self._native_tasks.discard(startup)
+            else:
+                startup.add_done_callback(self._native_finished)
 
         try:
             await self._wait_for_startup_quiet(state)
@@ -336,6 +453,7 @@ class ShellManager:
             await self._remove_and_stop(state)
             raise
 
+    @_tracked_operation
     async def read_shell(
         self,
         owner_session_id: str,
@@ -371,6 +489,7 @@ class ShellManager:
                 wait_for_quiet=True,
             )
 
+    @_tracked_operation
     async def write_shell(
         self,
         owner_session_id: str,
@@ -392,6 +511,7 @@ class ShellManager:
                 wait_for_quiet=True,
             )
 
+    @_tracked_operation
     async def interrupt_shell(
         self,
         owner_session_id: str,
@@ -403,7 +523,7 @@ class ShellManager:
             self._require_running(state)
             start_offset = self._total_chars(state)
             try:
-                await asyncio.to_thread(self._send_interrupt_blocking, state)
+                await self._native_call(self._send_interrupt_blocking, state)
             except EOFError as exc:
                 raise ShellError(f"Shell is closed: {state.shell_id}") from exc
             state.touch()
@@ -415,6 +535,7 @@ class ShellManager:
                 wait_for_quiet=True,
             )
 
+    @_tracked_operation
     async def stop_shell(
         self,
         owner_session_id: str,
@@ -436,6 +557,7 @@ class ShellManager:
             key=lambda item: item.started_at,
         )
 
+    @_tracked_operation
     async def stop_shell_for_user(
         self,
         session_id: str,
@@ -491,21 +613,65 @@ class ShellManager:
                 )
         return stopped
 
-    async def shutdown(self) -> int:
+    async def stop_operations(self) -> None:
+        """关闭业务接收，等待实际操作退出后释放所有 PTY。"""
+        self.close_admission()
         with self._registry_lock:
-            states = list(self._shells.values())
+            states = tuple(self._shells.values())
             self._session_aliases.clear()
-        stopped = 0
+        for state in states:
+            state.closing.set()
+            state.signal_output()
+        current = asyncio.current_task()
+        operations = tuple(self._operations)
+        if current in operations:
+            raise LifecycleFailure("Shell shutdown cannot wait for its own operation")
+        for task in operations:
+            task.cancel()
+        failures: list[BaseException] = []
+        if operations:
+            done, pending = await asyncio.wait(operations, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+            for task in done:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None:
+                        failures.append(error)
+            if pending:
+                failure = LifecycleFailure("Shell operations have not finished")
+                self.runtime.record_failure(failure)
+                raise BaseExceptionGroup("Shell shutdown failed", [*failures, failure])
+
+        native_tasks = tuple(self._native_tasks)
+        if native_tasks:
+            done, pending = await asyncio.wait(native_tasks, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+            for task in done:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None and not isinstance(error, (EOFError, ApplicationStoppingError)):
+                        failures.append(error)
+            if pending:
+                failure = LifecycleFailure("Shell native operations have not finished")
+                self.runtime.record_failure(failure)
+                raise BaseExceptionGroup("Shell shutdown failed", [*failures, failure])
+
+        # 包含关闭请求时仍在创建、但现在已经完成登记的 Shell。
+        with self._registry_lock:
+            states = tuple(self._shells.values())
         for state in states:
             try:
                 await self._remove_and_stop(state)
-                stopped += 1
-            except Exception:
-                logger.exception(
-                    "Failed to stop Shell during application shutdown | shell=%s",
-                    state.shell_id,
-                )
-        return stopped
+            except BaseException as exc:
+                failures.append(exc)
+        failures.extend(self._cleanup_failures)
+        if failures:
+            raise BaseExceptionGroup("ShellManager shutdown failed", failures)
+
+    async def virtual_shotdown(self) -> None:
+        """关闭：禁止新 Shell，停止所有操作任务并等待真正退出。
+
+        错误直接上抛；不吞掉清理失败或覆盖为成功。
+        """
+        await self.stop_operations()
 
     def _reader_loop(self, state: _ShellSession) -> None:
         error: str | None = None
@@ -620,7 +786,7 @@ class ShellManager:
     async def _write_line(self, state: _ShellSession, text: str) -> None:
         self._require_running(state)
         try:
-            await asyncio.to_thread(self._write_line_blocking, state, text)
+            await self._native_call(self._write_line_blocking, state, text)
         except EOFError as exc:
             raise ShellError(f"Shell is closed: {state.shell_id}") from exc
         state.touch()
@@ -642,10 +808,33 @@ class ShellManager:
     async def _remove_and_stop(self, state: _ShellSession) -> None:
         state.closing.set()
         state.signal_output()
-        async with state.operation_lock:
-            with self._registry_lock:
-                self._shells.pop(state.shell_id, None)
-            await asyncio.to_thread(self._stop_state_blocking, state)
+        task = self._stop_tasks.get(state.shell_id)
+        if task is None:
+            if state.native_closed.is_set() and state.reader_exited.is_set():
+                return
+
+            async def finish() -> None:
+                try:
+                    async with state.operation_lock:
+                        await self._native_call(self._stop_state_blocking, state)
+                        with self._registry_lock:
+                            self._shells.pop(state.shell_id, None)
+                except BaseException as exc:
+                    self._cleanup_failures.append(exc)
+                    self.runtime.record_failure(exc)
+                    raise
+
+            task = asyncio.create_task(finish(), name=f"shell-stop-{state.shell_id}")
+            self._stop_tasks[state.shell_id] = task
+            task.add_done_callback(self._stop_finished)
+        await asyncio.shield(task)
+
+    def _stop_finished(self, task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
+        for shell_id, current in tuple(self._stop_tasks.items()):
+            if current is task and not task.cancelled() and task.exception() is None:
+                del self._stop_tasks[shell_id]
 
     @staticmethod
     def _stop_state_blocking(state: _ShellSession) -> None:
@@ -658,72 +847,47 @@ class ShellManager:
             bool(state.reader_thread and state.reader_thread.is_alive()),
         )
 
-        # First terminate the child process so a blocked reader can leave read().
+        failures: list[BaseException] = []
         if state.pid is not None:
             try:
                 _kill_proc_tree(state.pid)
-            except Exception:
-                logger.warning(
-                    "Failed to terminate Shell process tree | shell=%s pid=%s",
-                    state.shell_id,
-                    state.pid,
-                    exc_info=True,
-                )
+            except BaseException as exc:
+                failures.append(exc)
 
-        if state.reader_thread is None:
+        reader = state.reader_thread
+        if reader is None or reader.ident is None:
             state.reader_exited.set()
-        reader_stopped = state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS)
-        if not reader_stopped:
-            logger.warning(
-                "Shell reader did not exit before PTY close | shell=%s pid=%s",
-                state.shell_id,
-                state.pid,
-            )
+        if not state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS):
+            failures.append(LifecycleFailure(f"Shell reader did not stop: {state.shell_id}"))
+            raise BaseExceptionGroup("Shell reader cleanup failed", failures)
 
         acquired = state.native_lock.acquire(timeout=SHELL_STOP_WAIT_SECONDS)
-        if acquired:
-            try:
-                if not state.native_closed.is_set():
-                    try:
-                        exit_code = state.pty.exitstatus
-                    except Exception:
-                        exit_code = None
+        if not acquired:
+            failures.append(LifecycleFailure(f"Shell native lock did not become available: {state.shell_id}"))
+            raise BaseExceptionGroup("Shell PTY cleanup failed", failures)
+        try:
+            if not state.native_closed.is_set():
+                try:
+                    exit_code = state.pty.exitstatus
                     with state.lock:
                         if exit_code is not None or state.exit_code is None:
                             state.exit_code = exit_code
-                    try:
-                        state.pty.close(force=True)
-                    except Exception:
-                        logger.warning(
-                            "PtyProcess.close(force=True) failed | shell=%s",
-                            state.shell_id,
-                            exc_info=True,
-                        )
-                    finally:
-                        state.native_closed.set()
-            finally:
-                state.native_lock.release()
-        else:
-            # The reader never owns native_lock while blocked in read(). If a
-            # foreign PTY call nevertheless holds it, do not deadlock cleanup.
-            logger.error(
-                "Timed out waiting for Shell native control lock; using emergency close | shell=%s",
-                state.shell_id,
-            )
-            if not state.native_closed.is_set():
+                except BaseException as exc:
+                    failures.append(exc)
                 try:
                     state.pty.close(force=True)
-                except Exception:
-                    logger.warning(
-                        "Emergency PtyProcess.close(force=True) failed | shell=%s",
-                        state.shell_id,
-                        exc_info=True,
-                    )
-                finally:
                     state.native_closed.set()
+                except BaseException as exc:
+                    failures.append(exc)
+        finally:
+            state.native_lock.release()
 
-        if state.reader_thread is not None and state.reader_thread.is_alive():
-            state.reader_thread.join(timeout=SHELL_STOP_WAIT_SECONDS)
+        if reader is not None and reader.ident is not None:
+            reader.join(timeout=SHELL_STOP_WAIT_SECONDS)
+            if reader.is_alive():
+                failures.append(LifecycleFailure(f"Shell reader thread is still alive: {state.shell_id}"))
+        if failures:
+            raise BaseExceptionGroup("Shell resource cleanup failed", failures)
         state.finish_output()
         with state.lock:
             state.running = False
@@ -789,7 +953,7 @@ class ShellManager:
             "custom_llm_client": "EVOLVE_CUSTOM_LLM_CLIENT",
             "custom_tools": "EVOLVE_CUSTOM_TOOLS",
         }
-        for namespace, path in sorted(self._sandbox.namespace_bases().items()):
+        for namespace, path in sorted(self.sandbox.namespace_bases().items()):
             fixed_env_name = fixed_names.get(namespace)
             if fixed_env_name is not None:
                 env_name = fixed_env_name

@@ -21,7 +21,8 @@ import logging
 import time
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 
 # 复用 mouse_click 的按键→Win32消息映射表
 from component.automation.mouse_click import _BUTTON_MESSAGES
@@ -196,10 +197,13 @@ def _handle_mouse_drag(args: dict[str, Any]) -> dict:
 # 注册
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="MouseDrag",
-    toolset="automation",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register MouseDrag into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="MouseDrag",
+        toolset="automation",
+        schema={
         # 模拟鼠标拖拽，支持屏幕坐标拖拽和窗口后台拖拽两种模式。
         # 前置条件：屏幕模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：从起点 (x1,y1) 按住按键拖拽到终点 (x2,y2)，保持 hold 秒后释放。
@@ -307,4 +311,4 @@ Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × 
     },
     handler=_handle_mouse_drag,
     check_fn=_check_pyautogui,
-)
+    )

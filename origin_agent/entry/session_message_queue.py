@@ -1,33 +1,23 @@
-"""会话级消息队列（SP-4）。
-
-每主会话 loop 持有一个实例：生产永不阻塞、消费双模态、事件驱动无周期计时器。
-
-线程模型：``_pending`` 的一切变更只发生在事件循环线程——``push`` 从任意线程进来，
-经 ``call_soon_threadsafe`` 落到事件循环后才入队；``drain_injected`` 由 finalize 触发，
-天然运行在该 loop 的轮次协程（即事件循环线程）。无需任何锁。
-"""
+"""主会话输入队列：先同步登记投递记录，再通过主loop唤醒消费者。"""
 
 from __future__ import annotations
 
 import asyncio
-import logging
-import time
-from collections import deque
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from entity.constant import SYSTEM_CHARACTER_NAME
+from entity.constant import ApplicationState, SYSTEM_CHARACTER_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import (
-    MainSessionActivityPhase,
-    MainSessionActivitySource,
-    MessageContent,
-    QueuedMessage,
+    InputDelivery, MainSessionActivityPhase, MainSessionActivitySource,
+    MessageContent, QueuedMessage, ShutdownInputReport,
 )
+from entry.input_delivery import InputDeliveryBuffer, ToolInputReservation
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
-
-logger = logging.getLogger(__name__)
 
 
 _QUEUE_ACTIVITY_SOURCES: dict[str, MainSessionActivitySource] = {
@@ -39,240 +29,251 @@ _QUEUE_ACTIVITY_SOURCES: dict[str, MainSessionActivitySource] = {
 
 
 def activity_source_for_items(items: list[QueuedMessage]) -> MainSessionActivitySource:
-    """把一个 drained 批次的队列来源归一化为单一活动来源。"""
-    sources = {
-        _QUEUE_ACTIVITY_SOURCES.get(item.source, MainSessionActivitySource.other)
-        for item in items
-    }
+    sources = {_QUEUE_ACTIVITY_SOURCES.get(item.source, MainSessionActivitySource.other) for item in items}
     if not sources:
         return MainSessionActivitySource.other
-    if len(sources) > 1:
-        return MainSessionActivitySource.mixed
-    return next(iter(sources))
+    return next(iter(sources)) if len(sources) == 1 else MainSessionActivitySource.mixed
 
 
 class SessionMessageQueue:
-    """会话级消息队列——生产永不阻塞、消费双模态、独立异步类、会话级持有。
+    """InputDeliveryBuffer是唯一输入记录表；本类只持有消费任务与唤醒事件。"""
 
-    由 ParentAgentLoop / MultiAgentLoop（及继承的 ColloquyLoop）在 ``__init__`` 构造。
-    生命周期随 loop：gateway 在 terminate/replace 时调用 ``stop()``；旋转复用 loop 不停止。
-    """
-
-    def __init__(self, loop: "IMainSessionLoop") -> None:
-        self._loop: IMainSessionLoop = loop
-        self._pending: deque[QueuedMessage] = deque()
-        self._wakeup: asyncio.Event | None = None
-        # 队列永远在事件循环线程内被构造（loop __init__ → SessionManager.create_session → async gateway），
-        # 构造时直接捕获事件循环，push 从任意线程经此引用 call_soon_threadsafe 入队。
-        self._event_loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        self._consumer_task: asyncio.Task | None = None
-        self._stopped: bool = False
-        # SP-4 D9：旋转检测——拿锁后比对当前 session_id，变更即知刚旋转
-        self.last_known_sid: str = loop.loop.session_id
-
-    # -- 生产 API --------------------------------------------------------
-
-    def push(
-        self,
-        content: MessageContent,
-        *,
-        character_name: str = "",
-        source: str = "",
-        timestamp: str = "",
-        client_message_id: str | None = None,
-        visible_characters: list[str] | None = None,
-        response_characters: list[str] | None = None,
-        llm_profile_name: str | None = None,
-    ) -> None:
-        """非阻塞投递一条消息。
-
-        线程安全：从任意线程调用，经 ``call_soon_threadsafe`` 落到事件循环入队。
-        ``llm_profile_name`` 保留每条消息自己的选择；None 仅供内部消息沿用当前配置。
-        push 不回显，回显由消息真正开始处理时完成。
-        """
-        if not character_name:
-            character_name = SYSTEM_CHARACTER_NAME
-        if not timestamp:
-            timestamp = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        item = QueuedMessage(
-            content=content,
-            character_name=character_name,
-            source=source,
-            timestamp=timestamp,
-            visible_characters=visible_characters,
-            response_characters=response_characters,
-            llm_profile_name=llm_profile_name,
-            client_message_id=client_message_id,
-        )
-
-        self._event_loop.call_soon_threadsafe(self._enqueue_on_loop, item)
-
-    def _enqueue_on_loop(
-        self,
-        item: QueuedMessage,
-    ) -> None:
-        """事件循环线程内的入队 + 唤醒（无回显——回显移到消费侧）。"""
-        self._pending.append(item)
-        source = _QUEUE_ACTIVITY_SOURCES.get(
-            item.source,
-            MainSessionActivitySource.other,
-        )
-        current = self._loop.loop.get_main_session_activity()
-        if current is None or current.phase == MainSessionActivityPhase.queued:
-            self._loop.loop.ensure_main_session_activity(source)
-        self._ensure_consumer()
-        if self._wakeup is not None:
-            self._wakeup.set()
-
-    def _ensure_consumer(self) -> None:
-        """懒启动 consumer task（仅事件循环线程调用）。"""
-        if self._consumer_task is not None or self._stopped:
-            return
+    def __init__(self, loop: IMainSessionLoop) -> None:
+        self._loop = loop
+        self._runtime = loop.loop.app.get_system(RuntimeSystem)
+        self._event_loop = self._runtime.loop
+        self._input_buffer = InputDeliveryBuffer[QueuedMessage](self._runtime)
         self._wakeup = asyncio.Event()
-        self._consumer_task = asyncio.create_task(
-            self._consume_loop(),
-            name=f"session-message-queue-{self._loop.loop.session_id[:8]}",
-        )
-        self._consumer_task.add_done_callback(self._on_consumer_done)
+        self._consumer_task: asyncio.Task[None] | None = None
+        self._round_tasks: set[asyncio.Task[Any]] = set()
+        self._tool_reservations: list[ToolInputReservation] = []
+        self._stop_task: asyncio.Task[None] | None = None
+        self._failures: list[BaseException] = []
+        self._handoff_pending = False
+        self._handoff_ready = asyncio.Event()
+        self._handoff_ready.set()
+        self.last_known_sid = loop.loop.session_id
 
-    # -- 消费循环（模态 B：空闲消费）----------------------------------------
-
-    async def _run_round_task(self, items: list[QueuedMessage]) -> None:
-        """在独立 task 中执行单次回复，取消该轮时保留长期 consumer。"""
-        consumer = asyncio.current_task()
-        round_task = asyncio.create_task(
-            self._loop.run_pending_round(items),
-            name=f"session-message-round-{self._loop.loop.session_id[:8]}",
+    def push(self, content: MessageContent, *, character_name: str = "", source: str = "",
+             timestamp: str = "", client_message_id: str | None = None,
+             visible_characters: list[str] | None = None,
+             response_characters: list[str] | None = None,
+             llm_profile_name: str | None = None, ready: bool = True) -> int:
+        item = QueuedMessage(
+            content=content, character_name=character_name or SYSTEM_CHARACTER_NAME, source=source,
+            timestamp=timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            client_message_id=client_message_id, visible_characters=visible_characters,
+            response_characters=response_characters, llm_profile_name=llm_profile_name,
         )
+        return self.accept(item, ready=ready)
+
+    def accept(self, item: QueuedMessage, *, ready: bool = True) -> int:
+        sequence = self._input_buffer.accept(item, ready=ready)
         try:
-            await round_task
-        except asyncio.CancelledError:
-            # consumer 自身被 stop()/应用关闭取消时，取消必须继续向上传播。
-            if consumer is not None and consumer.cancelling():
-                if not round_task.done():
-                    round_task.cancel()
-                try:
-                    await round_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                raise
-            # 只有 child 自身被主会话中断取消时，consumer 才继续 FIFO。
-            if not round_task.cancelled():
-                raise
-            logger.info(
-                "Session round cancelled; message consumer remains active | session=%s",
-                self._loop.loop.session_id,
-            )
+            self._event_loop.call_soon_threadsafe(self._wake_on_loop)
+        except BaseException as error:
+            # 已登记记录不能丢；唤醒失败进入失败关闭，由记录承担必要保存。
+            self._runtime.record_failure(error)
+            raise
+        return sequence
 
-    async def _consume_loop(self) -> None:
-        """空闲消费循环：单唤醒源（仅 push）+ 独立单次回复 task。"""
-        while not self._stopped:
-            self._wakeup.clear()
-            while not self._stopped and self._pending:
-                items: list[QueuedMessage] = []
-                while self._pending:
-                    items.append(self._pending.popleft())
-                await self._run_round_task(items)
-            await self._wakeup.wait()
+    def mark_ready(self, sequence: int) -> None:
+        self._input_buffer.mark_ready(sequence)
+        self._event_loop.call_soon_threadsafe(self._wake_on_loop)
 
-    def _on_consumer_done(self, task: asyncio.Task) -> None:
-        """观测 consumer 结束，并在竞态残留消息存在时重建 consumer。"""
-        exc: BaseException | None = None
-        if not task.cancelled():
-            exc = task.exception()
-            if exc is not None:
-                logger.error(
-                    "SessionMessageQueue consumer died | session=%s",
-                    self._loop.loop.session_id,
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
+    def _wake_on_loop(self) -> None:
+        if self._handoff_pending or self._input_buffer.frozen or self._runtime.state is not ApplicationState.RUNNING:
+            return
+        records = self._input_buffer.uncommitted()
+        if records:
+            activity = self._loop.loop.get_main_session_activity()
+            if activity is None or activity.phase is MainSessionActivityPhase.queued:
+                self._loop.loop.ensure_main_session_activity(activity_source_for_items([records[0].payload]))
+        if self._consumer_task is None:
+            self._consumer_task = asyncio.create_task(self._consume_loop(), name=f"input-consumer-{self.last_known_sid}")
+            self._consumer_task.add_done_callback(self._consumer_done)
+        self._wakeup.set()
 
+    def _record_failure(self, error: BaseException) -> None:
+        if not any(existing is error for existing in self._failures):
+            self._failures.append(error)
+        self._runtime.record_failure(error)
+
+    def _consumer_done(self, task: asyncio.Task[None]) -> None:
         if self._consumer_task is task:
             self._consumer_task = None
+        if task.cancelled():
+            if not self._input_buffer.frozen:
+                self._record_failure(LifecycleFailure("Input consumer cancelled without a stop request"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self._record_failure(error)
 
-        # 只处理失败批次 drain 后新入队的消息，不回填或重放已 drain 批次。
-        if not self._stopped and self._pending and self._consumer_task is None:
-            self._ensure_consumer()
-            if self._wakeup is not None:
-                self._wakeup.set()
+    def _round_done(self, task: asyncio.Task[Any], reservation_id: str) -> None:
+        self._round_tasks.discard(task)
+        self._input_buffer.release_reservation(reservation_id)
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None and not (
+                isinstance(error, ApplicationStoppingError)
+                and (self._input_buffer.frozen or self._runtime.state is not ApplicationState.RUNNING)
+            ):
+                self._record_failure(error)
 
-    # -- 模态 A：链中注入（由 finalize_tool_result 的 field_injector 调用）----
+    async def _consume_loop(self) -> None:
+        while not self._input_buffer.frozen and self._runtime.state is ApplicationState.RUNNING:
+            self._wakeup.clear()
+            reservation_id = uuid.uuid4().hex
+            items = self._input_buffer.reserve_pending(reservation_id=reservation_id)
+            if not items:
+                await self._wakeup.wait()
+                continue
+            task = asyncio.create_task(self._loop.run_pending_round(items), name=f"input-round-{self.last_known_sid}")
+            self._round_tasks.add(task)
+            task.add_done_callback(lambda done, key=reservation_id: self._round_done(done, key))
+            try:
+                await asyncio.shield(task)
+            except ApplicationStoppingError:
+                if not self._input_buffer.frozen and self._runtime.state is ApplicationState.RUNNING:
+                    raise
+                return
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    if not task.done() and not task.cancelling():
+                        task.cancel()
+                    raise
+                # 用户仅中断子轮次，消费者保留；输入仍由记录表负责。
+                if not task.cancelled():
+                    raise
+            finally:
+                if task.done():
+                    self._input_buffer.release_reservation(reservation_id)
 
-    def drain_injected(self, result: dict) -> dict | None:
-        """排空队列并注入内部 ``_queued_messages`` 字段（SP-5 bugfix 修订）。
+    def require_reply_admission(self) -> None:
+        if self._input_buffer.frozen:
+            raise ApplicationStoppingError("Session replies have been closed")
 
-        PM5 结构性不丢消息：先只读快照 + 构造产物（可抛——P1 上抛给 finalize
-        既有 try/except willing catcher），构造成功后才从 deque 移除；构造异常时
-        deque 未动，消息滞留队列等下轮消费。
+    def hold_for_handoff(self) -> None:
+        if self._consumer_task is not None:
+            raise LifecycleFailure("A replacement queue must be held before consumption starts")
+        self._handoff_pending = True
+        self._handoff_ready.clear()
 
-        SP-5 bugfix：从 _blocks 就地展开改为内部 _queued_messages 结构化字段——
-        工具结果 content 保持为合法 JSON dict；该字段由前端单独渲染，不进入普通 JSON 正文。
-        """
-        if not self._pending:
-            return None
-        items = list(self._pending)                  # 只读快照
-        messages = self._build_queued_messages(items)  # 构造可抛——deque 未动
-        for _ in range(len(items)):
-            self._pending.popleft()                  # 构造成功后移除（事件循环单线程，快照即队首）
-        existing = result.get("_queued_messages")
-        merged: list = list(existing) if isinstance(existing, list) else []
-        merged.extend(messages)
-        # 提取被消费消息的 client_message_id 列表（供 tool_result 事件透传给前端移除已排队徽章）
-        consumed_ids = [m.client_message_id for m in items if m.client_message_id]
-        return {"_queued_messages": merged, "consumed_client_message_ids": consumed_ids}
+    async def wait_handoff(self) -> None:
+        await self._handoff_ready.wait()
 
-    def _build_queued_messages(self, items: list[QueuedMessage]) -> list[dict]:
-        """构造 ``_queued_messages`` 字段值：每条消息为结构化 dict。"""
-        messages: list[dict] = []
-        for m in items:
-            content: Any = m.content
-            # content 为块列表时保持原始 dict 形式（不扁平化）
-            if isinstance(m.content, list):
-                content = [b for b in m.content if isinstance(b, dict)]
-            messages.append({
-                "role": "user",
-                "character_name": m.character_name,
-                "source": m.source,
-                "timestamp": m.timestamp,
-                "content": content,
-            })
-        return messages
+    async def transfer_after_round(self, target: SessionMessageQueue) -> None:
+        self.freeze()
+        tasks: set[asyncio.Task[Any]] = set(self._round_tasks)
+        if self._consumer_task is not None:
+            tasks.add(self._consumer_task)
+        if tasks:
+            await asyncio.wait(tasks)
+            for task in tasks:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None and not isinstance(error, ApplicationStoppingError):
+                        raise error
+        if self._failures:
+            raise BaseExceptionGroup("Cannot hand off a failed input queue", list(self._failures))
+        self._input_buffer.transfer_to(target._input_buffer)
+        target._handoff_pending = False
+        target._handoff_ready.set()
+        target._wake_on_loop()
 
-    # -- 生命周期 ---------------------------------------------------------
+    def abort_tool_reservations(self) -> None:
+        for reservation in self._tool_reservations:
+            reservation.abort()
+        self._tool_reservations.clear()
+
+    def new_tool_reservation(self) -> ToolInputReservation:
+        reservation = ToolInputReservation(self._input_buffer, uuid.uuid4().hex)
+        self._tool_reservations.append(reservation)
+        return reservation
+
+    def mark_appended(self, delivery: InputDelivery[QueuedMessage], index: int) -> None:
+        self._input_buffer.mark_appended(delivery.sequence, index)
+
+    def mark_persisted(self, items: list[InputDelivery[QueuedMessage]]) -> None:
+        self._input_buffer.mark_persisted([item.sequence for item in items])
+
+    def freeze(self) -> None:
+        self._input_buffer.freeze()
+        self._event_loop.call_soon_threadsafe(self._wakeup.set)
+
+    def freeze_inputs(self) -> None:
+        self.freeze()
+
+    def accept_shutdown_transfer(self, sequence: int, item: QueuedMessage) -> None:
+        if asyncio.get_running_loop() is not self._event_loop:
+            raise LifecycleFailure("Shutdown transfer requires the owning event loop")
+        self._input_buffer.accept_shutdown_transfer(sequence, item)
+
+    def pending_deliveries(self) -> list[InputDelivery[QueuedMessage]]:
+        return self._input_buffer.uncommitted()
+
+    def shutdown_report(self) -> ShutdownInputReport:
+        return self._input_buffer.shutdown_report()
+
+    def reserve_shutdown(self) -> list[InputDelivery[QueuedMessage]]:
+        if self._round_tasks or (self._consumer_task is not None and not self._consumer_task.done()):
+            raise LifecycleFailure("Cannot collect shutdown inputs while consumer or rounds are active")
+        return self._input_buffer.reserve_shutdown(reservation_id=uuid.uuid4().hex)
+
+    def release_shutdown(self, items: list[InputDelivery[QueuedMessage]]) -> None:
+        for item in items:
+            if item.reservation_id is not None:
+                self._input_buffer.release_reservation(item.reservation_id)
+
+    @property
+    def active_round_tasks(self) -> tuple[asyncio.Task[Any], ...]:
+        return tuple(self._round_tasks)
+
+    async def _stop_processing(self) -> None:
+        tasks: set[asyncio.Task[Any]] = set(self._round_tasks)
+        if self._consumer_task is not None:
+            tasks.add(self._consumer_task)
+        for task in tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+            for task in done:
+                if not task.cancelled():
+                    error = task.exception()
+                    if error is not None and not isinstance(error, ApplicationStoppingError):
+                        self._record_failure(error)
+            if pending:
+                self._record_failure(LifecycleFailure("Session input tasks did not finish shutdown"))
+        if self._failures:
+            raise BaseExceptionGroup("Session input shutdown failed", list(self._failures))
+
+    async def stop_processing(self) -> None:
+        self.freeze()
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._stop_processing(), name=f"input-stop-{self.last_known_sid}")
+            self._stop_task.add_done_callback(self._observe_stop)
+        await asyncio.shield(self._stop_task)
+
+    def _observe_stop(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            self._record_failure(LifecycleFailure("Input shutdown coordination was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self._runtime.record_failure(error)
 
     def stop(self) -> None:
-        """停止队列消费者（可跨线程调用）。
+        """删除/终结入口只请求停止；实际等待由会话所有者负责。"""
+        self.freeze()
+        self._event_loop.call_soon_threadsafe(self._cancel_consumer)
 
-        gateway 在 loop 消亡时调用；旋转复用 loop 不调用。残留消息计数后丢弃。
-        """
-        self._stopped = True
-        if self._pending:
-            logger.warning(
-                "Discarding %d queued messages on stop | session=%s",
-                len(self._pending),
-                self._loop.loop.session_id,
-            )
-        if not self._event_loop.is_closed():
-            if self._wakeup is not None:
-                self._event_loop.call_soon_threadsafe(self._wakeup.set)
-            if self._consumer_task is not None:
-                self._event_loop.call_soon_threadsafe(self._consumer_task.cancel)
+    def _cancel_consumer(self) -> None:
+        if self._consumer_task is not None and not self._consumer_task.done() and not self._consumer_task.cancelling():
+            self._consumer_task.cancel()
 
     def mark_stopped(self) -> None:
-        """标记队列停止但不取消正在运行的 consumer task。
-
-        用于 replace_loop 场景：旧 loop 的 consumer task 正在执行工具调用
-        （如 enter_multi_agent / exit_multi_agent），立即 cancel 会导致
-        CancelledError 穿透。标记 _stopped 后，consumer 在当前 run_pending_round
-        自然完成后退出 _consume_loop 循环。
-        """
-        self._stopped = True
-        if self._pending:
-            logger.warning(
-                "Discarding %d queued messages on mark_stopped | session=%s",
-                len(self._pending),
-                self._loop.loop.session_id,
-            )
-        if not self._event_loop.is_closed():
-            if self._wakeup is not None:
-                self._event_loop.call_soon_threadsafe(self._wakeup.set)
+        """替换Loop不取消正在执行切换工具的回复，记录交接由SessionManager负责。"""
+        self.freeze()

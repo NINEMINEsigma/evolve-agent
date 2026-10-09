@@ -1,6 +1,6 @@
 """前端验证工具 — 验证进化的前端代码能否构建。
 
-模块导入时通过 ``registry.register()`` 注册。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
 在目标前端目录（默认 fast 模式下为 ``fork:frontend``）中
 运行 ``<pkg_mgr> install`` 和 ``<pkg_mgr> run build``，
 以在进化交换前捕获 TypeScript 或构建错误。
@@ -12,7 +12,8 @@ import logging
 import subprocess  # nosec
 from typing import Any, Dict
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from entity.puretype import ToolAvailability
 from system.pkgmgr import detect_package_manager
@@ -20,12 +21,11 @@ from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
 
-# 从 filesystem 模块导入 sandbox 引用。
-from .filesystem import _s as _get_sandbox
-
 
 def _s():
-    return _get_sandbox()
+    from system.application import Application
+    from system.sandbox import Sandbox
+    return Application.current().get_system(Sandbox)
 
 
 # ---------------------------------------------------------------------------
@@ -169,22 +169,19 @@ def _tail(text: str | None, n: int = 8) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="ValidateFrontend",
-    toolset="frontend",
-    schema={
-        # 验证前端代码能否构建。在 fork:frontend 目录下运行 <pkg_mgr> install && <pkg_mgr> run build（包管理器优先 pnpm，回退 npm）。
-        # 前置条件：已通过 Write/PatchEdit 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
-        # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
-        # 调用效果：在目标目录中执行 install 和 run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
-        # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
-        # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, _note? } 或 { valid: false, stage: ..., error }
-        # 典型场景：修改前端文件后、evolve_code 前调用，捕获 validate_code 无法检测的 TypeScript/构建错误。
-        # 注意：运行时间较长（超时时间 SUBPROCESS_TIMEOUT_DEFAULT），非前端修改无需调用。
-        "description": """Validate frontend code by running `<pkg_mgr> install && <pkg_mgr> run build` (pnpm preferred, npm fallback) in the target frontend directory.
+_VALIDATE_FRONTEND_SCHEMA = {
+    # 验证前端代码能否构建。在 fork:frontend 目录下运行 <pkg_mgr> install && <pkg_mgr> run build（包管理器优先 pnpm，回退 npm）。
+    # 前置条件：已通过 Write/PatchEdit 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
+    # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
+    # 调用效果：在目标目录中执行 install 和 run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
+    # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
+    # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, _note? } 或 { valid: false, stage: ..., error }
+    # 典型场景：修改前端文件后、evolve_code 前调用，捕获 validate_code 无法检测的 TypeScript/构建错误。
+    # 注意：运行时间较长（超时时间 SUBPROCESS_TIMEOUT_DEFAULT），非前端修改无需调用。
+    "description": """Validate frontend code by running `<pkg_mgr> install && <pkg_mgr> run build` (pnpm preferred, npm fallback) in the target frontend directory.
 
 ## Prerequisites
 - Frontend files (`.tsx`, `.ts`, `.css`) have been modified via `Write` or `PatchEdit` with `fork:` prefix.
@@ -219,17 +216,30 @@ Evolution workflow — call after modifying frontend files and before `EvolveCod
 
 ## Side Effects
 Creates `node_modules/` and `dist/` in the target directory. Long-running (up to timeout); only call when frontend changes were actually made.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 前端目录的逻辑路径。默认 'fork:frontend'（进化目标）。可为裸名或命名空间路径。
-                    "description": """Logical path of the frontend directory. Defaults to 'fork:frontend' (evolution target). Can be a bare name or namespaced path.""",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                # 前端目录的逻辑路径。默认 'fork:frontend'（进化目标）。可为裸名或命名空间路径。
+                "description": """Logical path of the frontend directory. Defaults to 'fork:frontend' (evolution target). Can be a bare name or namespaced path.""",
             },
         },
     },
-    handler=_handle_validate_frontend,
-    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-)
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the ValidateFrontend tool."""
+    del ui_events  # ValidateFrontend has no UI event handler
+    registry.register(
+        name="ValidateFrontend",
+        toolset="frontend",
+        schema=_VALIDATE_FRONTEND_SCHEMA,
+        handler=_handle_validate_frontend,
+        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    )

@@ -1,7 +1,7 @@
 """启动一次性临时Agent。
 
-模块导入时通过 ``registry.register()`` 注册 ``RunTaskAgent`` 工具。
-父主会话通过此工具以单个 prompt 启动异步临时Agent，结果通过
+注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
+显式调用。父主会话通过此工具以单个 prompt 启动异步临时Agent，结果通过
 ``[subagent-result]`` 消息推送。
 """
 
@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 if TYPE_CHECKING:
@@ -37,12 +38,14 @@ async def _handle_run_taskagent(
 
     try:
         from system.application import Application
+        from system.llm_profile_store import LLMProfileStore
 
         app = Application.current()
-        profile_snapshot = app.llm_profile_store.snapshot_profile(
+        profile_snapshot = app.get_system(LLMProfileStore).snapshot_profile(
             context.llm_profile
         )
-        orch = app.subagent_orchestrator
+        from subagent.orchestrator import SubAgentOrchestrator
+        orch = app.get_system(SubAgentOrchestrator)
         result = await orch.launch_taskagent(
             parent_session_id=parent_session_id,
             prompt=prompt,
@@ -53,17 +56,20 @@ async def _handle_run_taskagent(
         return tool_error(f"Failed to launch taskagent: {exc}")
 
 
-registry.register(
-    name="RunTaskAgent",
-    toolset="multiagent",
-    schema={
-        # 启动一个一次性临时Agent。
-        # 临时Agent继承调用发生时父主会话的活动 LLM Profile快照，只携带一次任务消息。
-        # 它只能调用已加载工具集中同时标记为 TASKAGENT 且危险等级为 safe 的工具。
-        # 符合相同权限约束的 LoadToolset 可加载更多工具集，但不会扩大授权范围。
-        # 结果通过 [subagent-result] 消息异步推送；不要轮询或尝试与临时Agent交互。
-        # 如需提前终止，使用 StopTaskAgent 并传入返回的 session_id。
-        "description": """Launch a one-shot task agent with a single prompt.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register run taskagent tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="RunTaskAgent",
+        toolset="multiagent",
+        schema={
+            # 启动一个一次性临时Agent。
+            # 临时Agent继承调用发生时父主会话的活动 LLM Profile快照，只携带一次任务消息。
+            # 它只能调用已加载工具集中同时标记为 TASKAGENT 且危险等级为 safe 的工具。
+            # 符合相同权限约束的 LoadToolset 可加载更多工具集，但不会扩大授权范围。
+            # 结果通过 [subagent-result] 消息异步推送；不要轮询或尝试与临时Agent交互。
+            # 如需提前终止，使用 StopTaskAgent 并传入返回的 session_id。
+            "description": """Launch a one-shot task agent with a single prompt.
 
 The task agent runs asynchronously and inherits a snapshot of the parent main session's active LLM Profile at call time. The caller cannot select a separate model or sampling temperature.
 
@@ -92,20 +98,20 @@ On failure:
 - Put all required context in `prompt`; this is the task agent's only task message.
 - Loading a toolset does not authorize tools outside the TASKAGENT-and-safe intersection.
 - The task agent does not save history and cannot be resumed.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    # 发送给临时Agent的唯一任务消息，必须包含全部必要上下文。
-                    "description": "The complete task description and context. This is the only task message sent to the task agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        # 发送给临时Agent的唯一任务消息，必须包含全部必要上下文。
+                        "description": "The complete task description and context. This is the only task message sent to the task agent.",
+                    },
                 },
+                "required": ["prompt"],
             },
-            "required": ["prompt"],
         },
-    },
-    handler=_handle_run_taskagent,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN,
-)
+        handler=_handle_run_taskagent,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN,
+    )

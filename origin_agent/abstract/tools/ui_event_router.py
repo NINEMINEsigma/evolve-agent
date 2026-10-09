@@ -1,50 +1,55 @@
-"""UI 事件路由器 — 工具模块在此注册自己的前端推送 handler。
-
-工具文件通过模块级调用 ``ui_event_router.register(name, handler)``
-注册工具名到 emit handler 的映射。``finalize_tool_result()`` 执行完
-工具后统一调用 ``ui_event_router.emit_for(...)``，无需感知具体工具名称
-
-或推送方式。
-
-handler 签名::
-
-    async def handler(result: Any, sink: AgentSink, session_id: str, tool_name: str) -> None
-"""
+"""工具结果的 UI 事件路由；映射与在途发送由唯一 AsyncSystem 持有。"""
 
 from __future__ import annotations
 
-import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable
+
+from framework import AsyncSystem
+
+from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner
+from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
 
-logger = logging.getLogger(__name__)
 
-
-class UIEventRouter:
-    """工具名到 emit handler 的映射路由器。
-
-    工具模块在注册工具时同步调用 ``register(tool_name, handler)``
-    声明该工具的推送逻辑；执行层调用 ``emit_for()`` 完成分发。
-    """
+class UIEventRouter(AsyncSystem):
+    """工具显式注册事件 handler；关闭刷新结束前保留结果发送能力。"""
 
     def __init__(self) -> None:
-        # tool_name → async handler(result, sink, session_id, tool_name)
+        super().__init__(dependencies=(RuntimeSystem,))
         self._handlers: dict[str, Callable] = {}
+        self._task_owner: TaskOwner | None = None
+        self._closed = False
+
+    async def virtual_awake(self) -> None:
+        runtime = self.get_system(RuntimeSystem)
+        self._task_owner = TaskOwner("tool-ui-events", runtime.record_failure)
+
+    @property
+    def task_owner(self) -> TaskOwner:
+        if self._task_owner is None:
+            raise LifecycleFailure("UIEventRouter has not been awakened")
+        return self._task_owner
 
     def register(self, tool_name: str, handler: Callable) -> None:
-        """注册工具的前端推送 handler。
-
-        Args:
-            tool_name: 工具注册名（与 ``registry.register(name=...)`` 一致）。
-            handler: 异步可调用对象，签名 ``(result, sink, session_id, tool_name) -> None``。
-        """
+        """保存显式注册协议传入的 handler，不在导入期取得全局实例。"""
+        if self._closed:
+            raise ApplicationStoppingError("UI event registration has closed")
         self._handlers[tool_name] = handler
 
     def get_handler(self, tool_name: str) -> Callable | None:
-        """返回工具注册的 emit handler，未注册返回 None。"""
         return self._handlers.get(tool_name)
+
+    @contextmanager
+    def _admit_emit(self) -> Iterator[None]:
+        # 既有结果在 STOPPING 仍须回显；最终注销才封闭本路由。
+        if self._closed:
+            raise ApplicationStoppingError("UI event output has closed")
+        yield
 
     async def emit_for(
         self,
@@ -53,28 +58,17 @@ class UIEventRouter:
         sink: AgentSink,
         session_id: str,
     ) -> None:
-        """若工具已注册推送 handler，调用之。
-
-        UI 推送失败是前端副作用，不应中断主工具执行流程；
-        但必须记录异常，便于排查前端状态不一致问题。
-
-        Args:
-            tool_name: 刚执行的工具名。
-            result: 工具 handler 返回的结果 dict。
-            sink: 当前 loop 的 AgentSink 实例。
-            session_id: 目标会话 ID。
-        """
-        handler = self._handlers.get(tool_name)
+        handler = self.get_handler(tool_name)
         if handler is None:
             return
+        await self.task_owner.run_request(
+            lambda: handler(result, sink, session_id, tool_name),
+            name=f"tool-ui-{tool_name}",
+            admission=self._admit_emit,
+        )
+        # 断线由 FrontendSink 的网络边界处理；内部错误不伪装成成功发送。
 
-        try:
-            await handler(result, sink, session_id, tool_name)
-        except Exception:
-            logger.exception(
-                "UIEventRouter: emit handler failed for tool=%s", tool_name,
-            )
-
-
-# 模块级单例
-ui_event_router: UIEventRouter = UIEventRouter()
+    async def virtual_shotdown(self) -> None:
+        self._closed = True
+        await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+        self._handlers.clear()

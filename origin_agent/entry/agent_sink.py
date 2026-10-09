@@ -12,8 +12,16 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from contextlib import contextmanager
+from collections.abc import Iterator
 from typing import * # type: ignore
-from entity.constant import SYSTEM_CHARACTER_NAME
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+from entity.constant import (
+    ApplicationState,
+    SHUTDOWN_SEND_TIMEOUT_SECONDS,
+    SYSTEM_QUIESCE_TIMEOUT_SECONDS,
+    SYSTEM_CHARACTER_NAME,
+)
 from entity.puretype import (
     ApprovalResult,
     Message,
@@ -26,6 +34,9 @@ from entity.puretype import (
     ToolCallDelta,
     ToolCallRequest,
 )
+from framework import AsyncSystem
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner
+from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -153,14 +164,17 @@ class AgentSink(ABC):
         ...
 
 
-class FrontendSink(AgentSink):
+class FrontendSink(AsyncSystem, AgentSink):
     """主 Agent 的交互抽象 — 通过 WebSocket 与前端用户通信。
 
-    持有 _pending_confirms 和 _pending_asks Future 映射，
-    等待前端通过 HTTP 或 WebSocket 返回结果。
+    继承 AsyncSystem 以纳入 framework 生命周期；依赖 RuntimeSystem。
+    发送与交互属有调用方等待的请求级操作，经 TaskOwner.run_request 登记：
+    新交互（审批/提问）只在 RUNNING 接收；既有结果与 History 回显在
+    STOPPING 仍允许到关闭输出，发送期限不超过 SHUTDOWN_SEND_TIMEOUT_SECONDS。
     """
 
     def __init__(self) -> None:
+        AsyncSystem.__init__(self, dependencies=(RuntimeSystem,))
         # session_id → WsConnectionEntry
         self._ws_sinks: dict[str, WsConnectionEntry] = {}
         # {request_id: Future[ApprovalResult]}
@@ -171,14 +185,86 @@ class FrontendSink(AgentSink):
         self._pending_asks: dict[str, asyncio.Future] = {}
         # {request_id: session_id}
         self._ask_session_map: dict[str, str] = {}
+        self._runtime: RuntimeSystem
+        self._requests: TaskOwner
+        self._send_closed: bool = False
+        self._interaction_closed: bool = False
+        self._close_task: asyncio.Task[None] | None = None
+        self._send_deadlines: set[asyncio.Timeout] = set()
+
+    async def virtual_awake(self) -> None:
+        self._runtime = self.get_system(RuntimeSystem)
+        self._requests = TaskOwner("FrontendSink", self._runtime.record_failure)
+
+    # -- 接收边界 --
+
+    def close_admission(self) -> None:
+        """封闭新交互，并缩短在途发送期限；保留必要结果与History回显。"""
+        self._interaction_closed = True
+        deadline = asyncio.get_running_loop().time() + SHUTDOWN_SEND_TIMEOUT_SECONDS
+        for scope in tuple(self._send_deadlines):
+            if not scope.expired():
+                current = scope.when()
+                if current is None or current > deadline:
+                    scope.reschedule(deadline)
+
+    @contextmanager
+    def _admit_interaction(self) -> Iterator[None]:
+        with self._runtime.admission():
+            if self._interaction_closed:
+                raise ApplicationStoppingError("Frontend interaction admission is closed")
+            yield
+
+    @contextmanager
+    def _admit_send(self) -> Iterator[None]:
+        if self._send_closed:
+            raise ApplicationStoppingError("Frontend output is closed")
+        if self._runtime.state not in (ApplicationState.RUNNING, ApplicationState.STOPPING):
+            raise LifecycleFailure("Frontend output requires a running or stopping application")
+        yield
+
+    async def _send_raw(self, ws: WebSocket, payload: str, session_id: str) -> bool:
+        """仅转换明确断线或关闭发送超时；模型和内部错误向调用方传播。"""
+        if ws.application_state == WebSocketState.DISCONNECTED:
+            return False
+        timeout = (
+            SHUTDOWN_SEND_TIMEOUT_SECONDS
+            if self._interaction_closed or self._runtime.state == ApplicationState.STOPPING
+            else None
+        )
+        scope = asyncio.timeout(timeout)
+        try:
+            async with scope:
+                self._send_deadlines.add(scope)
+                await ws.send_text(payload)
+            return True
+        except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
+            logger.info("Frontend disconnected during send | session=%s", session_id)
+            return False
+        except TimeoutError:
+            if not scope.expired():
+                raise
+            logger.warning("Frontend shutdown send timed out | session=%s", session_id)
+            return False
+        finally:
+            self._send_deadlines.discard(scope)
+
+    def cancel_pending_interactions(self) -> None:
+        """同步解除所有待审批与提问 Future；关闭与连接移除时调用。"""
+        self.close_admission()
+        self._deny_all_confirms()
+        self._deny_all_asks()
 
     # -- WebSocket 管理 --
 
     def register_ws(self, session_id: str, ws: WebSocket, token: str) -> None:
         import time
-        self._ws_sinks[session_id] = WsConnectionEntry(
-            ws=ws, token=token, connected_at=time.time()
-        )
+        with self._runtime.admission():
+            if self._interaction_closed:
+                raise ApplicationStoppingError("Frontend connection admission is closed")
+            self._ws_sinks[session_id] = WsConnectionEntry(
+                ws=ws, token=token, connected_at=time.time()
+            )
 
     def unregister_ws(self, session_id: str) -> None:
         self._ws_sinks.pop(session_id, None)
@@ -189,23 +275,57 @@ class FrontendSink(AgentSink):
     async def close_session(
         self, session_id: str, *, code: int, reason: str,
     ) -> bool:
-        """使会话连接失效并关闭 WebSocket；无活动连接时保持幂等。"""
+        """使会话连接失效并关闭 WebSocket；无活动连接时保持幂等。
+
+        永久删除会话仍使用 4004 语义：先移除映射并拒绝待处理交互，
+        再以传入关闭码终止已建立连接。应用整体退出使用独立的
+        close_all_connections 以标准 1001 关闭，不与此路径混用。
+        """
         entry = self._ws_sinks.pop(session_id, None)
         self._deny_session_confirms(session_id)
         self._deny_session_asks(session_id)
         if entry is None:
             return False
-        try:
-            await entry.ws.close(code=code, reason=reason)
-        except Exception:
-            logger.warning(
-                "Failed to close WebSocket | session=%s code=%s reason=%s",
-                session_id,
-                code,
-                reason,
-                exc_info=True,
-            )
+        if entry.ws.application_state != WebSocketState.DISCONNECTED:
+            try:
+                async with asyncio.timeout(SYSTEM_QUIESCE_TIMEOUT_SECONDS):
+                    await entry.ws.close(code=code, reason=reason)
+            except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
+                logger.info("WebSocket already disconnected | session=%s", session_id)
         return True
+
+    async def close_all_connections(self) -> None:
+        """由应用协调任务调用；并发关闭等待同一实际关闭任务。"""
+        if self._close_task is None:
+            self.cancel_pending_interactions()
+            self._send_closed = True
+            self._close_task = asyncio.create_task(
+                self._close_connections(), name="frontend-close-connections",
+            )
+        await asyncio.shield(self._close_task)
+
+    async def _close_connections(self) -> None:
+        failures: list[BaseException] = []
+        try:
+            await self._requests.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+        except BaseException as exc:
+            if not self._requests.is_idle:
+                raise
+            failures.append(exc)
+        for session_id, entry in tuple(self._ws_sinks.items()):
+            try:
+                if entry.ws.application_state != WebSocketState.DISCONNECTED:
+                    async with asyncio.timeout(SYSTEM_QUIESCE_TIMEOUT_SECONDS):
+                        await entry.ws.close(code=1001, reason="going_away")
+            except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
+                pass
+            except BaseException as exc:
+                failures.append(exc)
+                continue
+            if self._ws_sinks.get(session_id) is entry:
+                self._ws_sinks.pop(session_id)
+        if failures:
+            raise BaseExceptionGroup("Frontend connection cleanup failed", failures)
 
     def get_ws(self, session_id: str) -> WebSocket | None:
         entry = self._ws_sinks.get(session_id)
@@ -222,7 +342,19 @@ class FrontendSink(AgentSink):
         new_name: str | None,
     ) -> list[str]:
         """向所有已连接前端广播独立的 Profile 变更事件。"""
+        return await self._requests.run_request(
+            lambda: self._broadcast_profile_change(operation, old_name, new_name),
+            name="frontend-broadcast-profile-change",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
+    async def _broadcast_profile_change(
+        self,
+        operation: str,
+        old_name: str,
+        new_name: str | None,
+    ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
             message = Message(
@@ -232,18 +364,11 @@ class FrontendSink(AgentSink):
                 old_name=old_name,
                 new_name=new_name,
             )
-            try:
-                payload = message.model_dump(exclude_none=True)
-                # 删除最后一个 Profile 时协议要求显式携带 JSON null。
-                payload["new_name"] = new_name
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
+            payload = message.model_dump(exclude_none=True)
+            # 删除最后一个 Profile 时协议要求显式携带 JSON null。
+            payload["new_name"] = new_name
+            if not await self._send_raw(ws, json.dumps(payload, ensure_ascii=False), session_id):
                 failures.append(session_id)
-                logger.warning(
-                    "Failed to broadcast LLM Profile change | session=%s",
-                    session_id,
-                    exc_info=True,
-                )
         return failures
 
     async def broadcast_approval_profile_change(
@@ -255,7 +380,17 @@ class FrontendSink(AgentSink):
         ``state`` 为 ``ApprovalProfileState`` 实例。显式保留 null 值
         以便前端区分"未选择"与"字段缺失"；Profile 变化不携带审批模式。
         """
+        return await self._requests.run_request(
+            lambda: self._broadcast_approval_profile_change(state),
+            name="frontend-broadcast-approval-profile-change",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
+    async def _broadcast_approval_profile_change(
+        self,
+        state,
+    ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
             message = Message(
@@ -265,18 +400,11 @@ class FrontendSink(AgentSink):
                 approval_profile_model=state.model,
                 approval_profile_available=state.available,
             )
-            try:
-                payload = message.model_dump(exclude_none=True)
-                payload["approval_profile_name"] = state.profile_name
-                payload["approval_profile_model"] = state.model
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
+            payload = message.model_dump(exclude_none=True)
+            payload["approval_profile_name"] = state.profile_name
+            payload["approval_profile_model"] = state.model
+            if not await self._send_raw(ws, json.dumps(payload, ensure_ascii=False), session_id):
                 failures.append(session_id)
-                logger.warning(
-                    "Failed to broadcast approval profile change | session=%s",
-                    session_id,
-                    exc_info=True,
-                )
         return failures
 
     async def broadcast_metadata_profile_change(
@@ -284,7 +412,17 @@ class FrontendSink(AgentSink):
         state,
     ) -> list[str]:
         """向所有已连接前端广播全局元数据 Profile 状态变更。"""
+        return await self._requests.run_request(
+            lambda: self._broadcast_metadata_profile_change(state),
+            name="frontend-broadcast-metadata-profile-change",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
+    async def _broadcast_metadata_profile_change(
+        self,
+        state,
+    ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
             message = Message(
@@ -294,18 +432,11 @@ class FrontendSink(AgentSink):
                 metadata_profile_model=state.model,
                 metadata_profile_available=state.available,
             )
-            try:
-                payload = message.model_dump(exclude_none=True)
-                payload["metadata_profile_name"] = state.profile_name
-                payload["metadata_profile_model"] = state.model
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
+            payload = message.model_dump(exclude_none=True)
+            payload["metadata_profile_name"] = state.profile_name
+            payload["metadata_profile_model"] = state.model
+            if not await self._send_raw(ws, json.dumps(payload, ensure_ascii=False), session_id):
                 failures.append(session_id)
-                logger.warning(
-                    "Failed to broadcast metadata Profile change | session=%s",
-                    session_id,
-                    exc_info=True,
-                )
         return failures
 
     async def broadcast_modality_profile_change(
@@ -313,7 +444,17 @@ class FrontendSink(AgentSink):
         states: ModalityProfileStates,
     ) -> list[str]:
         """向所有已连接前端广播三路全局多模态 Profile 状态。"""
+        return await self._requests.run_request(
+            lambda: self._broadcast_modality_profile_change(states),
+            name="frontend-broadcast-modality-profile-change",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
+    async def _broadcast_modality_profile_change(
+        self,
+        states: ModalityProfileStates,
+    ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
             message = Message(
@@ -329,22 +470,15 @@ class FrontendSink(AgentSink):
                 modality_vision_video_profile_model=states.video.model,
                 modality_vision_video_profile_available=states.video.available,
             )
-            try:
-                payload = message.model_dump(exclude_none=True)
-                payload["modality_vision_image_profile_name"] = states.image.profile_name
-                payload["modality_vision_image_profile_model"] = states.image.model
-                payload["modality_audio_profile_name"] = states.audio.profile_name
-                payload["modality_audio_profile_model"] = states.audio.model
-                payload["modality_vision_video_profile_name"] = states.video.profile_name
-                payload["modality_vision_video_profile_model"] = states.video.model
-                await ws.send_text(json.dumps(payload, ensure_ascii=False))
-            except Exception:
+            payload = message.model_dump(exclude_none=True)
+            payload["modality_vision_image_profile_name"] = states.image.profile_name
+            payload["modality_vision_image_profile_model"] = states.image.model
+            payload["modality_audio_profile_name"] = states.audio.profile_name
+            payload["modality_audio_profile_model"] = states.audio.model
+            payload["modality_vision_video_profile_name"] = states.video.profile_name
+            payload["modality_vision_video_profile_model"] = states.video.model
+            if not await self._send_raw(ws, json.dumps(payload, ensure_ascii=False), session_id):
                 failures.append(session_id)
-                logger.warning(
-                    "Failed to broadcast modality Profile change | session=%s",
-                    session_id,
-                    exc_info=True,
-                )
         return failures
 
     def is_session_occupied(self, session_id: str, token: str | None) -> bool:
@@ -387,33 +521,59 @@ class FrontendSink(AgentSink):
             return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
-            from abstract.tools.registry import registry
-            # 前端期望 request_id/tool/args/content 在消息顶层
-            display_args = dict(args)
-            if reason:
-                display_args["reason"] = reason
-            msg = Message(
-                type=MessageType.CONFIRM_REQUEST,
-                session_id=session_id,
-                request_id=request_id,
-                tool=tool_name,
-                args=display_args,
-                content=content,
-                danger_level=str(registry.get_danger_level(tool_name).value),
+            return await self._requests.run_request(
+                lambda: self._request_approval(
+                    ws, session_id, request_id, tool_name, args, reason, content, fut,
+                ),
+                name="frontend-request-approval",
+                admission=self._admit_interaction,
             )
-            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
-        except Exception as exc:
+        except ApplicationStoppingError:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            logger.exception("Failed to send confirm_request to session=%s: %s", session_id, exc)
-            return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by=SYSTEM_CHARACTER_NAME)
+            return ApprovalResult(action="deny", deny_reason="Application is stopping", denied_by=SYSTEM_CHARACTER_NAME)
+        finally:
+            self._pending_confirms.pop(request_id, None)
+            self._confirm_session_map.pop(request_id, None)
+            if not fut.done():
+                fut.cancel()
 
-        try:
-            return await fut
-        except asyncio.CancelledError:
-            self._pending_confirms.pop(request_id, None)
-            self._confirm_session_map.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="Cancelled", denied_by=SYSTEM_CHARACTER_NAME)
+    async def _request_approval(
+        self,
+        ws: WebSocket,
+        session_id: str,
+        request_id: str,
+        tool_name: str,
+        args: dict,
+        reason: str,
+        content: str,
+        fut: asyncio.Future,
+    ) -> "ApprovalResult":
+        from entity.puretype import ApprovalResult
+        from system.application import Application
+        from abstract.tools.registry import ToolRegistry
+        tool_registry = Application.current().get_system(ToolRegistry)
+        # 前端期望 request_id/tool/args/content 在消息顶层
+        display_args = dict(args)
+        if reason:
+            display_args["reason"] = reason
+        msg = Message(
+            type=MessageType.CONFIRM_REQUEST,
+            session_id=session_id,
+            request_id=request_id,
+            tool=tool_name,
+            args=display_args,
+            content=content,
+            danger_level=str(tool_registry.get_danger_level(tool_name).value),
+        )
+        # 模型构造/序列化错误传播，不作为网络异常吞掉。
+        payload = json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False)
+        if not await self._send_raw(ws, payload, session_id):
+            return ApprovalResult(
+                action="deny", deny_reason="WebSocket disconnected during approval request",
+                denied_by=SYSTEM_CHARACTER_NAME,
+            )
+        return await fut
 
     def resolve_confirm(self, request_id: str, action: str,
                         deny_reason: str | None = None,
@@ -436,6 +596,17 @@ class FrontendSink(AgentSink):
             if self._confirm_session_map.get(rid) == session_id:
                 self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by=SYSTEM_CHARACTER_NAME)
 
+    def _deny_all_confirms(self) -> None:
+        from entity.puretype import ApprovalResult
+        for rid in list(self._pending_confirms.keys()):
+            fut = self._pending_confirms.pop(rid, None)
+            self._confirm_session_map.pop(rid, None)
+            if fut is not None and not fut.done():
+                fut.set_result(ApprovalResult(
+                    action="deny", deny_reason="Application is stopping",
+                    denied_by=SYSTEM_CHARACTER_NAME,
+                ))
+
     # -- 提问请求 --
 
     async def ask_question(self, question: str, options: list[dict] | None = None,
@@ -454,38 +625,52 @@ class FrontendSink(AgentSink):
             return {"error": "WebSocket connection unavailable, cannot send question"}
 
         try:
-            await ws.send_text(json.dumps({
-                "type": "ask_request",
-                "session_id": session_id,
-                "request_id": request_id,
-                "question": question,
-                "detail": detail,
-                "options": options or [],
-            }, ensure_ascii=False))
-        except Exception as exc:
+            return await self._requests.run_request(
+                lambda: self._ask_question(
+                    ws, session_id, request_id, question, detail, options, fut,
+                ),
+                name="frontend-ask-question",
+                admission=self._admit_interaction,
+            )
+        except ApplicationStoppingError:
             self._pending_asks.pop(request_id, None)
             self._ask_session_map.pop(request_id, None)
-            logger.exception("Failed to send ask_request to session=%s: %s", session_id, exc)
-            return {"error": f"Failed to push question via WebSocket: {exc}"}
+            return {"error": "Application is stopping, cannot send question"}
+        finally:
+            self._pending_asks.pop(request_id, None)
+            self._ask_session_map.pop(request_id, None)
+            if not fut.done():
+                fut.cancel()
 
-        try:
-            result_str: str = await fut
-            result: dict = json.loads(result_str)
-            return {
-                "question": question,
-                "option": result.get("option"),
-                "custom_text": result.get("custom_text"),
-                "answered": result.get("option") is not None or result.get("custom_text") is not None,
-            }
-        except asyncio.CancelledError:
-            self._pending_asks.pop(request_id, None)
-            self._ask_session_map.pop(request_id, None)
-            return {"error": "Question request was cancelled"}
-        except Exception as exc:
-            self._pending_asks.pop(request_id, None)
-            self._ask_session_map.pop(request_id, None)
-            logger.exception("Failed to handle ask response for session=%s: %s", session_id, exc)
-            return {"error": f"Question handling error: {exc}"}
+    async def _ask_question(
+        self,
+        ws: WebSocket,
+        session_id: str,
+        request_id: str,
+        question: str,
+        detail: str,
+        options: list[dict] | None,
+        fut: asyncio.Future,
+    ) -> dict:
+        # 模型构造/序列化错误传播，不作为网络异常吞掉。
+        payload = json.dumps({
+            "type": "ask_request",
+            "session_id": session_id,
+            "request_id": request_id,
+            "question": question,
+            "detail": detail,
+            "options": options or [],
+        }, ensure_ascii=False)
+        if not await self._send_raw(ws, payload, session_id):
+            return {"error": "WebSocket disconnected during question request"}
+        result_str: str = await fut
+        result: dict = json.loads(result_str)
+        return {
+            "question": question,
+            "option": result.get("option"),
+            "custom_text": result.get("custom_text"),
+            "answered": result.get("option") is not None or result.get("custom_text") is not None,
+        }
 
     def resolve_ask(self, request_id: str, option: str | None = None,
                     custom_text: str | None = None) -> bool:
@@ -505,6 +690,15 @@ class FrontendSink(AgentSink):
         for rid in list(self._ask_session_map.keys()):
             if self._ask_session_map.get(rid) == session_id:
                 self.resolve_ask(rid, option=None, custom_text=None)
+
+    def _deny_all_asks(self) -> None:
+        for rid in list(self._pending_asks.keys()):
+            fut = self._pending_asks.pop(rid, None)
+            self._ask_session_map.pop(rid, None)
+            if fut is not None and not fut.done():
+                fut.set_result(json.dumps(
+                    {"option": None, "custom_text": None}, ensure_ascii=False,
+                ))
 
     # -- 事件推送 --
 
@@ -537,9 +731,6 @@ class FrontendSink(AgentSink):
                                 client_message_id: str | None = None,
                                 message_suffix: str | None = None,
                                 dynamic_message_suffix: str | None = None) -> None:
-        ws = self.get_ws(session_id)
-        if ws is None:
-            return
         msg = Message(
             type=MessageType.USER_MESSAGE,
             session_id=session_id,
@@ -552,18 +743,17 @@ class FrontendSink(AgentSink):
             message_suffix=message_suffix,
             dynamic_message_suffix=dynamic_message_suffix,
         )
-        try:
-            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
-        except Exception:
-            logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, msg),
+            name="frontend-emit-user-message",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
     async def emit_assistant_message(self, session_id: str, content: Any,
                                      character_name: str,
                                      visible_characters: list[str] | None = None,
                                      response_characters: list[str] | None = None) -> None:
-        ws = self.get_ws(session_id)
-        if ws is None:
-            return
         msg = Message(
             type=MessageType.ASSISTANT_MESSAGE,
             session_id=session_id,
@@ -572,17 +762,19 @@ class FrontendSink(AgentSink):
             visible_characters=visible_characters,
             response_characters=response_characters,
         )
-        try:
-            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
-        except Exception:
-            logger.warning("Failed to send assistant_message to session=%s", session_id, exc_info=True)
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, msg),
+            name="frontend-emit-assistant-message",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
                                 tool_call: ToolCallRequest | None = None,
                                 tool_call_delta: ToolCallDelta | None = None,
                                 character_name: str | None = None) -> None:
-        await self._send_stream_event(StreamDeltaEvent(
+        event = StreamDeltaEvent(
             session_id=session_id,
             stream_id=stream_id,
             delta=delta or None,
@@ -590,34 +782,41 @@ class FrontendSink(AgentSink):
             tool_call=tool_call,
             tool_call_delta=tool_call_delta,
             character_name=character_name or None,
-        ))
+        )
+        await self._requests.run_request(
+            lambda: self._send_stream_event(event),
+            name="frontend-emit-stream-delta",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",
                                content: str = "",
                                metrics: MessageMetrics | None = None) -> None:
-        await self._send_stream_event(StreamDoneEvent(
+        event = StreamDoneEvent(
             session_id=session_id,
             stream_id=stream_id,
             finish_reason=finish_reason,
             # 维持既有语义：调用方的空文本省略，前端保留累计的部分正文。
             content=content or None,
             metrics=metrics,
-        ))
+        )
+        await self._requests.run_request(
+            lambda: self._send_stream_event(event),
+            name="frontend-emit-stream-done",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
     async def _send_stream_event(self, event: StreamEvent) -> None:
         """流式事件唯一发送边界；模型/序列化错误不作为网络异常吞掉。"""
         ws = self.get_ws(event.session_id)
         if ws is None:
             return
+        # 模型构造/序列化错误在此前已发生；此处只捕获网络发送异常。
         payload = event.model_dump_json(exclude_none=True)
-        try:
-            await ws.send_text(payload)
-        except Exception:
-            logger.warning(
-                "Failed to send %s event | session=%s stream=%s",
-                event.type.value, event.session_id, event.stream_id, exc_info=True,
-            )
+        await self._send_raw(ws, payload, event.session_id)
 
     async def emit_usage_update(self, session_id: str, token_usage: int,
                                 context_tokens: int) -> None:
@@ -643,22 +842,27 @@ class FrontendSink(AgentSink):
                                   history_index: int | None = None,
                                   is_system_status: bool = False) -> None:
         """推送系统消息到前端。"""
-        try:
-            ws = self.get_ws(session_id)
-            if ws is None:
-                return
-            msg = Message(
-                type=MessageType.SYSTEM,
-                session_id=session_id,
-                content=content,
-                index=history_index,
-                is_system_status=is_system_status or None,
-            )
-            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
-        except Exception:
-            logger.warning(
-                "Failed to send system message | session=%s", session_id, exc_info=True,
-            )
+        msg = Message(
+            type=MessageType.SYSTEM,
+            session_id=session_id,
+            content=content,
+            index=history_index,
+            is_system_status=is_system_status or None,
+        )
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, msg),
+            name="frontend-emit-system-message",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
+
+    async def _send_message_model(self, session_id: str, msg: Message) -> None:
+        """既有非流式 Message 发送边界；模型构造/序列化错误传播。"""
+        ws = self.get_ws(session_id)
+        if ws is None:
+            return
+        payload = json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False)
+        await self._send_raw(ws, payload, session_id)
 
     async def _send_msg(self, session_id: str, event_type: str,
                         tool_name: str, payload: str, *,
@@ -700,12 +904,16 @@ class FrontendSink(AgentSink):
         else:
             return
 
-        try:
-            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
-        except Exception:
-            logger.warning(
-                "Failed to send %s event to session=%s", event_type, session_id, exc_info=True
-            )
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, msg),
+            name=f"frontend-send-{event_type}",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
+
+    async def virtual_shotdown(self) -> None:
+        """所有System业务收尾完成之后，等待实际输出资源关闭。"""
+        await self.close_all_connections()
 
 
 class ParentAgentSink(AgentSink):
@@ -849,13 +1057,12 @@ class ParentAgentSink(AgentSink):
         """转发流结束事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_stream_done(
-                    self._loop.parent_session_id, stream_id, finish_reason,
-                    content=content,
-                    metrics=metrics,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_stream_done(
+                self._loop.parent_session_id, stream_id, finish_reason,
+                content=content,
+                metrics=metrics,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward stream_done to parent session=%s", session_id, exc_info=True
@@ -866,11 +1073,10 @@ class ParentAgentSink(AgentSink):
         """转发 token 消耗更新到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_usage_update(
-                    self._loop.parent_session_id, token_usage, context_tokens,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_usage_update(
+                self._loop.parent_session_id, token_usage, context_tokens,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward usage_update to parent session=%s", session_id, exc_info=True
@@ -881,11 +1087,10 @@ class ParentAgentSink(AgentSink):
         """转发进度事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_progress(
-                    self._loop.parent_session_id, tool_name, payload,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_progress(
+                self._loop.parent_session_id, tool_name, payload,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward progress event to parent session=%s", session_id, exc_info=True
@@ -896,11 +1101,10 @@ class ParentAgentSink(AgentSink):
         """转发剪贴板展示事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_clipboard_display(
-                    self._loop.parent_session_id, tool_name, payload,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_clipboard_display(
+                self._loop.parent_session_id, tool_name, payload,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward clipboard_display to parent session=%s", session_id, exc_info=True
@@ -910,11 +1114,10 @@ class ParentAgentSink(AgentSink):
         """转发子 Agent 状态更新到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_subagent_update(
-                    self._loop.parent_session_id, payload,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_subagent_update(
+                self._loop.parent_session_id, payload,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward subagent_update to parent session=%s", session_id, exc_info=True
@@ -926,14 +1129,13 @@ class ParentAgentSink(AgentSink):
         """转发系统消息到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().frontend_sink
-            if sink is not None:
-                await sink.emit_system_message(
-                    self._loop.parent_session_id,
-                    content,
-                    history_index=history_index,
-                    is_system_status=is_system_status,
-                )
+            sink = Application.current().get_system(FrontendSink)
+            await sink.emit_system_message(
+                self._loop.parent_session_id,
+                content,
+                history_index=history_index,
+                is_system_status=is_system_status,
+            )
         except Exception:
             logger.warning(
                 "Failed to forward system message to parent session=%s", session_id, exc_info=True,

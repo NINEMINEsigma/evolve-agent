@@ -13,10 +13,15 @@ import logging
 import subprocess  # nosec
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from component.browser import _connection
-from component.tools.filesystem import _s as _get_sandbox
+from component.browser.system import BrowserSystem
+from entity.constant import CDP_ENDPOINT_DEFAULT, EDGE_CANDIDATE_PATHS
 from entity.puretype import ToolDangerLevel
+from system.application import Application
+from system.sandbox import Sandbox
+from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +33,7 @@ def _launch_edge_process(user_data_dir_real: str, endpoint: str, headless: bool 
 
     *headless* 为 True 时追加 ``--headless=new``，浏览器窗口不可见，
     适用于不需要用户参与操作和观察页面的自动化场景。
-    调用方应在 headless 模式下将返回的句柄登记到 ``_connection.register_headless_proc``，
+    调用方应在 headless 模式下将返回的句柄登记到 BrowserSystem.register_headless_proc，
     以便应用关闭时终止进程。
     """
     port: str = endpoint.rsplit(":", 1)[-1] if ":" in endpoint else "9222"
@@ -46,9 +51,11 @@ def _launch_edge_process(user_data_dir_real: str, endpoint: str, headless: bool 
 
 
 async def _handle_browser_launch(args: dict[str, Any]) -> dict:
-    endpoint: str = str(args.get("endpoint", "")).strip() or _connection.CDP_ENDPOINT_DEFAULT
+    endpoint: str = str(args.get("endpoint", "")).strip() or CDP_ENDPOINT_DEFAULT
     timeout: int = int(args.get("timeout", 20))
     headless: bool = bool(args.get("headless", False))
+
+    bs = Application.current().get_system(BrowserSystem)
 
     # 幂等：端口已就绪（无论由谁拉起）直接返回
     if await asyncio.to_thread(_connection.probe_cdp_endpoint, endpoint, 2.0):
@@ -57,20 +64,21 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
     exe: str | None = _connection.edge_executable_path()
     if exe is None:
         return tool_error(
-            "未找到 Edge 可执行文件。请安装 Microsoft Edge，或手动以调试参数启动浏览器。",
-            searched=list(_connection.EDGE_CANDIDATE_PATHS),
+            "Microsoft Edge executable not found. Please install Edge or start a browser with debug flags manually.",
+            searched=list(EDGE_CANDIDATE_PATHS),
         )
 
-    resolved = _get_sandbox().resolve_write(_PROFILE_LOGICAL)
+    resolved = Application.current().get_system(Sandbox).resolve_write(_PROFILE_LOGICAL)
     resolved.real.mkdir(parents=True, exist_ok=True)
+    Application.current().get_system(RuntimeSystem).require_running()
     proc = _launch_edge_process(str(resolved.real), endpoint, headless=headless)
     if headless:
-        _connection.register_headless_proc(proc)
+        bs.register_headless_proc(proc)
     logger.info("BrowserLaunch: started Edge, user-data-dir=%s, endpoint=%s, headless=%s", resolved.real, endpoint, headless)
 
     if not await _connection.wait_for_endpoint(endpoint, timeout_s=float(timeout)):
         return tool_error(
-            "Edge 已启动但 CDP 端口在规定时间内未就绪。请检查是否已有另一个实例占用了该 user-data-dir 或端口。",
+            "Edge started but CDP port not ready within the timeout. Check if another instance occupies the same user-data-dir or port.",
             endpoint=endpoint,
             user_data_dir=_PROFILE_LOGICAL,
         )
@@ -84,10 +92,13 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
     )
 
 
-registry.register(
-    name="BrowserLaunch",
-    toolset="browser",
-    schema={
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register BrowserLaunch into explicit runtime registries."""
+    del ui_events
+    registry.register(
+        name="BrowserLaunch",
+        toolset="browser",
+        schema={
         # 以调试参数启动 Edge（幂等：端口已就绪时直接返回）。
         # profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
         # 登录态、Cookie 跨会话保留；调试实例与日常 Edge 并存；
@@ -181,4 +192,4 @@ If the CDP endpoint is already reachable, returns `already_running: true` withou
     check_fn=_connection.playwright_available,
     is_async=True,
     danger_level=ToolDangerLevel.dangerous,
-)
+    )

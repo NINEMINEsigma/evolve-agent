@@ -1,7 +1,7 @@
 """向子 Agent 发送消息。
 
-模块导入时通过 ``registry.register()`` 注册 ``ChatSubAgent`` 工具。
-父 Agent 通过此工具向指定子 Agent 发送消息，消息进入收件箱，
+注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
+显式调用。父 Agent 通过此工具向指定子 Agent 发送消息，消息进入收件箱，
 在子 Agent 工具链结束后合并注入上下文。
 """
 
@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
@@ -42,43 +43,48 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
 
     try:
         from system.application import Application
-        orch = Application.current().subagent_orchestrator
+        from system.application import Application
+        from subagent.orchestrator import SubAgentOrchestrator
+        orch = Application.current().get_system(SubAgentOrchestrator)
         result = await orch.chat(parent_session_id=parent_session_id, session_id=session_id, message=message, user_name=user_name, message_type=message_type)
         return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:
         return tool_error(f"Failed to chat with subagent: {exc}")
 
 
-registry.register(
-    name="ChatSubAgent",
-    toolset="multiagent",
-    schema={
-        # 向正在运行的子 Agent 会话发送一条消息。
-        #
-        # ## 前置条件
-        # 目标子 Agent 必须已经处于活跃运行状态。
-        # 在发送新消息前，应当已经收到子 Agent 的最新一轮回复；避免在上一轮工具调用链尚未结束时连续发送消息。
-        #
-        # ## 调用效果
-        # 消息进入子 Agent 的收件箱队列，并在当前工具调用链完成后注入其上下文。
-        # 可用于追加任务说明、回答问题、提供新上下文或纠正子 Agent 的行为。
-        # 不要仅为了发送初始提示而调用本工具——初始提示应通过 run_subagent 的 initial_prompt 参数发送。
-        #
-        # ## 返回
-        # ```json
-        # {"feedback": ["..."], "success": true}
-        # ```
-        # feedback 是调用时从子 Agent 发件箱收集的文本响应列表，用于即时反馈，而非等待定期收集周期。
-        #
-        # ## 何时使用
-        # - 子 Agent 运行过程中需要补充上下文或纠正方向。
-        # - 子 Agent 提出问题时回复它。
-        # - 需要立即获取子 Agent 的最新输出（通过 feedback）。
-        #
-        # ## 副作用/注意
-        # - 消息不会立即打断子 Agent 当前的工具调用链，而是排队等待当前链结束后注入。
-        # - 频繁发送消息可能让子 Agent 上下文变得混乱；应等待子 Agent 回复后再决定是否需要继续发送。
-        "description": """Send a message to an active running sub-agent session.
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register chat subagent tool into the explicit runtime registry."""
+    del ui_events
+    registry.register(
+        name="ChatSubAgent",
+        toolset="multiagent",
+        schema={
+            # 向正在运行的子 Agent 会话发送一条消息。
+            #
+            # ## 前置条件
+            # 目标子 Agent 必须已经处于活跃运行状态。
+            # 在发送新消息前，应当已经收到子 Agent 的最新一轮回复；避免在上一轮工具调用链尚未结束时连续发送消息。
+            #
+            # ## 调用效果
+            # 消息进入子 Agent 的收件箱队列，并在当前工具调用链完成后注入其上下文。
+            # 可用于追加任务说明、回答问题、提供新上下文或纠正子 Agent 的行为。
+            # 不要仅为了发送初始提示而调用本工具——初始提示应通过 run_subagent 的 initial_prompt 参数发送。
+            #
+            # ## 返回
+            # ```json
+            # {"feedback": ["..."], "success": true}
+            # ```
+            # feedback 是调用时从子 Agent 发件箱收集的文本响应列表，用于即时反馈，而非等待定期收集周期。
+            #
+            # ## 何时使用
+            # - 子 Agent 运行过程中需要补充上下文或纠正方向。
+            # - 子 Agent 提出问题时回复它。
+            # - 需要立即获取子 Agent 的最新输出（通过 feedback）。
+            #
+            # ## 副作用/注意
+            # - 消息不会立即打断子 Agent 当前的工具调用链，而是排队等待当前链结束后注入。
+            # - 频繁发送消息可能让子 Agent 上下文变得混乱；应等待子 Agent 回复后再决定是否需要继续发送。
+            "description": """Send a message to an active running sub-agent session.
 
 ## Prerequisites
 The target sub-agent must already be active.
@@ -115,35 +121,35 @@ If the sub-agent is still generating its current response, the call fails with:
 - The message does not interrupt the sub-agent's current tool-call chain; it is queued and injected after the chain ends.
 - Calling this before the sub-agent has finished its current round fails.
 - Frequent messages may clutter the sub-agent's context; wait for the sub-agent's response before deciding whether to send another message.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    # 目标子 Agent 的会话 ID。
-                    "description": "Session ID of the target sub-agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        # 目标子 Agent 的会话 ID。
+                        "description": "Session ID of the target sub-agent.",
+                    },
+                    "message": {
+                        "type": "string",
+                        # 发送给子 Agent 的消息内容。
+                        "description": "The message content to send to the sub-agent.",
+                    },
+                    "user_name": {
+                        "type": "string",
+                        # 本轮消息的真实发送者名称（必填）。即使转述第三方内容，也应填你自己的身份。
+                        "description": "The real sender's name for this turn (required). Use your own identity even when relaying third-party content.",
+                    },
+                    "message_type": {
+                        "type": "string",
+                        # 消息类型："direct" 表示直接对子 Agent 说，子 Agent 应响应；"overheard" 表示旁听。
+                        "description": "Message type: 'direct' means addressed to the sub-agent (it should respond); 'overheard' means it is only listening in.",
+                    },
                 },
-                "message": {
-                    "type": "string",
-                    # 发送给子 Agent 的消息内容。
-                    "description": "The message content to send to the sub-agent.",
-                },
-                "user_name": {
-                    "type": "string",
-                    # 本轮消息的真实发送者名称（必填）。即使转述第三方内容，也应填你自己的身份。
-                    "description": "The real sender's name for this turn (required). Use your own identity even when relaying third-party content.",
-                },
-                "message_type": {
-                    "type": "string",
-                    # 消息类型："direct" 表示直接对子 Agent 说，子 Agent 应响应；"overheard" 表示旁听。
-                    "description": "Message type: 'direct' means addressed to the sub-agent (it should respond); 'overheard' means it is only listening in.",
-                },
+                "required": ["session_id", "message", "user_name", "message_type"],
             },
-            "required": ["session_id", "message", "user_name", "message_type"],
         },
-    },
-    handler=_handle_chat_subagent,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    availability=ToolAvailability.MAIN,
-)
+        handler=_handle_chat_subagent,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN,
+    )

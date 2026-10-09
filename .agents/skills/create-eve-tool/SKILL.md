@@ -1,6 +1,6 @@
 ---
 name: create-eve-tool
-description: 通过一次一个问题的质询流程引导用户为 evolve-agent 项目创建新工具。结合 grill-me 质询方法论和工具注册规范，逐个决策点澄清工具的 name、toolset、schema、handler、danger_level 等字段，最终生成包含 imports + handler + registry.register 的完整 .py 文件。当用户想创建新工具、注册新工具、添加 agent 工具，或提到"新建工具""create tool""register tool"时使用。
+description: 通过一次一个问题的质询流程引导用户为 Evolve Agent 项目创建新工具。结合 grill-me 质询方法论和显式注册协议，逐个决策点澄清工具的 name、toolset、schema、handler、danger_level 等字段，最终生成包含 imports、handler 和 register_tools(registry, ui_events) 的完整 .py 文件。当用户想创建新工具、注册新工具、添加 Agent 工具，或提到“新建工具”“create tool”“register tool”时使用。
 disable-model-invocation: true
 ---
 
@@ -45,7 +45,7 @@ disable-model-invocation: true
    - `parameters` — JSON Schema 参数定义
    - `handler` — 处理函数签名与逻辑
    - `is_async` — 是否异步
-   - `emoji` — 图标
+   - `availability` — 可用范围（ToolAvailability 位掩码）
    - `danger_level` — 危险级别（safe / write / dangerous / critical）
    - `no_timeout` — 是否禁用超时
 3. 说明本次质询的范围和预计深度。
@@ -73,7 +73,7 @@ disable-model-invocation: true
 
 - 一次只问**一个问题**。
 - 每个问题附带**推荐答案**。
-- 按**依赖顺序**遍历：先 `name` → `toolset` → `description` → `parameters` → `danger_level` → `is_async` → `no_timeout` → `emoji`，再进入 `handler` 逻辑。
+- 按**依赖顺序**遍历：先 `name` → `toolset` → `description` → `parameters` → `danger_level` → `is_async` → `no_timeout` → `availability`，再进入 `handler` 逻辑。
 - 当答案可通过检查现有工具获得时，**优先探索代码库**。用 Grep 搜索 `registry.register(` 找现有工具作为参考。
 - 不接受"待定"或模糊答案——追问到具体为止。
 - 整个会话使用**中文**。工具的 `description` 字段内容用**英文**编写（遵循工具注册规范）。
@@ -105,8 +105,8 @@ disable-model-invocation: true
 
 确认 `registry.register()` 的其余属性：
 
-- `is_async` — 默认 `False`，阻塞型工具设为 `True`
-- `emoji` — 与工具语义相关的单字符 emoji
+- `is_async` — handler 是 `async def` 时设为 `True`；同步阻塞 handler 保持 `False`，由 ToolRegistry 唯一执行器持有真实线程任务
+- `availability` — 使用 `ToolAvailability` 指定可用范围
 - `danger_level` — `safe` / `write` / `dangerous` / `critical`
 - `no_timeout` — 长阻塞工具设为 `True`
 
@@ -129,15 +129,17 @@ disable-model-invocation: true
 
 ```python
 # 文件头部：imports（只导入必要的）
-# handler 函数：_handle_<tool_name>(ctx, params) -> dict
-# 注册调用：registry.register(...)
+# handler 函数：_handle_<tool_name>(args, context) -> dict
+# 唯一同步声明入口：register_tools(registry, ui_events) -> None
+# registry.register(...) 与 ui_events.register(...) 只能在显式声明入口中调用
 ```
 
 文件应：
 
 - 包含所有必要的 import 语句
 - handler 函数带完整类型注解
-- `registry.register()` 调用位于模块级别（自动发现机制要求）
+- 导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，所有工具与事件注册都放在该入口中
+- 导入只定义函数、常量和类型；不得在导入期取得 Application、注册工具或创建连接。handler 执行时通过 ToolContext 的 app 或 `Application.current().get_system(T)` 取得唯一 System
 - `description` 字段按工具注册规范：中文注释在上方，英文内容在下方
 - markdown 分段：Prerequisites / Effect / Returns / When to Use / Side Effects
 
@@ -161,7 +163,7 @@ disable-model-invocation: true
 
 生成代码时必须遵守以下规则：
 
-1. **自动发现**：AST 扫描 `.py` 文件，模块级别包含 `registry.register()` 即被自动导入，无需额外注册。
+1. **自动发现**：AST 扫描顶层同步 `register_tools` 函数，按路径排序导入后显式传入唯一 ToolRegistry/UIEventRouter 调用。同一次发现每个模块只调用一次；已有 Python 模块缓存不影响显式注册。旧模块级注册、读取/语法/导入/注册错误直接失败，不能用吞错或修改 `sys.modules` 修补。可选 `custom_tools/` 不存在时跳过；必需内置目录缺失属于错误。
 2. **description 字段**：内容用**英文**编写，上方必须附带**中文注释**。
 3. **markdown 分段**：description 内按段落写明工具功能、前置条件（Prerequisites）、调用效果（Effect）、返回值（Returns）、何时使用（When to Use）、副作用（Side Effects）。
 4. **中文注释位置**：每个 `description` 字段（包括嵌套参数的 description）上方必须有中文注释解释行为。
@@ -175,41 +177,50 @@ disable-model-invocation: true
 ```python
 """<tool_name> tool for evolve-agent."""
 
-from typing import Any
+from __future__ import annotations
 
-# ... 其他必要 imports ...
+from typing import TYPE_CHECKING, Any
+
+from abstract.tools.registry import ToolRegistry
+from abstract.tools.ui_event_router import UIEventRouter
+from entity.puretype import ToolAvailability, ToolDangerLevel
+
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
 
-async def _handle_<tool_name>(ctx: Any, params: dict) -> dict:
-    """<工具功能简述>"""
-    # ... handler 逻辑 ...
+async def _handle_<tool_name>(args: dict[str, Any], context: ToolContext) -> dict:
+    """Execute the requested operation."""
+    # 仅在 handler 执行时读取 context.app.get_system(...)。
     return {"result": "..."}
 
 
-registry.register(
-    name="<tool_name>",
-    toolset="<toolset>",
-    schema={
-        # <中文注释：工具功能、前置条件、调用效果、返回值、典型场景、副作用>
-        "description": """<English description with Prerequisites/Effect/Returns/When to Use/Side Effects>""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "<param1>": {
-                    "type": "string",
-                    # <中文注释：参数说明>
-                    "description": """<English description>""",
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    registry.register(
+        name="<tool_name>",
+        toolset="<toolset>",
+        schema={
+            # 工具功能、前置条件、调用效果、返回值、典型场景、副作用。
+            "description": "<English description with Prerequisites/Effect/Returns/When to Use/Side Effects>",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "<param1>": {
+                        "type": "string",
+                        # 参数说明。
+                        "description": "<English description>",
+                    },
                 },
+                "required": ["<param1>"],
             },
-            "required": ["<param1>"],
         },
-    },
-    handler=_handle_<tool_name>,
-    is_async=<True|False>,
-    emoji="<emoji>",
-    danger_level="<safe|write|dangerous|critical>",
-    no_timeout=<True|False>,
-)
+        handler=_handle_<tool_name>,
+        is_async=True,
+        danger_level=ToolDangerLevel.safe,
+        availability=ToolAvailability.MAIN,
+        no_timeout=False,
+    )
+    # 有 UI 事件时在此调用 ui_events.register(...)，不要导入全局实例。
 ```
 
 ---

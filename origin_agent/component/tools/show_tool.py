@@ -5,14 +5,15 @@ danger_level / toolset 四字段），未命中再按工具集匹配（返回该
 可见工具名列表）。仅返回当前 loop 上下文下实际可调用的工具，不可见或不
 存在的名称按单条 error 返回，不阻塞其余项。
 
-模块导入时通过 ``registry.register()`` 注册 ``ShowTool`` 工具。
+显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 ``ShowTool`` 工具。
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.registry import ToolRegistry, tool_error, tool_result
+from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from entity.constant import COLLOQUY_TOOLSET_WHITELIST
 
@@ -24,13 +25,21 @@ if TYPE_CHECKING:
 # 可见性辅助
 # ---------------------------------------------------------------------------
 
+def _get_registry():
+    """运行期取得唯一 ToolRegistry System 实例。"""
+    from system.application import Application
+    from abstract.tools.registry import ToolRegistry
+    return Application.current().get_system(ToolRegistry)
+
+
 def _names_for_availability(scope: ToolAvailability) -> set[str]:
     """按 availability scope 求可见工具名集合。
 
     复用 ``get_definitions_for_availability``，其内部已叠加 ``check_fn``
     可用性过滤（30 秒 TTL 缓存）。
     """
-    defs = registry.get_definitions_for_availability(scope, quiet=True)
+    tool_registry = _get_registry()
+    defs = tool_registry.get_definitions_for_availability(scope, quiet=True)
     return {(d.get("function") or {}).get("name", "") for d in defs} - {""}
 
 
@@ -50,13 +59,14 @@ def _visible_tool_names(context: ToolContext | None) -> set[str]:
     from entry.colloquy_loop import ColloquyLoop
     from entry.multi_agent_loop import MultiAgentLoop
 
+    tool_registry = _get_registry()
     if isinstance(loop, SubAgentLoop):
         # 含 TaskAgentLoop（其 allowed_tool_names 构造时已按 scope+safe 过滤）
-        return {n for n in loop.allowed_tool_names if registry.is_tool_available(n)}
+        return {n for n in loop.allowed_tool_names if tool_registry.is_tool_available(n)}
     if isinstance(loop, ColloquyLoop):
         # 白名单 toolset 内的工具名 ∩ MAIN 可见集合
         whitelist: set[str] = {
-            n for n, ts in registry.get_tool_to_toolset_map().items()
+            n for n, ts in tool_registry.get_tool_to_toolset_map().items()
             if ts in COLLOQUY_TOOLSET_WHITELIST
         }
         return _names_for_availability(ToolAvailability.MAIN) & whitelist
@@ -82,12 +92,13 @@ def _handle_show_tool(args: dict[str, Any], context: ToolContext | None = None) 
         return tool_error("'names' must be a non-empty list of tool or toolset names")
 
     visible: set[str] = _visible_tool_names(context)
+    tool_registry = _get_registry()
     results: dict[str, Any] = {}
 
     for raw in names:
         name: str = str(raw).strip()
         # 先按工具匹配
-        entry = registry.get_entry(name)
+        entry = tool_registry.get_entry(name)
         if entry is not None and name in visible:
             results[name] = {
                 "no_timeout": entry.no_timeout,
@@ -98,9 +109,9 @@ def _handle_show_tool(args: dict[str, Any], context: ToolContext | None = None) 
             continue
 
         # 回落按工具集匹配（仅当该 toolset 下有可见工具时才返回，避免泄露存在性）
-        if name in registry.get_registered_toolset_names():
+        if name in tool_registry.get_registered_toolset_names():
             tools: list[str] = [
-                n for n in registry.get_tool_names_for_toolset(name) if n in visible
+                n for n in tool_registry.get_tool_names_for_toolset(name) if n in visible
             ]
             if tools:
                 results[name] = {
@@ -117,23 +128,20 @@ def _handle_show_tool(args: dict[str, Any], context: ToolContext | None = None) 
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-registry.register(
-    name="ShowTool",
-    toolset="core",
-    schema={
-        # 查询当前会话可见的工具或工具集的元数据。
-        # 对工具名返回 {no_timeout, is_async, danger_level, toolset}；
-        # 对工具集名返回该 toolset 下可见工具名列表。
-        # 仅返回当前 loop 上下文下实际可调用的工具，不可见/不存在的名称按单条 error 返回。
-        # 前置条件：无。
-        # 调用效果：无副作用，纯查询。
-        # 返回格式：{ results: { <name>: <metadata dict | error dict>, ... } }
-        # 典型场景：了解工具能力边界；排查工具可见性；查看工具集成员。
-        # 注意：子 Agent / Colloquy / 多 Agent 等不同 loop 上下文下可见集不同。
-        "description": """Show metadata for tools or toolsets visible in the current session.
+_SHOW_TOOL_SCHEMA = {
+    # 查询当前会话可见的工具或工具集的元数据。
+    # 对工具名返回 {no_timeout, is_async, danger_level, toolset}；
+    # 对工具集名返回该 toolset 下可见工具名列表。
+    # 仅返回当前 loop 上下文下实际可调用的工具，不可见/不存在的名称按单条 error 返回。
+    # 前置条件：无。
+    # 调用效果：无副作用，纯查询。
+    # 返回格式：{ results: { <name>: <metadata dict | error dict>, ... } }
+    # 典型场景：了解工具能力边界；排查工具可见性；查看工具集成员。
+    # 注意：子 Agent / Colloquy / 多 Agent 等不同 loop 上下文下可见集不同。
+    "description": """Show metadata for tools or toolsets visible in the current session.
 
 Given a list of names, each name is resolved first as a tool (returning `{no_timeout, is_async, danger_level, toolset}`), then as a toolset (returning the list of visible tool names it contains). Only tools actually callable in the current loop context are reported; invisible or unknown names return a per-item error without blocking the rest.
 
@@ -161,19 +169,32 @@ No side effects, read-only query.
 
 ## Note
 The visible set depends on the current loop type (parent / sub-agent / colloquy / multi-agent). A name that is registered but not visible in the current context is treated as unknown — its existence is not leaked.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    # 要查询的名称列表，元素可为工具名或工具集名。
-                    "description": "List of names to query. Each element may be a tool name or a toolset name.",
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string"},
+                # 要查询的名称列表，元素可为工具名或工具集名。
+                "description": "List of names to query. Each element may be a tool name or a toolset name.",
             },
-            "required": ["names"],
         },
+        "required": ["names"],
     },
-    handler=_handle_show_tool,
-    danger_level=ToolDangerLevel.safe,
-)
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
+    """Register the ShowTool tool."""
+    del ui_events  # ShowTool has no UI event handler
+    registry.register(
+        name="ShowTool",
+        toolset="core",
+        schema=_SHOW_TOOL_SCHEMA,
+        handler=_handle_show_tool,
+        danger_level=ToolDangerLevel.safe,
+    )

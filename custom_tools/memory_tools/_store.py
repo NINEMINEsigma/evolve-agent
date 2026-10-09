@@ -44,11 +44,13 @@ def get_parent_ids(session_id: str) -> list[str]:
 
     任何异常或不可用时返回空列表。
     """
+    from gateway.session_manager import SessionManager
     from system.application import Application
-    app = Application.current()
-    if app.session_manager is None:
+    try:
+        sm = Application.current().get_system(SessionManager)
+    except Exception:
         return []
-    info = app.session_manager.get(session_id)
+    info = sm.get(session_id)
     if info is None:
         return []
     return list(info.parents)

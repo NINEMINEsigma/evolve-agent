@@ -40,6 +40,7 @@ from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
 from entry.tool_executor import ToolExecutor, _interrupted_result
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
 from entry.agent_support.multimodal import preprocess_multimodal_blocks
 import asyncio
 
@@ -230,6 +231,8 @@ class MultiAgentWorker:
         self._turn_counter.value = 0
         self._collected_metrics = []
         while self._turn_counter.value < MAX_TOOL_TURNS:
+            from system.runtime import RuntimeSystem
+            self._loop.loop.app.get_system(RuntimeSystem).require_running()
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
@@ -292,6 +295,8 @@ class MultiAgentWorker:
                 )
                 raise
             except Exception as exc:
+                if requires_lifecycle_propagation(exc):
+                    raise
                 logger.exception(
                     "LLM error for agent=%s: %s",
                     self.character_name, exc,
@@ -417,7 +422,7 @@ class MultiAgentWorker:
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
-                        tool_msg = await self._tool_executor.execute(
+                        prepared = await self._tool_executor.execute(
                             tc, self._loop.loop.session_id,
                             round_id=self._round_id,
                             character_name=self.character_name,
@@ -425,9 +430,11 @@ class MultiAgentWorker:
                             activity_id=self._activity_id,
                         )
 
-                        # 写入共享 History
-                        tool_result_index = self._loop.loop.history.add_message(tool_msg)
-                        self._loop.loop.save_history(self._loop.loop.session_id)
+                        # 先保存共享History及预订，再发送通知。
+                        tool_msg = prepared.message
+                        tool_result_index = self._loop.loop.store_tool_result(prepared)
+                        from abstract.tools.ui_event_router import UIEventRouter
+                        await prepared.emit(self._sink, self._loop.loop.app.get_system(UIEventRouter))
                         await emit_tool_card_result_link(tool_msg)
 
                         # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
@@ -459,7 +466,9 @@ class MultiAgentWorker:
                         self._loop.loop.save_history(self._loop.loop.session_id)
                         await emit_tool_card_result_link(tool_msg)
                     raise
-                except Exception:
+                except Exception as error:
+                    if requires_lifecycle_propagation(error):
+                        raise
                     # 普通异常补齐未执行的 tool_calls 后返回既有降级结果。
                     logger.exception(
                         "Worker tool loop failed | session=%s character=%s turn=%d",

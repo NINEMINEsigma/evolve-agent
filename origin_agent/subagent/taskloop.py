@@ -2,7 +2,7 @@
 
 继承 ``SubAgentLoop``，覆写终止行为：
 - LLM 产出纯文本回复时立即终止（不等待 ``_wake_event``）
-- 达到 ``MAX_TOOL_TURNS`` 上限时终止并通知 outbox
+- 达到 ``MAX_TOOL_TURNS`` 上限时终止并登记反馈
 - 无系统提示词
 - 无持久化、无历史保存
 """
@@ -13,7 +13,7 @@ import json
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import registry as tool_registry
+from abstract.tools.registry import ToolRegistry
 from entity.puretype import LLMResponse, ToolAvailability, ToolDangerLevel
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME
 from entity.messages import (
@@ -24,8 +24,12 @@ from entity.messages import (
 )
 from entity.puretype import Role
 from subagent.context import SubRuntimeContext
+from entry.tool_post_dispatch import PreparedToolResult
+from abstract.tools.ui_event_router import UIEventRouter
+from entry.base_agent_loop import UserMessage
 from subagent.loop import SubAgentLoop, format_user_message
 from entry.tool_executor import _interrupted_result
+from system.lifecycle import requires_lifecycle_propagation
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +40,7 @@ class TaskAgentLoop(SubAgentLoop):
     与 ``SubAgentLoop`` 的核心差异：
     - 无系统提示词（``_build_system_prompt`` 返回空列表）
     - LLM 产出纯文本时设 ``_completed=True`` 并 return（不 await ``_wake_event``）
-    - 达到 ``MAX_TOOL_TURNS`` 时设 ``_completed=True`` 并通知 outbox
+    - 达到 ``MAX_TOOL_TURNS`` 时设 ``_completed=True`` 并登记反馈
     """
 
     def _build_system_prompt(self) -> list[str]:
@@ -50,6 +54,8 @@ class TaskAgentLoop(SubAgentLoop):
         """检查工具是否满足临时Agent的完整授权交集。"""
         if name not in self._allowed_tool_names:
             return False
+        from system.application import Application
+        tool_registry = Application.current().get_system(ToolRegistry)
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
@@ -73,24 +79,21 @@ class TaskAgentLoop(SubAgentLoop):
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """taskagent 主循环 — 纯文本回复即终止。"""
         from system.application import Application
-        _cron = Application.current().cron_router
-        if _cron is not None:
-            _cron.register(self.session_id, self)
+        from component.cron_router import CronRouter
+        _cron = Application.current().get_system(CronRouter)
+        _cron.register(self.session_id, self)
         active_round_id = self.begin_agentspace_round(self.current_character_agent)
         try:
-            # 注入初始用户消息
+            # 初始 prompt 也先进入可追踪 Inbox；临时Agent关闭时只做内存交接。
             initial_character_name = (
                 USER_CHARACTER_NAME if message_type == "user_direct"
                 else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
             )
-            self._history.add_message(
-                CharacterConversationMessage(
-                    role=Role.USER,
-                    character_name=initial_character_name,
-                    content=format_user_message(user_name, message_type, initial_prompt),
-                    visible_characters=[self.current_character_agent],
-                )
-            )
+            self._inbox.put(UserMessage(
+                content=format_user_message(user_name, message_type, initial_prompt),
+                character_name=initial_character_name,
+            ))
+            self._maybe_inject_inbox()
 
             turn: int = 0
             while turn < self._max_turns:
@@ -121,8 +124,7 @@ class TaskAgentLoop(SubAgentLoop):
                         reasoning=reasoning_text,
                     )
                     self._history.add_message(assistant_msg)
-                    self._outbox.append(text)
-                    self._outbox_event.set()
+                    self.append_feedback(text)
                     self._emit("assistant", content=text, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
                     self._completed = True
@@ -157,7 +159,7 @@ class TaskAgentLoop(SubAgentLoop):
 
                 # 处理工具调用：完整授权交集内直接执行，其余直接拒绝且不进入审批。
                 try:
-                    _executed_tool_msgs: list[ToolResultMessage] = []
+                    _executed_tool_msgs: list[PreparedToolResult] = []
                     for i, tc in enumerate(resp.tool_calls):
                         if self._cancel_event.is_set():
                             for remaining in resp.tool_calls[i:]:
@@ -174,9 +176,9 @@ class TaskAgentLoop(SubAgentLoop):
                         )
 
                         if self._is_task_tool_authorized(tc.name):
-                            tool_msg = await self._execute_approved_tool(tc)
+                            prepared = await self._execute_approved_tool(tc)
                         else:
-                            tool_msg = self._make_tool_msg(
+                            prepared = self._make_tool_msg(
                                 tc.id,
                                 {
                                     "success": False,
@@ -189,20 +191,26 @@ class TaskAgentLoop(SubAgentLoop):
                                 },
                             )
 
+                        self.store_tool_result(prepared)
+                        await prepared.emit(
+                            self.get_sink(),
+                            self.app.get_system(UIEventRouter),
+                        )
+                        tool_msg = prepared.message
                         from entry.agent_support.multimodal import content_to_text
                         raw_content = content_to_text(tool_msg.content)
                         self._maybe_record_tool_failure(tc.name, raw_content)
 
                         messages.append(tool_msg)
-                        self._history.add_message(tool_msg)
-                        _executed_tool_msgs.append(tool_msg)
+                        _executed_tool_msgs.append(prepared)
 
                     # 延迟注入 follow_up 消息
                     for tm in _executed_tool_msgs:
-                        if tm._follow_up_messages:
-                            for fu_msg in tm._follow_up_messages:
+                        if tm.message._follow_up_messages:
+                            for fu_msg in tm.message._follow_up_messages:
                                 self._history.add_message(fu_msg)
-                except BaseException:
+                except BaseException as exc:
+                    must_propagate = requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
                     logger.exception(
                         "TaskAgent tool loop failed | session=%s", self.session_id,
                     )
@@ -218,14 +226,15 @@ class TaskAgentLoop(SubAgentLoop):
                         self._history.add_message(_interrupted_result(
                             tc, self.current_character_agent, "unexpected",
                         ))
+                    if must_propagate:
+                        raise
                     return
 
                 self._round_active = False
                 self._maybe_inject_inbox()
 
             # 达到 MAX_TOOL_TURNS 上限
-            self._outbox.append("[taskagent] Max tool turns reached.")
-            self._outbox_event.set()
+            self.append_feedback("[taskagent] Max tool turns reached.")
             self._completed = True
             self._round_active = False
             logger.warning(
@@ -234,6 +243,8 @@ class TaskAgentLoop(SubAgentLoop):
             )
 
         except Exception as exc:
+            if requires_lifecycle_propagation(exc):
+                raise
             logger.exception("TaskAgentLoop error for session=%s: %s", self.session_id, exc)
         finally:
             self.end_agentspace_round(

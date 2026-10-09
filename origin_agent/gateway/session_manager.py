@@ -6,14 +6,32 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from component.approval.system import ApprovalSystem
+from component.cron_router import CronRouter
 from gateway.chat import SessionManager as ChatSessionManager
-from entity.puretype import Loop, LoopMeta, Role, SessionInfo, ClientInfo
+from entity.puretype import (
+    Loop, LoopMeta, Role, SessionInfo, ClientInfo, ShutdownInputReport,
+    QueuedMessage, SubAgentFeedbackDelivery,
+)
 from system.session_store import SessionStore
+from framework import AsyncSystem
+from abstract.tools.registry import ToolRegistry
+from abstract.tools.ui_event_router import UIEventRouter
+from entry.agent_sink import FrontendSink
+from system.runtime import RuntimeSystem
+from system.llm_profile_store import LLMProfileStore
+from system.session_metadata import SessionMetadataService
+from system.agentspace import AgentspaceService
+from system.shell_manager import ShellManager
+from system.modality_capability import ModalityCapabilitySystem
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS, SYSTEM_CHARACTER_NAME
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
@@ -22,7 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SessionManager:
+class SessionManager(AsyncSystem):
     """Session 生命周期管理 + ParentAgentLoop 映射。
 
     持有：
@@ -37,16 +55,45 @@ class SessionManager:
     - rotate_session(old_sid, new_sid)
     """
 
-    def __init__(self, store_path: str | None = None):
-        from system.application import Application
-
-        self._app = Application.current()
-        self._chat_sm = ChatSessionManager(store_path)
+    def __init__(self) -> None:
+        super().__init__(dependencies=(
+            RuntimeSystem, LLMProfileStore, SessionMetadataService, ApprovalSystem,
+            FrontendSink, ToolRegistry, UIEventRouter, CronRouter, AgentspaceService,
+            ShellManager, ModalityCapabilitySystem,
+        ))
+        self._chat_sm: ChatSessionManager
+        self._runtime: RuntimeSystem
         self._loops: dict[str, IMainSessionLoop] = {}
-        self._store_path: str | None = store_path
+        self._store_path: str | None = None
         self._client_infos: dict[str, ClientInfo] = {}
         self._deleting_sessions: set[str] = set()
         self._deleting_sessions_lock = threading.Lock()
+        self._inputs_frozen = False
+        self._retiring_loops: set[IMainSessionLoop] = set()
+        self._retirement_tasks: set[asyncio.Task[None]] = set()
+        self._stop_task: asyncio.Task[None] | None = None
+        self._discarded_loops: set[IMainSessionLoop] = set()
+
+    async def virtual_awake(self) -> None:
+        from system.application import Application
+        self._app = Application.current()
+        self._runtime = self.get_system(RuntimeSystem)
+        self._store_path = str(self._runtime.context.workspace / SESSIONS_DIR_NAME)
+        self._chat_sm = ChatSessionManager(self._store_path)
+        self.ensure_colloquy_session()
+
+    async def virtual_shotdown(self) -> None:
+        await self.stop_rounds()
+        if any(loop.loop.message_queue is not None and loop.loop.message_queue.pending_deliveries()
+               for loop in self._owned_loops() if loop not in self._discarded_loops):
+            raise LifecycleFailure("Session inputs were not committed before system removal")
+        self._loops.clear()
+        self._retiring_loops.clear()
+        self._discarded_loops.clear()
+        self._client_infos.clear()
+
+    def _owned_loops(self) -> tuple[IMainSessionLoop, ...]:
+        return tuple(dict.fromkeys((*self._loops.values(), *self._retiring_loops)))
 
     # -- 委托给底层 ChatSessionManager 的方法 --
 
@@ -93,7 +140,7 @@ class SessionManager:
             context, parent_sid=parent_sid, parents=parents,
             role=role, loop_meta=loop_meta,
         )
-        self._app.approval_mode_store.initialize_session(session_id)
+        self._app.get_system(ApprovalSystem).mode_store.initialize_session(session_id)
         return session_id
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
@@ -132,14 +179,14 @@ class SessionManager:
             parents=parents,
             session_id=session_id,
         )
-        self._app.approval_mode_store.initialize_session(new_session_id)
+        self._app.get_system(ApprovalSystem).mode_store.initialize_session(new_session_id)
         return new_session_id
 
     def remove(self, session_id: str) -> None:
         """从内存和磁盘移除 session（含目录）及审批模式缓存。"""
         self._chat_sm.remove(session_id)
         if not self._chat_sm.exists(session_id):
-            self._app.approval_mode_store.forget_session(session_id)
+            self._app.get_system(ApprovalSystem).mode_store.forget_session(session_id)
 
     def remove_from_index(self, session_id: str) -> None:
         """仅从索引移除 session，不删除磁盘目录。"""
@@ -174,15 +221,118 @@ class SessionManager:
         """返回所有活跃 loop 的 (session_id → IMainSessionLoop) 快照。"""
         return dict(self._loops)
 
+    def freeze_inputs(self) -> None:
+        self._inputs_frozen = True
+        for managed_loop in self._owned_loops():
+            managed_loop.loop.freeze_inputs()
+
+    def track_retiring_loop(self, loop: IMainSessionLoop) -> None:
+        self._retiring_loops.add(loop)
+
+    async def _stop_rounds(self) -> None:
+        loops = self._owned_loops()
+        for managed in loops:
+            managed.loop.interrupt()
+
+        async def stop_one(managed: IMainSessionLoop) -> None:
+            actions = [managed.stop_reply_tasks]
+            queue = managed.loop.message_queue
+            if queue is not None:
+                actions.append(queue.stop_processing)
+            await close_resources(tuple(actions))
+
+        async def wait_retirements() -> None:
+            tasks = tuple(self._retirement_tasks)
+            if tasks:
+                done, pending = await asyncio.wait(tasks, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+                failures = []
+                for task in done:
+                    if task.cancelled():
+                        failures.append(LifecycleFailure("Loop retirement task cancelled"))
+                    else:
+                        error = task.exception()
+                        if error is not None:
+                            failures.append(error)
+                if pending:
+                    failures.append(LifecycleFailure("Loop retirement tasks did not finish"))
+                if failures:
+                    raise BaseExceptionGroup("Loop retirement failed", failures)
+
+        await close_resources(tuple(lambda managed=managed: stop_one(managed) for managed in loops)
+                              + (wait_retirements,))
+
+    async def stop_rounds(self) -> None:
+        self.freeze_inputs()
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._stop_rounds(), name="main-session-stop")
+            self._stop_task.add_done_callback(self._observe_stop)
+        await asyncio.shield(self._stop_task)
+
+    def _observe_stop(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            self._runtime.record_failure(LifecycleFailure("Session shutdown coordination cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self._runtime.record_failure(error)
+
+    def accept_shutdown_feedback(
+        self, parent_session_id: str, items: list[SubAgentFeedbackDelivery],
+    ) -> None:
+        if not self._inputs_frozen or asyncio.get_running_loop() is not self._runtime.loop:
+            raise LifecycleFailure("Shutdown feedback requires the frozen owning loop")
+        managed = self._loops.get(parent_session_id)
+        if managed is None or self.is_session_deleting(parent_session_id) or not self.exists(parent_session_id):
+            return
+        queue = managed.loop.message_queue
+        if queue is None:
+            raise LifecycleFailure("Shutdown feedback requires a main input queue")
+        for item in items:
+            if item.delivered:
+                continue
+            queue.accept_shutdown_transfer(item.sequence, QueuedMessage(
+                content=item.text, character_name=SYSTEM_CHARACTER_NAME, source="subagent",
+            ))
+            item.delivered = True
+
+    async def flush_inputs(self) -> ShutdownInputReport:
+        # 串行刷新，禁止gather并发保存共享History的两个Loop。
+        await self.stop_rounds()
+        report = ShutdownInputReport()
+        loops = [managed for managed in self._owned_loops() if managed not in self._discarded_loops]
+        pending = []
+        for managed in loops:
+            queue = managed.loop.message_queue
+            if queue is not None:
+                pending.extend((item, managed) for item in queue.reserve_shutdown())
+        try:
+            for item, managed in sorted(pending, key=lambda pair: pair[0].sequence):
+                await managed.loop.flush_shutdown_inputs([item])
+        finally:
+            for item, managed in pending:
+                queue = managed.loop.message_queue
+                if queue is not None:
+                    queue.release_shutdown([item])
+        for managed in loops:
+            queue = managed.loop.message_queue
+            if queue is not None:
+                current = queue.shutdown_report()
+                report.accepted += current.accepted
+                report.appended += current.appended
+                report.persisted += current.persisted
+                report.ephemeral += current.ephemeral
+        return report
+
     def replace_idle_loops_using_profile(
         self,
         source_profile,
         replacement_profile,
     ) -> tuple[list[str], list[str]]:
         """只切换当前空闲且正在使用源 Profile 的主会话。"""
+        from system.llm_profile_store import LLMProfileStore
         switched: list[str] = []
         busy: list[str] = []
-        with self._app.profile_lock:
+        with self._app.get_system(LLMProfileStore).locked():
             for session_id, managed_loop in self._loops.items():
                 loop = managed_loop.loop
                 if loop.active_llm_profile is not source_profile:
@@ -190,12 +340,7 @@ class SessionManager:
                 if loop.is_processing():
                     busy.append(session_id)
                     continue
-                set_profile = getattr(loop, "set_profile", None)
-                if not callable(set_profile):
-                    raise RuntimeError(
-                        f"Loop {type(loop).__name__} cannot switch LLM Profile"
-                    )
-                set_profile(replacement_profile)
+                managed_loop.set_profile(replacement_profile)
                 switched.append(session_id)
         return switched, busy
 
@@ -213,6 +358,9 @@ class SessionManager:
         可能是 ParentAgentLoop 或 MultiAgentLoop），否则根据索引
         中的 loop_type 创建对应的 loop 实例。
         """
+        self._runtime.require_running()
+        if self._inputs_frozen:
+            raise ApplicationStoppingError("SessionManager no longer accepts loop creation")
         # 已有 loop 则复用（可能是 MultiAgentLoop，因 replace_loop 已替换）
         existing = self._loops.get(session_id)
         if existing is not None:
@@ -241,8 +389,7 @@ class SessionManager:
         self._loops[session_id] = loop
 
         # 注册到 CronRouter，使 cron 结果能投递到该 loop 的 inbox
-        if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, loop.loop)
+        self._app.get_system(CronRouter).register(session_id, loop.loop)
 
         return loop
 
@@ -253,12 +400,13 @@ class SessionManager:
         history_store_dir: Path | None = None,
     ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
-        from system.context import get_runtime_context
+        from system.runtime import RuntimeSystem
         from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
         from subagent.profile import CharacterProfileResolver
         from system.templates import get_templates_dir
-        from abstract.tools.registry import registry as tool_registry
+        from abstract.tools.registry import ToolRegistry
+        tool_registry = self._app.get_system(ToolRegistry)
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
         from system.session_store import SessionStore
         from component.multiagenttools.profile_builder import (
@@ -269,9 +417,12 @@ class SessionManager:
         info = self._chat_sm.get(session_id)
         agents_names: list[str] = (info.agents or []) if info else []
 
-        parent_ctx = get_runtime_context()
-        sandbox = self._app.sandbox
-        resolver = CharacterProfileResolver(sandbox, self._app.llm_profile_store)
+        parent_ctx = self._app.get_system(RuntimeSystem).context
+        from system.sandbox import Sandbox
+        from system.llm_profile_store import LLMProfileStore
+        sandbox = self._app.get_system(Sandbox)
+        profile_store = self._app.get_system(LLMProfileStore)
+        resolver = CharacterProfileResolver(sandbox, profile_store)
         profiles: dict[str, Any] = {}
         for character_profile in resolver.discover():
             if character_profile.error is not None or character_profile.name in profiles:
@@ -289,7 +440,7 @@ class SessionManager:
             ss = SessionStore(history_store_dir)
             profile_name = ss.read_active_profile_name(session_id)
             if profile_name is not None:
-                main_profile = self._app.llm_profile_store.resolve_profile_name(
+                main_profile = profile_store.resolve_profile_name(
                     profile_name,
                 )
 
@@ -338,8 +489,7 @@ class SessionManager:
             )
             loop.set_session_manager(self)
             self._loops[session_id] = loop
-            if self._app.cron_router is not None:
-                self._app.cron_router.register(session_id, loop)
+            self._app.get_system(CronRouter).register(session_id, loop)
             return loop
 
         # 读取 history.es
@@ -362,8 +512,7 @@ class SessionManager:
         )
         multi_loop.set_session_manager(self)
         self._loops[session_id] = multi_loop
-        if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, multi_loop)
+        self._app.get_system(CronRouter).register(session_id, multi_loop)
         return multi_loop
 
     def _create_colloquy_loop(
@@ -384,8 +533,7 @@ class SessionManager:
         loop.set_session_manager(self)
         self._loops[session_id] = loop
 
-        if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, loop.loop)
+        self._app.get_system(CronRouter).register(session_id, loop.loop)
 
         return loop
 
@@ -398,10 +546,11 @@ class SessionManager:
         loop = self._loops.pop(session_id, None)
         self._client_infos.pop(session_id, None)
         if loop is not None:
+            self.track_retiring_loop(loop)
+            self._discarded_loops.add(loop)
             loop.loop.interrupt()
             loop.loop.stop_message_queue()
-            if self._app.cron_router is not None:
-                self._app.cron_router.unregister(session_id)
+            self._app.get_system(CronRouter).unregister(session_id)
             logger.info("Session terminated: %s", session_id)
 
     async def delete_session_runtime(self, session_id: str) -> None:
@@ -410,6 +559,11 @@ class SessionManager:
         self._client_infos.pop(session_id, None)
         try:
             if loop is not None:
+                self.track_retiring_loop(loop)
+                self._discarded_loops.add(loop)
+                queue = loop.loop.message_queue
+                if queue is not None:
+                    await queue.stop_processing()
                 try:
                     result = await loop.request_interrupt(reason="delete")
                     logger.info(
@@ -426,8 +580,7 @@ class SessionManager:
         finally:
             if loop is not None:
                 loop.loop.stop_message_queue()
-            if self._app.cron_router is not None:
-                self._app.cron_router.unregister(session_id)
+            self._app.get_system(CronRouter).unregister(session_id)
         logger.info("Session runtime deleted | session=%s", session_id)
 
     async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
@@ -445,13 +598,30 @@ class SessionManager:
             logger.warning("Loop replace rejected for colloquy session | id=%s", session_id)
             return
 
-        old_loop = self._loops.pop(session_id, None)
+        self._runtime.require_running()
+        if self._inputs_frozen:
+            raise ApplicationStoppingError("Loop replacement has been closed")
+        old_loop = self._loops.get(session_id)
         if old_loop is not None:
+            old_queue = old_loop.loop.message_queue
+            new_queue = new_loop.loop.message_queue
+            if old_queue is None or new_queue is None:
+                raise LifecycleFailure("Main loop replacement requires both input queues")
+            if old_loop.loop.history is not new_loop.loop.history:
+                raise LifecycleFailure("Replacement loops must share the same History")
+            new_queue.hold_for_handoff()
+            self.track_retiring_loop(old_loop)
+            async def complete_handoff() -> None:
+                await old_loop.wait_reply_tasks()
+                await old_queue.transfer_after_round(new_queue)
+
+            handoff = asyncio.create_task(complete_handoff(), name=f"loop-handoff-{session_id}")
+            self._retirement_tasks.add(handoff)
+            handoff.add_done_callback(self._retirement_done)
             # 标记旧队列停止但不取消 consumer task——让当前 run_pending_round
             # 自然完成（含 tool_result 追加和 LLM 过渡回复）后再退出。
             old_loop.loop.mark_queue_stopped()
-            if self._app.cron_router is not None:
-                self._app.cron_router.unregister(session_id)
+            self._app.get_system(CronRouter).unregister(session_id)
             logger.info(
                 "Loop replaced for session=%s: %s → %s",
                 session_id,
@@ -468,8 +638,7 @@ class SessionManager:
         new_loop.loop.set_session_id(session_id)
         self._loops[session_id] = new_loop
 
-        if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, new_loop.loop)
+        self._app.get_system(CronRouter).register(session_id, new_loop.loop)
 
         # 更新索引中的 LoopMeta
         from entry.multi_agent_loop import MultiAgentLoop
@@ -478,45 +647,52 @@ class SessionManager:
             self._chat_sm.update_loop_type(session_id, Loop.multi, agents)
             # 通知前端 agents 列表已变更
             try:
-                sink = self._app.frontend_sink
-                if sink is not None:
-                    import json as _json
-                    ws = sink.get_ws(session_id)
-                    if ws is not None:
-                        await ws.send_text(_json.dumps({
-                            "type": "system",
-                            "session_id": session_id,
-                            "content": _json.dumps({"agents": agents}),
-                        }, ensure_ascii=False))
+                from entry.agent_sink import FrontendSink
+                sink = self._app.get_system(FrontendSink)
+                import json as _json
+                ws = sink.get_ws(session_id)
+                if ws is not None:
+                    await ws.send_text(_json.dumps({
+                        "type": "system",
+                        "session_id": session_id,
+                        "content": _json.dumps({"agents": agents}),
+                    }, ensure_ascii=False))
             except Exception:
                 logger.warning("Failed to push agents for session=%s", session_id, exc_info=True)
         else:
             self._chat_sm.update_loop_type(session_id, Loop.parent)
             # 通知前端 agents 列表已清空（退出多 Agent 模式）
             try:
-                sink = self._app.frontend_sink
-                if sink is not None:
-                    import json as _json
-                    ws = sink.get_ws(session_id)
-                    if ws is not None:
-                        await ws.send_text(_json.dumps({
-                            "type": "system",
-                            "session_id": session_id,
-                            "content": _json.dumps({"agents": []}),
-                        }, ensure_ascii=False))
+                from entry.agent_sink import FrontendSink
+                sink = self._app.get_system(FrontendSink)
+                import json as _json
+                ws = sink.get_ws(session_id)
+                if ws is not None:
+                    await ws.send_text(_json.dumps({
+                        "type": "system",
+                        "session_id": session_id,
+                        "content": _json.dumps({"agents": []}),
+                    }, ensure_ascii=False))
             except Exception:
                 logger.warning("Failed to push agents clear for session=%s", session_id, exc_info=True)
+
+    def _retirement_done(self, task: asyncio.Task[None]) -> None:
+        self._retirement_tasks.discard(task)
+        if task.cancelled():
+            self._runtime.record_failure(LifecycleFailure("Loop handoff was cancelled"))
+        else:
+            error = task.exception()
+            if error is not None:
+                self._runtime.record_failure(error)
 
     def rotate_session(self, old_sid: str, new_sid: str) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""
         loop = self._loops.pop(old_sid, None)
         if loop is not None:
-            if self._app.cron_router is not None:
-                self._app.cron_router.unregister(old_sid)
+            self._app.get_system(CronRouter).unregister(old_sid)
             loop.loop.set_session_id(new_sid)
             self._loops[new_sid] = loop
-            if self._app.cron_router is not None:
-                self._app.cron_router.register(new_sid, loop.loop)
+            self._app.get_system(CronRouter).register(new_sid, loop.loop)
             ci = self._client_infos.pop(old_sid, None)
             if ci is not None:
                 self._client_infos[new_sid] = ci

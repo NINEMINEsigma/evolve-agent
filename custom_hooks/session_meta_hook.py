@@ -7,7 +7,7 @@
 3. 父子会话簇（主链遍历 + 多父合并标注）
 4. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
 
-所有数据通过 Application.current().session_manager.get(sid) 获取 SessionInfo。
+所有数据通过 Application.current().get_system(SessionManager).get(sid) 获取 SessionInfo。
 """
 
 from __future__ import annotations
@@ -217,10 +217,14 @@ def _format_visual_resources(session_id: str) -> str:
     """格式化服务端解析的三项会话视觉资源状态。"""
     try:
         from system.application import Application
-        resources = Application.current().session_visual_resource_service.get_all_states(session_id)
+        from system.agentspace import AgentspaceService
+        resources = Application.current().get_system(AgentspaceService).visual_resources.get_all_states(session_id)
         payload = {}
-        for name in ("stage", "site", "chat_style"):
-            state = getattr(resources, name)
+        for name, state in (
+            ("stage", resources.stage),
+            ("site", resources.site),
+            ("chat_style", resources.chat_style),
+        ):
             payload[name] = {
                 "status": state.status.value,
                 "source_path": state.source_path,
@@ -240,7 +244,8 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         from system.application import Application
         from entity.constant import COLLOQUY_SESSION_ID
 
-        sm = Application.current().session_manager
+        from gateway.session_manager import SessionManager
+        sm = Application.current().get_system(SessionManager)
         info = sm.get(session_id)
         if info is None:
             return ""

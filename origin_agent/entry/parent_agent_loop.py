@@ -18,10 +18,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, TYPE_CHECKING
 
-from abstract.tools.registry import registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
 from entity.puretype import (
+    InputDelivery,
     LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord,
     MessageContent, LLMProfile, MessageMetrics, QueuedMessage, HistoryRowLink,
     SessionHistoryRowKind, MainSessionActivitySource, MainSessionActivityPhase,
@@ -29,6 +29,7 @@ from entity.puretype import (
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
+    ApplicationState,
     LOG_PREVIEW_CHARS,
     MAX_TOOL_TURNS,
     MAIN_AGENT_CHARACTER_NAME,
@@ -64,11 +65,9 @@ from entry.agent_support.multimodal import (
     summarize_message_for_log,
     preprocess_multimodal_blocks,
 )
-from system.modality_capability import (
-    ensure_modality_capability,
-)
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
 from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
@@ -124,11 +123,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if self._session_store is not None:
             restored_name = self._session_store.read_active_profile_name(session_id)
             if restored_name is not None:
-                restored_profile = app.llm_profile_store.resolve_profile_name(restored_name)
+                from system.llm_profile_store import LLMProfileStore
+                restored_profile = app.get_system(LLMProfileStore).resolve_profile_name(restored_name)
                 if restored_profile is not None:
+                    from system.runtime import RuntimeSystem
                     self._llm = create_llm_client(
                         restored_profile.llm_client_name,
-                        app.runtime_context,
+                        self.app.get_system(RuntimeSystem).context,
                         restored_profile,
                     )
                     self._active_llm_profile = restored_profile
@@ -163,8 +164,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # NOTE: _processing 已上移至 BaseAgentLoop.__init__，is_processing() 由基类提供
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
-        # -- 子 Agent 编排器（由 server 层注入） --
-        self.subagent_orchestrator: Any = None
+        # 子Agent编排器由Application的SubAgentOrchestrator System持有。
 
     # ========================================================================
     # 抽象方法实现
@@ -182,7 +182,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._llm
 
     def _get_context(self) -> RuntimeContext:
-        return self.app.runtime_context
+        from system.runtime import RuntimeSystem
+        return self.app.get_system(RuntimeSystem).context
 
     def get_sink(self) -> AgentSink:
         return self._frontend_sink
@@ -211,14 +212,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
+        from system.runtime import RuntimeSystem
+        from system.sandbox import Sandbox
         prompts = build_agent_system_prompt(
-            self.app.runtime_context,
+            self.app.get_system(RuntimeSystem).context,
             self._collect_skill_prompts(),
             profile=self._active_llm_profile,
             session_id=self.session_id,
             loaded_toolsets=self._loaded_toolsets,
         )
-        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.sandbox)
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
         if dynamic_spaces_block:
             prompts.append(dynamic_spaces_block)
         site_block = build_session_site_block(self.session_id, owner="self")
@@ -323,7 +326,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 "Received user message | session=%s content=%s",
                 sid, summarize_message_for_log(user_message),
             )
-            async with self._process_lock:
+            async with self.reply_scope():
                 current_task = asyncio.current_task()
                 self.register_round_task(current_task)
                 self._processing = True
@@ -383,7 +386,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self.append_system_status(err_text, session_id=sid)
                 return err_text
 
-            async with self._process_lock:
+            async with self.reply_scope():
                 current_task = asyncio.current_task()
                 self.register_round_task(current_task)
                 self._processing = True
@@ -441,6 +444,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
         try:
             while turn.value < _MAX_TOOL_TURNS:
+                from system.runtime import RuntimeSystem
+                if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                    return ""
                 if self._cancel_event.is_set():
                     # 取消事件检查点：只写一次系统状态并结束当前工具循环。
                     self.append_system_status("已中断", session_id=sid)
@@ -498,6 +504,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
                     return partial_content or ""
                 except Exception as llm_exc:
+                    if requires_lifecycle_propagation(llm_exc):
+                        raise
                     logger.exception("LLM call failed for session=%s", sid)
                     # NOTE: D1——失败时保留 user 消息（不再移除），错误回复持久化为
                     # assistant 消息。前后端状态一致，重新生成自然命中刚失败的消息。
@@ -612,32 +620,30 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
-                        tool_msg = await self._tool_executor.execute(
+                        prepared = await self._tool_executor.execute(
                             tc, sid,
                             round_id=round_id,
                             character_name=self.current_character_agent,
                             llm_profile=self.active_llm_profile,
                             activity_id=activity_id,
                         )
+                        tool_msg = prepared.message
+                        tool_result_index = self.store_tool_result(prepared)
                         messages.append(tool_msg)
-                        tool_result_index = self._history.add_message(tool_msg)
-                        self.save_history(sid)
+                        from abstract.tools.ui_event_router import UIEventRouter
+                        await prepared.emit(self._frontend_sink, self.app.get_system(UIEventRouter))
                         await emit_tool_card_result_link(tool_msg)
                         await self._push_usage_update(sid)
                         _executed_tool_msgs.append(tool_msg)
 
-                        if tc.name == "EvolveCode":
-                            try:
-                                content_text = content_to_text(tool_msg.content)
-                                parsed: Any = json.loads(content_text)
-                                if parsed.get("evolved"):
-                                    self._append(
-                                        sid, Role.ASSISTANT,
-                                        "Evolution complete, restarting to apply new code...",
-                                    )
-                                    return "Evolution complete, restarting to apply new code..."
-                            except (json.JSONDecodeError, KeyError, TypeError):
-                                pass
+                        # 进化关闭由 store_tool_result 在严格保存后经
+                        # RuntimeSystem 请求；此处不再解析结果文本。
+                        if prepared.evolution_requested:
+                            self._append(
+                                sid, Role.ASSISTANT,
+                                "Evolution complete, restarting to apply new code...",
+                            )
+                            return "Evolution complete, restarting to apply new code..."
 
                     # 延迟注入 follow_up 消息（当前轮所有工具调用完成后）
                     for tm in _executed_tool_msgs:
@@ -665,7 +671,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         await emit_tool_card_result_link(tool_msg)
                     self.append_system_status("已中断", session_id=sid)
                     raise
-                except Exception:
+                except Exception as error:
+                    if requires_lifecycle_propagation(error):
+                        raise
                     # 非取消异常同样补齐 tool_calls，再按既有错误路径降级。
                     logger.exception("Tool loop failed for session=%s", sid)
                     _assistant_ids = {t.id for t in resp.tool_calls}
@@ -776,62 +784,31 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def get_result_field_injector(self) -> "ResultFieldInjector | None":
         """SP-4：返回队列的链中注入回调。"""
-        return self._message_queue.drain_injected
+        return self._message_queue.new_tool_reservation()
 
-    async def _append_queued_messages(self, items: list[QueuedMessage]) -> None:
-        """队列消息落历史 + 回显：保序、原生块。
+    def build_queued_message(self, item: QueuedMessage) -> CharacterConversationMessage:
+        content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
+        hooks, fixator = self._collect_hooks_context() if item.source == "ws" else (None, None)
+        return CharacterConversationMessage(
+            role=Role.USER, character_name=item.character_name, content=content,
+            visible_characters=[self.current_character_agent],
+            message_suffix=fixator or None, dynamic_message_suffix=hooks or None,
+        )
 
-        SP-5 bugfix：回显从 push 移到此处（空闲消费时回显，链中注入不回显）。
-        SP-5 D1/R7：仅 source == "ws" 时收集 hooks 上下文（message_suffix /
-        dynamic_message_suffix），与 append_user_message 同源；其余来源
-        （cron/dynamic-endpoint/subagent）不设 suffix——属切队列后的有意行为变更。
-        """
-        for item in items:
-            content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
-            message_suffix: str | None = None
-            dynamic_message_suffix: str | None = None
-            if item.source == "ws":
-                hooks_context, fixator_context = self._collect_hooks_context()
-                dynamic_parts: list[str] = []
-                if hooks_context:
-                    dynamic_parts.append(hooks_context)
-                dynamic_message_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
-                message_suffix = fixator_context or None
-            message = CharacterConversationMessage(
-                role=Role.USER,
-                character_name=item.character_name,
-                content=content,
-                visible_characters=[self.current_character_agent],
-                message_suffix=message_suffix,
-                dynamic_message_suffix=dynamic_message_suffix,
-            )
-            index = self._history.add_message(message)
-            self.save_history(self.session_id)
-            # SP-5 bugfix：空闲消费时回显（push 不再回显）
-            await self._frontend_sink.emit_user_message(
-                self.session_id,
-                item.content,
-                item.character_name,
-                index,
-                client_message_id=item.client_message_id,
-                message_suffix=message_suffix,
-                dynamic_message_suffix=dynamic_message_suffix,
-            )
-
-    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+    async def run_pending_round(self, items: list[InputDelivery[QueuedMessage]]) -> str | None:
         """由会话消息队列驱动一轮回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
 
         activity_id = self.ensure_main_session_activity(
-            activity_source_for_items(items),
+            activity_source_for_items([item.payload for item in items]),
             character_name=self.current_character_agent,
         )
         current_task = asyncio.current_task()
         registered = False
         reply: str | None = None
         try:
-            async with self._process_lock:
+            async with self.reply_scope():
                 self.register_round_task(current_task)
                 registered = True
                 self._processing = True
@@ -842,6 +819,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 )
                 self._event_loop = asyncio.get_running_loop()
                 try:
+                    from system.runtime import RuntimeSystem
+                    if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                        return None
                     sid = self.session_id
                     queue = self._message_queue
                     if self._lifecycle.is_context_over_limit():
@@ -856,7 +836,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                             if not isinstance(exc, SessionMetadataError):
                                 raise
-                            await self._append_queued_messages(items)
+                            await self._commit_input_deliveries(items)
                             await self.report_context_limit_rotation_blocked(
                                 sid,
                                 exc,
@@ -867,13 +847,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     interrupted: bool = self._cancel_event.is_set()
                     self._cancel_event.clear()
                     self._disgust_event.clear()
-                    await self._append_queued_messages(items)
-                    should_run: bool = not rotated and not interrupted
-
+                    await self._commit_input_deliveries(items)
+                    from system.runtime import RuntimeSystem
+                    should_run = (
+                        not rotated and not interrupted
+                        and self.app.get_system(RuntimeSystem).state is ApplicationState.RUNNING
+                    )
                     # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置。
                     selected_name = next(
-                        (m.llm_profile_name for m in reversed(items)
-                         if m.llm_profile_name is not None),
+                        (m.payload.llm_profile_name for m in reversed(items)
+                         if m.payload.llm_profile_name is not None),
                         None,
                     )
                     if should_run and self._llm is None and selected_name is None:
@@ -883,7 +866,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         should_run = False
                     if should_run and selected_name is not None:
                         try:
-                            profile = self.app.llm_profile_store.resolve_profile_name(
+                            from system.llm_profile_store import LLMProfileStore
+                            profile = self.app.get_system(LLMProfileStore).resolve_profile_name(
                                 selected_name,
                             )
                             self.set_profile(profile)
@@ -1005,9 +989,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if profile is None:
             client = None
         else:
+            from system.runtime import RuntimeSystem
             client = create_llm_client(
                 profile.llm_client_name,
-                self.app.runtime_context,
+                self.app.get_system(RuntimeSystem).context,
                 profile,
             )
         self._llm = client

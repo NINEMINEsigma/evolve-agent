@@ -20,11 +20,13 @@ from entity.messages import (
     CharacterConversationMessage,
 )
 from entity.puretype import (
+    InputDelivery,
     Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord,
     MessageContent, LLMProfile, QueuedMessage, SessionTerminationResult,
     MainSessionActivitySource, MainSessionActivityPhase,
 )
 from entity.constant import (
+    ApplicationState,
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
@@ -34,6 +36,7 @@ from entity.constant import (
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
+from system.lifecycle import ApplicationStoppingError, requires_lifecycle_propagation
 from system.prompt import (
     build_dynamic_sandbox_spaces_block,
     build_session_chat_style_block,
@@ -216,6 +219,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     async def _rotate_session_for_context_limit(self) -> str:
         """摘要成功后创建并切换到多Agent延续会话。"""
         from entry.session_manager import terminate_and_rotate_session
+        from system.session_metadata import SessionMetadataService
 
         old_sid = self.session_id
         sm = self.session_manager
@@ -226,7 +230,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             session_id=old_sid,
             session_store=self._session_store,
             session_manager=sm,
-            metadata_service=self.app.session_metadata_service,
+            metadata_service=self.app.get_system(SessionMetadataService),
             loop_meta=LoopMeta(
                 loopType=Loop.multi,
                 agents=list(self._agents.keys()),
@@ -303,9 +307,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         client = None
         if profile is not None:
             from abstract.llm.loader import create_llm_client
+            from system.runtime import RuntimeSystem
             client = create_llm_client(
                 profile.llm_client_name,
-                self.app.runtime_context,
+                self.app.get_system(RuntimeSystem).context,
                 profile,
             )
             main_agent.config.base_url = profile.base_url
@@ -320,12 +325,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._active_llm_profile = profile
 
         from component.multiagenttools.profile_builder import _resolve_main_agent_prompts
+        from system.runtime import RuntimeSystem
         common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
+        from system.sandbox import Sandbox
         main_agent.system_prompts = _resolve_main_agent_prompts(
             MAIN_AGENT_CHARACTER_NAME,
             main_agent.config,
-            self.app.runtime_context,
-            self.app.sandbox,
+            self.app.get_system(RuntimeSystem).context,
+            self.app.get_system(Sandbox),
             profile=profile,
             session_id=self.session_id,
         ) + common_prompt
@@ -349,7 +356,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         logger.info("Terminating multi-agent session | session=%s", self.session_id)
         self.interrupt()
         warnings: list[str] = []
-        service = self.app.session_metadata_service
+        from system.session_metadata import SessionMetadataService
+        service = self.app.get_system(SessionMetadataService)
 
         try:
             await service.ensure_summary(self.session_id)
@@ -385,7 +393,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         self.session_manager.archive(self.session_id, continuation_sid=None)
         try:
-            await self.app.shell_manager.stop_session(self.session_id)
+            from system.shell_manager import ShellManager
+            await self.app.get_system(ShellManager).stop_session(self.session_id)
         except Exception as exc:
             logger.exception(
                 "Failed to stop Shell sessions during multi-agent termination | session=%s",
@@ -415,7 +424,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._disgust_event.clear()
         active_id = activity_id or self.ensure_main_session_activity(activity_source)
         try:
-            async with self._process_lock:
+            async with self.reply_scope():
                 current_task = asyncio.current_task()
                 self.register_round_task(current_task)
                 self._processing = True
@@ -491,66 +500,33 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     def get_result_field_injector(self) -> "ResultFieldInjector | None":
         """SP-4：返回队列的链中注入回调。"""
-        return self._message_queue.drain_injected
+        return self._message_queue.new_tool_reservation()
 
-    async def _append_queued_messages(self, items: list[QueuedMessage]) -> None:
-        """队列消息落历史 + 回显：保序、原生块。
+    def build_queued_message(self, item: QueuedMessage) -> CharacterConversationMessage:
+        content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
+        visible = item.visible_characters or list(self._agent_names)
+        if visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+            visible = list(self._agent_names)
+        response = item.response_characters
+        if response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+            response = list(self._agent_names)
+        hooks, fixator = self._collect_hooks_context() if item.source == "ws" else (None, None)
+        return CharacterConversationMessage(
+            role=Role.USER, character_name=item.character_name, content=content,
+            visible_characters=visible, response_characters=response,
+            message_suffix=fixator or None, dynamic_message_suffix=hooks or None,
+        )
 
-        SP-5 bugfix：回显从 push 移到此处（空闲消费时回显，链中注入不回显）。
-        SP-5 D1/R3：visible/response 由 QueuedMessage 携带（None → 全体），
-        [ALL_AGENTS_CHARACTER_REF_NAME] 简写展开为全体；source=="ws" 时收集 hooks。
-        """
-        for item in items:
-            content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
-            visible = item.visible_characters if item.visible_characters else list(self._agent_names)
-            if visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                visible = list(self._agent_names)
-            response = item.response_characters
-            if response == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                response = list(self._agent_names)
-            message_suffix: str | None = None
-            dynamic_message_suffix: str | None = None
-            if item.source == "ws":
-                hooks_context, fixator_context = self._collect_hooks_context()
-                dynamic_parts: list[str] = []
-                if hooks_context:
-                    dynamic_parts.append(hooks_context)
-                dynamic_message_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
-                message_suffix = fixator_context or None
-            message = CharacterConversationMessage(
-                role=Role.USER,
-                character_name=item.character_name,
-                content=content,
-                visible_characters=visible,
-                response_characters=response,
-                message_suffix=message_suffix,
-                dynamic_message_suffix=dynamic_message_suffix,
-            )
-            index = self._history.add_message(message)
-            self.save_history(self.session_id)
-            # SP-5 bugfix：空闲消费时回显（push 不再回显）
-            await self._sink.emit_user_message(
-                self.session_id,
-                item.content,
-                item.character_name,
-                index,
-                visible_characters=visible,
-                response_characters=response,
-                client_message_id=item.client_message_id,
-                message_suffix=message_suffix,
-                dynamic_message_suffix=dynamic_message_suffix,
-            )
-
-    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+    async def run_pending_round(self, items: list[InputDelivery[QueuedMessage]]) -> str | None:
         """由会话消息队列驱动一轮多Agent回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
 
-        activity_id = self.ensure_main_session_activity(activity_source_for_items(items))
+        activity_id = self.ensure_main_session_activity(activity_source_for_items([item.payload for item in items]))
         current_task = asyncio.current_task()
         registered = False
         try:
-            async with self._process_lock:
+            async with self.reply_scope():
                 self.register_round_task(current_task)
                 registered = True
                 self._processing = True
@@ -560,6 +536,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     stream_id=None,
                 )
                 try:
+                    from system.runtime import RuntimeSystem
+                    if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                        return None
                     sid = self.session_id
                     queue = self._message_queue
                     rotated: bool = queue.last_known_sid != sid
@@ -568,17 +547,22 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     self._disgust_event.clear()
                     self._history.remove_unpaired_tool_calls()
                     self.save_history(self.session_id)
-                    await self._append_queued_messages(items)
-                    should_run = not rotated and not interrupted
-
+                    await self._commit_input_deliveries(items)
+                    from system.runtime import RuntimeSystem
+                    should_run = (
+                        not rotated
+                        and not interrupted
+                        and self.app.get_system(RuntimeSystem).state is ApplicationState.RUNNING
+                    )
                     selected_name = next(
-                        (m.llm_profile_name for m in reversed(items)
-                         if m.llm_profile_name is not None),
+                        (m.payload.llm_profile_name for m in reversed(items)
+                         if m.payload.llm_profile_name is not None),
                         None,
                     )
-                    if selected_name is not None:
+                    if should_run and selected_name is not None:
                         try:
-                            selected = self.app.llm_profile_store.resolve_profile_name(
+                            from system.llm_profile_store import LLMProfileStore
+                            selected = self.app.get_system(LLMProfileStore).resolve_profile_name(
                                 selected_name,
                             )
                             self.set_profile(selected)
@@ -597,8 +581,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
                     if should_run:
                         selected_response = next(
-                            (m.response_characters for m in reversed(items)
-                             if m.response_characters is not None),
+                            (m.payload.response_characters for m in reversed(items)
+                             if m.payload.response_characters is not None),
                             None,
                         )
                         cascade_chars = (
@@ -641,7 +625,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._disgust_event.clear()
         activity_id = self.ensure_main_session_activity(MainSessionActivitySource.resume)
         try:
-            async with self._process_lock:
+            async with self.reply_scope():
                 current_task = asyncio.current_task()
                 self.register_round_task(current_task)
                 self._processing = True
@@ -676,10 +660,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         from subagent.profile import CharacterProfileResolver
         from system.application import Application
+        from system.sandbox import Sandbox
+        from system.llm_profile_store import LLMProfileStore
 
         resolver = CharacterProfileResolver(
-            Application.current().sandbox,
-            Application.current().llm_profile_store,
+            Application.current().get_system(Sandbox),
+            Application.current().get_system(LLMProfileStore),
         )
         available_names = {
             profile.name
@@ -753,6 +739,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         )
 
         while queue and step < max_steps:
+            from system.runtime import RuntimeSystem
+            if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                return
             char = queue.popleft()
 
             # 中断检查：用户请求停止时立即退出级联
@@ -788,7 +777,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     self.session_id, char, step,
                 )
                 raise
+            except ApplicationStoppingError:
+                return
             except Exception as exc:
+                if requires_lifecycle_propagation(exc):
+                    raise
                 logger.exception(
                     "Agent worker failed, cascade interrupted | session=%s character=%s step=%d",
                     self.session_id, char, step,
@@ -941,6 +934,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         委托给 MultiAgentWorker 执行完整的 LLM → tool_calls → tool_result → 循环。
         """
         profile = self._agents[character_name]
+        from system.sandbox import Sandbox
         llm_client = profile.llm_client
         if llm_client is None:
             raise RuntimeError(
@@ -972,7 +966,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
             if chat_style_block:
                 system_prompts = system_prompts + [chat_style_block]
-        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.sandbox)
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
         if dynamic_spaces_block:
             system_prompts = system_prompts + [dynamic_spaces_block]
         logger.info(
