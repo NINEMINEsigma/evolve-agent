@@ -50,6 +50,7 @@ from abstract.tools.ui_event_router import UIEventRouter
 from component.cron_router import CronRouter
 from system.agentspace import AgentspaceService
 from system.sandbox import Sandbox
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from system.llm_profile_store import LLMProfileStore
 from system.session_metadata import SessionMetadataService
 from system.shell_manager import ShellManager
