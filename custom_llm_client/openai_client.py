@@ -22,7 +22,7 @@ import httpcore
 import httpx
 import openai
 
-from abstract.llm.client import BaseLLMClient
+from abstract.llm.client import BaseLLMClient, LLMAPIStatusError
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
@@ -161,9 +161,10 @@ class OpenAILLMClient(BaseLLMClient):
                 else:
                     logger.error("LLM transient error exhausted all %d retries: %s", LLM_RETRY_COUNT, exc)
                     raise exc
-            except Exception:
-                # 非 transient 异常（如认证失败、BadRequestError 等）立即抛出
-                raise
+            except Exception as exc:
+                # 非 transient 异常（如认证失败、BadRequestError 等）立即抛出；
+                # SDK 状态错误归一化为 abstract 层异常，上层不依赖 SDK 异常族。
+                raise _convert_status_error(exc) from exc
         # 所有代码路径都已 return 或 raise，此处不可达（保留以安抚类型检查器）
         raise AssertionError("unreachable")
 
@@ -405,6 +406,17 @@ class OpenAILLMClient(BaseLLMClient):
 # ---------------------------------------------------------------------------
 # 续传 / 重试辅助
 # ---------------------------------------------------------------------------
+
+
+def _convert_status_error(exc: Exception) -> Exception:
+    """把 openai SDK 的 APIStatusError 归一化为 abstract 层 LLMAPIStatusError。
+
+    非 SDK 状态异常原样返回，由上层按原生异常处理。transient（连接/超时/
+    限流/5xx）重试耗尽路径不经此转换，原生上抛。
+    """
+    if isinstance(exc, openai.APIStatusError):
+        return LLMAPIStatusError(f"{exc}", status_code=exc.status_code)
+    return exc
 
 
 class _StreamInterruptedError(Exception):

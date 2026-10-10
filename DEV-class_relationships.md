@@ -1187,7 +1187,18 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 ### 多模态能力探测内化
 
-原探针工具已内化为 `system/modality_capability.py` 的系统自动行为：需要给活跃模型传递多模态块时先查 easysave 缓存（`modality_capability_cache.es`，按 model+base_url 联合索引、六项能力齐全才命中），未探测则伪装 Read 工具调用按 模态 × 消息路径（tool/user）六路并发探测；400 类错误及客户端明确的 `UnsupportedModalityError` 判为对应模态不支持，网络/认证/超时等非模态错误上抛不写缓存。`build_modality_prompt_block()` 每轮生成 system prompt 注入块；活跃模型不支持某模态时经 `resolve_modality_reference_profile()` 按活动引用优先、全局对应媒体回退引用次之解析，再由 `forward_modality_to_ref_profile()` 单跳转发。全局三路引用保存为 `LLMProfileData` 根列表中的实例引用，Profile 被引用时受删除保护；显式活动引用失败不切换全局回退，非预期异常不被吞没。
+原探针工具已内化为 `system/modality_capability.py` 的系统自动行为：需要给活跃模型传递多模态块时先查 easysave 缓存（`modality_capability_cache.es`，按 model+base_url 联合索引、六项能力齐全才命中），未探测则伪装 Read 工具调用按 模态 × 消息路径（tool/user）六路并发探测；HTTP 400 类错误经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式路径由客户端转换抛出、流式回退路径经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；及客户端明确的 `UnsupportedModalityError` 判为对应模态不支持，网络/认证/超时等非模态错误上抛不写缓存。`build_modality_prompt_block()` 每轮生成 system prompt 注入块；活跃模型不支持某模态时经 `resolve_modality_reference_profile()` 按活动引用优先、全局对应媒体回退引用次之解析，再由 `forward_modality_to_ref_profile()` 单跳转发。全局三路引用保存为 `LLMProfileData` 根列表中的实例引用，Profile 被引用时受删除保护；显式活动引用失败不切换全局回退，非预期异常不被吞没。多模态预检调用（`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker`）纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`）时终止本轮并把配置指引持久化展示给前端，provider 错误降级为用户可见错误，不穿透炸轮次。
+
+### 多模态探针 400 误判修复与无法转发的前端可见拒绝
+
+2026-10-10 事故：glm-5.3（Anthropic 协议）图片探测收到 HTTP 400「Model only supports text input」，异常经客户端流式回退路径降级为裸 `RuntimeError`（状态码语义丢失），探针 except 链只识别 openai 族 400 而误判为致命错误上抛，从无保护的预检调用点穿透炸掉轮次并在 shutdown 时层层重抛（`Application shutdown failed`）。修复分四层：
+
+1. `StreamChunk` 新增 `error_code: int | None`（`entity/puretype/llm.py`），客户端流式 400 在 error chunk 附带 HTTP 状态码；
+2. `abstract/llm/client.py` 新增 `LLMAPIStatusError(RuntimeError)`（携带 `status_code`，继承 RuntimeError 保证既有 `except RuntimeError` 捕获点行为不变），作为客户端 API 状态错误的统一 abstract 层表达：openai/anthropic 客户端在非流式路径经各自模块级 `_convert_status_error` 把本 SDK `APIStatusError` 转换抛出（`raise ... from` 保留异常链），anthropic 客户端流式回退收集路径在错误块携带 `error_code` 时重建同一类型，其余错误块维持裸 `RuntimeError`；
+3. `system/modality_capability.py` 新增模块级 `_is_modality_rejection`，只识别 abstract 层 `LLMAPIStatusError(400)` 单一来源，system 核心不 import 任何具体 SDK（消除原探针对 openai 族异常的内联依赖与「openai 协议 = openai 库」假设，原 TODO 完成）；两个探针函数与 `_forward_modality_to_ref_profile` 的 400 判断全部收敛到该 helper（`kscc_client`/`lmstudio_client` 因继承自动获益）；
+4. `entry/agent_support/multimodal.py` 新增 `ModalityForwardUnavailableError(ValueError)`（无引用 Profile 时抛出，含配置指引文本）；`ParentAgentLoop._run_tool_loop`（`stream_id` 提前生成）与 `MultiAgentWorker` 的预检调用纳入与模型错误路径同构的边界转换——无法转发终止本轮并把指引持久化展示给前端，provider 错误降级为用户可见错误，生命周期异常照常放行。
+
+修复合并了探针日志笔误（tool 路径 400 日志补 `single_probe(tool)` 后缀）。
 
 ### Agentspace 编辑器业务服务与回复轮次文件锁
 

@@ -134,7 +134,7 @@ component/browser/system.py 的 BrowserSystem 为依赖RuntimeSystem的AsyncSyst
 
 system/modality_capability.py 的 ModalityCapabilitySystem依赖RuntimeSystem与LLMProfileStore，唯一持有探测锁、生成音频/载入视频探针及缓存文件路径；媒体构造、显式Profile引用解析与文本格式化保持无状态函数。导入模块不再读取探针模板或创建共享锁，virtual_awake完成媒体准备，关闭不删除持久化能力缓存。
 
-run_modality_probe/ensure_modality_capability与多模态转发使用TaskOwner.run_request托管完整操作，开始与同模型锁等待后检查Runtime；六路子探针由TaskGroup持有，全部结束/清理后才返回或传播错误，锁与媒体只在实际任务完成后释放。HTTP状态只有400按既有模态拒绝分类，认证/限流/服务端错误继续传播且不写缓存。不同模型探测保存前重新合并最新缓存根，保留其他已完成探测；仍直接交easysave保存ModalityCapability实例。缓存可丢弃的既有读取/保存策略不因System迁移扩大为其他存储策略。
+run_modality_probe/ensure_modality_capability与多模态转发使用TaskOwner.run_request托管完整操作，开始与同模型锁等待后检查Runtime；六路子探针由TaskGroup持有，全部结束/清理后才返回或传播错误，锁与媒体只在实际任务完成后释放。HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式路径由客户端转换抛出、流式回退路径经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/限流/服务端错误继续传播且不写缓存。不同模型探测保存前重新合并最新缓存根，保留其他已完成探测；仍直接交easysave保存ModalityCapability实例。缓存可丢弃的既有读取/保存策略不因System迁移扩大为其他存储策略。
 
 全部有状态缓存/探测/有效Profile解析/提示词查询经get_system(ModalityCapabilitySystem)，关闭刷新只允许只读查询，不触发模型。
 

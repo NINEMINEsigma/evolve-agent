@@ -30,6 +30,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ModalityForwardUnavailableError(ValueError):
+    """活动模型不支持该模态且未配置任何引用 Profile，无法转发。
+
+    携带面向用户的配置指引（配置对应媒体引用 Profile 或切换到支持
+    该模态的模型）。调用方捕获后应终止本轮回复并将指引作为持久化
+    系统状态展示给前端。
+    """
+
+
 def is_content_block_error(exc: Exception) -> bool:
     """检测异常是否由 unsupported content blocks（如图片/音频/视频）引起。"""
     return any(k in str(exc).lower() for k in [
@@ -75,7 +84,7 @@ async def _forward_unsupported_block(
         media_type,
     )
     if _ref_profile is None:
-        raise ValueError(
+        raise ModalityForwardUnavailableError(
             f"Active model does not support {media_type} in either tool or user messages, "
             f"and no active or global {media_type} reference profile is configured. "
             f"Please configure a reference profile or switch to a model that supports {media_type}."

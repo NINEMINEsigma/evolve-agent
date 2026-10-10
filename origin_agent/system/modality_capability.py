@@ -57,7 +57,7 @@ from entity.messages import (
     ToolCall,
     FunctionCall,
 )
-from abstract.llm.client import BaseLLMClient, UnsupportedModalityError
+from abstract.llm.client import BaseLLMClient, UnsupportedModalityError, LLMAPIStatusError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -322,11 +322,7 @@ async def _forward_modality_to_ref_profile(
     except Exception as exc:
         if requires_lifecycle_propagation(exc):
             raise
-        import openai as _openai
-        if not isinstance(exc, _openai.BadRequestError) and not (
-            isinstance(exc, _openai.APIStatusError)
-            and exc.status_code == 400
-        ):
+        if not _is_modality_rejection(exc):
             raise
         logger.warning(
             "forward_modality | session=%s ref_profile=%s media_type=%s error=%s",
@@ -529,6 +525,21 @@ def _is_complete(entry: ModalityCapability | None) -> TypeGuard[ModalityCapabili
 # 探测消息构造与单路探测
 # ---------------------------------------------------------------------------
 
+def _is_modality_rejection(exc: Exception) -> bool:
+    """判断异常是否为 provider 的 HTTP 400 模态拒绝信号。
+
+    客户端负责把各自 SDK 的 APIStatusError 归一化为 abstract 层
+    ``LLMAPIStatusError``——openai/anthropic 协议的非流式路径直接转换抛出，
+    流式回退路径经 ``StreamChunk.error_code`` 重建——本函数只识别这一
+    单一 abstract 来源，不依赖任何具体 SDK 的异常族。
+
+    ``UnsupportedModalityError`` 不在此处理——由调用方 except 链首单独分支
+    处理，以保留 ``reason=unsupported_modality`` 与 ``reason=http_400`` 的
+    日志区分。网络/认证/超时等非模态错误返回 False，由调用方上抛。
+    """
+    return isinstance(exc, LLMAPIStatusError) and exc.status_code == 400
+
+
 def _build_tool_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
     """构造伪装成 Read 工具调用的探测消息序列。
 
@@ -605,14 +616,12 @@ async def _probe_single_modality(
                 session_id, model_name, modality,
             )
             return False
-        # TODO: 错误的提前依赖第三方库, 实际上根本就不一定使用openai库来使用openai协议
-        import openai as _openai
         # 400 错误（无论是否匹配 modality 关键词）都判定为该模态在工具消息中不可用。
         # 某些 provider 返回通用的 "Invalid request parameters" / "Upstream request failed"
         # 而非明确的 "unsupported content" 消息，此时乐观默认 True 会导致能力误判。
-        if isinstance(exc, _openai.APIStatusError) and exc.status_code == 400:
+        if _is_modality_rejection(exc):
             logger.info(
-                "probe_modality | session=%s model=%s %s=False source=single_probe reason=http_400",
+                "probe_modality | session=%s model=%s %s=False source=single_probe(tool) reason=http_400",
                 session_id, model_name, modality,
             )
             return False
@@ -659,8 +668,7 @@ async def _probe_single_user_modality(
                 session_id, model_name, modality,
             )
             return False
-        import openai as _openai
-        if isinstance(exc, _openai.APIStatusError) and exc.status_code == 400:
+        if _is_modality_rejection(exc):
             logger.info(
                 "probe_modality | session=%s model=%s %s=False source=single_probe(user) reason=http_400",
                 session_id, model_name, modality,

@@ -280,7 +280,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 ### 多模态能力生命周期（S14）
 
-预处理消息的探测/转发与系统提示词的缓存读取通过ModalityCapabilitySystem实例。完整请求由System的TaskOwner持有，六路子探针使用TaskGroup收尾；主/参与Agent的模型错误转换边界明确透传停止、取消及生命周期异常组，不把关闭清理失败变成普通LLM错误回复。纯内容块构造、文本转换与显式Profile引用解析仍为独立函数。
+预处理消息的探测/转发与系统提示词的缓存读取通过ModalityCapabilitySystem实例。完整请求由System的TaskOwner持有，六路子探针使用TaskGroup收尾；主/参与Agent的模型错误转换边界明确透传停止、取消及生命周期异常组，不把关闭清理失败变成普通LLM错误回复。`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker` 的多模态预检调用同样纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`，无引用Profile）时终止本轮并把配置指引作为持久化系统状态展示给前端；探针/转发途中的provider错误降级为用户可见错误，不再穿透炸轮次。纯内容块构造、文本转换与显式Profile引用解析仍为独立函数。
 
 ### `multimodal.py`
 

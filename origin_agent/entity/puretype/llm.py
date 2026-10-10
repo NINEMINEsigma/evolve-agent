@@ -106,6 +106,8 @@ class StreamChunk(BaseModel):
     finish_reason: str | None = None
     usage: Usage | None = None
     error: str | None = None
+    error_code: int | None = None
+    """API 状态错误的 HTTP 状态码；仅状态错误时填写，供非流式收集路径重建类型化异常。"""
 
 
 # ---------------------------------------------------------------------------

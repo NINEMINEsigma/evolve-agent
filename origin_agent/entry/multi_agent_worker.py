@@ -252,7 +252,8 @@ class MultiAgentWorker:
             )
 
             # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock/VideoBlock，
-            # 自动探查能力，不支持时转发借用并替换为描述文本
+            # 自动探查能力，不支持时转发借用并替换为描述文本。
+            # 预检失败（含无法转发）不穿透级联，转为 worker 错误结果对前端可见。
             _ctx = ToolContext(
                 loop=self._loop.loop,
                 session_id=self._loop.loop.session_id,
@@ -260,9 +261,22 @@ class MultiAgentWorker:
                 character_name=self.character_name,
                 llm_profile=self._llm_profile,
             )
-            full_messages = await preprocess_multimodal_blocks(
-                full_messages, _ctx, self._loop.loop.save_history,
-            )
+            try:
+                full_messages = await preprocess_multimodal_blocks(
+                    full_messages, _ctx, self._loop.loop.save_history,
+                )
+            except Exception as exc:
+                if requires_lifecycle_propagation(exc):
+                    raise
+                logger.exception(
+                    "Multimodal preprocessing failed | session=%s character=%s",
+                    self._loop.loop.session_id, self.character_name,
+                )
+                return await self._error_result(
+                    f"Multimodal preprocessing failed: {exc}",
+                    stream_id=stream_id,
+                    collected_metrics=self._collected_metrics,
+                )
 
             async def _mark_streaming(started_stream_id: str) -> None:
                 self._loop.loop.set_main_session_activity_phase(

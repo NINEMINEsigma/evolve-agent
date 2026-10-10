@@ -64,6 +64,7 @@ from entry.agent_support.multimodal import (
     content_to_text,
     summarize_message_for_log,
     preprocess_multimodal_blocks,
+    ModalityForwardUnavailableError,
 )
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
@@ -454,12 +455,33 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 turn.value += 1
 
                 # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
-                # 自动探查能力，不支持时转发借用并替换为描述文本
-                messages = await self._preprocess_multimodal_blocks(
-                    sid, messages, round_id,
-                )
-
+                # 自动探查能力，不支持时转发借用并替换为描述文本。
+                # 无法转发（无引用 Profile）→ 终止本轮并持久化配置指引供前端展示；
+                # 探针/转发途中的 provider 错误 → 降级为用户可见错误，不穿透炸轮次。
                 stream_id = uuid.uuid4().hex[:12]
+                try:
+                    messages = await self._preprocess_multimodal_blocks(
+                        sid, messages, round_id,
+                    )
+                except ModalityForwardUnavailableError as exc:
+                    logger.warning(
+                        "Modality forward unavailable | session=%s error=%s", sid, exc,
+                    )
+                    await self._emit_persisted_system_status(sid, str(exc))
+                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    return ""
+                except Exception as exc:
+                    if requires_lifecycle_propagation(exc):
+                        raise
+                    logger.exception("Multimodal preprocessing failed for session=%s", sid)
+                    err_text = (
+                        f"Multimodal preprocessing failed, please try again later. "
+                        f"Details: {exc}"
+                    )
+                    await self._emit_persisted_system_status(sid, err_text)
+                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    return ""
+
                 self.set_main_session_activity_phase(
                     activity_id,
                     MainSessionActivityPhase.waiting_first_token,
@@ -495,9 +517,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         )
                         if partial_metrics:
                             collected_metrics.append((sid, msg_index, partial_metrics))
-                    self.append_system_status("已中断", session_id=sid)
-                    if partial_content:
+                        self.append_system_status("已中断", session_id=sid)
                         await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
+                    else:
+                        self.append_system_status("已中断", session_id=sid)
                     await self._emit_stream_done(
                         sid, stream_id, "cancelled",
                         content=partial_content, metrics=partial_metrics,
