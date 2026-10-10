@@ -302,7 +302,7 @@ class _OrchestratorContext:
         task = self._active_task.get(session_id)
         if task is not None and not task.done():
             await task
-        await sub.flush_pending_inputs(persist=False)
+        await sub.flush_inbox()
 
         self._active.pop(session_id, None)
         self._active_task.pop(session_id, None)
@@ -480,7 +480,7 @@ class _OrchestratorContext:
         task = self._active_task.get(session_id)
         if task is not None and not task.done():
             await task
-        await sub.flush_pending_inputs(persist=True, history_path=session_path)
+        await sub.flush_inbox(history_path=session_path)
 
         self._active.pop(session_id, None)
         self._active_task.pop(session_id, None)
@@ -602,8 +602,7 @@ class _OrchestratorContext:
     async def flush_inputs(self) -> None:
         """运行任务完全结束后，提交普通子Agent Inbox并保存历史。"""
         for session_id, sub in tuple(self._active.items()):
-            await sub.flush_pending_inputs(
-                persist=not isinstance(sub, TaskAgentLoop),
+            await sub.flush_inbox(
                 history_path=None if isinstance(sub, TaskAgentLoop) else self._history_path(session_id),
             )
 
@@ -931,7 +930,7 @@ class _OrchestratorContext:
                 await self._flush_subagent_message(session_id, sub)
                 if sub.completed or sub.terminated:
                     if isinstance(sub, TaskAgentLoop) and sub.completed:
-                        await sub.flush_pending_inputs(persist=False)
+                        await sub.flush_inbox()
                         self._cleanup_taskagent(session_id)
                     self._waiter_tasks.pop(session_id, None)
                     break

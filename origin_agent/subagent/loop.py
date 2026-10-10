@@ -734,10 +734,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             raise
         return True
 
-    async def flush_pending_inputs(
-        self, *, persist: bool, history_path: str | Path | None = None,
+    async def flush_inbox(
+        self, *, history_path: str | Path | None = None,
     ) -> ShutdownInputReport:
-        """冻结后提交尚未进入 History 的 Inbox；TaskAgent只清理内存记录。"""
+        """冻结后提交尚未进入 History 的 Inbox；history_path 为 None 时仅做内存结算（TaskAgent 场景）。"""
         self._inbox.freeze()
         reservation_id = f"subagent-shutdown-{uuid.uuid4().hex}"
         deliveries = self._inbox.reserve_shutdown(reservation_id=reservation_id)
@@ -756,13 +756,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     )
                     self._inbox.mark_appended(delivery.sequence, index)
                 sequences.append(delivery.sequence)
-            if persist:
-                if history_path is None:
-                    raise ValueError("Persistent sub-agent flush requires a history path")
+            if history_path is None:
+                self._inbox.mark_ephemeral(sequences)
+            else:
                 self.save_history(history_path)
                 self._inbox.mark_persisted(sequences)
-            else:
-                self._inbox.mark_ephemeral(sequences)
         except BaseException:
             self._inbox.release_reservation(reservation_id)
             raise
