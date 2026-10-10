@@ -381,6 +381,7 @@ classDiagram
         #_get_context()
         #_get_sink()
         #_get_tool_definitions()
+        +get_effective_visible_tool_names()
         #_build_system_prompt()
         #_on_context_over_limit()
         +append_user_message()
@@ -851,6 +852,9 @@ classDiagram
 | `_stopped` | `SessionMessageQueue` | `bool` | `stop()` / `mark_stopped()` 置位 |
 | `last_known_sid` | `SessionMessageQueue` | `str` | 旋转检测：与当前 session_id 比对 |
 | `_llm_profile` | `SubAgentLoop` | `LLMProfile \| None` | 临时Agent使用调用时 Profile 快照；普通角色子Agent的运行字段来自动态角色档案引用的 Profile |
+| `_tools` | `SubAgentLoop` | `list[dict]` | 构造期静态全量 SUBAGENT 工具 schema 清单；**仅作静态授权清单派生源**（`_allowed_tool_names`），不再作为 LLM 工具表来源（LLM 调用点动态走 `_get_tool_definitions()`） |
+| `_allowed_tool_names` | `SubAgentLoop` | `set[str]` | 从构造传入 tools 派生的静态授权清单；执行期闸门使用，并在 `_execute_approved_tool` 中叠加「已加载工具集」检查；`allowed_tool_names` property 返回其副本（ShowTool 已改走动态口径） |
+| `get_effective_visible_tool_names()` | `SubAgentLoop` | public method | 按动态口径（loaded ∩ scope ∩ check_fn）返回可见工具名集合，供 ShowTool 复用；TaskAgentLoop 经虚分派自动叠加 safe 过滤 |
 | `llm_profile` | `SubRuntimeContext` | `LLMProfile \| None` | TaskAgent持有调用时活动 Profile的非持久化深快照；普通角色子Agent不持久化独立配置 |
 | （无新增字段） | `TaskAgentLoop` | — | 全部继承 `SubAgentLoop`；覆写无系统提示词、`TASKAGENT ∩ safe` 定义/执行授权及完成即终止行为 |
 | `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | session_id → WebSocket 映射 |
@@ -953,6 +957,7 @@ classDiagram
 | `ParentAgentSink.request_approval` | `_parent_session_id`, `_pending_approvals`, `_paused_event`, `_emit()` | `SubAgentLoop` | `entry/agent_sink.py` | 直接访问子 agent 内部字段/方法 |
 | `ParentAgentSink.emit_*` | `_emit()` / `_parent_session_id` | `SubAgentLoop` | `entry/agent_sink.py` | 转发事件时读取子 agent 内部 |
 | `ParentAgentSink.emit_stream_done` | `get_system(FrontendSink)` | `Application` | `entry/agent_sink.py` | 通过 `Application.current().get_system(FrontendSink)` 转发到父会话前端 |
+| `ShowTool._visible_tool_names` | `get_effective_visible_tool_names()` | `SubAgentLoop`（TaskAgentLoop 经虚分派覆写） | `component/tools/show_tool.py` | 子Agent可见性查询走公开方法，动态口径（loaded ∩ scope ∩ check_fn） |
 | `LoopSessionManager.initialize` | `_session_store`, `_history`, `session_id` | `ParentAgentLoop` | `entry/session_manager.py` | 初始化时读写 loop 内部 |
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
 | `LoopSessionManager.rotate_session_for_continuation` | `_remove_last_user_message`, `_append`, `_history`, `_last_prompt_tokens`, `_session_store`, `_session_manager`, `_llm`, `load_history`, `persist_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时大量调用 loop 内部 |

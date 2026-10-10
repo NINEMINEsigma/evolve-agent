@@ -414,8 +414,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
                 messages = self._build_history_messages()
+                # 工具定义按已加载工具集动态计算（loaded ∩ SUBAGENT ∩ check_fn），
+                # LoadToolset 后下一轮 LLM 调用即见新工具，与执行期口径一致。
                 resp: LLMResponse = await self._llm.chat(
-                    messages, self._tools, character=self.current_character_agent,
+                    messages, self._get_tool_definitions(), character=self.current_character_agent,
                     last_user_message=self._history.last_user_message,
                 )
 
@@ -915,15 +917,28 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             from system.application import Application
             from abstract.tools.registry import ToolRegistry
             tool_registry = Application.current().get_system(ToolRegistry)
-            if tool_registry.get_entry(tc.name) is None:
+            entry = tool_registry.get_entry(tc.name)
+            if entry is None:
                 return self._make_tool_msg(tc.id, {"error": f"Tool '{tc.name}' not found in registry"})
+
+            # 工具集加载检查：未加载工具在执行前拦截（与执行期口径一致），
+            # 文案与 registry._resolve_call 保持逐字一致；registry 拦截仍作兜底。
+            if not self.is_toolset_loaded(entry.toolset):
+                return self._make_tool_msg(
+                    tc.id,
+                    {
+                        "success": False,
+                        "error": f"Tool '{tc.name}' belongs to toolset '{entry.toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
+                        "_toolset_not_loaded": True,
+                        "_toolset": entry.toolset,
+                    },
+                )
 
             args: dict[str, Any] = dict(tc.arguments) if tc.arguments else {}
             args["_session_id"] = self.session_id
 
             current_subagent_loop.set(self)
-            entry = tool_registry.get_entry(tc.name)
-            if entry and entry.no_timeout:
+            if entry.no_timeout:
                 timeout = 0
 
             # 通过 registry.async_dispatch 执行，正确传递 ToolContext
@@ -1041,6 +1056,17 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     @property
     def allowed_tool_names(self) -> set[str]:
         return set(self._allowed_tool_names)
+
+    def get_effective_visible_tool_names(self) -> set[str]:
+        """按当前口径（loaded ∩ scope ∩ check_fn）返回可见工具名集合。
+
+        供 ShowTool 等外部查询复用；TaskAgentLoop 子类经虚分派自动叠加
+        其 safe 过滤覆写，与其动态 LLM 调用点口径一致。
+        """
+        return {
+            (d.get("function") or {}).get("name", "")
+            for d in self._get_effective_tool_definitions()
+        } - {""}
 
     def _maybe_record_tool_failure(self, tool_name: str, content: str) -> None:
         """检测工具失败并写入 outbox，让父 Agent 在下一次 [subagent-result] 中收到。

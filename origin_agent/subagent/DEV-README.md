@@ -187,6 +187,14 @@ graph TD
 
 多 Agent 模式下，`MultiAgentLoop._run_single_agent()` 使用 `self._get_effective_tool_definitions()` 动态获取工具定义，参与Agent共享主会话的加载状态。
 
+### 工具口径三处统一（LLM 表 / 执行期 / ShowTool）
+
+- **LLM 工具表**：`SubAgentLoop.run()` 的 LLM 调用点使用 `_get_tool_definitions()`（委托基类 `_get_effective_tool_definitions()`），按「已加载工具集 ∩ SUBAGENT ∩ check_fn」动态计算，`LoadToolset` 后下一轮即见新工具，与执行期拦截口径一致。构造期传入的静态 tools 参数不再作为 LLM 工具表来源。
+- **静态授权清单**：`_allowed_tool_names`（及其 `allowed_tool_names` property、构造传入的 `_tools`）保持静态全量 SUBAGENT 注册清单语义，仍用于执行期授权闸门与审批路径；`_execute_approved_tool` 在授权检查之后叠加「已加载工具集」检查，未加载工具在执行前被拦截（文案与 `registry._resolve_call` 一致，registry 拦截仍作兜底）。
+- **ShowTool**：对 `SubAgentLoop` 与 `TaskAgentLoop` 均按动态口径返回（`SubAgentLoop.get_effective_visible_tool_names()`，TaskAgentLoop 经虚分派自动叠加 safe 过滤），与其各自 LLM 调用点一致，不再按静态授权清单虚报未加载工具。
+- **orchestrator 启动日志**：`_start_agent` 日志中的 `tools=%d` 自本次修复后为「静态授权清单长度」（构造期全量 SUBAGENT 工具数），不再等价于 LLM 可见工具数。
+- **不持久化**：子代理（子会话）不持久化 `_loaded_toolsets`（无 SessionStore，`_persist_loaded_toolsets` 自然跳过），每次启动从 `core` 起步是刻意设计，`LoadToolset` 的效果仅存活于该子代理会话生命周期内。
+
 ---
 
 ## 审批与结果注入

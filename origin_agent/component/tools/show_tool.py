@@ -47,22 +47,29 @@ def _visible_tool_names(context: ToolContext | None) -> set[str]:
     """按当前 loop 类型分派，返回该 loop 上下文下可见的工具名集合。
 
     使用 ``isinstance`` 类型分派（非反射），判定顺序先子后父：
-    ``SubAgentLoop``（含 ``TaskAgentLoop``）→ ``ColloquyLoop`` →
+    ``TaskAgentLoop`` → ``SubAgentLoop`` → ``ColloquyLoop`` →
     ``MultiAgentLoop`` → 兜底（``ParentAgentLoop`` 等）。
+    子Agent 两个分支均按动态口径（loaded ∩ scope ∩ check_fn）返回，
+    与各自 LLM 调用点的工具表一致。
     """
     loop = context.loop if context is not None else None
     if loop is None:
         return _names_for_availability(ToolAvailability.MAIN)
 
     # 延迟导入避免 component → entry/subagent 模块级循环依赖
+    from subagent.taskloop import TaskAgentLoop
     from subagent.loop import SubAgentLoop
     from entry.colloquy_loop import ColloquyLoop
     from entry.multi_agent_loop import MultiAgentLoop
 
     tool_registry = _get_registry()
+    if isinstance(loop, TaskAgentLoop):
+        # TaskAgent：动态口径（loaded ∩ TASKAGENT ∩ safe ∩ check_fn），
+        # 虚分派自动走其 _get_effective_tool_definitions 覆写，与其 LLM 调用点一致
+        return loop.get_effective_visible_tool_names()
     if isinstance(loop, SubAgentLoop):
-        # 含 TaskAgentLoop（其 allowed_tool_names 构造时已按 scope+safe 过滤）
-        return {n for n in loop.allowed_tool_names if tool_registry.is_tool_available(n)}
+        # SubAgent：动态口径（loaded ∩ SUBAGENT ∩ check_fn），与其 LLM 调用点一致
+        return loop.get_effective_visible_tool_names()
     if isinstance(loop, ColloquyLoop):
         # 白名单 toolset 内的工具名 ∩ MAIN 可见集合
         whitelist: set[str] = {
