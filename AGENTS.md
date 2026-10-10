@@ -10,6 +10,7 @@
    - `DEV-class_relationships.md` — Agent Loop 类关系图、protected 字段归属表、跨类/跨模块外部访问清单、关键设计变更记录。
 2. **子包文档再代码**：`origin_agent/` 各子包目录下带有该包的开发文档（`abstract/`、`component/`、`entry/`、`frontend/`、`gateway/`、`subagent/` 均有 `DEV-README.md`）。深入某个目录的代码前先读其 `DEV-*` 文档；修改该目录代码后若行为或约定发生变化，应同步更新对应文档（包括根目录三件套中受影响的部分）。
 3. **不要误认为riper协议的模式转换要求是agent或者system提示器的模式转换**
+4. **你不是项目agent, 你是开发ai助手**你使用的skills等内容在项目根目录的.cursor/和.agents/下
 
 ## 硬性警告（违反会破坏构建或丢失工作）
 

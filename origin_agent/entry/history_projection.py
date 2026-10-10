@@ -128,7 +128,7 @@ def _build_tool_pairs(messages: list[BaseMessage]) -> tuple[dict[str, _ToolPair]
                 pairs[tool_call_id] = _ToolPair(occurrences[0], None)
             continue
         request = occurrences[0]
-        result = matching_results[0] if matching_results[0].history_index > request.history_index else None
+        result = matching_results[0] if matching_results and matching_results[0].history_index > request.history_index else None
         if result is None and matching_results:
             logger.warning(
                 "Invalid tool result order in history projection | tool_call_id=%s",

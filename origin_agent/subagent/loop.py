@@ -25,6 +25,7 @@ from entity.puretype import (
     ApprovalResult,
     LLMProfile,
     LLMResponse,
+    MessageContent,
     ToolCallRequest,
     ToolAvailability,
     SubAgentApprovalDecisionResult,
@@ -271,7 +272,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     async def process_message(
         self,
-        user_message: str,
+        user_message: MessageContent,
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
@@ -477,7 +478,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 处理工具调用 — safe 直接执行；其它工具入审批队列阻塞等待
                 try:
-                    _executed_tool_msgs: list[PreparedToolResult] = []
+                    _executed_tool_msgs: list[ToolResultMessage] = []
                     for i, tc in enumerate(resp.tool_calls):
                         # 中断：为当前及剩余未执行 tool_calls 补中断结果后停止响应
                         if self._cancel_event.is_set():
@@ -516,8 +517,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                     # 延迟注入 follow_up 消息
                     for tm in _executed_tool_msgs:
-                        if tm.message._follow_up_messages:
-                            for fu_msg in tm.message._follow_up_messages:
+                        if tm._follow_up_messages:
+                            for fu_msg in tm._follow_up_messages:
                                 self._history.add_message(fu_msg)
                 except BaseException as exc:
                     must_propagate = requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
