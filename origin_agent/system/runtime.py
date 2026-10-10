@@ -13,13 +13,48 @@ from framework import AsyncSystem
 from entity.constant import (
     APPLICATION_SHUTDOWN_TIMEOUT_SECONDS,
     ApplicationState,
+    DEFAULT_MAIN_AGENT_CHARACTER_NAME,
     EXIT_EVOLVED,
     EXIT_FAILURE,
     EXIT_NORMAL,
+    SOUL_META_CHARACTER_NAME_KEY,
     ShutdownReason,
 )
 from system.context import RuntimeContext
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+
+
+def _read_main_agent_character_name_from_soul_meta(meta_path) -> str:
+    """从 SOUL.md.meta 读取主Agent角色名。
+
+    文件不存在、无 [character_name] 键或解析失败时回退默认角色名。
+    解析失败属于配置错误，仅记 warning 不阻断启动（Fail-Soft 仅限该边界）。
+    """
+    import logging
+    from system.file_metadata import MetaFormatError, parse_meta_content
+
+    logger = logging.getLogger(__name__)
+    if not meta_path.is_file():
+        return DEFAULT_MAIN_AGENT_CHARACTER_NAME
+    try:
+        content = meta_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed to read %s: %s; falling back to default main agent name", meta_path, exc)
+        return DEFAULT_MAIN_AGENT_CHARACTER_NAME
+    try:
+        metadata = parse_meta_content(content)
+    except MetaFormatError as exc:
+        logger.warning("Invalid %s: %s; falling back to default main agent name", meta_path, exc)
+        return DEFAULT_MAIN_AGENT_CHARACTER_NAME
+    name = metadata.get(SOUL_META_CHARACTER_NAME_KEY, "").strip()
+    return name if name else DEFAULT_MAIN_AGENT_CHARACTER_NAME
+
+
+def _resolve_soul_meta_path(agentspace, soul_file: str) -> "Path":
+    """根据当前 SOUL 文件名推导对应 .meta 文件路径。"""
+    from pathlib import Path
+    from entity.constant import META_FILE_SUFFIX
+    return Path(agentspace) / f"{soul_file}{META_FILE_SUFFIX}"
 
 
 class RuntimeSystem(AsyncSystem):
@@ -36,6 +71,9 @@ class RuntimeSystem(AsyncSystem):
         self._failures: list[BaseException] = []
         self._input_sequence = 0
         self._shutdown_deadline: threading.Timer | None = None
+        # 主Agent角色名：启动时从 SOUL.md.meta 读取一次；运行期由 RefreshIdentity 工具刷新。
+        # 默认使用 DEFAULT_MAIN_AGENT_CHARACTER_NAME 作为回退。
+        self._main_agent_character_name: str = DEFAULT_MAIN_AGENT_CHARACTER_NAME
 
     async def virtual_awake(self) -> None:
         with self._lock:
@@ -49,10 +87,29 @@ class RuntimeSystem(AsyncSystem):
                 self._shutdown_event.set()
             else:
                 raise LifecycleFailure(f"Invalid runtime initialization state: {self._state}")
+        # 启动时读取一次主Agent角色名（SOUL.md.meta），此后由 RefreshIdentity 工具按需刷新。
+        self.refresh_main_agent_character_name()
 
     @property
     def context(self) -> RuntimeContext:
         return self._context
+
+    @property
+    def main_agent_character_name(self) -> str:
+        """返回当前主Agent角色名（启动时初始化，可由 RefreshIdentity 工具刷新）。"""
+        with self._lock:
+            return self._main_agent_character_name
+
+    def refresh_main_agent_character_name(self, soul_file: str = "SOUL.md") -> str:
+        """从 agentspace/{soul_file}.meta 重新读取主Agent角色名。
+
+        由 RefreshIdentity 工具调用；返回刷新后的名字。
+        """
+        meta_path = _resolve_soul_meta_path(self._context.agentspace, soul_file)
+        name = _read_main_agent_character_name_from_soul_meta(meta_path)
+        with self._lock:
+            self._main_agent_character_name = name
+        return name
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:

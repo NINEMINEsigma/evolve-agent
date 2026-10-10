@@ -13,7 +13,7 @@ from typing import Any, cast
 from abstract.tools.registry import ToolRegistry, tool_error, tool_result
 from abstract.tools.ui_event_router import UIEventRouter
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
-from entity.constant import SYSTEM_CHARACTER_NAME, MAIN_AGENT_CHARACTER_NAME
+from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.agent_sink import FrontendSink
 from entry.multi_agent_loop import MultiAgentLoop

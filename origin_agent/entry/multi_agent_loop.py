@@ -27,7 +27,6 @@ from entity.puretype import (
 )
 from entity.constant import (
     ApplicationState,
-    MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
@@ -98,6 +97,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         history: History,
         agents: dict[str, AgentProfile],
         sink: AgentSink,
+        main_agent_name: str,
         history_store_dir: Path | None = None,
     ) -> None:
         super().__init__(app, session_id)
@@ -105,7 +105,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._agents: dict[str, AgentProfile] = agents
         self._sink: AgentSink = sink
         self._agent_names: list[str] = list(agents.keys())
-        main_agent = agents.get(MAIN_AGENT_CHARACTER_NAME)
+        self._main_agent_name: str = main_agent_name
+        main_agent = agents.get(self._main_agent_name)
         self._active_llm_profile = (
             main_agent.llm_profile if main_agent is not None else None
         )
@@ -205,7 +206,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         if self._token_record.prompt_tokens == 0:
             return False
         # 从主 agent 的 AgentConfig 获取上下文上限（不再依赖已删除的 ctx.llm_* 字段）
-        main_agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
+        main_agent = self._agents.get(self._main_agent_name)
         if main_agent is None and self._agents:
             main_agent = next(iter(self._agents.values()))
         if main_agent is None:
@@ -300,7 +301,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     def set_profile(self, profile: LLMProfile | None) -> None:
         """同步切换 MultiAgentLoop 的主 Agent Profile；子 Agent 不变。"""
-        main_agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
+        main_agent = self._agents.get(self._main_agent_name)
         if main_agent is None:
             raise RuntimeError("MultiAgentLoop has no main Agent profile")
 
@@ -329,7 +330,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
         from system.sandbox import Sandbox
         main_agent.system_prompts = _resolve_main_agent_prompts(
-            MAIN_AGENT_CHARACTER_NAME,
+            self._main_agent_name,
             main_agent.config,
             self.app.get_system(RuntimeSystem).context,
             self.app.get_system(Sandbox),
@@ -674,8 +675,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         }
         available = [c for c in characters if c in available_names]
         dropped = set(characters) - set(available)
-        if dropped and MAIN_AGENT_CHARACTER_NAME in dropped:
-            dropped.remove(MAIN_AGENT_CHARACTER_NAME)
+        if dropped and self._main_agent_name in dropped:
+            dropped.remove(self._main_agent_name)
         if dropped:
             logger.warning(
                 "Subagent profiles dropped: %s; removing from response_characters (session=%s)",
@@ -708,10 +709,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         显式指定的 response_characters 不受回调次数限制。
         """
         # ── 构建初始队列 ──
-        is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
+        is_contains_main_agent = self._main_agent_name in response_characters
         filtered = self._get_available_subagents(response_characters)
         if is_contains_main_agent:
-            filtered.append(MAIN_AGENT_CHARACTER_NAME)
+            filtered.append(self._main_agent_name)
 
         # 过滤不存在的 Agent 名
         valid_chars = [c for c in filtered if c in self._agents]
@@ -956,7 +957,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         system_prompts = profile.system_prompts
         # 主 agent 动态注入会话站点约定块（不写入 AgentProfile.system_prompts，
         # 以确保会话旋转后 session_id 自动更新）
-        if character_name == MAIN_AGENT_CHARACTER_NAME:
+        if character_name == self._main_agent_name:
             site_block = build_session_site_block(self.session_id, owner="self")
             if site_block:
                 system_prompts = system_prompts + [site_block]
@@ -986,7 +987,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
         effective_tools = self._get_effective_tool_definitions()
-        if character_name != MAIN_AGENT_CHARACTER_NAME:
+        if character_name != self._main_agent_name:
             effective_tools = [
                 definition
                 for definition in effective_tools

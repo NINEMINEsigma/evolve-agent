@@ -34,7 +34,7 @@ from entity.puretype import (
     InputDelivery,
     ShutdownInputReport,
 )
-from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__, InputDeliveryState
+from entity.constant import USER_CHARACTER_NAME, History_Version as __History_Version__, InputDeliveryState
 from entity.messages import (
     History,
     CharacterConversationMessage,
@@ -213,7 +213,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     @property
     def user_character_name(self) -> str:
-        return self._parent_character_agent# or MAIN_AGENT_CHARACTER_NAME
+        return self._parent_character_agent
 
     def _get_llm_client(self) -> BaseLLMClient:
         return self._llm
@@ -394,7 +394,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         active_round_id: str | None = None
         try:
             # 初始 prompt 也必须先登记为 Inbox 输入，避免启动 task 前丢失。
-            initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
+            from system.runtime import RuntimeSystem
+            _main_name = Application.current().get_system(RuntimeSystem).main_agent_character_name
+            initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or _main_name)
             self._inbox.put(UserMessage(
                 content=format_user_message(user_name, message_type, initial_prompt),
                 character_name=initial_character_name,
@@ -593,7 +595,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._last_message_from_parent = (message_type != "user_direct")
         content = format_user_message(user_name, message_type, text, co_recipients)
         if character_name is None:
-            character_name = USER_CHARACTER_NAME if message_type == "user_direct" else MAIN_AGENT_CHARACTER_NAME
+            from system.runtime import RuntimeSystem
+            character_name = USER_CHARACTER_NAME if message_type == "user_direct" else Application.current().get_system(RuntimeSystem).main_agent_character_name
         return self.enqueue_inbox_message(
             UserMessage(content=content, character_name=character_name),
             from_parent=message_type != "user_direct",

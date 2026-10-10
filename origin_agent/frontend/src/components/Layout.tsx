@@ -60,7 +60,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [visibleCharacters, setVisibleCharacters] = usePersistentSessionState<string[]>(
     STORAGE_KEYS.VISIBLE_CHARACTERS, ws.sessionId, ["all-agents"]);
   const [responseCharacters, setResponseCharacters] = usePersistentSessionState<string[]>(
-    STORAGE_KEYS.RESPONSE_CHARACTERS, ws.sessionId, ["main-agent"]);
+    STORAGE_KEYS.RESPONSE_CHARACTERS, ws.sessionId, []);
 
   // 会话视觉暂停开关（按会话持久化）
   const [stagePaused, setStagePaused] = usePersistentSessionState<boolean>(

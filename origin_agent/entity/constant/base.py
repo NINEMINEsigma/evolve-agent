@@ -13,7 +13,10 @@ History_Version = "v1"
 
 SYSTEM_CHARACTER_NAME: str = "system"
 USER_CHARACTER_NAME: str = "end-user"
-MAIN_AGENT_CHARACTER_NAME: str = "main-agent"
+# 主Agent默认角色名：SOUL.md.meta 未配置 [character_name] 时的回退值。
+DEFAULT_MAIN_AGENT_CHARACTER_NAME: str = "main-agent"
+# 向后兼容别名，等价于 DEFAULT_MAIN_AGENT_CHARACTER_NAME。
+MAIN_AGENT_CHARACTER_NAME: str = DEFAULT_MAIN_AGENT_CHARACTER_NAME
 # 使用时用于在列表字段指代所有agents
 ALL_AGENTS_CHARACTER_REF_NAME: str = "all-agents"
 

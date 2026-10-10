@@ -407,7 +407,6 @@ class SessionManager(AsyncSystem):
         from system.templates import get_templates_dir
         from abstract.tools.registry import ToolRegistry
         tool_registry = self._app.get_system(ToolRegistry)
-        from entity.constant import MAIN_AGENT_CHARACTER_NAME
         from system.session_store import SessionStore
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
@@ -418,6 +417,7 @@ class SessionManager(AsyncSystem):
         agents_names: list[str] = (info.agents or []) if info else []
 
         parent_ctx = self._app.get_system(RuntimeSystem).context
+        main_agent_name = self._app.get_system(RuntimeSystem).main_agent_character_name
         from system.sandbox import Sandbox
         from system.llm_profile_store import LLMProfileStore
         sandbox = self._app.get_system(Sandbox)
@@ -454,7 +454,7 @@ class SessionManager(AsyncSystem):
 
         agent_profiles = build_agent_profiles(
             agents=agents_names,
-            main_agent_name=MAIN_AGENT_CHARACTER_NAME,
+            main_agent_name=main_agent_name,
             parent_ctx=parent_ctx,
             llm_client_factory=lambda name, profile: create_llm_client(
                 profile.llm_client_name if profile is not None else (
@@ -508,6 +508,7 @@ class SessionManager(AsyncSystem):
             history=history,
             agents=agent_profiles,
             sink=frontend_sink,
+            main_agent_name=main_agent_name,
             history_store_dir=history_store_dir,
         )
         multi_loop.set_session_manager(self)

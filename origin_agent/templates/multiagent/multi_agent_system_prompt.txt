@@ -69,7 +69,7 @@ Based on the analysis, the fix is to update the configuration file. The issue sh
 You want only specific agents to see your message, then hand off:
 
 ```text
-@{{TAG_VISIBLE}}(main-agent, engineer)
+@{{TAG_VISIBLE}}(Noire, engineer)
 @{{TAG_RESPONSE}}(engineer)
 
 I've reviewed the requirements. Engineer, please proceed with the implementation.

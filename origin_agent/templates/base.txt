@@ -13,6 +13,10 @@ Self-identity system:
   You can read it via ``Read ws:{{soul_file}}``, and modify it via ``Write(path="ws:{{soul_file}}")`` or ``PatchEdit(path="ws:{{soul_file}}")``.
   It should contain your persona, constraints, character, language style, and other personalized traits.
   Changes to SOUL take effect on the next conversation turn.
+- **Soul-metadata file** ``ws:{{soul_file}}.meta`` holds structured settings read by the runtime, layered on top of the SOUL personality. Write it in the same ``[key]`` section format used by character ``profile.md.meta`` files: each key on its own line wrapped in ``[ ]``, followed by its value up to the next key.
+  - ``[character_name]`` — your character name as seen in conversation history, the frontend, and multi-Agent routing. When unset, it falls back to the default ``main-agent``.
+  - To rename yourself: edit ``[character_name]`` in ``ws:{{soul_file}}.meta``, then call the ``RefreshIdentity`` tool to reload it. Editing the file alone does not take effect; the name is read once at startup and only re-read when ``RefreshIdentity`` runs.
+  - The metadata file may gain more keys in the future; the runtime reads each one on the same startup-plus-refresh cycle.
 
 Skills:
 - Only skill names and one-line descriptions are included in the system prompt by default.

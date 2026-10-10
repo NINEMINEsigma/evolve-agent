@@ -16,6 +16,9 @@ CHARACTER_DESCRIPTION_FALLBACK: str = "未提供简介"
 # profile.md.meta 中用于声明附加系统提示词逻辑路径的键。
 CHARACTER_SYSTEM_PROMPT_PATHS_META_KEY: str = "profile"
 
+# SOUL.md.meta 中用于声明主Agent角色名的键。
+SOUL_META_CHARACTER_NAME_KEY: str = "character_name"
+
 # 普通子Agent停止后保存历史的临时目录与格式
 SUBAGENT_TEMP_DIR_NAME: str = "tmp"
 SUBAGENT_HISTORY_SUFFIX: str = ".es"

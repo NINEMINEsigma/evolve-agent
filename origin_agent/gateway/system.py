@@ -174,6 +174,9 @@ class GatewaySystem(AsyncSystem):
                     f"Gateway did not finish startup within {GATEWAY_START_TIMEOUT_SECONDS}s"
                 )
             logger.info(
+                f"Webpage http://localhost:{ctx.gateway_port}",
+            )
+            logger.info(
                 "Gateway listening on http://%s:%d (ws /ws/chat)",
                 ctx.gateway_host, ctx.gateway_port,
             )

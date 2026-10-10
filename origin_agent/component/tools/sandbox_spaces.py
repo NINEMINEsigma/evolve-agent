@@ -11,7 +11,6 @@ from typing import Any, TYPE_CHECKING
 
 from abstract.tools.registry import ToolRegistry, tool_error, tool_result
 from abstract.tools.ui_event_router import UIEventRouter
-from entity.constant import MAIN_AGENT_CHARACTER_NAME
 from entity.puretype import DynamicSandboxSpace, ToolAvailability, ToolDangerLevel
 from system.application import Application
 from system.runtime import RuntimeSystem
@@ -33,7 +32,7 @@ def _require_main_agent(context: ToolContext | None) -> str | None:
     if context.runtime_context.mode != "fast":
         return "Dynamic sandbox spaces can only be modified in fast mode"
     character_name = context.character_name or context.loop.current_character_agent
-    if character_name != MAIN_AGENT_CHARACTER_NAME:
+    if character_name != Application.current().get_system(RuntimeSystem).main_agent_character_name:
         return "Only the main Agent can modify global dynamic sandbox spaces"
     return None
 

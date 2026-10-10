@@ -15,7 +15,7 @@ from typing import * # type: ignore
 
 from abstract.tools.registry import ToolRegistry
 from entity.puretype import LLMResponse, ToolAvailability, ToolDangerLevel
-from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME
+from entity.constant import USER_CHARACTER_NAME
 from entity.messages import (
     CharacterConversationMessage,
     FunctionCall,
@@ -85,9 +85,11 @@ class TaskAgentLoop(SubAgentLoop):
         active_round_id = self.begin_agentspace_round(self.current_character_agent)
         try:
             # 初始 prompt 也先进入可追踪 Inbox；临时Agent关闭时只做内存交接。
+            from system.runtime import RuntimeSystem
+            _main_name = Application.current().get_system(RuntimeSystem).main_agent_character_name
             initial_character_name = (
                 USER_CHARACTER_NAME if message_type == "user_direct"
-                else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
+                else (self._parent_character_agent or _main_name)
             )
             self._inbox.put(UserMessage(
                 content=format_user_message(user_name, message_type, initial_prompt),

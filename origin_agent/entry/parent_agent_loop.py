@@ -32,7 +32,6 @@ from entity.constant import (
     ApplicationState,
     LOG_PREVIEW_CHARS,
     MAX_TOOL_TURNS,
-    MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
 )
 from entity.messages import (
@@ -151,7 +150,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._stream_consumer: StreamConsumer = StreamConsumer(
             llm=self._llm,
             sink=self._frontend_sink,
-            character_name=MAIN_AGENT_CHARACTER_NAME,
+            character_name=self.current_character_agent,
             cancel_event=self._cancel_event,
         )
 
@@ -173,7 +172,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     @property
     def current_character_agent(self) -> str:
-        return MAIN_AGENT_CHARACTER_NAME
+        from system.runtime import RuntimeSystem
+        return self.app.get_system(RuntimeSystem).main_agent_character_name
 
     @property
     def user_character_name(self) -> str:

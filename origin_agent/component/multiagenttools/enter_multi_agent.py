@@ -163,6 +163,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history=history,
         agents=agent_profiles,
         sink=sink,
+        main_agent_name=main_agent_name,
         history_store_dir=parent_loop.history_store_dir,
     )
 
