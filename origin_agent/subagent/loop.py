@@ -574,7 +574,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     def enqueue_inbox_message(self, message: UserMessage, *, from_parent: bool) -> int:
         self._last_message_from_parent = from_parent
-        return self._inbox.put(message)
+        seq = self._inbox.put(message)
+        # 唤醒 run() 空闲等待点（纯文本轮结束后 await _wake_event）：
+        # Inbox.put 只 set Inbox 侧事件，不会唤醒 loop 侧事件
+        self._wake_event.set()
+        return seq
 
     def inject_parent_message(
         self,
