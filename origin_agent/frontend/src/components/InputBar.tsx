@@ -219,9 +219,21 @@ export default function InputBar({
   const [recordingActive, setRecordingActive] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const handleRecordingStateChange = useCallback((isRecording: boolean) => {
     setRecordingActive(isRecording);
   }, []);
+
+  // ── 焦点实况核对 ──
+  // 变形结束时 InputMorph 会连同聚焦中的按钮一起卸载，浏览器不派发 blur，
+  // 事件驱动的 inputFocused 将永久卡在 true，抽屉被钉住而无法收回底部。
+  // 每次渲染后以 DOM 焦点实况核对，静默失焦立即纠正。
+  useEffect(() => {
+    if (!inputFocused) return;
+    const active = document.activeElement;
+    if (active instanceof Element && surfaceRef.current?.contains(active)) return;
+    setInputFocused(false);
+  });
   const activeSubagents = Object.values(subagentSessions).filter(
     (session) => session.status === "running" && session.interactive !== false,
   );
@@ -229,6 +241,7 @@ export default function InputBar({
 
   // 非空普通单Agent输入栏固定使用底部停靠位置；没有必须常驻显示的交互时，启用独立热区控制的三态抽屉。
   // 空会话保留原有的居中完整输入栏，不参与自动隐藏；空闲且位于聊天底部时自动展开，离底后恢复收缩。
+  // ask/审批变形同样遵循三态抽屉规则（不位于底部或不聚焦输入框时收起），不再常驻展开。
   const hasPendingAttachments = pendingImages.length > 0 || pendingAudios.length > 0 || pendingVideos.length > 0;
   const inputBarBottomDocked = !archived
     && !chatEmpty
@@ -236,7 +249,6 @@ export default function InputBar({
     && agents.length === 0
     && !hasSubagents;
   const inputBarAutoHide = inputBarBottomDocked
-    && !morphActive
     && !hasPendingAttachments
     && !uploading
     && !recordingActive
@@ -334,18 +346,25 @@ export default function InputBar({
         <button
           type="button"
           className={`input-bar-hotzone input-bar-hotzone-${inputDrawer.phase}`}
-          aria-label="展开输入栏"
+          aria-label={morphActive ? "有待处理的提问/审批，展开输入栏" : "展开输入栏"}
           aria-expanded={inputDrawer.phase === "open"}
-          title="展开输入栏"
+          title={morphActive ? "有待处理的提问/审批" : "展开输入栏"}
           {...inputDrawer.hotzoneProps}
           onFocus={inputDrawer.hotzoneProps.onMouseEnter}
           onClick={() => inputRef.current?.focus()}
         >
           <span className="input-bar-hotzone-glint" aria-hidden />
+          {morphActive && queueExtra > 0 && (
+            <span className="input-bar-hotzone-badge" aria-hidden>+{queueExtra}</span>
+          )}
+          {morphActive && (
+            <span className="input-bar-hotzone-morph-dot" aria-hidden />
+          )}
         </button>
       )}
 
       <div
+        ref={surfaceRef}
         className="input-bar-drawer-surface"
         {...(inputBarAutoHide ? inputDrawer.drawerProps : {})}
       >

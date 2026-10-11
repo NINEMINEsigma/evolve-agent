@@ -85,7 +85,7 @@ WS /ws/chat?resume=<sid>
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
 - `server_info`：服务端信息。
 - `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式。前端不持久化该值。
-- `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。
+- `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。轮次后推送（`MessageRouter._send_history_sync`）的 `agents` 按会话当前注册 Loop 计算，不按轮次所属 Loop：ExitMultiAgent 退役 MultiAgentLoop 后，其最后一轮的轮次后推送若沿用退役 Loop 会把已清空的 agents 重新覆盖为过期列表，导致前端主徽章停留在多Agent配色。
 - `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`；转发 task 登记在 `GatewaySystem.task_owner`，连接断开时经 `TaskOwner.cancel` 预期取消（禁止裸 `task.cancel()`，否则 Owner 会按 RV11 判定为未授权取消并报生命周期失败）并注销订阅；自动旋转复用同一物理连接和订阅。
 
 ### 上行消息类型

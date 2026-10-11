@@ -769,10 +769,16 @@ class MessageRouter:
 
     async def _send_history_sync(self, loop: IMainSessionLoop) -> None:
         """在一轮 History 写入完成后推送正典历史同步元数据。"""
+        # agents 是会话级模式状态，必须按会话当前注册 Loop 计算：轮次所属 Loop
+        # 可能已被 replace_loop 退役（如 ExitMultiAgent），沿用退役 MultiAgentLoop
+        # 的参与者列表会把 ExitMultiAgent 推送的清空通知重新覆盖为过期列表。
+        # 与 server.py 握手处 HISTORY_SYNC 的口径保持一致。
         agents_info: list[str] | None = None
-        from entry.multi_agent_loop import MultiAgentLoop
-        if isinstance(loop, MultiAgentLoop):
-            agents_info = list(loop._agent_names)
+        current_loop = _get_loop(self.sid)
+        if current_loop is not None:
+            from entry.multi_agent_loop import MultiAgentLoop
+            if isinstance(current_loop, MultiAgentLoop):
+                agents_info = list(current_loop.get_agents().keys())
         try:
             await self.ws.send_text(
                 json.dumps(

@@ -966,6 +966,55 @@
     transform: translateX(-50%);
     pointer-events: auto;
   }
+
+  /* ── 变形待办提示：ask/审批存在时热区呼吸发光 + 角标计数 ── */
+  .input-bar-morph-active .input-bar-hotzone {
+    background:
+      linear-gradient(115deg, rgba(var(--white-rgb), 0.22), rgba(var(--accent-rgb), 0.28) 48%, rgba(var(--white-rgb), 0.08)),
+      rgba(var(--bg-secondary-rgb), 0.72);
+    box-shadow:
+      0 -10px 32px rgba(var(--black-rgb), 0.30),
+      0 0 30px rgba(var(--accent-rgb), 0.45),
+      inset 0 1px 0 rgba(var(--white-rgb), 0.30);
+    animation: input-hotzone-morph-breathe 2.2s ease-in-out infinite;
+  }
+
+  .input-bar-morph-active .input-bar-hotzone.input-bar-hotzone-open {
+    animation: none;
+  }
+
+  @keyframes input-hotzone-morph-breathe {
+    0%, 100% { box-shadow: 0 -10px 32px rgba(var(--black-rgb), 0.30), 0 0 18px rgba(var(--accent-rgb), 0.25), inset 0 1px 0 rgba(var(--white-rgb), 0.30); }
+    50% { box-shadow: 0 -10px 32px rgba(var(--black-rgb), 0.30), 0 0 34px rgba(var(--accent-rgb), 0.55), inset 0 1px 0 rgba(var(--white-rgb), 0.30); }
+  }
+
+  .input-bar-hotzone-morph-dot {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.8);
+    pointer-events: none;
+  }
+
+  .input-bar-hotzone-badge {
+    position: absolute;
+    right: 22px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0 5px;
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
+    pointer-events: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

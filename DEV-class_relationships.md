@@ -1254,6 +1254,10 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 `StreamConsumer` 通过共享取消事件自行终止当前 `__anext__()`，并作为异步迭代器唯一关闭者；外部不再并发 `aclose()`。工具 handler task 的取消使用有限清理窗口，超时 task 由 `ToolExecutor._cancel_cleanup_tasks` 强引用并观察。前端对 `history_sync.processing` 的 true/false 都按服务端权威值覆盖本地状态。
 
+### 轮次后 HISTORY_SYNC 的 agents 口径修正
+
+`MessageRouter._send_history_sync` 的 `agents` 字段从"轮次所属 Loop"改为"会话当前注册 Loop"（`_get_loop(self.sid)`）计算，与 `server.py` 握手处 HISTORY_SYNC 口径一致。原实现下 `ExitMultiAgent` 在旧 MultiAgentLoop 轮次内调用 `replace_loop`（推送 `{"agents": []}` 并注册 ParentAgentLoop）后，退役 loop 最后一轮收尾仍会执行轮次后回调：按退役 MultiAgentLoop 的 `_agent_names` 计算 agents 并随 HISTORY_SYNC 推送，把清空通知覆盖回过期多Agent列表，前端主徽章停留在多Agent配色。新 ParentAgentLoop 各轮 HISTORY_SYNC 中 `agents=None` 被 `exclude_none` 省略，前端 `setAgents` 两个分支均不触发，过期状态不会自愈。`agents` 属于会话级模式状态而非轮次级数据，因此取当前注册 Loop；token 统计等轮次级字段仍按轮次所属 Loop。
+
 ### 主会话永久删除与连接失效收敛
 
 永久删除由 Gateway 分层执行：`SessionManager` 的删除中集合先封闭新连接与 Loop重建竞态，`FrontendSink.close_session()`从连接映射移除会话并以 4004关闭已建立连接，`delete_session_runtime()`再中断活动回复、停止长期消息队列、清除客户端信息并注销 Cron，最后由 `gateway.chat.SessionManager.remove()`统一删除索引与会话目录。握手前无法可靠向浏览器传递私有关闭码，因此前端通过 `/api/sessions/{id}/status` 的删除感知 `exists`字段二次确认；显式恢复已经删除或删除中的 ID不再创建随机新会话。
