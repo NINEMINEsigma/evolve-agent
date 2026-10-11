@@ -351,7 +351,10 @@ export default function InputBar({
           title={morphActive ? "有待处理的提问/审批" : "展开输入栏"}
           {...inputDrawer.hotzoneProps}
           onFocus={inputDrawer.hotzoneProps.onMouseEnter}
-          onClick={() => inputRef.current?.focus()}
+          /* 点击时输入面仍处于 hidden/peek 变形态（位于 .chat-area-container 底缘之下），
+             裸 focus() 会触发浏览器聚焦滚动，把 overflow:hidden 的容器连同整个会话区
+             向上推、抽屉展开后再逐帧钳制回弹；preventScroll 阻断该滚动即可。 */
+          onClick={() => inputRef.current?.focus({ preventScroll: true })}
         >
           <span className="input-bar-hotzone-glint" aria-hidden />
           {morphActive && queueExtra > 0 && (
