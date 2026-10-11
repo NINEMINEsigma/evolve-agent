@@ -69,7 +69,7 @@
 | 普通模式主会话 | `ParentAgentLoop` 的会话 | `Loop.parent` |
 | 多Agent模式主会话 | `MultiAgentLoop` 的会话 | `Loop.multi` |
 | 随意聊聊会话 | `ColloquyLoop` 的内置会话 | `Loop.colloquy` / `COLLOQUY_SESSION_ID` |
-| 子会话 | `SubAgentLoop` 的会话（与前端 UI「子会话面板/抽屉」对齐） | — |
+| 子会话 | `SubAgentLoop` 的会话（与前端 UI「子会话 Tab」对齐） | — |
 | 临时子会话 | `TaskAgentLoop` 的会话 | — |
 | 子Agent / subagent | `SubAgentLoop` 运行体；亦指多Agent模式中从动态角色档案加载的非主参与者（两语境互斥，复用不歧义） | — |
 | 临时Agent / taskagent | `TaskAgentLoop` 运行体（无系统提示词、无持久化、完成即终止） | — |
@@ -191,7 +191,7 @@
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |
 | 全局元数据 Profile | `LLMProfileData.metadata_profile`（英文锚点：`global metadata Profile`）；项目级元数据生成 Profile，统一服务所有会话的自动标题、自动标签和摘要；未配置时按目标会话活动 Profile 回退 |
 | 会话待用 Profile 选择 | 浏览器按主会话保存的 Profile 名称，供下一条发送给主会话的消息或重新生成提交使用；选择操作本身不更新后端，可能与后端已保存的名称不同（英文锚点：`pending session Profile selection`） |
-| 抽屉分页按钮 | 模型配置抽屉顶部切换“模型配置”和“全局配置引用”的按钮组；不称作左侧导航栏（英文锚点：`drawer tabs`） |
+| 抽屉分页按钮 | 模型配置 Tab顶部切换“模型配置”和“全局配置引用”的按钮组；不称作左侧导航栏（英文锚点：`drawer tabs`） |
 | Profile 名称指针 | 会话级或全局最近使用的 Profile 名称（英文锚点：`Profile name pointer`）；只保存名称，不复制端点、密钥或 Profile 对象 |
 | Profile 实例引用 | `LLMProfile` 多模态分工字段直接指向根列表中的另一个 `LLMProfile` 实例（英文锚点：`Profile object reference`） |
 
@@ -217,16 +217,35 @@
 
 ```
 ┌──────────┬────────────────────────────────────────────┬──────┐
-│          │  顶部栏 (Header)                            │      │
+│          │  顶部栏 (Header，浮层)                      │      │
 │  左侧    ├────────────────────────────────────────────┤  右  │
-│  导航栏  │  任务进度面板 (TaskProgressPanel)           │  侧  │
-│          │  统一面板 (UnifiedPanel)                    │  触  │
-│ (Sidebar)│  聊天区 (ChatArea)                          │  发  │
-│          │  输入栏 (InputBar)                          │  条  │
+│  导航栏  │  主界面区域 (TabStage)                      │  侧  │
+│          │  ├ 聊天 Tab（ChatArea + 输入栏）            │  Tab │
+│ (Sidebar,│  ├ 资源 Tab / 子会话 Tab / 会话网页 Tab     │  栏  │
+│  浮层)   │  └ 模型配置 Tab（同一时刻显示一个）          │      │
+│          │                                            │(Rail)│
 └──────────┴────────────────────────────────────────────┴──────┘
 ```
 
 > 启动屏（`SplashScreen`）和骨架屏（`SkeletonScreen`）作为覆盖层叠加在整体布局之上，分别用于开屏动画和首次连接前的占位。
+> 各 tab 内容层常驻挂载（grid 叠放 + `visibility` 切换，不卸载），切换会话或页面刷新统一回到聊天 Tab。
+> 会话锁定（`SessionLockOverlay`）时主界面区域与右侧 Tab 栏整体替换为锁定提示页。
+
+### Tab 导航体系
+
+文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `SiteTab.tsx` · `LlmTab.tsx`）· `styles/tabs.css`
+
+| 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
+|---|---|---|---|
+| 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容的 tab 为禁用态不可点击 | tab rail |
+| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式 tab 注册表（id/标题/图标/render）；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
+| 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 内容层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与 iframe 生命周期） | tab stage |
+| 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
+| 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
+| 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
+| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
+| 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
+| Tab 安全区 | `.tab-panel-safe-top` | 各非聊天 tab 顶部 56px 安全留白，避开顶部栏浮层热区 | tab safe area |
 
 ### Agentspace 编辑器
 
@@ -312,15 +331,11 @@
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 主内容区 | `.main-content` | 顶部栏以右的全部内容 |
-| 任务进度面板 | `TaskProgressPanel` | 顶部栏下方，可折叠 |
-| 统一面板（剪贴板） | `UnifiedPanel` | 剪贴板内容展示，可折叠 |
-| 聊天区 | `ChatArea` | 消息流 |
-| 输入栏 | `InputBar` | 底部输入区；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制 hidden/peek/open 三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时默认收缩，抵达聊天区底部时自动展开，离开底部后恢复收缩，热区悬停、聚焦及附件、上传、录音、任务进度等交互期间保持展开；ask/审批变形同样遵循三态收起规则（不位于底部或不聚焦输入框时收起），变形待办通过热区呼吸光效与角标提示，聚焦变形按钮会钉住展开；触摸设备保持完整形态 |
-| 右侧触发条 | `.right-trigger-strip` / `.right-trigger-bar` | 屏幕右缘的展开把手（资源抽屉 / 子会话面板） |
-| 资源抽屉 | `Drawer` | 后台任务、Cron 等 |
-| 模型配置抽屉 | `LlmProfileDrawer` | “模型配置 / 全局配置引用”两个分页；模型页纵向分组、详情单开、先只读后编辑；全局页管理审批与元数据引用，不提供会话模型切换 |
-| 子会话面板 | `SubagentPanel` | 宽度持久化于 localStorage 键 `evolve_subagent_panel_width` |
+| 主内容区 | `.main-content` | 顶部栏以右的全部内容；内部为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`） |
+| 任务进度面板 | `TaskProgressPanel` | 输入栏抽屉面内（聊天 Tab），仅非空会话显示 |
+| 统一面板（剪贴板） | `UnifiedPanel` | 剪贴板面板 `ClipboardPanel`，归属聊天 Tab，随 tab 隐藏（保持挂载） |
+| 聊天区 | `ChatArea` | 消息流；归属聊天 Tab（`ChatTab` 包裹） |
+| 输入栏 | `InputBar` | 底部输入区；归属聊天 Tab；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制 hidden/peek/open 三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时默认收缩，抵达聊天区底部时自动展开，离开底部后恢复收缩，热区悬停、聚焦及附件、上传、录音、任务进度等交互期间保持展开；ask/审批变形同样遵循三态收起规则（不位于底部或不聚焦输入框时收起），变形待办通过热区呼吸光效与角标提示，聚焦变形按钮会钉住展开；触摸设备保持完整形态 |
 | 图片灯箱 | `Lightbox` | 图片放大查看 |
 | 确认对话框 | `ConfirmDialog` | 工具调用审批弹窗 |
 | 询问对话框 | `AskDialog` | Agent 提问弹窗 |
@@ -335,14 +350,14 @@
 | 消息体 | `MessageBody` | Markdown 渲染（GFM + breaks + raw）；reasoning 折叠；检测 `<script>`/`<style>` 等标签时切换到 `SafeHtml` 沙箱 |
 | 消息编辑器 | `MessageEditor` / `.message-edit-box` | 用户消息内联编辑（textarea + 保存/取消） |
 | 消息附件 | `MessageAttachments` | 图片缩略图、音频播放器、下载链接、播放列表 |
-| 工具调用卡片 | `ToolCallCard` / tool call card | 主聊天区和子会话面板中以 `tool_call_id` 一对一聚合工具调用请求、执行状态与工具结果的可折叠视觉单元；不改变 History 中 assistant `tool_calls` 与 `ToolResultMessage` 的存储顺序 |
+| 工具调用卡片 | `ToolCallCard` / tool call card | 主聊天区和子会话 Tab中以 `tool_call_id` 一对一聚合工具调用请求、执行状态与工具结果的可折叠视觉单元；不改变 History 中 assistant `tool_calls` 与 `ToolResultMessage` 的存储顺序 |
 | 代码块 | `CodeBlock` / `.code-block-wrapper` | 语法高亮（Prism oneDark）+ 一键复制 |
 | Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
 | Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
-| 会话网页 | `SessionSiteDrawer` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时显示右侧触发按钮；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
-| 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话抽屉保留局部消息 DOM 几何预览；移动端默认折叠 |
+| 会话网页 | `SiteTab`（会话网页 Tab） | 会话网页 Tab 内 iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时右侧 Tab 栏图标可用；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
+| 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话 Tab保留局部消息 DOM 几何预览；移动端默认折叠 |
 | 回到底部按钮 | `.scroll-to-bottom` | 已有聊天内容、初始化完成且物理离底时显示的快捷回底按钮；初始化、小地图拖拽与主动回底期间隐藏，不仅依赖 `detached` 状态 |
 
 ### 输入栏内部组件
@@ -371,17 +386,17 @@
 
 ### 子会话与定时任务
 
-文件：`origin_agent/frontend/src/components/SubagentDrawer.tsx` · `SubagentPanel.tsx` · `SubagentCountdown.tsx` · `CronCountdown.tsx`
+文件：`origin_agent/frontend/src/components/SubagentCard.tsx` · `SubagentCountdown.tsx` · `CronCountdown.tsx`
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 子会话抽屉 | `SubagentDrawer` / `SubagentCard` | 子会话全屏抽屉，含 `SubagentCard` 卡片和 `Minimap` |
-| 子会话倒计时 | `SubagentCountdown` / `.cron-countdown-strip` | 子会话空闲收集倒计时条（≤30s 显示） |
-| Cron 倒计时 | `CronCountdown` / `.cron-countdown-strip` | 定时任务下次执行倒计时条（≤60s 显示） |
+| 子会话卡片 | `SubagentCard` | 子会话 Tab内的单卡片视图，含消息流和 `Minimap`；子级 tab 活跃项按会话持久化（`ACTIVE_SUBAGENT_ID`） |
+| 子会话倒计时 | `SubagentCountdown` / `.cron-countdown-strip` | 子会话空闲收集倒计时条（≤30s 显示）；归属聊天 Tab |
+| Cron 倒计时 | `CronCountdown` / `.cron-countdown-strip` | 定时任务下次执行倒计时条（≤60s 显示）；归属聊天 Tab |
 
-### 资源抽屉内部
+### 资源 Tab 内部
 
-文件：`origin_agent/frontend/src/components/Drawer.tsx`
+文件：`origin_agent/frontend/src/features/tabs/ResourcesTab.tsx`
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
@@ -444,3 +459,5 @@
 | RIPER Yolo | （已删除） | RIPER-5 协议中已过时的 Yolo 概念，已从 `.agents/skills/riper-core/SKILL.md` 移除 |
 | 允许列表 | 白名单 | 统一为"白名单" |
 | orchestrator（裸称） | 启动入口（launch entry） | prompt 模板中裸称 orchestrator 指代 run.py 的写法已退役；`SubAgentOrchestrator` 合法保留 |
+| 右侧触发条 | 右侧 Tab 栏（tab rail） | `.right-trigger-strip` 体系已被右侧 Tab 栏替换；2026-10-12 起 Tab 导航改造退役 |
+| 资源抽屉 / 模型配置抽屉 / 会话网页抽屉 / 子会话面板 | 资源 Tab / 模型配置 Tab / 会话网页 Tab / 子会话 Tab | 右侧抽屉体系 tab 化后退役；规范称谓见 §11「Tab 导航体系」 |

@@ -18,6 +18,7 @@ import "./styles/modal.css";
 import "./styles/dialogs.css";
 import "./styles/panels.css";
 import "./styles/drawer.css";
+import "./styles/tabs.css";
 import "./styles/input.css";
 import "./styles/morph.css";
 import "./styles/tooltip.css";

@@ -5,7 +5,7 @@
  * 默认鼠标穿透。
  *
  * sandbox 策略：allow-scripts allow-same-origin。
- * 比 SafeHtml 和 SessionSiteDrawer 更严格（去掉 allow-popups 和 allow-forms），
+ * 比 SafeHtml 和会话网页 Tab 更严格（去掉 allow-popups 和 allow-forms），
  * 因为舞台层是背景层，不接收用户交互。
  * 需要 allow-same-origin 以加载 assets/ 下的图集资源和 fetch 本地文件。
  */

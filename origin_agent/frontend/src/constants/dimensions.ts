@@ -1,20 +1,10 @@
 /** 尺寸/断点常量 */
 export const DIMENSIONS = {
-  SUBAGENT_PANEL_DEFAULT: 520,   // 子代理面板默认宽度
-  SUBAGENT_PANEL_MIN:     280,   // 子代理面板最小宽度
-  SUBAGENT_PANEL_MAX:     900,   // 子代理面板最大宽度
   SIDEBAR_DEFAULT:        320,   // 侧边栏默认宽度
   SIDEBAR_MIN:            200,   // 侧边栏最小宽度
   SIDEBAR_MAX:            560,   // 侧边栏最大宽度
-  DRAWER_DEFAULT:         520,   // 右侧抽屉默认宽度
-  DRAWER_MIN:             320,   // 右侧抽屉最小宽度
-  DRAWER_MAX:             900,   // 右侧抽屉最大宽度
-  LLM_DRAWER_DEFAULT:     680,   // 模型配置抽屉默认宽度
-  LLM_DRAWER_MIN:         480,   // 模型配置抽屉最小宽度
-  LLM_DRAWER_MAX:         1100,  // 模型配置抽屉最大宽度
-  SITE_DRAWER_DEFAULT:    620,   // 会话网页抽屉默认宽度
-  SITE_DRAWER_MIN:        380,   // 会话网页抽屉最小宽度
-  SITE_DRAWER_MAX:        1000,  // 会话网页抽屉最大宽度
+  TAB_RAIL_WIDTH:         44,    // 右侧 Tab 栏立柱宽度 (px)
+  TAB_RAIL_WIDTH_MOBILE:  40,    // 右侧 Tab 栏立柱移动端宽度 (px)
   INPUT_MAX_SCROLL:       200,   // 输入框最大滚动高度
   MENU_MAX_HEIGHT:        244,   // 提及菜单最大高度
   MOBILE_BREAKPOINT:      768,   // 移动端断点 (px)

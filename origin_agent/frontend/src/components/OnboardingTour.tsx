@@ -1,14 +1,13 @@
 import { useMemo } from "react";
 import { Joyride, STATUS, EVENTS, type Step } from "react-joyride";
+import type { TabId } from "../features/tabs/registry";
 
 interface OnboardingTourProps {
   run: boolean;
   onClose: () => void;
   isMobile: boolean;
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  setDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setLlmDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  onCloseLlmDrawer: () => void;
+  switchTab: (id: TabId) => void;
   onPinSidebarChange: (pinned: boolean) => void;
   onPinHeaderChange: (pinned: boolean) => void;
 }
@@ -18,9 +17,7 @@ export default function OnboardingTour({
   onClose,
   isMobile,
   setSidebarCollapsed,
-  setDrawerOpen,
-  setLlmDrawerOpen,
-  onCloseLlmDrawer,
+  switchTab,
   onPinSidebarChange,
   onPinHeaderChange,
 }: OnboardingTourProps) {
@@ -65,43 +62,43 @@ export default function OnboardingTour({
         content: "在这里输入消息与 Agent 对话。支持文件上传、@提及、/命令、录音等。",
         placement: "top",
       },
-      // 步骤 4：右侧触发条（仅展示，不打开抽屉）
+      // 步骤 4：右侧 Tab 栏（仅展示，不切换）
       {
-        target: '[data-tour="right-trigger-strip"]',
-        title: "资源入口",
-        content: "屏幕右缘的触发条可以打开资源抽屉、子会话面板、模型配置等。",
+        target: '[data-tour="tab-rail"]',
+        title: "右侧 Tab 栏",
+        content: "屏幕右缘的右侧 Tab 栏切换主界面视图：聊天、资源、子会话、会话网页、模型配置。",
         placement: "left",
       },
-      // 步骤 5：资源抽屉
+      // 步骤 5：资源 Tab
       {
-        target: '[data-tour="resource-drawer"]',
-        title: "资源抽屉",
-        content: "这里展示当前会话的图片、下载文件、后台任务和定时任务。",
+        target: '[data-tour="resources-tab"]',
+        title: "资源 / 任务",
+        content: "这里展示当前会话的图片、下载文件、Shell 会话和定时任务。",
         placement: "left",
         before: async () => {
-          setDrawerOpen(true);
+          switchTab("resources");
           await wait(300);
         },
         after: () => {
-          setDrawerOpen(false);
+          switchTab("chat");
         },
       },
       // 步骤 6：模型配置
       {
-        target: '[data-tour="llm-drawer-panel"]',
+        target: '[data-tour="llm-tab"]',
         title: "模型配置",
         content: "模型配置页按客户端和端点管理连接、参数；全局配置引用页选择审批与元数据模型。当前会话的待用模型从顶部栏切换。",
         placement: "left",
         before: async () => {
-          setLlmDrawerOpen(true);
+          switchTab("llm");
           await wait(300);
         },
         after: () => {
-          onCloseLlmDrawer();
+          switchTab("chat");
         },
       },
     ];
-  }, [isMobile, setSidebarCollapsed, setDrawerOpen, setLlmDrawerOpen, onCloseLlmDrawer]);
+  }, [isMobile, setSidebarCollapsed, switchTab]);
 
   return (
     <Joyride

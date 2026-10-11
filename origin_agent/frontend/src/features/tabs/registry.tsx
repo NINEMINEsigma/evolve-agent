@@ -1,0 +1,102 @@
+import type { ReactNode } from "react";
+import type { WebSocketState } from "../../hooks/useWebSocket";
+import type { useSessionSite } from "../../hooks/useSessionSite";
+import type { SessionStageState } from "../../hooks/useSessionStage";
+import type { SessionChatStyleState } from "../../hooks/useSessionChatStyle";
+import ResourcesTab from "./ResourcesTab";
+import SubagentsTab from "./SubagentsTab";
+import SiteTab from "./SiteTab";
+import LlmTab from "./LlmTab";
+import ChatTab from "./ChatTab";
+
+/** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
+export type TabId = "chat" | "resources" | "subagents" | "site" | "llm";
+
+/** Shared render context handed to every tab content layer. */
+export interface TabRenderContext {
+  ws: WebSocketState;
+  activeTab: TabId;
+  siteStatus: ReturnType<typeof useSessionSite>;
+  sessionId: string;
+  // chat tab
+  targetSessions: string[];
+  setTargetSessions: React.Dispatch<React.SetStateAction<string[]>>;
+  visibleCharacters: string[];
+  responseCharacters: string[];
+  onToggleAgentState: (agentName: string) => void;
+  onToggleMessageVisibility: (messageId: string, agentName: string) => void;
+  setLightboxSrc: (src: string | null) => void;
+  currentSessionArchived: boolean;
+  clipboardCollapsed: boolean;
+  onToggleClipboardCollapse: () => void;
+  stageState: SessionStageState;
+  chatStyleCssText: string | null;
+  chatStyleStatus: SessionChatStyleState["status"];
+  chatStyleReloadKey: number;
+  // subagents tab
+  activeSubagentId: string | null;
+  setActiveSubagentId: (id: string) => void;
+}
+
+export interface TabDefinition {
+  id: TabId;
+  title: string;
+  icon: ReactNode;
+  render: (ctx: TabRenderContext) => ReactNode;
+}
+
+const chatIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+const resourcesIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
+const subagentsIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+
+const siteIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <line x1="2" y1="9" x2="22" y2="9" />
+    <circle cx="5" cy="6.5" r="0.5" fill="currentColor" />
+    <circle cx="7.5" cy="6.5" r="0.5" fill="currentColor" />
+  </svg>
+);
+
+const llmIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 21v-7" />
+    <path d="M4 10V3" />
+    <path d="M12 21v-9" />
+    <path d="M12 8V3" />
+    <path d="M20 21v-5" />
+    <path d="M20 12V3" />
+    <line x1="2" y1="14" x2="6" y2="14" />
+    <line x1="10" y1="8" x2="14" y2="8" />
+    <line x1="18" y1="16" x2="22" y2="16" />
+  </svg>
+);
+
+/** Declarative tab registry. The rail and the stage both render from this list. */
+export const TAB_REGISTRY: readonly TabDefinition[] = [
+  { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} /> },
+  { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} /> },
+  { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} /> },
+  { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} /> },
+  { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} /> },
+];

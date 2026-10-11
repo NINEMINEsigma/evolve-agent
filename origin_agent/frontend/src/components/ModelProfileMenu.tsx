@@ -111,7 +111,7 @@ export default function ModelProfileMenu({ open, anchorRef, manager, onClose }: 
         <span className="model-profile-option-text"><strong>{profile.name}</strong><span>{profile.model || "未设置模型"}</span></span>
         <span className="model-profile-check" aria-hidden>{profile.name === manager.activeProfileName && manager.selectionStatus === "ready" ? "✓" : ""}</span>
       </button>)}
-      {manager.profilesStatus === "ready" && !manager.profiles.length && <div className="model-profile-menu-notice">尚无模型配置，请从右侧模型配置抽屉新增。</div>}
+      {manager.profilesStatus === "ready" && !manager.profiles.length && <div className="model-profile-menu-notice">尚无模型配置，请从右侧 Tab 栏的模型配置新增。</div>}
     </div>
   </PopupLayer>;
 }

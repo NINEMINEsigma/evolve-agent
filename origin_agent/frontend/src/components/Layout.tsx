@@ -1,20 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
-import ChatArea from "./ChatArea";
-import InputBar from "./InputBar";
-import ClipboardPanel from "./ClipboardPanel";
-import Drawer from "./Drawer";
-import SubagentPanel from "./SubagentPanel";
-import CronCountdown from "./CronCountdown";
-import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
-import LlmProfileDrawer from "./LlmProfileDrawer";
-import DynamicSandboxSpacesDialog from "./DynamicSandboxSpacesDialog";
-import SessionSiteDrawer from "./SessionSiteSection";
 import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
 import PerformanceTelemetryDialog from "./PerformanceTelemetryDialog";
+import DynamicSandboxSpacesDialog from "./DynamicSandboxSpacesDialog";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -24,6 +15,11 @@ import { useResizable } from "../hooks/useResizable";
 import { useSessionStage } from "../hooks/useSessionStage";
 import { useSessionChatStyle } from "../hooks/useSessionChatStyle";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { TAB_REGISTRY } from "../features/tabs/registry";
+import { useTabSystem } from "../features/tabs/useTabSystem";
+import TabRail from "../features/tabs/TabRail";
+import TabStage from "../features/tabs/TabStage";
+import type { TabRenderContext } from "../features/tabs/registry";
 
 interface LayoutProps {
   ws: WebSocketState;
@@ -37,24 +33,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pinSidebar, setPinSidebar] = useState(false);
   const [pinHeader, setPinHeader] = useState(false);
-  const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
-  const llmCloseGuardRef = useRef<(() => void) | null>(null);
-  const closeLlmDrawer = useCallback(() => setLlmDrawerOpen(false), [setLlmDrawerOpen]);
-  const registerLlmCloseGuard = useCallback((guard: (() => void) | null) => { llmCloseGuardRef.current = guard; }, []);
-  const requestCloseLlmDrawer = useCallback(() => {
-    if (llmCloseGuardRef.current) llmCloseGuardRef.current();
-    else closeLlmDrawer();
-  }, [closeLlmDrawer]);
   const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
   const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
-  const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
-  const [siteAvailable, setSiteAvailable] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
-  const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
-  const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
-    STORAGE_KEYS.SUBAGENT_PANEL_OPEN, ws.sessionId, false);
-  const [activeSubagentId, setActiveSubagentId] = usePersistentSessionState<string | null>(
-    STORAGE_KEYS.ACTIVE_SUBAGENT_ID, ws.sessionId, null);
   const [targetSessions, setTargetSessions] = usePersistentSessionState<string[]>(
     STORAGE_KEYS.TARGET_SESSIONS, ws.sessionId, ["main"]);
   const [visibleCharacters, setVisibleCharacters] = usePersistentSessionState<string[]>(
@@ -76,15 +57,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const stageStatusText = stagePaused ? "已暂停" : stageState.status === "ready" ? "已启用" : stageState.status === "idle" ? "未配置" : "未配置";
   const chatStyleStatusText = chatStylePaused ? "已暂停" : chatStyleState.status === "ready" ? "已启用" : chatStyleState.status === "error" ? "加载失败" : "未配置";
 
-  const [subagentPanelWidth, setSubagentPanelWidth] = usePersistentState<number>(
-    STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, DIMENSIONS.SUBAGENT_PANEL_DEFAULT);
-  const subagentResize = useResizable({
-    width: subagentPanelWidth,
-    setWidth: setSubagentPanelWidth,
-    min: DIMENSIONS.SUBAGENT_PANEL_MIN,
-    max: DIMENSIONS.SUBAGENT_PANEL_MAX,
-    direction: "right",
-  });
+  // 子会话 tab 的活跃子会话（按会话持久化）
+  const [activeSubagentId, setActiveSubagentId] = usePersistentSessionState<string | null>(
+    STORAGE_KEYS.ACTIVE_SUBAGENT_ID, ws.sessionId, null);
 
   const [sidebarWidth, setSidebarWidth] = usePersistentState<number>(
     STORAGE_KEYS.SIDEBAR_WIDTH, DIMENSIONS.SIDEBAR_DEFAULT);
@@ -94,36 +69,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     min: DIMENSIONS.SIDEBAR_MIN,
     max: DIMENSIONS.SIDEBAR_MAX,
     direction: "left",
-  });
-
-  const [drawerWidth, setDrawerWidth] = usePersistentState<number>(
-    STORAGE_KEYS.DRAWER_WIDTH, DIMENSIONS.DRAWER_DEFAULT);
-  const drawerResize = useResizable({
-    width: drawerWidth,
-    setWidth: setDrawerWidth,
-    min: DIMENSIONS.DRAWER_MIN,
-    max: DIMENSIONS.DRAWER_MAX,
-    direction: "right",
-  });
-
-  const [llmDrawerWidth, setLlmDrawerWidth] = usePersistentState<number>(
-    STORAGE_KEYS.LLM_DRAWER_WIDTH, DIMENSIONS.LLM_DRAWER_DEFAULT);
-  const llmDrawerResize = useResizable({
-    width: llmDrawerWidth,
-    setWidth: setLlmDrawerWidth,
-    min: DIMENSIONS.LLM_DRAWER_MIN,
-    max: DIMENSIONS.LLM_DRAWER_MAX,
-    direction: "right",
-  });
-
-  const [siteDrawerWidth, setSiteDrawerWidth] = usePersistentState<number>(
-    STORAGE_KEYS.SITE_DRAWER_WIDTH, DIMENSIONS.SITE_DRAWER_DEFAULT);
-  const siteDrawerResize = useResizable({
-    width: siteDrawerWidth,
-    setWidth: setSiteDrawerWidth,
-    min: DIMENSIONS.SITE_DRAWER_MIN,
-    max: DIMENSIONS.SITE_DRAWER_MAX,
-    direction: "right",
   });
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
@@ -222,6 +167,33 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
 
+  // Tab system: active tab state, site probe source and enablement derivation.
+  const tabSystem = useTabSystem(ws);
+  const onToggleClipboardCollapse = useCallback(() => setClipboardCollapsed((v) => !v), [setClipboardCollapsed]);
+
+  const tabRenderContext: TabRenderContext = {
+    ws,
+    activeTab: tabSystem.activeTab,
+    siteStatus: tabSystem.siteStatus,
+    sessionId: ws.sessionId,
+    targetSessions,
+    setTargetSessions,
+    visibleCharacters,
+    responseCharacters,
+    onToggleAgentState,
+    onToggleMessageVisibility: handleToggleMessageVisibility,
+    setLightboxSrc,
+    currentSessionArchived,
+    clipboardCollapsed,
+    onToggleClipboardCollapse,
+    stageState,
+    chatStyleCssText: chatStyleState.cssText,
+    chatStyleStatus: chatStyleState.status,
+    chatStyleReloadKey: chatStyleState.reloadKey,
+    activeSubagentId,
+    setActiveSubagentId,
+  };
+
   return (
     <>
       <Sidebar
@@ -286,7 +258,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
-          modelMenuBlocked={drawerOpen || subagentPanelOpen || llmDrawerOpen || siteDrawerOpen || sandboxSpacesOpen || performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
+          modelMenuBlocked={sandboxSpacesOpen || performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
           forcePin={pinHeader}
           stagePaused={stagePaused}
           onToggleStagePaused={() => setStagePaused((v) => !v)}
@@ -298,155 +270,26 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
         />
 
-        {ws.sessionLocked ? (
-          <SessionLockOverlay onRetry={ws.retryConnect} />
-        ) : (
-          <>
-            <ClipboardPanel
-              clipboardDisplays={ws.clipboardDisplays}
-              collapsed={clipboardCollapsed}
-              onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
-            />
-
-            <ChatArea
-              archived={currentSessionArchived}
-              onImageClick={setLightboxSrc}
-              onEditMessage={ws.editMessage}
-              onDeleteMessages={ws.deleteMessages}
-              onDeleteSingleMessage={ws.deleteSingleMessage}
-              onRegenerateResponse={ws.regenerateResponse}
-              onDropFiles={ws.handleFileUpload}
-              agents={ws.agents}
-              onToggleMessageVisibility={handleToggleMessageVisibility}
-              stageState={stageState}
-              chatStyleCssText={chatStyleState.cssText}
-              chatStyleStatus={chatStyleState.status}
-              chatStyleReloadKey={chatStyleState.reloadKey}
-            >
-              <CronCountdown cronTasks={ws.cronTasks} />
-
-              <SubagentCountdown
-                subagentSessions={ws.subagentSessions}
-                idleCountdown={ws.subagentIdleCountdown}
+        <div className="tab-body">
+          {ws.sessionLocked ? (
+            <SessionLockOverlay onRetry={ws.retryConnect} />
+          ) : (
+            <>
+              <TabStage
+                tabs={TAB_REGISTRY}
+                activeTab={tabSystem.activeTab}
+                renderContext={tabRenderContext}
               />
-
-              <InputBar
-                uploading={ws.uploading}
-                archived={currentSessionArchived}
-                hasActiveProfile={!!ws.llmProfiles?.activeProfile || (targetSessions.length > 0 && !targetSessions.includes("main"))}
-                sessionId={ws.sessionId}
-                taskProgress={ws.taskProgress}
-                onSend={() => {
-                  ws.send(targetSessions, visibleCharacters, responseCharacters);
-                }}
-                onUpload={ws.handleFileInputChange}
-                onUploadClick={ws.handleUploadClick}
-                onInterrupt={ws.interrupt}
-                interruptStatus={ws.interruptStatus}
-                onDisgust={ws.disgust}
-                onResume={ws.resume}
-                fileInputRef={ws.fileInputRef}
-                pendingImages={ws.pendingImages}
-                onRemovePendingImage={ws.removePendingImage}
-                onPasteImage={ws.handlePasteImages}
-                pendingAudios={ws.pendingAudios}
-                onRemovePendingAudio={ws.removePendingAudio}
-                onPasteAudio={ws.handlePasteAudios}
-                pendingVideos={ws.pendingVideos}
-                onRemovePendingVideo={ws.removePendingVideo}
-                onPasteVideo={ws.handlePasteVideos}
-                inputRef={ws.inputRef}
-                subagentSessions={ws.subagentSessions}
-                targetSessions={targetSessions}
-                setTargetSessions={setTargetSessions}
-                agents={ws.agents}
-                visibleCharacters={visibleCharacters}
-                responseCharacters={responseCharacters}
-                onToggleAgentState={onToggleAgentState}
-                pendingAsks={ws.pendingAsks}
-                pendingConfirms={ws.pendingConfirms}
-                onRespondAsk={ws.respondAsk}
-                onRespondConfirm={ws.respondConfirm}
-                tokenUsage={ws.tokenUsage}
-                contextTokens={ws.contextTokens}
-                llmMaxContextTokens={ws.llmMaxContextTokens}
+              <TabRail
+                tabs={TAB_REGISTRY}
+                activeTab={tabSystem.activeTab}
+                enabledTabs={tabSystem.enabledTabs}
+                onSwitch={tabSystem.switchTab}
               />
-            </ChatArea>
-          </>
-        )}
-
-      </div>
-
-      {!(drawerOpen || subagentPanelOpen || llmDrawerOpen || siteDrawerOpen) && (
-        <div className="right-trigger-strip" data-tour="right-trigger-strip">
-          <div
-            className="right-trigger-bar resource-trigger-bar"
-            data-tour="resource-trigger"
-            onClick={() => setDrawerOpen(true)}
-            data-tooltip="打开资源/任务抽屉"
-          >
-            <span className="right-trigger-icon">◀</span>
-          </div>
-          {Object.keys(ws.subagentSessions).length > 0 && (
-            <div
-              className="right-trigger-bar subagent-trigger-bar"
-              onClick={() => setSubagentPanelOpen(true)}
-              data-tooltip="展开子会话面板"
-            >
-              <span className="right-trigger-icon">◀</span>
-            </div>
+            </>
           )}
-          {siteAvailable && (
-            <div
-              className="right-trigger-bar site-trigger-bar"
-              onClick={() => setSiteDrawerOpen(true)}
-              data-tooltip="打开会话网页抽屉"
-            >
-              <span className="right-trigger-icon">◀</span>
-            </div>
-          )}
-          <div
-            className="right-trigger-bar llm-trigger-bar"
-            data-tour="llm-trigger"
-            onClick={() => setLlmDrawerOpen(true)}
-            data-tooltip="打开模型配置抽屉"
-          >
-            <span className="right-trigger-icon">◀</span>
-          </div>
         </div>
-      )}
-
-      <Drawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        sessionId={ws.sessionId}
-        onImageClick={setLightboxSrc}
-        shells={ws.shells}
-        setShells={ws.setShells}
-        cronTasks={ws.cronTasks}
-        setCronTasks={ws.setCronTasks}
-        dynamicEndpoints={ws.dynamicEndpoints}
-        width={drawerWidth}
-        isResizing={drawerResize.isResizing}
-        onResizePointerDown={drawerResize.onPointerDown}
-      />
-
-      {subagentPanelOpen && (
-        <div
-          className={`subagent-panel-resize-handle ${subagentResize.isResizing ? "dragging" : ""}`}
-          onPointerDown={subagentResize.onPointerDown}
-          data-tooltip="拖拽调整子会话面板宽度"
-        />
-      )}
-
-      <SubagentPanel
-        open={subagentPanelOpen}
-        onToggle={() => setSubagentPanelOpen((v) => !v)}
-        subagentSessions={ws.subagentSessions}
-        activeId={activeSubagentId}
-        onSelect={setActiveSubagentId}
-        width={subagentPanelWidth}
-      />
+      </div>
 
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
@@ -463,36 +306,12 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         />
       )}
 
-      {llmDrawerOpen && ws.llmProfiles && (
-        <LlmProfileDrawer
-          open={llmDrawerOpen}
-          onClose={closeLlmDrawer}
-          onRegisterCloseGuard={registerLlmCloseGuard}
-          llmProfiles={ws.llmProfiles}
-          width={llmDrawerWidth}
-          isResizing={llmDrawerResize.isResizing}
-          onResizePointerDown={llmDrawerResize.onPointerDown}
-        />
-      )}
-
-      <SessionSiteDrawer
-        open={siteDrawerOpen}
-        onClose={() => setSiteDrawerOpen(false)}
-        sessionId={ws.sessionId}
-        onAvailabilityChange={setSiteAvailable}
-        width={siteDrawerWidth}
-        isResizing={siteDrawerResize.isResizing}
-        onResizePointerDown={siteDrawerResize.onPointerDown}
-      />
-
       <OnboardingTour
         run={onboardingRun}
         onClose={onOnboardingClose}
         isMobile={isMobile}
         setSidebarCollapsed={setSidebarCollapsed}
-        setDrawerOpen={setDrawerOpen}
-        setLlmDrawerOpen={setLlmDrawerOpen}
-        onCloseLlmDrawer={requestCloseLlmDrawer}
+        switchTab={tabSystem.switchTab}
         onPinSidebarChange={setPinSidebar}
         onPinHeaderChange={setPinHeader}
       />

@@ -8,77 +8,20 @@ import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { isMessageVisible } from "../features/chat/messageVisibility";
 import SubagentAvatar from "../features/characterAvatars/SubagentAvatar";
 
-interface SubagentDrawerProps {
-  open: boolean;
-  onClose: () => void;
-  subagentSessions: Record<string, SubagentSession>;
-}
-
 const STATUS_LABEL: Record<SubagentSession["status"], string> = {
   running: "运行中",
   completed: "已完成",
   terminated: "已终止",
 };
 
-export default function SubagentDrawer({
-  open,
-  onClose,
-  subagentSessions,
-}: SubagentDrawerProps) {
-  const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(new Set());
-  const [openTick, setOpenTick] = useState(0);
-
-  useEffect(() => {
-    if (open) setOpenTick((t) => t + 1);
-  }, [open]);
-
-  if (!open) return null;
-
-  const items = Object.values(subagentSessions);
-
-  const toggleCollapse = (sid: string) => {
-    setCollapsedSessions((prev) => {
-      const next = new Set(prev);
-      next.has(sid) ? next.delete(sid) : next.add(sid);
-      return next;
-    });
-  };
-
-  return (
-    <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel subagent-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-header">
-          <span className="drawer-title">子会话 ({items.length})</span>
-          <button className="drawer-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="drawer-body">
-          {items.length === 0 && (
-            <div className="drawer-empty">暂无子会话</div>
-          )}
-          {items.map((session, index) => (
-            <SubagentCard
-              key={session.session_id}
-              session={session}
-              collapsed={collapsedSessions.has(session.session_id)}
-              onToggleCollapse={() => toggleCollapse(session.session_id)}
-              openTick={openTick + index}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface SubagentCardProps {
   session: SubagentSession;
   collapsed: boolean;
   onToggleCollapse: () => void;
   disableToggle?: boolean;
-  openTick?: number;
 }
 
-export function SubagentCard({ session, collapsed, onToggleCollapse, disableToggle, openTick }: SubagentCardProps) {
+export function SubagentCard({ session, collapsed, onToggleCollapse, disableToggle }: SubagentCardProps) {
   const chatRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
@@ -133,7 +76,7 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
       ro.disconnect();
       timers.forEach(clearTimeout);
     };
-  }, [collapsed, session.session_id, openTick, scrollToBottom]);
+  }, [collapsed, session.session_id, scrollToBottom]);
 
   useEffect(() => {
     if (!collapsed) {

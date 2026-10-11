@@ -15,6 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与五个 tab 内容层
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
@@ -92,18 +93,24 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `App.tsx` | 根组件，组合 Sidebar / Header / ChatArea / InputBar / 各类面板与弹窗 |
-| `Layout.tsx` | 布局容器，管理主聊天区与侧面板的排列 |
+| `App.tsx` | 根组件，组合 Sidebar / Header / Tab 系统 / 各类弹窗 |
+| `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
-| `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用” |
-| `Drawer.tsx` | 侧边抽屉容器；资源区包含 Shell会话元数据列表与用户停止按钮，不提供终端输出或人工输入 |
-| `LlmProfileDrawer.tsx` | 模型配置分页外壳、焦点管理和受保护关闭入口；内容委托 `components/llm/` 的列表、详情、全局引用及确认组件 |
+| `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由动态沙盒弹窗、性能遥测、灯箱与引导向导触发 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 五条目（chat/resources/subagents/site/llm），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
+| `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
+| `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击 |
+| `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
+| `features/tabs/ChatTab.tsx` | 聊天 Tab 内容层：ChatArea + ClipboardPanel + 双倒计时条 + InputBar |
+| `features/tabs/ResourcesTab.tsx` | 资源 Tab：四折叠区块（资源/Shell/Cron/动态端点），资源按 tab 激活懒加载 |
+| `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
+| `features/tabs/SiteTab.tsx` | 会话网页 Tab：toolbar + iframe；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`） |
+| `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
-| `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动 |
+| `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动；步骤 4-6 锚定右侧 Tab 栏与资源/模型配置 Tab，经 `switchTab` 程序性切换 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
-| `SessionSiteSection.tsx` / `SessionSiteDrawer` | 会话网页抽屉展示与交互；消费 `useSessionSite` 的权威状态，保留手动刷新、全屏、新标签页和整站下载 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
 
 ### 聊天区域
@@ -128,7 +135,7 @@ frontend/
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
-| `Minimap.tsx` | 主聊天区使用 Canvas 逻辑 Minimap 映射，将正典骨架与尚未固化的 live 行共同绘制，不测量离屏 DOM；子会话抽屉继续使用局部 DOM 几何模式 |
+| `Minimap.tsx` | 主聊天区使用 Canvas 逻辑 Minimap 映射，将正典骨架与尚未固化的 live 行共同绘制，不测量离屏 DOM；子会话 Tab继续使用局部 DOM 几何模式 |
 | `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
 
 `@` 提及支持通过 `/` 逐级查询工作空间子目录；选择目录会保留输入状态并自动进入该目录，选择文件才会插入不可编辑的引用标签。子目录查询期间候选项暂时为空时，`Enter` 和 `Tab` 也不会发送消息或切走输入焦点。只有输入开头或空白后的 `/` 才触发 skill 菜单，目录路径中的 `/` 会作为路径分隔符保留。
@@ -137,24 +144,22 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `AskDialog.tsx` | `Ask` 弹窗 |
 | `TagEditor.tsx` | 会话标签编辑 |
 | `primitives/ModalWindow.tsx` | 模态窗口基础原语 |
 | `primitives/PopupLayer.tsx` | 弹出层基础原语 |
 | `primitives/NoticeBanner.tsx` | 用户触发操作的持久错误/警告横幅；不会写入聊天 History，需用户关闭 |
 
-### 面板
+### 面板与倒计时
 
 子会话状态与后端统一为 `running` / `completed` / `terminated`。数量限制移除后不再保留旧 `waiting` 排队状态、标签或样式；输入栏只将 `running` 且可交互的子会话列为消息目标。此状态保存在页面内存并通过 WebSocket/快照同步，不涉及持久化迁移。
 
 | 组件 | 职责 |
 |---|---|
-| `ClipboardPanel.tsx` | 剪贴板展示面板 |
-| `SubagentPanel.tsx` | 子代理状态面板 |
-| `SubagentDrawer.tsx` | 子代理抽屉 |
-| `TaskProgressPanel.tsx` | 任务进度面板 |
-| `PlaylistPlayer.tsx` | 播放列表播放器 |
-| `CronCountdown.tsx` / `SubagentCountdown.tsx` | 倒计时组件 |
+| `ClipboardPanel.tsx` | 剪贴板展示面板（聊天 Tab 内） |
+| `SubagentCard.tsx` | 子会话卡片：单会话消息流 + Minimap（子会话 Tab 内） |
+| `TaskProgressPanel.tsx` | 任务进度面板（输入栏抽屉面内，聊天 Tab） |
+| `PlaylistPlayer.tsx` | 播放列表播放器（资源 Tab） |
+| `CronCountdown.tsx` / `SubagentCountdown.tsx` | 倒计时组件（聊天 Tab 内） |
 
 ### Agentspace 文件浏览器（新增）
 
@@ -191,7 +196,7 @@ frontend/
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
 | `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态及图片/音频/视频三路全局回退引用；多模态状态一次 GET 恢复、三路独立 PUT，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
 | `useSessionLlmSelection.ts` | 按会话名称存储、服务端恢复、读取取消与代际隔离、Profile重命名/删除处理 |
-| `useLlmProfileEditor.ts` | 抽屉只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
+| `useLlmProfileEditor.ts` | 模型配置 Tab只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口先按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，再由 `wsMessageDecoder.decodeWSMessage` 将原始 JSON 解码为判别联合 `WSMessage`（非法 JSON / 未知 type / 非法流式载荷在解码层丢弃），避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
 | `wsMessageDecoder.ts` | 入站消息统一解码器：`decodeWSMessage(raw)` 把原始 JSON 字符串转为判别联合 `WSMessage`；JSON 解析失败 / 非对象 / 未知 type 丢弃；`stream_delta` / `stream_done` 经 `streamEventGuards` 实际结构校验（嵌套类型、数字有限、整数、`extra=forbid`），非法载荷丢弃并输出不含正文 / 参数的诊断；旧非流事件暂仅基础检查后透传为 `NonStreamWSMessage`；日志只输出已验证且已知的消息 type |
 | `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
@@ -202,17 +207,17 @@ frontend/
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `features/characterAvatars/characterAvatarStore.ts` | 角色名 → 头像 URL 的 zustand 低频 store；主Agent条目优先防同名覆盖，`useCharacterAvatarUrl` selector 供消息与子会话组件订阅 |
 | `features/characterAvatars/useCharacterAvatarSync.ts` | 挂载时拉取 `GET /api/characters/avatars`，订阅聊天页 Agentspace 事件（`SOUL.md.meta` / `characters/` 命中或 `resync`）后去抖重拉；失败静默保留旧映射 |
-| `features/characterAvatars/SubagentAvatar.tsx` | 子会话面板 tab 与抽屉卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
+| `features/characterAvatars/SubagentAvatar.tsx` | 子会话 Tab子级 tab 与卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
-| `useSessionSite.ts` | 会话网页状态：通过稳定入口的服务端重定向取得最终 `index.html` URL；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时隐藏入口 |
+| `useSessionSite.ts` | 会话网页状态：通过稳定入口的服务端重定向取得最终 `index.html` URL；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时隐藏入口；探测唯一实例由 `features/tabs/useTabSystem.ts` 持有，会话网页 Tab经 ctx 消费 |
 | `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：服务端解析重定向，按最终 CSS URL 获取内容；PostCSS 作用域处理并按最终 URL重写 CSS `url()`，禁止 `@import` |
 
-“模型配置”抽屉由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在抽屉内保持挂载。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡和图片/音频/视频三张独立全局回退卡片；每张卡片使用独立的可用状态、保存状态、错误状态和清空确认。多模态卡片明确说明活动 Profile 引用优先，活动引用失败时不切换全局回退。引用选择立即保存到服务端，状态由 REST 响应与 WebSocket 广播收敛。
+“模型配置”Tab（`features/tabs/LlmTab.tsx`，去模态化、无遮罩与焦点陷阱）由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在 Tab 内保持挂载；编辑草稿跨 tab 与跨会话保留（内存态），`beforeunload` 刷新守卫保留。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡和图片/音频/视频三张独立全局回退卡片；每张卡片使用独立的可用状态、保存状态、错误状态和清空确认。多模态卡片明确说明活动 Profile 引用优先，活动引用失败时不切换全局回退。引用选择立即保存到服务端，状态由 REST 响应与 WebSocket 广播收敛。
 
 会话待用 Profile 选择只通过顶部栏修改。`useSessionLlmSelection` 使用 `evolve_session_llm_profile:<encoded sessionId>` 每会话键保存名称，本地明确选择优先；缺失时读取 `GET /api/sessions/{id}/llm-profile`。空sessionId不继承旧会话值；读失败不写空名称；目录加载失败不误判名称已删除。旧 `evolve_active_llm_profile` 全局键不再读取，也不猜测迁移。新建/分支/合并/旋转按新ID恢复服务端指针，不复制父会话未提交选择。发送消息与重新生成才提交名称，resume不受待用选择影响。读取请求完整覆盖响应正文的15秒截止，切会话/用户重选/名称广播使旧请求失效。
 
-编辑草稿由 `useLlmProfileEditor` 持有且只驻留内存，切分页/搜索不会丢失；切Profile、收起编辑祖先、取消、关闭按钮/遮罩/Escape与引导程序性关闭统一通过离开守卫。外部变更不覆盖草稿，提示另存或放弃；写成功后的目录刷新失败显示警告，不再次创建；网络不确定保存先刷新确认。密钥不出现在只读详情或浏览器存储中。抽屉样式独立为 `llm-profile.css`，不重写其他弹窗共享表单类。
+编辑草稿由 `useLlmProfileEditor` 持有且只驻留内存，切分页/搜索不会丢失；切Profile、收起编辑祖先、取消统一通过离开守卫（Tab 化后无遮罩/关闭按钮/Escape 关闭路径，`beforeunload` 刷新守卫保留）。外部变更不覆盖草稿，提示另存或放弃；写成功后的目录刷新失败显示警告，不再次创建；网络不确定保存先刷新确认。密钥不出现在只读详情或浏览器存储中。Tab 样式独立为 `llm-profile.css`（外壳由 `tabs.css` 的 `.llm-tab` 承载），不重写其他弹窗共享表单类。
 
 顶部 `ModelProfileMenu` 通过 `PopupLayer` 挂到body，以fixed浮层和真实按钮支持触摸/键盘；触摸与折叠顶部栏均不依赖hover。pointerdown只判断外部关闭，选项通过click提交以保留触摸滚动；菜单追踪锚点与visualViewport变化，层级高于聊天但低于模态。仅选取/Escape关闭时归还触发按钮焦点，外部点击和新模态不抢焦点。
 
@@ -260,7 +265,7 @@ frontend/
 - 主聊天区逻辑 Minimap 同时绘制正典骨架和当前 live 行；拖动到 live 尾部等价于回到底部。
 - `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供 Minimap 物理高亮与拖拽使用；拖动期间抑制内容页请求，释放时以最终物理位置反查目标范围。
 - 主聊天区 Minimap 的 Canvas 背景按已测量/骨架估算消息高度加权绘制；高亮和拖拽只使用 scroller 的 `scrollTop` / `scrollHeight` / `clientHeight` 物理指标，估算高度不反向修改 Virtuoso 或追底位置。极薄高亮保持真实比例，另以透明扩展命中区保留可抓取性。子会话 Legacy Minimap 保留原 DOM 几何实现。
-- 资源抽屉使用完整 History 资源索引，不依赖前端已加载正文页。
+- 资源 Tab使用完整 History 资源索引，不依赖前端已加载正文页。
 - 原“导出会话为 HTML”已移除；虚拟列表不保证浏览器原生查找命中离屏历史。
 
 ## 本地性能遥测
@@ -298,8 +303,9 @@ frontend/
 | `messages.css` | 消息气泡与渲染 |
 | `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |
-| `drawer.css` | 通用抽屉面板与右侧入口 |
-| `llm-profile.css` | 模型配置抽屉分页、纵向分组、只读详情/编辑、用途卡与窄屏全宽布局 |
+| `drawer.css` | Tab 化后保留的共享区块样式：折叠区块、空态、任务/Cron 列表、资源网格、子会话子级 tab 行、site 工具栏 |
+| `tabs.css` | Tab 导航体系：`.tab-body` 水平容器、`.tab-stage` grid 叠放、`.tab-panel-layer` visibility 切换、`.tab-rail` 右侧 Tab 栏、`.tab-panel-safe-top` 安全区与各 tab 内容层 |
+| `llm-profile.css` | 模型配置 Tab分页、纵向分组、只读详情/编辑、用途卡与窄屏适配布局 |
 | `panels.css` | 任务进度/子代理面板 |
 | `sidebar.css` | 侧边栏 |
 | `header.css` | 顶部栏 |
