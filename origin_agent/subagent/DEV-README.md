@@ -123,6 +123,7 @@ graph TD
 - `profile.md.meta` 的 `[llm_profile]` 引用运行时 LLM Profile；`[profile]` 可按行声明附加系统提示词逻辑路径。
 - `profile.md` 作为第一个自定义系统提示词；元数据中的 `[profile]` 可按行声明额外的沙盒命名空间路径，系统按声明顺序加载每个文件并分别作为独立 system message。
 - 元数据中的 `[llm_profile]` 直接引用 `llm_profiles.es` 中已有的 Profile 名称。
+- `profile.md.meta` 的 `[avatar]` 是可选的角色头像逻辑路径键（值取首行非空内容）；仅服务前端展示（`system/character_avatars.py` 轻量扫描 + `/files` 服务），不属于可运行性校验——`[avatar]` 声明无效不影响角色启动，头像扫描也不依赖 `discover()` 的重量级加载。
 - `[profile]` 中的路径不存在、不是文件或不具备当前沙盒的读取权限时，列表保留条目并返回错误，启动入口拒绝该角色。
 - 角色名称跨 `roleplay` 与 `task` 全局唯一；重复名称保留为错误条目但不可启动。
 - 缺失档案、元数据格式错误、缺少引用或 Profile 不存在时，列表保留条目并返回错误；启动入口拒绝该角色。

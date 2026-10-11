@@ -15,6 +15,7 @@ Self-identity system:
   Changes to SOUL take effect on the next conversation turn.
 - **Soul-metadata file** ``ws:{{soul_file}}.meta`` holds structured settings read by the runtime, layered on top of the SOUL personality. Write it in the same ``[key]`` section format used by character ``profile.md.meta`` files: each key on its own line wrapped in ``[ ]``, followed by its value up to the next key.
   - ``[character_name]`` — your character name as seen in conversation history, the frontend, and multi-Agent routing. When unset, it falls back to the default ``main-agent``.
+  - ``[avatar]`` — optional logical path (e.g. ``ws:avatar.png``) to your custom avatar image, served to the frontend at up to 5 MiB; any readable namespace path works and no file-type whitelist is enforced (the browser tries to load it). Editing this file takes effect automatically in the frontend (no tool call needed); unset means the default initial-letter avatar.
   - To rename yourself: edit ``[character_name]`` in ``ws:{{soul_file}}.meta``, then call the ``RefreshIdentity`` tool to reload it. Editing the file alone does not take effect; the name is read once at startup and only re-read when ``RefreshIdentity`` runs.
   - The metadata file may gain more keys in the future; the runtime reads each one on the same startup-plus-refresh cycle.
 

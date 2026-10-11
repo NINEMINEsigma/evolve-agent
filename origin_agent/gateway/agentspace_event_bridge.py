@@ -152,7 +152,7 @@ async def forward_agentspace_events(
         await asyncio.sleep(0)
         event, dropped = coalesce_agentspace_event(first, queue)
         if dropped:
-            logger.warning(
+            logger.debug(
                 "Agentspace WebSocket events coalesced | connection=%s dropped=%d sequence=%d",
                 connection_label,
                 dropped,

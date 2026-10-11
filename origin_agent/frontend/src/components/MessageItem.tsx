@@ -1,10 +1,11 @@
-import { memo, useState, type WheelEvent } from "react";
+import { memo, useEffect, useState, type WheelEvent } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageBody from "./MessageBody";
 import { contentToText, isLongChatMessage, toolCallSummary } from "../features/chat/messageCollapse";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
 import ToolCallCard from "./ToolCallCard";
+import { useCharacterAvatarUrl } from "../features/characterAvatars/characterAvatarStore";
 
 function hashString(str: string): number {
   let hash = 0;
@@ -75,6 +76,7 @@ const MessageItem = memo(function MessageItem({
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
+  const [avatarImgFailed, setAvatarImgFailed] = useState(false);
 
   const textContent = contentToText(m.content);
   const toolSummary = toolCallSummary(m);
@@ -111,6 +113,10 @@ const MessageItem = memo(function MessageItem({
   };
 
   const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : undefined);
+  const avatarUrl = useCharacterAvatarUrl(displayName);
+  useEffect(() => {
+    setAvatarImgFailed(false);
+  }, [avatarUrl]);
   const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
   // 系统状态消息：居中灰色气泡，无头像、无编辑/删除/重新生成按钮
@@ -134,7 +140,14 @@ const MessageItem = memo(function MessageItem({
       {(m.role === "user" || m.role === "assistant" || m.role === "error") && (
         <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
           <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>
-            {m.role === "error" ? "!" : getInitials(displayName || "")}
+            {m.role === "error" ? "!" : avatarUrl && !avatarImgFailed ? (
+              <img
+                className="message-avatar-img"
+                src={avatarUrl}
+                onError={() => setAvatarImgFailed(true)}
+                alt=""
+              />
+            ) : getInitials(displayName || "")}
           </div>
         </div>
       )}

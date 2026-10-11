@@ -15,6 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
+│   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
 │   ├── context/
@@ -112,7 +113,7 @@ frontend/
 | `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥；`user`/`assistant` 头像按角色名查角色头像映射，命中渲染 `<img>`（onError 回退首字母） |
 | `ToolCallCard.tsx` | 工具调用卡片的状态摘要、请求参数区、结果区、耗时和附件；展开详情顶部的“原始 JSON”按钮同时切换请求参数与结果正文，再次点击恢复默认预览。选择仅保留在当前挂载的卡片内，卸载后重新挂载恢复默认，不写入全局状态或浏览器存储。JSON 模式仅展示前端收到的数据，不额外获取后端内部字段；`_meta` 等内部字段不进入普通 JSON 展示，工具链注入的排队消息通过 `embedded_messages` 在结果区单独渲染。独立的嵌入消息、附件和耗时不随模式隐藏。 |
 | `MessageBody.tsx` | 消息正文渲染；可选显示参数 `rawToolJson` 默认 `false`，仅影响工具分支。启用时绕过请求差异预览和结果特殊渲染，对象/数组复用 JSON 树，合法 JSON 标量使用 JSON 文本；非 JSON 文本和多模态内容块保留既有降级。未传参数的调用方保持默认预览，assistant 流式参数展示不受影响。 |
 | `EmbeddedToolMessages.tsx` | 工具结果中嵌入的排队用户消息的独立渲染；显示消息正文、角色、来源和时间，不把内部字段原样展示为 JSON。 |
@@ -199,6 +200,9 @@ frontend/
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
+| `features/characterAvatars/characterAvatarStore.ts` | 角色名 → 头像 URL 的 zustand 低频 store；主Agent条目优先防同名覆盖，`useCharacterAvatarUrl` selector 供消息与子会话组件订阅 |
+| `features/characterAvatars/useCharacterAvatarSync.ts` | 挂载时拉取 `GET /api/characters/avatars`，订阅聊天页 Agentspace 事件（`SOUL.md.meta` / `characters/` 命中或 `resync`）后去抖重拉；失败静默保留旧映射 |
+| `features/characterAvatars/SubagentAvatar.tsx` | 子会话面板 tab 与抽屉卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
 | `useSessionSite.ts` | 会话网页状态：通过稳定入口的服务端重定向取得最终 `index.html` URL；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时隐藏入口 |
 | `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |

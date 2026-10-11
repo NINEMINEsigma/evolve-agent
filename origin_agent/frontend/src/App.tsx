@@ -3,6 +3,7 @@ import { Routes, Route } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useGlobalTooltip } from "./hooks/useGlobalTooltip";
+import { useCharacterAvatarSync } from "./features/characterAvatars/useCharacterAvatarSync";
 import Layout from "./components/Layout";
 import ChatContextMenu from "./components/ChatContextMenu";
 import TagEditor from "./components/TagEditor";
@@ -16,6 +17,7 @@ import { STORAGE_KEYS } from "./constants/storage";
 
 function ChatApp() {
   useGlobalTooltip();
+  useCharacterAvatarSync();
   const ws = useWebSocket();
   const [showSplash, setShowSplash] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);

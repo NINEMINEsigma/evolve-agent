@@ -217,6 +217,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 | POST | `/api/interrupt/{session_id}` | 强制中断已经取得处理锁的主会话当前回复 task；按活动 task 判定 idle，返回权威结果（cancelled / timeout / failed / not_found），不取消长期消息 consumer |
 | POST | `/api/file-picker` | 系统文件选择器 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
+| GET | `/api/characters/avatars` | 实时组装主Agent与全部子Agent角色的头像映射（`[avatar]` 元数据键 → `/files` URL，≤5 MiB、不限扩展名）；no-store、不创建 Loop、不依赖会话，组装委托 `system/character_avatars.py` |
 
 ### Shell会话与 Cron
 

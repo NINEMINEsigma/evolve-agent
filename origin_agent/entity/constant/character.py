@@ -18,6 +18,12 @@ CHARACTER_SYSTEM_PROMPT_PATHS_META_KEY: str = "profile"
 
 # SOUL.md.meta 中用于声明主Agent角色名的键。
 SOUL_META_CHARACTER_NAME_KEY: str = "character_name"
+# SOUL.md.meta 中用于声明主Agent头像逻辑路径的键。
+SOUL_META_AVATAR_KEY: str = "avatar"
+# profile.md.meta 中用于声明子Agent头像逻辑路径的键。
+CHARACTER_AVATAR_META_KEY: str = "avatar"
+# 头像文件大小上限（字节）；超过则该头像无效，前端回退首字母头像。
+AVATAR_MAX_BYTES: int = 5 * 1024 * 1024
 
 # 普通子Agent停止后保存历史的临时目录与格式
 SUBAGENT_TEMP_DIR_NAME: str = "tmp"

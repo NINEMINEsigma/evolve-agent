@@ -75,3 +75,29 @@ class CharacterProfile(BaseModel):
 
     error: str | None = None
     """档案不可用时的可展示错误。"""
+
+
+class CharacterAvatarEntry(BaseModel):
+    """单个角色的头像映射条目；avatar_url 为空表示无有效头像。"""
+
+    name: str
+    """角色名（主Agent当前角色名或子Agent目录名）。"""
+
+    avatar_path: str = ""
+    """元数据 [avatar] 声明的逻辑路径；未声明为空串。"""
+
+    avatar_url: str | None = None
+    """经 /files 前缀拼出的头像 URL；校验未通过时为 None。"""
+
+    error: str | None = None
+    """头像声明存在但校验失败时的可展示错误。"""
+
+
+class CharacterAvatarsResponse(BaseModel):
+    """GET /api/characters/avatars 的响应体。"""
+
+    main: CharacterAvatarEntry
+    """主Agent头像条目。"""
+
+    characters: list[CharacterAvatarEntry] = Field(default_factory=list)
+    """全部子Agent角色条目（含重名与无效条目，由前端处理）。"""

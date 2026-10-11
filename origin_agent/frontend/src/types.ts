@@ -531,6 +531,18 @@ export interface ChatMessage {
   isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）
 }
 
+export interface CharacterAvatarEntryDto {
+  name: string;
+  avatar_path: string;
+  avatar_url: string | null;
+  error: string | null;
+}
+
+export interface CharacterAvatarsResponseDto {
+  main: CharacterAvatarEntryDto;
+  characters: CharacterAvatarEntryDto[];
+}
+
 export interface SessionInfo {
   id: string;
   created_at: number;

@@ -45,6 +45,14 @@
   color: var(--text-white);
 }
 
+.message-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+}
+
 .message-system .message-avatar {
   background: transparent;
   color: var(--text-muted);

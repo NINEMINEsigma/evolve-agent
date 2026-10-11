@@ -3,6 +3,7 @@ import { SubagentCard } from "./SubagentDrawer";
 import { SubagentSession } from "../types";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
+import SubagentAvatar from "../features/characterAvatars/SubagentAvatar";
 
 interface SubagentPanelProps {
   open: boolean;
@@ -52,6 +53,7 @@ export default function SubagentPanel({
               title={s.name || s.session_id}
             >
               <span className="subagent-tab-name">
+                <SubagentAvatar name={s.name || s.session_id} />
                 {s.name || s.session_id.slice(0, SID_DISPLAY_LEN)}
               </span>
               <span className={`subagent-tab-status subagent-status-${s.status}`} />

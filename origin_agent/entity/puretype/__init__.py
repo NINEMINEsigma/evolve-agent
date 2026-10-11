@@ -168,6 +168,8 @@ from .session import (
 from .agent import (
     AgentConfig,
     CharacterProfile,
+    CharacterAvatarEntry,
+    CharacterAvatarsResponse,
 )
 from .ws import (
     MessageType,
@@ -347,6 +349,8 @@ __all__ = [
     # agent
     "AgentConfig",
     "CharacterProfile",
+    "CharacterAvatarEntry",
+    "CharacterAvatarsResponse",
     # ws
     "MessageType",
     "Message",

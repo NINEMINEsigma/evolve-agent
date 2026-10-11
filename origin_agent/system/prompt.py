@@ -171,6 +171,7 @@ def build_subagent_catalog_block() -> str:
     lines = [
         "Available sub-agents (dynamically refreshed; use ListSubAgents for current status):",
         "",
+        "(optional: each character directory may declare an [avatar] key in profile.md.meta to set a custom frontend avatar)",
     ]
     for profile in available_profiles:
         lines.append(f"- {profile.name} ({profile.character_type})")

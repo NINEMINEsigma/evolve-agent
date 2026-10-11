@@ -68,6 +68,7 @@ from entity.constant import (
 from entity.puretype import (
     SessionStatus,
     ClientInfo,
+    CharacterAvatarsResponse,
     SessionTagsUpdateRequest,
     SessionTitleUpdateRequest,
     SessionMessageEditRequest,
@@ -478,6 +479,21 @@ async def get_session_llm_profile(session_id: str, response: Response) -> Sessio
         return SessionLlmProfileState(
             session_id=session_id, profile_name=name, available=available,
         )
+
+
+@router.get("/api/characters/avatars", response_model=CharacterAvatarsResponse)
+async def get_character_avatars(response: Response) -> CharacterAvatarsResponse:
+    """实时组装主Agent与全部子Agent角色的头像映射；不创建 Loop、不依赖会话。"""
+    from system.application import Application
+    from system.character_avatars import collect_character_avatars
+    from system.runtime import RuntimeSystem
+    from system.sandbox import Sandbox
+
+    application = Application.current()
+    sandbox = application.get_system(Sandbox)
+    runtime = application.get_system(RuntimeSystem)
+    response.headers["Cache-Control"] = "no-store"
+    return await asyncio.to_thread(collect_character_avatars, sandbox, runtime)
 
 
 @router.get("/api/sessions/{session_id}/subagents")

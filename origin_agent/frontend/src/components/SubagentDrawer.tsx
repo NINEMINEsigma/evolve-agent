@@ -6,6 +6,7 @@ import { subagentFeedbackToChatMessages } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { isMessageVisible } from "../features/chat/messageVisibility";
+import SubagentAvatar from "../features/characterAvatars/SubagentAvatar";
 
 interface SubagentDrawerProps {
   open: boolean;
@@ -145,6 +146,7 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
       <div className={`subagent-info ${disableToggle ? "no-toggle" : ""}`} onClick={disableToggle ? undefined : onToggleCollapse}>
       <span className="subagent-name">
         <span className="subagent-collapse-arrow">{collapsed ? "▶" : "▼"}</span>
+        <SubagentAvatar name={session.name || session.session_id} />
         {session.name || session.session_id.slice(0, SID_DISPLAY_LEN)}
         <span className="subagent-feedback-count">
           {session.feedback.length} 条

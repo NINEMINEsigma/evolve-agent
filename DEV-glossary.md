@@ -56,6 +56,7 @@
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
 | 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。Read 默认仅返回数据；会话视觉源目录的 `redirect` 字段约定由会话视觉资源服务解释，Read 本身不跟随重定向。与会话元数据及工具内部 `_meta` 字段不同。会话视觉重定向实现进度以对应任务文件为准。 |
 | 主Agent角色名 | 运行时由 `RuntimeSystem.main_agent_character_name` 持有的进程级名称，用于 History 角色标记、前端展示与多Agent路由匹配。启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取一次，缺失或异常时回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`（"main-agent"）；运行期由 `RefreshIdentity` 工具（`component/tools/refresh_identity.py`，MAIN scope）重新读取。该机制供未来 `SOUL.md.meta` 扩展更多运行时设定复用。 |
+| 角色头像（character avatar） | 元数据键 `[avatar]` 声明的角色自定义头像（英文锚点：character avatar）。主Agent键在 `ws:SOUL.md.meta`，子Agent键在角色目录 `profile.md.meta`；值为一行任意可读命名空间逻辑路径。服务端仅校验可读、是文件与 ≤`AVATAR_MAX_BYTES`（5 MiB），不限扩展名，浏览器自动尝试加载；经 `GET /api/characters/avatars` 实时组装、`/files` 前缀服务，前端按角色名映射并回退首字母头像。编辑 meta 后前端经 Agentspace 事件去抖自动刷新，无需调用工具；非 agentspace 命名空间的头像文件本体替换不触发自动重拉（重连 `resync` 或重新挂载时生效）。 |
 | `.docs/` | 项目示例与引用资料目录 |
 
 ---
