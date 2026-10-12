@@ -52,7 +52,7 @@
 |---|---|
 | 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系；内置前缀由 `Namespace` 枚举定义 |
 | 动态沙盒空间 | 用户授权的全局逻辑路径映射（英文锚点：`global dynamic sandbox space`）；独立持久化、仅 fast 模式启用，由 Sandbox 单例管理并供所有 Agent 共享。`is_readonly` 仅表示标准 Sandbox 文件 API 层只读，不是操作系统 ACL |
-| 动态沙盒空间管理弹窗 | 顶部栏命令菜单进入的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批 |
+| 动态沙盒空间 Tab | 右侧 Tab 栏第六个 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批（英文锚点：`dynamic sandbox spaces tab`） |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
 | 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。Read 默认仅返回数据；会话视觉源目录的 `redirect` 字段约定由会话视觉资源服务解释，Read 本身不跟随重定向。与会话元数据及工具内部 `_meta` 字段不同。会话视觉重定向实现进度以对应任务文件为准。 |
 | 主Agent角色名 | 运行时由 `RuntimeSystem.main_agent_character_name` 持有的进程级名称，用于 History 角色标记、前端展示与多Agent路由匹配。启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取一次，缺失或异常时回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`（"main-agent"）；运行期由 `RefreshIdentity` 工具（`component/tools/refresh_identity.py`，MAIN scope）重新读取。该机制供未来 `SOUL.md.meta` 扩展更多运行时设定复用。 |
@@ -222,8 +222,8 @@
 │  导航栏  │  主界面区域 (TabStage)                      │  侧  │
 │          │  ├ 聊天 Tab（ChatArea + 输入栏）            │  Tab │
 │ (Sidebar,│  ├ 资源 Tab / 子会话 Tab / 会话网页 Tab     │  栏  │
-│  浮层)   │  └ 模型配置 Tab（同一时刻显示一个）          │      │
-│          │                                            │(Rail)│
+│  浮层)   │  └ 模型配置 Tab / 动态沙盒空间 Tab           │      │
+│          │    （同一时刻显示一个）                      │(Rail)│
 └──────────┴────────────────────────────────────────────┴──────┘
 ```
 
@@ -233,7 +233,7 @@
 
 ### Tab 导航体系
 
-文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `SiteTab.tsx` · `LlmTab.tsx`）· `styles/tabs.css`
+文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
 
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
@@ -245,6 +245,7 @@
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
+| 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |
 | Tab 安全区 | `.tab-panel-safe-top` | 各非聊天 tab 顶部 56px 安全留白，避开顶部栏浮层热区 | tab safe area |
 
 ### Agentspace 编辑器
@@ -316,7 +317,7 @@
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、动态沙盒空间、system 角色用户消息显示开关与会话视觉开关；展开期间钉住顶部抽屉 |
+| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、system 角色用户消息显示开关与会话视觉开关；展开期间钉住顶部抽屉 |
 | system 角色用户消息显示开关 | `showSystemUserMessages` | 控制 Role 为 `user` 且角色名为 `system` 的消息是否显示；默认显示，作为浏览器全局偏好保存，覆盖主聊天区、子会话和工具结果嵌入消息；不影响 History、模型上下文或系统状态提示（英文锚点：system-character user message visibility toggle） |
 | 状态胶囊 | `HeaderPill` / `.header-pill` | 居中状态胶囊，桌面支持hover/焦点展开；触摸与折叠顶部栏常显待用模型按钮，模型选择由独立浮层承载 |
 | 模型选择菜单 | `ModelProfileMenu` / `.model-profile-menu` | 顶部栏唯一的会话待用 Profile 选择入口，body独立浮层；选择仅更新当前会话浏览器值，发送或重新生成时提交 |
@@ -461,3 +462,4 @@
 | orchestrator（裸称） | 启动入口（launch entry） | prompt 模板中裸称 orchestrator 指代 run.py 的写法已退役；`SubAgentOrchestrator` 合法保留 |
 | 右侧触发条 | 右侧 Tab 栏（tab rail） | `.right-trigger-strip` 体系已被右侧 Tab 栏替换；2026-10-12 起 Tab 导航改造退役 |
 | 资源抽屉 / 模型配置抽屉 / 会话网页抽屉 / 子会话面板 | 资源 Tab / 模型配置 Tab / 会话网页 Tab / 子会话 Tab | 右侧抽屉体系 tab 化后退役；规范称谓见 §11「Tab 导航体系」 |
+| 动态沙盒空间管理弹窗 | 动态沙盒空间 Tab | 命令菜单弹窗 tab 化后退役（2026-10-12）；规范称谓见 §11「Tab 导航体系」 |

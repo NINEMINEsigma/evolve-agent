@@ -20,6 +20,7 @@ export function useTabSystem(ws: WebSocketState) {
       subagents: Object.keys(ws.subagentSessions).length > 0,
       site: siteStatus.status === "ready",
       llm: true,
+      sandbox: true,
     }),
     [ws.subagentSessions, siteStatus.status],
   );

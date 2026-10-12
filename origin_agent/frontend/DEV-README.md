@@ -15,7 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与五个 tab 内容层
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与六个 tab 内容层
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
@@ -96,8 +96,8 @@ frontend/
 | `App.tsx` | 根组件，组合 Sidebar / Header / Tab 系统 / 各类弹窗 |
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
-| `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由动态沙盒弹窗、性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 五条目（chat/resources/subagents/site/llm），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
+| `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 六条目（chat/resources/subagents/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
 | `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
@@ -106,6 +106,7 @@ frontend/
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
 | `features/tabs/SiteTab.tsx` | 会话网页 Tab：toolbar + iframe；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`） |
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
+| `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
 | `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动；步骤 4-6 锚定右侧 Tab 栏与资源/模型配置 Tab，经 `switchTab` 程序性切换 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
@@ -305,7 +306,7 @@ frontend/
 | `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |
 | `drawer.css` | Tab 化后保留的共享区块样式：折叠区块、空态、任务/Cron 列表、资源网格、子会话子级 tab 行、site 工具栏 |
-| `tabs.css` | Tab 导航体系：`.tab-body` 水平容器、`.tab-stage` grid 叠放、`.tab-panel-layer` visibility 切换、`.tab-rail` 右侧 Tab 栏、`.tab-panel-safe-top` 安全区与各 tab 内容层 |
+| `tabs.css` | Tab 导航体系：`.tab-body` 水平容器、`.tab-stage` grid 叠放、`.tab-panel-layer` visibility 切换、`.tab-rail` 右侧 Tab 栏、`.tab-panel-safe-top` 安全区、各 tab 内容层与 `dynamic-sandbox-*` 类族（动态沙盒空间 Tab） |
 | `llm-profile.css` | 模型配置 Tab分页、纵向分组、只读详情/编辑、用途卡与窄屏适配布局 |
 | `panels.css` | 任务进度/子代理面板 |
 | `sidebar.css` | 侧边栏 |
@@ -317,9 +318,9 @@ frontend/
 | `agent-stage.css` | Agent 舞台层（聊天区背景层 iframe） |
 | `chat-style-scope.css` | 聊天区自定义样式作用域基础变量（`.chat-area` 可覆盖 CSS 变量锚点） |
 
-## 动态沙盒空间管理弹窗
+## 动态沙盒空间 Tab
 
-顶部栏命令菜单中的“动态沙盒空间”在所有会话中显示，打开用户直接管理全局动态沙盒空间的弹窗。弹窗通过 REST 接口完成列表查询、创建、完整更新和删除，不经过 Agent 工具审批；Sandbox 的名称、路径、描述、只读标志校验仍是唯一权威。空间名称不可修改，目录选择按钮只选择已有目录，手动输入允许暂不存在的绝对目录；删除仅删除配置，不删除目标目录和文件。
+右侧 Tab 栏第六个 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）。所有会话中可用，用户直接管理全局动态沙盒空间。Tab 通过 REST 接口完成列表查询、创建、完整更新和删除，不经过 Agent 工具审批；Sandbox 的名称、路径、描述、只读标志校验仍是唯一权威。列表以 `activeTab` 为懒加载键，每次切入 tab 重拉。空间名称不可修改，目录选择按钮只选择已有目录，手动输入允许暂不存在的绝对目录；删除仅删除配置，不删除目标目录和文件。删除确认使用复用 `LlmConfirmation` 的受控对话框；编辑态挂 `beforeunload` 刷新守卫。会话锁定（SessionLockOverlay）期间随 Tab 栏一起不可达。
 
 
 | `modal.css` | 模态窗口 |

@@ -8,9 +8,10 @@ import SubagentsTab from "./SubagentsTab";
 import SiteTab from "./SiteTab";
 import LlmTab from "./LlmTab";
 import ChatTab from "./ChatTab";
+import SandboxTab from "./SandboxTab";
 
 /** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
-export type TabId = "chat" | "resources" | "subagents" | "site" | "llm";
+export type TabId = "chat" | "resources" | "subagents" | "site" | "llm" | "sandbox";
 
 /** Shared render context handed to every tab content layer. */
 export interface TabRenderContext {
@@ -92,6 +93,15 @@ const llmIcon = (
   </svg>
 );
 
+const sandboxIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
+    <path d="M12 12l8-4.5" />
+    <path d="M12 12v9" />
+    <path d="M12 12L4 7.5" />
+  </svg>
+);
+
 /** Declarative tab registry. The rail and the stage both render from this list. */
 export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} /> },
@@ -99,4 +109,5 @@ export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} /> },
   { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} /> },
   { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} /> },
+  { id: "sandbox", title: "动态沙盒空间", icon: sandboxIcon, render: (ctx) => <SandboxTab ctx={ctx} /> },
 ];
