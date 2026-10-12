@@ -524,6 +524,19 @@ class History(BaseModel):
             self.messages[index] = message
             self.update_last_user_message()
 
+    def replace_range(self, start: int, end: int, replacements: list[BaseMessage]) -> None:
+        """用 replacements 整体替换半开区间 [start, end) 的消息.
+
+        调用方负责保持 tool_calls/tool_result 配对完整；本方法不做配对校验.
+        """
+        with self._io_locker:
+            if start < 0 or end > len(self.messages) or start > end:
+                raise IndexError(
+                    f"replace_range out of bounds: start={start} end={end} count={len(self.messages)}"
+                )
+            self.messages[start:end] = replacements
+            self.update_last_user_message()
+
     def truncate_to(self, index: int) -> None:
         """截断消息列表到指定索引（保留 messages[:index]）. """
         with self._io_locker:

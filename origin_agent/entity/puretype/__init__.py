@@ -78,6 +78,9 @@ from .metadata import (
     MetadataProfileUpdateRequest,
     MetadataProfileState,
     MetadataProfileMutationResponse,
+    ToolchainSummaryProfileUpdateRequest,
+    ToolchainSummaryProfileState,
+    ToolchainSummaryProfileMutationResponse,
 )
 from .modality import (
     ModalityType,
@@ -164,6 +167,7 @@ from .session import (
     TokenUsageRecord,
     QueuedMessage,
     MainSessionInterruptResult,
+    ToolChainSpan,
 )
 from .agent import (
     AgentConfig,
@@ -274,6 +278,9 @@ __all__ = [
     "MetadataProfileUpdateRequest",
     "MetadataProfileState",
     "MetadataProfileMutationResponse",
+    "ToolchainSummaryProfileUpdateRequest",
+    "ToolchainSummaryProfileState",
+    "ToolchainSummaryProfileMutationResponse",
     # modality
     "ModalityType",
     "ModalityProfileState",
@@ -349,6 +356,7 @@ __all__ = [
     "TokenUsageRecord",
     "QueuedMessage",
     "MainSessionInterruptResult",
+    "ToolChainSpan",
     # agent
     "AgentConfig",
     "CharacterProfile",

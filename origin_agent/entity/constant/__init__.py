@@ -275,6 +275,8 @@ from .colloquy import (
     COMPRESS_HISTORY_MIN_KEEP_ROUNDS,
     COMPRESS_HISTORY_MAX_KEEP_ROUNDS,
     COMPRESS_HISTORY_MIN_MESSAGES,
+    COMPRESSED_TOOL_CHAIN_CALL_NAME,
+    TOOL_CHAIN_COMPRESS_MIN_CHARS,
 )
 from .versions import (
     History_Type_Version,
@@ -513,6 +515,8 @@ __all__ = [
     "COMPRESS_HISTORY_MIN_KEEP_ROUNDS",
     "COMPRESS_HISTORY_MAX_KEEP_ROUNDS",
     "COMPRESS_HISTORY_MIN_MESSAGES",
+    "COMPRESSED_TOOL_CHAIN_CALL_NAME",
+    "TOOL_CHAIN_COMPRESS_MIN_CHARS",
     "History_Type_Version",
     "LLMProfileData_Type_Version",
     "AgentConfig_Type_Version",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionLlmSelection } from "./useSessionLlmSelection";
 import type {
-  LlmProfile, ApprovalProfileState, MetadataProfileState, ModalityProfileState,
+  LlmProfile, ApprovalProfileState, MetadataProfileState, ToolchainSummaryProfileState, ModalityProfileState,
   ModalityProfileStates, ModalityType, LlmLoadStatus,
   LlmProfileChangeEvent, LlmProfileDeleteResult,
 } from "../types";
@@ -192,6 +192,7 @@ export function useLlmProfiles(sessionId: string) {
   const clientsGeneration = useRef(0);
   const approval = useGlobalProfileReference("/api/approval/profile");
   const metadata = useGlobalProfileReference("/api/metadata/profile");
+  const toolchainSummary = useGlobalProfileReference("/api/toolchain-summary/profile");
   const modality = useGlobalModalityReferences("/api/modality/profiles");
   const selection = useSessionLlmSelection({ sessionId, profiles, profilesStatus });
   const selectionRef = useRef(selection);
@@ -264,7 +265,8 @@ export function useLlmProfiles(sessionId: string) {
   const refreshReferences = useCallback(() => {
     void approval.refresh().catch(() => {});
     void metadata.refresh().catch(() => {});
-  }, [approval.refresh, metadata.refresh]);
+    void toolchainSummary.refresh().catch(() => {});
+  }, [approval.refresh, metadata.refresh, toolchainSummary.refresh]);
   const afterMutation = useCallback((failures?: string[]) => {
     setError(null);
     notificationWarningRef.current = failures?.length ? "配置已保存，但部分会话通知失败；请刷新受影响页面。" : null;
@@ -344,6 +346,12 @@ export function useLlmProfiles(sessionId: string) {
     profile_name: msg.metadata_profile_name ?? null, model: msg.metadata_profile_model ?? null,
     available: msg.metadata_profile_available ?? false,
   }), [metadata.receive]);
+  const handleToolchainSummaryProfileChanged = useCallback((msg: {
+    toolchain_summary_profile_name?: string | null; toolchain_summary_profile_model?: string | null; toolchain_summary_profile_available?: boolean;
+  }) => toolchainSummary.receive({
+    profile_name: msg.toolchain_summary_profile_name ?? null, model: msg.toolchain_summary_profile_model ?? null,
+    available: msg.toolchain_summary_profile_available ?? false,
+  }), [toolchainSummary.receive]);
   const handleModalityProfileChanged = useCallback((msg: {
     modality_vision_image_profile_name?: string | null;
     modality_vision_image_profile_model?: string | null;
@@ -388,6 +396,13 @@ export function useLlmProfiles(sessionId: string) {
     metadataProfile: profiles.find((profile) => profile.name === metadata.state.profile_name) ?? null,
     metadataStatus: metadata.status, metadataError: metadata.error, metadataBusy: metadata.busy,
     fetchMetadataProfile: metadata.refresh, setMetadataProfile: metadata.select, handleMetadataProfileChanged,
+    toolchainSummaryProfileState: toolchainSummary.state as ToolchainSummaryProfileState,
+    toolchainSummaryProfileName: toolchainSummary.state.profile_name,
+    toolchainSummaryProfile: profiles.find((profile) => profile.name === toolchainSummary.state.profile_name) ?? null,
+    toolchainSummaryStatus: toolchainSummary.status, toolchainSummaryError: toolchainSummary.error,
+    toolchainSummaryBusy: toolchainSummary.busy,
+    fetchToolchainSummaryProfile: toolchainSummary.refresh, setToolchainSummaryProfile: toolchainSummary.select,
+    handleToolchainSummaryProfileChanged,
     modalityProfileStates: modality.states,
     modalityImageStatus: modality.statuses.image,
     modalityAudioStatus: modality.statuses.audio,

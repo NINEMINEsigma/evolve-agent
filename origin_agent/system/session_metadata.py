@@ -20,7 +20,7 @@ from entity.constant import (
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.messages import BaseMessage, CharacterConversationMessage, History
-from entity.puretype import LLMProfile, MetadataProfileState, Role
+from entity.puretype import LLMProfile, MetadataProfileState, Role, ToolchainSummaryProfileState
 from entry.agent_support.history_summary import summarize_history
 from system.lifecycle import (
     ApplicationStoppingError,
@@ -177,48 +177,111 @@ class SessionMetadataService(AsyncSystem):
         """返回目标是否为当前全局元数据 Profile。"""
         return self.llm_profile_store.is_metadata_profile(profile)
 
+    def get_toolchain_summary_state(self) -> ToolchainSummaryProfileState:
+        """返回工具链摘要 Profile 的服务端权威状态。"""
+        store = self.llm_profile_store
+        with store.locked():
+            profile = store.get_toolchain_summary_profile()
+            if profile is None:
+                return ToolchainSummaryProfileState()
+            return ToolchainSummaryProfileState(
+                profile_name=profile.name,
+                model=profile.model or None,
+                available=not self._missing_connection_fields(profile),
+            )
+
+    def select_toolchain_summary_profile(
+        self, profile: LLMProfile | None
+    ) -> ToolchainSummaryProfileState:
+        """设置或清空工具链摘要 Profile。"""
+        store = self.llm_profile_store
+        with store.locked():
+            if profile is not None:
+                missing = self._missing_connection_fields(profile)
+                if missing:
+                    raise MetadataProfileUnavailableError(
+                        f"工具链摘要 Profile {profile.name!r} 缺少必需字段："
+                        + ", ".join(missing)
+                    )
+            store.set_toolchain_summary_profile(profile)
+            return self.get_toolchain_summary_state()
+
+    def is_selected_toolchain_summary_profile(self, profile: LLMProfile) -> bool:
+        """返回目标是否为当前工具链摘要 Profile。"""
+        return self.llm_profile_store.is_toolchain_summary_profile(profile)
+
+    def _resolve_toolchain_summary_profile_snapshot(self, session_id: str) -> LLMProfile:
+        """工具链摘要 Profile 优先，未配置时回退到目标会话活动 Profile。"""
+        store = self.llm_profile_store
+        with store.locked():
+            profile = store.get_toolchain_summary_profile()
+            if profile is None:
+                profile = self._resolve_session_profile_fallback(
+                    session_id, purpose="工具链摘要 Profile"
+                )
+            self._assert_profile_usable(profile, purpose="工具链摘要 Profile")
+            return profile.model_copy()
+
+    def _create_toolchain_summary_client(self, session_id: str) -> BaseLLMClient:
+        return self._create_client_for_profile(
+            self._resolve_toolchain_summary_profile_snapshot(session_id),
+            purpose="工具链摘要 Profile",
+        )
+
+    def _resolve_session_profile_fallback(
+        self, session_id: str, *, purpose: str
+    ) -> LLMProfile:
+        """读取目标会话活动 Profile 作为全局引用缺失时的回退。
+
+        调用方必须持有 ``LLMProfileStore.locked()`` 事务边界。
+        """
+        try:
+            profile_name = self.session_store.read_active_profile_name(session_id)
+        except Exception as exc:
+            self._preserve_lifecycle_error(exc)
+            raise MetadataProfileUnavailableError(
+                f"无法读取会话 {session_id!r} 的活动 Profile"
+            ) from exc
+        if not profile_name:
+            raise MetadataProfileUnavailableError(
+                f"未配置{purpose}，目标会话也没有活动 Profile"
+            )
+        try:
+            return self.llm_profile_store.get_profile(profile_name)
+        except LookupError as exc:
+            raise MetadataProfileUnavailableError(
+                f"目标会话活动 Profile {profile_name!r} 不存在"
+            ) from exc
+
+    def _assert_profile_usable(self, profile: LLMProfile, *, purpose: str) -> None:
+        """校验 Profile 连接字段完整，缺失时按用途报错。"""
+        missing = self._missing_connection_fields(profile)
+        if missing:
+            raise MetadataProfileUnavailableError(
+                f"{purpose} {profile.name!r} 缺少必需字段：" + ", ".join(missing)
+            )
+
     def _resolve_profile_snapshot(self, session_id: str) -> LLMProfile:
         """按全局优先、目标会话回退规则取得单次任务 Profile 快照。"""
         store = self.llm_profile_store
         with store.locked():
             profile = store.get_metadata_profile()
             if profile is None:
-                try:
-                    profile_name = self.session_store.read_active_profile_name(
-                        session_id
-                    )
-                except Exception as exc:
-                    self._preserve_lifecycle_error(exc)
-                    raise MetadataProfileUnavailableError(
-                        f"无法读取会话 {session_id!r} 的活动 Profile"
-                    ) from exc
-                if not profile_name:
-                    raise MetadataProfileUnavailableError(
-                        "未配置全局元数据 Profile，目标会话也没有活动 Profile"
-                    )
-                try:
-                    profile = store.get_profile(profile_name)
-                except LookupError as exc:
-                    raise MetadataProfileUnavailableError(
-                        f"目标会话活动 Profile {profile_name!r} 不存在"
-                    ) from exc
-
-            missing = self._missing_connection_fields(profile)
-            if missing:
-                raise MetadataProfileUnavailableError(
-                    f"元数据 Profile {profile.name!r} 缺少必需字段："
-                    + ", ".join(missing)
+                profile = self._resolve_session_profile_fallback(
+                    session_id, purpose="全局元数据 Profile"
                 )
+            self._assert_profile_usable(profile, purpose="元数据 Profile")
             return profile.model_copy()
 
-    def _create_client(self, session_id: str) -> BaseLLMClient:
-        # 已停机后不再为元数据创建 LLM 客户端，避免在关闭期间发起新的模型请求。
+    def _create_client_for_profile(
+        self, profile: LLMProfile, *, purpose: str
+    ) -> BaseLLMClient:
+        # 已停机后不再创建 LLM 客户端，避免在关闭期间发起新的模型请求。
         if self._admission_closed:
             raise ApplicationStoppingError(
                 "Application is no longer accepting metadata generation work"
             )
         self.runtime.require_running()
-        profile = self._resolve_profile_snapshot(session_id)
         try:
             return create_llm_client(
                 profile.llm_client_name,
@@ -228,8 +291,13 @@ class SessionMetadataService(AsyncSystem):
         except Exception as exc:
             self._preserve_lifecycle_error(exc)
             raise MetadataProfileUnavailableError(
-                f"无法创建元数据 Profile {profile.name!r} 的 LLM 客户端：{exc}"
+                f"无法创建{purpose} {profile.name!r} 的 LLM 客户端：{exc}"
             ) from exc
+
+    def _create_client(self, session_id: str) -> BaseLLMClient:
+        return self._create_client_for_profile(
+            self._resolve_profile_snapshot(session_id), purpose="元数据 Profile"
+        )
 
     def _read_history(self, session_id: str) -> History:
         try:
@@ -275,6 +343,13 @@ class SessionMetadataService(AsyncSystem):
         return await self.task_owner.run_request(
             lambda: self._ensure_summary(session_id),
             name=f"metadata-ensure-summary-{session_id}",
+            admission=self._admit_generation,
+        )
+
+    async def generate_tool_chain_summary(self, session_id: str, chain_text: str) -> str:
+        return await self.task_owner.run_request(
+            lambda: self._generate_tool_chain_summary(session_id, chain_text),
+            name=f"metadata-toolchain-summary-{session_id}",
             admission=self._admit_generation,
         )
 
@@ -428,3 +503,29 @@ class SessionMetadataService(AsyncSystem):
         if summary:
             return summary
         return await self._regenerate_summary(session_id)
+
+    async def _generate_tool_chain_summary(self, session_id: str, chain_text: str) -> str:
+        """用工具链摘要 Profile 对单条工具链文本生成紧凑摘要（不落盘）。"""
+        if not chain_text.strip():
+            raise MetadataGenerationError("工具链文本为空，无法生成摘要")
+        user_prompt = read_template("toolchain_summary_input.txt").replace(
+            "{{chain_text}}", chain_text
+        )
+        client = self._create_toolchain_summary_client(session_id)
+        try:
+            response = await client.chat(
+                [
+                    BaseMessage(role=Role.SYSTEM, content=read_template("toolchain_summary.txt")),
+                    BaseMessage(role=Role.USER, content=user_prompt),
+                ],
+                character=META_EXTRACTOR_CHARACTER,
+            )
+        except (SessionMetadataError, ApplicationStoppingError):
+            raise
+        except Exception as exc:
+            self._preserve_lifecycle_error(exc)
+            raise MetadataGenerationError(f"工具链摘要生成失败：{exc}") from exc
+        summary = (response.content or "").strip()
+        if not summary:
+            raise MetadataGenerationError("元数据模型返回了空工具链摘要")
+        return summary

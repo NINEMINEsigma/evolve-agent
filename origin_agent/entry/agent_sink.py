@@ -439,6 +439,38 @@ class FrontendSink(AsyncSystem, AgentSink):
                 failures.append(session_id)
         return failures
 
+    async def broadcast_toolchain_summary_profile_change(
+        self,
+        state,
+    ) -> list[str]:
+        """向所有已连接前端广播工具链摘要 Profile 状态变更。"""
+        return await self._requests.run_request(
+            lambda: self._broadcast_toolchain_summary_profile_change(state),
+            name="frontend-broadcast-toolchain-summary-profile-change",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
+
+    async def _broadcast_toolchain_summary_profile_change(
+        self,
+        state,
+    ) -> list[str]:
+        failures: list[str] = []
+        for session_id, ws in self.get_all_ws().items():
+            message = Message(
+                type=MessageType.TOOLCHAIN_SUMMARY_PROFILE_CHANGED,
+                session_id=session_id,
+                toolchain_summary_profile_name=state.profile_name,
+                toolchain_summary_profile_model=state.model,
+                toolchain_summary_profile_available=state.available,
+            )
+            payload = message.model_dump(exclude_none=True)
+            payload["toolchain_summary_profile_name"] = state.profile_name
+            payload["toolchain_summary_profile_model"] = state.model
+            if not await self._send_raw(ws, json.dumps(payload, ensure_ascii=False), session_id):
+                failures.append(session_id)
+        return failures
+
     async def broadcast_modality_profile_change(
         self,
         states: ModalityProfileStates,

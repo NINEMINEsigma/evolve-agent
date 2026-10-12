@@ -160,6 +160,9 @@
 | 规范称谓 | 定义 |
 |---|---|
 | 压缩 | 将早期消息压缩为摘要以释放上下文（`compress_history` 工具；随意聊聊会话用滑动窗口压缩最早 30%） |
+| 工具链 | 历史中一段仅由「带 tool_calls 的 assistant 消息」和 ToolResultMessage 组成的连续消息段；遇到 user / 纯文本 assistant / system 消息即结束（英文锚点：tool chain） |
+| 工具链压缩 | 把完整工具链整段替换为「一次伪造的不可调用工具调用（`CompressedToolChain`）+ 携带链摘要的配对工具结果」；可压缩链要求全部 tool_call 已配对结果（进行中的本轮链天然排除）且原始体积达阈值；摘要由工具链摘要 Profile 生成（英文锚点：tool chain compression） |
+| 工具链摘要 Profile | `LLMProfileData.toolchain_summary_profile` 全局实例引用（英文锚点：toolchain summary Profile）；为被折叠的工具链生成紧凑摘要；未配置时回退到目标会话主Agent正在使用的活动 Profile；通过前端「模型配置 Tab → 全局配置引用」页选择 |
 | 摘要 | 会话级总结文本（`summary.txt`，终结/旋转时生成） |
 | 旋转（rotation） | 上下文超限时自动终结当前会话并产生子会话的机制 |
 | 延续（continuation） | **动作**：继承已终结父会话产生子会话——手动（一个或多个父会话，含合并）或旋转自动触发 |

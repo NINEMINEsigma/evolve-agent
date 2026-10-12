@@ -23,6 +23,7 @@ entry/
 └── agent_support/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换
+    ├── tool_chain_compress.py    ← 工具链检测与重打包（CompressHistory 的链压缩纯函数层）
     └── multimodal.py             ← 多模态处理与 content block 清洗
                                        NOTE: content_to_text 会自动过滤 JSON 中所有 _ 前缀字段（_image/_meta/_queued_messages/_note），
                                        避免 base64 或工具链嵌入消息载荷泄露到前端/日志。_meta 与 _queued_messages 等内部字段通过 emit_tool_result 的独立参数传递，分别由工具卡片元信息和嵌入消息区域渲染。
@@ -250,7 +251,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 4. 迁移运行态资源（工具副作用、cron 任务）。
 5. 前端通过 `session_rotated` 系统消息刷新。
 
-上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。
+上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩（`agent_support/tool_chain_compress.py` 检测与重打包，链摘要模板 `toolchain_summary.txt` / `toolchain_summary_input.txt`，由工具链摘要 Profile 生成）。
 
 ---
 
@@ -268,6 +269,13 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 - `summarize_history(history, llm) -> str`：用 LLM 对完整历史做压缩生成摘要。
 - `messages_to_text(messages) -> str`：把 `BaseMessage` 列表转换为适合 LLM 阅读的纯文本。
 - `extract_last_rounds(history, rounds) -> list[BaseMessage]`：提取最后 N 轮消息的原始对象。
+
+### `tool_chain_compress.py`
+
+- `detect_compressible_chains(messages, min_chars) -> list[ToolChainSpan]`：检测可压缩工具链（链内 tool_call 全部已配对结果、原始体积达 `TOOL_CHAIN_COMPRESS_MIN_CHARS`）；进行中的本轮链因缺少结果天然排除。
+- `chain_to_summary_input(chain_messages) -> str`：链文本化（复用 `messages_to_text`，不设全局截断）。
+- `build_compressed_chain_messages(chain_messages, summary) -> list[BaseMessage]`：把整链重打包为「伪造的 `CompressedToolChain` 调用（不可调用，参数携带调用数与工具名清单）+ 携带链摘要的配对 ToolResultMessage」。
+- 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` 经 `SessionMetadataService.generate_tool_chain_summary()` 预生成，全部成功后才通过 `History.replace_range()` 应用替换。
 
 ### `history_projection.py`
 

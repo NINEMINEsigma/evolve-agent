@@ -62,7 +62,7 @@ ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Applicat
 | `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
-| `compress_history.py` | `CompressHistory` | 会话历史压缩 |
+| `compress_history.py` | `CompressHistory` | 会话历史压缩：旧轮次替换为 Agent 撰写的会话摘要；保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`，链摘要任一失败则整体失败、历史不变） |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 

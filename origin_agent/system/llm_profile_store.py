@@ -150,6 +150,30 @@ class LLMProfileStore(AsyncSystem):
         with self._lock:
             return self.data.metadata_profile is profile
 
+    def get_toolchain_summary_profile(self) -> LLMProfile | None:
+        """返回根对象当前指向的工具链摘要 Profile 实例。"""
+        with self._lock:
+            return self.data.toolchain_summary_profile
+
+    def set_toolchain_summary_profile(self, profile: LLMProfile | None) -> None:
+        """设置根对象工具链摘要 Profile 引用并持久化。"""
+        with self._lock:
+            if profile is not None and not any(
+                candidate is profile for candidate in self.data.profiles
+            ):
+                raise ValueError(
+                    "LLMProfileData.toolchain_summary_profile must reference a profile in profiles"
+                )
+            candidate = self.data.model_copy()
+            candidate.toolchain_summary_profile = profile
+            self._save_unlocked(candidate)
+            self.data.toolchain_summary_profile = profile
+
+    def is_toolchain_summary_profile(self, profile: LLMProfile) -> bool:
+        """返回 Profile 是否是根对象当前的工具链摘要 Profile 实例。"""
+        with self._lock:
+            return self.data.toolchain_summary_profile is profile
+
     def get_global_modality_profile(
         self,
         media_type: Literal["image", "audio", "video"],
@@ -366,9 +390,9 @@ class LLMProfileStore(AsyncSystem):
     ) -> None:
         """确认目标实例没有被任何根对象引用。
 
-        ``clear_global_selections=True`` 时仅忽略审批 Profile 与全局元数据
-        Profile 两个全局引用的删除检查；其他 Profile 的多模态引用与三路全局
-        多模态回退引用仍会阻止删除。默认检查全部引用。
+        ``clear_global_selections=True`` 时仅忽略审批 Profile、全局元数据
+        Profile 与工具链摘要 Profile 三个全局引用的删除检查；其他 Profile 的
+        多模态引用与三路全局多模态回退引用仍会阻止删除。默认检查全部引用。
         """
         with self._lock:
             for owner in self.data.profiles:
@@ -402,6 +426,10 @@ class LLMProfileStore(AsyncSystem):
                     raise ProfileConflictError(
                         f"LLM profile {profile.name!r} is the metadata Profile"
                     )
+                if self.data.toolchain_summary_profile is profile:
+                    raise ProfileConflictError(
+                        f"LLM profile {profile.name!r} is the toolchain summary Profile"
+                    )
 
     def remove_profile(
         self,
@@ -412,8 +440,8 @@ class LLMProfileStore(AsyncSystem):
         """移除未被其他根 Profile 引用的实例。
 
         ``clear_global_selections=True`` 时，在一次 Profile 文件保存中删除
-        Profile 并清空指向它的审批 Profile 与全局元数据 Profile 引用；
-        默认行为仍要求这两个引用为空才允许删除。
+        Profile 并清空指向它的审批 Profile、全局元数据 Profile 与工具链摘要
+        Profile 引用；默认行为仍要求这些引用为空才允许删除。
         """
         with self._lock:
             profile = self.get_profile(name)
@@ -432,6 +460,8 @@ class LLMProfileStore(AsyncSystem):
                     candidate.approval_profile = None
                 if self.data.metadata_profile is profile:
                     candidate.metadata_profile = None
+                if self.data.toolchain_summary_profile is profile:
+                    candidate.toolchain_summary_profile = None
             self._save_unlocked(candidate)
             self.data.profiles.pop(index)
             if clear_global_selections:
@@ -439,6 +469,8 @@ class LLMProfileStore(AsyncSystem):
                     self.data.approval_profile = None
                 if self.data.metadata_profile is profile:
                     self.data.metadata_profile = None
+                if self.data.toolchain_summary_profile is profile:
+                    self.data.toolchain_summary_profile = None
             logger.info("Removed LLM profile | name=%s", name)
             return profile
 
@@ -475,6 +507,7 @@ class LLMProfileStore(AsyncSystem):
         candidate.profiles = [copies[id(profile)] for profile in self.data.profiles]
         candidate.approval_profile = copied(self.data.approval_profile)
         candidate.metadata_profile = copied(self.data.metadata_profile)
+        candidate.toolchain_summary_profile = copied(self.data.toolchain_summary_profile)
         candidate.global_vision_image_profile = copied(self.data.global_vision_image_profile)
         candidate.global_audio_profile = copied(self.data.global_audio_profile)
         candidate.global_vision_video_profile = copied(self.data.global_vision_video_profile)

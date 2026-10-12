@@ -245,6 +245,7 @@ export type MessageType =
   | "llm_profile_changed"
   | "approval_profile_changed"
   | "metadata_profile_changed"
+  | "toolchain_summary_profile_changed"
   | "modality_profile_changed"
   | "agentspace_event"
   | "client_diagnostic"
@@ -369,6 +370,9 @@ export interface NonStreamWSMessage {
   metadata_profile_name?: string | null;    // METADATA_PROFILE_CHANGED
   metadata_profile_model?: string | null;   // METADATA_PROFILE_CHANGED
   metadata_profile_available?: boolean;     // METADATA_PROFILE_CHANGED
+  toolchain_summary_profile_name?: string | null;    // TOOLCHAIN_SUMMARY_PROFILE_CHANGED
+  toolchain_summary_profile_model?: string | null;   // TOOLCHAIN_SUMMARY_PROFILE_CHANGED
+  toolchain_summary_profile_available?: boolean;     // TOOLCHAIN_SUMMARY_PROFILE_CHANGED
   modality_vision_image_profile_name?: string | null; // MODALITY_PROFILE_CHANGED
   modality_vision_image_profile_model?: string | null;
   modality_vision_image_profile_available?: boolean;
@@ -693,6 +697,12 @@ export interface ApprovalProfileState {
 }
 
 export interface MetadataProfileState {
+  profile_name: string | null;
+  model: string | null;
+  available: boolean;
+}
+
+export interface ToolchainSummaryProfileState {
   profile_name: string | null;
   model: string | null;
   available: boolean;

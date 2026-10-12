@@ -190,6 +190,10 @@ export function useWebSocket() {
       llmProfilesRef.current.handleMetadataProfileChanged(message);
       return;
     }
+    if (message.type === WS_IN.TOOLCHAIN_SUMMARY_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleToolchainSummaryProfileChanged(message);
+      return;
+    }
     if (message.type === WS_IN.MODALITY_PROFILE_CHANGED) {
       llmProfilesRef.current.handleModalityProfileChanged(message);
       return;

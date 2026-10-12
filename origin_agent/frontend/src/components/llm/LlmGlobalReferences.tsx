@@ -4,7 +4,7 @@ import type { LlmProfileManager } from "../../hooks/useLlmProfiles";
 import { groupLlmProfiles } from "../../utils/llmProfile";
 import { LlmConfirmation } from "./LlmProfileDialogs";
 
-type ReferenceRole = "approval" | "metadata";
+type ReferenceRole = "approval" | "metadata" | "toolchainSummary";
 interface LlmGlobalReferencesProps {
   manager: LlmProfileManager;
   onOpenProfiles: () => void;
@@ -21,18 +21,34 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
     onDialogOpenChange(confirmRole !== null || modalityConfirmRole !== null);
     return () => onDialogOpenChange(false);
   }, [confirmRole, modalityConfirmRole, onDialogOpenChange]);
+  const roleRefs = {
+    approval: {
+      state: manager.approvalProfileState, status: manager.approvalStatus,
+      busy: manager.approvalBusy, error: manager.approvalError,
+      refresh: manager.fetchApprovalProfile, select: manager.setApprovalProfile,
+    },
+    metadata: {
+      state: manager.metadataProfileState, status: manager.metadataStatus,
+      busy: manager.metadataBusy, error: manager.metadataError,
+      refresh: manager.fetchMetadataProfile, select: manager.setMetadataProfile,
+    },
+    toolchainSummary: {
+      state: manager.toolchainSummaryProfileState, status: manager.toolchainSummaryStatus,
+      busy: manager.toolchainSummaryBusy, error: manager.toolchainSummaryError,
+      refresh: manager.fetchToolchainSummaryProfile, select: manager.setToolchainSummaryProfile,
+    },
+  } as const;
   const assign = async (role: ReferenceRole, name: string | null) => {
     setErrors((previous) => ({ ...previous, [role]: undefined }));
     try {
-      if (role === "approval") await manager.setApprovalProfile(name);
-      else await manager.setMetadataProfile(name);
+      await roleRefs[role].select(name);
       setConfirmRole((current) => current === role && name === null ? null : current);
     } catch (cause) {
       setErrors((previous) => ({ ...previous, [role]: cause instanceof Error ? cause.message : "保存失败" }));
     }
   };
   const cancelConfirm = () => {
-    if (confirmRole === "approval" ? manager.approvalBusy : manager.metadataBusy) return;
+    if (confirmRole !== null && roleRefs[confirmRole].busy) return;
     setConfirmRole(null);
   };
   const cancelModalityConfirm = () => {
@@ -57,6 +73,7 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
   const cards: { role: ReferenceRole; title: string; description: string; empty: string }[] = [
     { role: "approval", title: "审批模型", description: "为脱手模式的工具调用执行自动审批。选择在所有会话间共享，不改变各会话的审批模式。", empty: "未配置时，脱手模式无法使用审批模型；YOLO 不受影响。" },
     { role: "metadata", title: "元数据模型", description: "统一生成会话标题、标签与摘要。可选择轻量模型，独立于各会话的对话模型。", empty: "未配置时，使用目标会话已保存的模型配置。" },
+    { role: "toolchainSummary", title: "工具链摘要模型", description: "压缩会话历史时为被折叠的工具链生成紧凑摘要。可选择轻量模型，独立于各会话的对话模型。", empty: "未配置时，使用目标会话主Agent正在使用的模型配置。" },
   ];
   const modalityCards: { mediaType: ModalityType; title: string; description: string }[] = [
     { mediaType: "image", title: "全局图片转发", description: "当前活动 Profile 未配置读图转发引用时使用。" },
@@ -74,11 +91,8 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
     </div></div>
     {manager.profilesError && <div className="llm-message llm-message--error">{manager.profilesError}<button className="llm-text-button" onClick={() => void manager.refreshProfiles().catch(() => {})}>重新加载配置列表</button></div>}
     {cards.map(({ role, title, description, empty }) => {
-      const state = role === "approval" ? manager.approvalProfileState : manager.metadataProfileState;
-      const status = role === "approval" ? manager.approvalStatus : manager.metadataStatus;
-      const busy = role === "approval" ? manager.approvalBusy : manager.metadataBusy;
-      const error = errors[role] || (role === "approval" ? manager.approvalError : manager.metadataError);
-      const refresh = role === "approval" ? manager.fetchApprovalProfile : manager.fetchMetadataProfile;
+      const { state, status, busy, error: referenceError, refresh } = roleRefs[role];
+      const error = errors[role] || referenceError;
       const unknown = !!state.profile_name && !manager.profiles.some((profile) => profile.name === state.profile_name);
       const help = `${description} ${empty} 已明确指定的模型不可用时，不会静默切换到其他模型。`;
       return <section key={role} className="llm-reference-card">
@@ -133,10 +147,18 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
       </section>;
     })}
     {manager.profilesStatus === "ready" && manager.profiles.length === 0 && <div className="llm-empty"><p>先创建一个模型配置，再为这些用途建立引用。</p><button className="llm-button" onClick={onOpenProfiles}>前往模型配置</button></div>}
-    {confirmRole && <LlmConfirmation title={confirmRole === "approval" ? "清空审批模型引用？" : "清空元数据模型引用？"} onCancel={cancelConfirm} actions={<>
-      <button className="modal-btn modal-btn--secondary" data-llm-cancel disabled={manager.approvalBusy || manager.metadataBusy} onClick={cancelConfirm}>取消</button>
-      <button className="modal-btn modal-btn--danger" disabled={manager.approvalBusy || manager.metadataBusy} onClick={() => void assign(confirmRole, null)}>确认清空</button>
-    </>}><p>{confirmRole === "approval" ? "清空后，脱手模式将无法使用审批模型；各会话审批模式保持不变。" : "清空后，标题、标签和摘要将使用各会话已保存的模型配置。"}</p>
+    {confirmRole && <LlmConfirmation title={{
+      approval: "清空审批模型引用？",
+      metadata: "清空元数据模型引用？",
+      toolchainSummary: "清空工具链摘要模型引用？",
+    }[confirmRole]} onCancel={cancelConfirm} actions={<>
+      <button className="modal-btn modal-btn--secondary" data-llm-cancel disabled={roleRefs[confirmRole].busy} onClick={cancelConfirm}>取消</button>
+      <button className="modal-btn modal-btn--danger" disabled={roleRefs[confirmRole].busy} onClick={() => void assign(confirmRole, null)}>确认清空</button>
+    </>}><p>{{
+      approval: "清空后，脱手模式将无法使用审批模型；各会话审批模式保持不变。",
+      metadata: "清空后，标题、标签和摘要将使用各会话已保存的模型配置。",
+      toolchainSummary: "清空后，工具链摘要将使用各会话主Agent正在使用的模型配置。",
+    }[confirmRole]}</p>
       {errors[confirmRole] && <p className="llm-field-error" role="alert">{errors[confirmRole]}</p>}
     </LlmConfirmation>}
     {modalityConfirmRole && <LlmConfirmation title="清空全局多模态回退引用？" onCancel={cancelModalityConfirm} actions={<>

@@ -30,12 +30,26 @@ logger = logging.getLogger(__name__)
 async def _handle_compress_history(args: dict[str, Any], context: "ToolContext") -> dict:
     """用 agent 撰写的摘要替换旧消息，保留最近 N 轮对话。
 
+    保留轮次中的完整工具链会先重打包为一次伪造工具调用 + 链摘要结果，
+    再执行轮次级截断；进行中的本轮链（含本次调用）不参与。
+
     流程：
     1. 提取 summary 和 keep_recent_rounds 参数
     2. 边界保护（summary 为空、rounds 越界、历史过短）
     3. 定位截断位置（保护本轮对话不被压缩）
-    4. 通知前端 → 截断 → 清理 → 插入摘要 → 保存 → 通知完成
+    4. 检测保留区可压缩工具链并预生成全部链摘要（失败则整体失败，历史不变）
+    5. 应用链重打包 → 截断 → 插入摘要 → 保存 → 通知完成
     """
+    from system.session_metadata import (
+        SessionMetadataError,
+        SessionMetadataService,
+    )
+    from entry.agent_support.tool_chain_compress import (
+        build_compressed_chain_messages,
+        chain_to_summary_input,
+        detect_compressible_chains,
+    )
+
     loop = context.loop
     session_id = context.session_id
     history = loop.history
@@ -80,14 +94,43 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     # 5. 通知前端
     await context.sink.emit_system_message(session_id, "正在压缩历史...")
 
-    # 6. 截断（保留尾部）
+    # 6. 检测保留区可压缩工具链并预生成全部链摘要。
+    # 在任何历史变更之前完成全部模型调用：任一失败整体返回错误，历史保持原样。
+    snapshot = list(history.iter_messages())
+    chain_spans = detect_compressible_chains(snapshot[keep_start_idx:])
+    metadata_service = context.app.get_system(SessionMetadataService)
+    chain_replacements: list[tuple[int, int, list]] = []
+    try:
+        for span in chain_spans:
+            start = keep_start_idx + span.start
+            end = keep_start_idx + span.end
+            chain_text = chain_to_summary_input(snapshot[start:end])
+            chain_summary = await metadata_service.generate_tool_chain_summary(
+                session_id, chain_text
+            )
+            chain_replacements.append(
+                (
+                    start,
+                    end,
+                    build_compressed_chain_messages(snapshot[start:end], chain_summary),
+                )
+            )
+    except SessionMetadataError as exc:
+        return tool_error(f"Tool chain summary generation failed: {exc}")
+
+    # 7. 应用链重打包（从后往前，避免索引位移）。
+    # 链完全位于保留区内，截断边界的 user 消息索引不受影响。
+    for start, end, replacement in reversed(chain_replacements):
+        history.replace_range(start, end, replacement)
+
+    # 8. 截断（保留尾部）
     # 注意：截断后不调用 remove_unpaired_tool_calls()，
     # 因为当前轮的 assistant tool_calls（即本次 compress_history 调用）
     # 尚未配对 ToolResultMessage，此时清理会错误地移除它，
     # 导致 tool_result 无法配对写入 History，agent 会循环重复调用压缩。
     history.truncate_from(keep_start_idx)
 
-    # 7. 插入摘要消息到头部
+    # 9. 插入摘要消息到头部
     summary_msg = CharacterConversationMessage(
         role=Role.USER,
         character_name=SYSTEM_CHARACTER_NAME,
@@ -96,24 +139,25 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     )
     history.insert_message(summary_msg, 0)
 
-    # 8. 保存历史
+    # 10. 保存历史
     loop.save_history(session_id)
 
-    # 9. 重置 token 计数
+    # 11. 重置 token 计数
     loop._token_record.prompt_tokens = 0
 
-    # 10. 通知前端
+    # 12. 通知前端
     await context.sink.emit_system_message(session_id, "压缩完成")
 
     logger.info(
-        "History compressed | session=%s compressed=%d remaining=%d",
-        session_id, keep_start_idx, history.count,
+        "History compressed | session=%s compressed=%d remaining=%d tool_chains=%d",
+        session_id, keep_start_idx, history.count, len(chain_replacements),
     )
 
     return tool_result(
         success=True,
         compressed=keep_start_idx,
         remaining=history.count,
+        tool_chains_compressed=len(chain_replacements),
     )
 
 
@@ -126,7 +170,7 @@ _COMPRESS_HISTORY_SCHEMA = {
     # 返回格式：{ success, compressed, remaining }
     # 典型场景：用户要求压缩历史；agent 感知上下文丢失或响应质量下降时主动压缩。
     # 注意：此操作为 critical 级别，始终需要用户亲自审批，即使在脱手模式下也不走审批模型。
-    "description": f"""Compress conversation history by replacing older messages with a summary you write, keeping recent rounds intact.
+    "description": f"""Compress conversation history: replace older rounds with a summary you write, and repack complete tool call chains inside the kept rounds into single compressed placeholder calls carrying LLM-generated chain summaries.
 
 ## Prerequisites
 - The session must have at least {COMPRESS_HISTORY_MIN_MESSAGES} messages in history.
@@ -137,11 +181,13 @@ _COMPRESS_HISTORY_SCHEMA = {
 - `keep_recent_rounds` (optional, default {COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS}): Number of recent user/assistant conversation rounds to preserve. Must be between {COMPRESS_HISTORY_MIN_KEEP_ROUNDS} and {COMPRESS_HISTORY_MAX_KEEP_ROUNDS}.
 
 ## Effect
-Replaces all messages before the kept rounds with your summary. This is irreversible.
+1. Rounds older than the kept rounds are replaced by your summary.
+2. Inside the kept rounds, every complete tool call chain (all calls already have results) above a small size threshold is repacked into one placeholder tool call `CompressedToolChain` (not callable) whose paired tool result carries a model-generated chain summary. Chains from the current, still-running round are never touched.
+3. This is irreversible. If any chain summary cannot be generated, the whole operation fails and the history is left unchanged.
 
 ## Returns
 ```json
-{{ "success": true, "compressed": <int>, "remaining": <int> }}
+{{ "success": true, "compressed": <int>, "remaining": <int>, "tool_chains_compressed": <int> }}
 ```
 
 ## When to Use
@@ -152,6 +198,7 @@ Replaces all messages before the kept rounds with your summary. This is irrevers
 
 ## Important
 - This is a `critical` level operation: it always requires explicit user approval, even in handsfree mode.
+- This tool has no execution timeout: generating one summary per compressed tool chain may take a while.
 - Do NOT compress the current round (the last user message and your response).
 
 ## Summary Quality Requirements
@@ -191,4 +238,5 @@ def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
         is_async=True,
         danger_level=ToolDangerLevel.critical,
         availability=ToolAvailability.MAIN,
+        no_timeout=True,
     )

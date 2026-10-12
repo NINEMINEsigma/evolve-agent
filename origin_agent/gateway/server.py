@@ -89,6 +89,8 @@ from entity.puretype import (
     SessionLlmProfileState,
     MetadataProfileUpdateRequest,
     MetadataProfileMutationResponse,
+    ToolchainSummaryProfileUpdateRequest,
+    ToolchainSummaryProfileMutationResponse,
     ModalityProfileUpdateRequest,
     ModalityProfileMutationResponse,
     ModalityProfileState,
@@ -2124,6 +2126,63 @@ async def put_metadata_profile(
 
 
 # ---------------------------------------------------------------------------
+# Toolchain Summary Profile API
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/toolchain-summary/profile")
+async def get_toolchain_summary_profile():
+    """返回项目级工具链摘要 Profile 的权威状态。"""
+    from system.application import Application
+    from system.session_metadata import SessionMetadataService
+
+    return Application.current().get_system(SessionMetadataService).get_toolchain_summary_state()
+
+
+@router.put(
+    "/api/toolchain-summary/profile",
+    response_model=ToolchainSummaryProfileMutationResponse,
+)
+async def put_toolchain_summary_profile(
+    update: ToolchainSummaryProfileUpdateRequest,
+):
+    """设置或清空项目级工具链摘要 Profile 引用。"""
+    from system.application import Application
+    from system.llm_profile_store import LLMProfileStore
+    from system.session_metadata import (
+        MetadataProfileUnavailableError,
+        SessionMetadataService,
+    )
+
+    application = Application.current()
+    store = application.get_system(LLMProfileStore)
+    metadata_service = application.get_system(SessionMetadataService)
+    try:
+        with store.locked():
+            profile = (
+                store.get_profile(update.profile_name)
+                if update.profile_name is not None
+                else None
+            )
+            state = metadata_service.select_toolchain_summary_profile(profile)
+    except ProfileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Profile not found: {update.profile_name!r}",
+        )
+    except MetadataProfileUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+        state
+    )
+    return ToolchainSummaryProfileMutationResponse(
+        state=state,
+        notification_failures=failures,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agentspace editor API
 # ---------------------------------------------------------------------------
 
@@ -2484,6 +2543,7 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                 ).replace_profile_name_pointers(old_name, new_name)
             response_payload = store.to_payload(profile)
             metadata_state = metadata_service.get_state()
+            toolchain_summary_state = metadata_service.get_toolchain_summary_state()
             modality_states = _get_modality_profile_states(application)
         failures: list[str] = []
         if new_name != old_name:
@@ -2498,13 +2558,17 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
         metadata_failures = await application.get_system(FrontendSink).broadcast_metadata_profile_change(
             metadata_state,
         )
+        toolchain_summary_failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+            toolchain_summary_state,
+        )
         modality_failures = await application.get_system(FrontendSink).broadcast_modality_profile_change(
             modality_states,
         )
         return LLMProfileMutationResponse(
             profile=response_payload,
             notification_failures=(
-                failures + approval_failures + metadata_failures + modality_failures
+                failures + approval_failures + metadata_failures
+                + toolchain_summary_failures + modality_failures
             ),
         )
     except ProfileNotFoundError as exc:
@@ -2535,7 +2599,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             )
             if replacement is source:
                 raise ProfileConflictError("replacement Profile must differ from deleted Profile")
-            # 先检查所有阻止删除的引用，再提交删除与审批/元数据引用清空。
+            # 先检查所有阻止删除的引用，再提交删除与审批/元数据/工具链摘要引用清空。
             store.assert_removable(source, clear_global_selections=True)
             store.remove_profile(request.profile_name, clear_global_selections=True)
             application.get_system(ApprovalSystem).backend_manager.invalidate()
@@ -2550,6 +2614,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 request.replacement_profile_name,
             )
             metadata_state = metadata_service.get_state()
+            toolchain_summary_state = metadata_service.get_toolchain_summary_state()
             modality_states = _get_modality_profile_states(application)
 
         failures = await application.get_system(FrontendSink).broadcast_profile_change(
@@ -2565,6 +2630,9 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
         metadata_failures = await application.get_system(FrontendSink).broadcast_metadata_profile_change(
             metadata_state,
         )
+        toolchain_summary_failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+            toolchain_summary_state,
+        )
         modality_failures = await application.get_system(FrontendSink).broadcast_modality_profile_change(
             modality_states,
         )
@@ -2575,7 +2643,8 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             switched_sessions=switched,
             pending_sessions=busy,
             notification_failures=(
-                failures + approval_failures + metadata_failures + modality_failures
+                failures + approval_failures + metadata_failures
+                + toolchain_summary_failures + modality_failures
             ),
         )
     except ProfileNotFoundError as exc:

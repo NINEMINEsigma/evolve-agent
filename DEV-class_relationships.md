@@ -53,6 +53,7 @@ classDiagram
 
     class History {
         +remove_message_with_pairing()
+        +replace_range()
     }
 
     class SessionMessageEditResult {
@@ -487,6 +488,8 @@ classDiagram
         +create_profile()
         +update_profile()
         +remove_profile()
+        +get_toolchain_summary_profile()
+        +set_toolchain_summary_profile()
         +to_payload()
     }
 
@@ -497,17 +500,21 @@ classDiagram
         #_session_store
         +get_state()
         +select_profile()
+        +get_toolchain_summary_state()
+        +select_toolchain_summary_profile()
         +generate_title()
         +generate_tags()
         +generate_summary()
         +regenerate_summary()
         +ensure_summary()
+        +generate_tool_chain_summary()
     }
 
     class LLMProfileData {
         +profiles
         +approval_profile
         +metadata_profile
+        +toolchain_summary_profile
         +global_vision_image_profile
         +global_audio_profile
         +global_vision_video_profile
@@ -1025,6 +1032,8 @@ classDiagram
 | `SubAgentLaunchResult` / `SubAgentChatResult` / `SubAgentApprovalResult` / `SubAgentStopResult` | `entity/puretype/subagent.py` | `BaseModel` | `SubAgentOrchestrator` 与 `_OrchestratorContext` 的启动、对话、审批和停止稳定结果；工具层只在边界序列化 |
 | `SubAgentSnapshot` / `SubAgentSnapshotResponse` / `SubAgentUpdate` | `entity/puretype/subagent.py` | `BaseModel` | 统一子Agent快照与前端状态更新中的 `status`、`feedback`、`pending_approvals`、`interactive` 字段 |
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
+| `ToolchainSummaryProfileUpdateRequest` / `ToolchainSummaryProfileState` / `ToolchainSummaryProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 工具链摘要 Profile REST 请求、权威状态与变更响应 |
+| `ToolChainSpan` | `entity/puretype/session.py` | `BaseModel` | 可压缩工具链在 History 中的半开索引区间 [start, end) |
 | `ModalityProfileState` / `ModalityProfileUpdateRequest` / `ModalityProfileMutationResponse` / `ModalityProfileStates` | `entity/puretype/modality.py` | `BaseModel` | 图片、音频、视频三路全局回退 Profile 的 REST 状态、更新请求和完整状态快照 |
 | `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |
 | `InboxMessage` | `entry/base_agent_loop.py` | `BaseModel` | 收件箱消息基类，含 `to_text()` |
@@ -1096,7 +1105,7 @@ BrowserSystem依赖RuntimeSystem，唯一持有_pw/_browser/_endpoint、按PID�
 
 Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型），由 FastAPI 编码；显式 Response、WebSocket 和 SSE 仍在实际传输边界序列化。接口只转换专门的业务异常，意外错误不再被通用 `Exception`/`OSError` 包装成固定 500，也不返回空结果或默认请求掩盖失败。Profile 的 `ProfileNotFoundError`/`ProfileConflictError` 和动态沙盒空间的 `DynamicSandboxInputError`/`DynamicSandboxConflictError`/`DynamicSandboxNotFoundError` 均定义在所属业务模块，不新增全局生命周期对象。
 
-`LLMProfileStore` 六个写方法改为候选根先保存、成功后提交共享内存；更新候选图先复制全部 Profile，再按对象身份重连三个 Profile 引用和五个全局引用，提交时仍更新原实例。不再维护 `_snapshot_profile`/`_restore_profile` 或失败回滚。`assert_removable`/`remove_profile` 的 `clear_global_selections` 关键字参数允许在一次根对象写入中清空指向删除目标的审批/元数据引用，其他 Profile 与全局多模态引用依然阻止删除。先完成业务检查再修改，避免拒绝删除时已经清空全局选择；跨 Profile 文件、会话名称指针和通知仍无整体事务。
+`LLMProfileStore` 六个写方法改为候选根先保存、成功后提交共享内存；更新候选图先复制全部 Profile，再按对象身份重连三个 Profile 引用和六个全局引用，提交时仍更新原实例。不再维护 `_snapshot_profile`/`_restore_profile` 或失败回滚。`assert_removable`/`remove_profile` 的 `clear_global_selections` 关键字参数允许在一次根对象写入中清空指向删除目标的审批/元数据/工具链摘要引用，其他 Profile 与全局多模态引用依然阻止删除。先完成业务检查再修改，避免拒绝删除时已经清空全局选择；跨 Profile 文件、会话名称指针和通知仍无整体事务。
 
 `ws_chat` 的初始化归入连接生命周期 `finally`，取消与意外错误继续传播；订阅清理即使失败也释放属于本连接的交互和连接登记。重新生成入口在 `finally` 中结束匹配的活动标识，包括请求取消与通知编码失败；不改变 Loop 的 task 登记归属。无新增 protected 字段或跨类访问。
 

@@ -24,3 +24,28 @@ class MetadataProfileMutationResponse(BaseModel):
 
     state: MetadataProfileState
     notification_failures: list[str] = Field(default_factory=list)
+
+
+class ToolchainSummaryProfileUpdateRequest(BaseModel):
+    """项目级工具链摘要 Profile 名称指针更新请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_name: str | None
+
+
+class ToolchainSummaryProfileState(BaseModel):
+    """项目级工具链摘要 Profile 的服务端权威状态。"""
+
+    profile_name: str | None = None
+    model: str | None = None
+    available: bool = False
+
+
+class ToolchainSummaryProfileMutationResponse(BaseModel):
+    """工具链摘要 Profile 更新响应。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: ToolchainSummaryProfileState
+    notification_failures: list[str] = Field(default_factory=list)

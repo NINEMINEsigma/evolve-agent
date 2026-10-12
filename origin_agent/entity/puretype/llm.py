@@ -168,6 +168,7 @@ class LLMProfileData(BaseModel):
     profiles: list[LLMProfile] = Field(default_factory=list, description="LLMProfile列表")
     approval_profile: LLMProfile|None = Field(default=None)
     metadata_profile: LLMProfile|None = Field(default=None)
+    toolchain_summary_profile: LLMProfile|None = Field(default=None)
     global_vision_image_profile: LLMProfile|None = Field(default=None)
     global_audio_profile: LLMProfile|None = Field(default=None)
     global_vision_video_profile: LLMProfile|None = Field(default=None)
