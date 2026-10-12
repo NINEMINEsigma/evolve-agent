@@ -182,6 +182,7 @@ from .ws import (
     ClientDiagnosticPhase,
     ClientDiagnostic,
     ConfirmResponseRequest,
+    AskAnswerItem,
     AskResponseRequest,
 )
 from .lsp import (
@@ -359,6 +360,7 @@ __all__ = [
     "StreamEvent",
     "HistoryRowLink",
     "ConfirmResponseRequest",
+    "AskAnswerItem",
     "AskResponseRequest",
     # lsp
     "LSPState",

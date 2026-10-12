@@ -15,13 +15,21 @@ class ConfirmResponseRequest(BaseModel):
     denied_by: str = "user"
 
 
-class AskResponseRequest(BaseModel):
-    """HTTP Ask 回答请求。"""
+class AskAnswerItem(BaseModel):
+    """Ask 单题回答：选项值数组 + 可选自定义文本（可与选项并存）。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    option: str | None = None
+    selected: list[str] = []
     custom_text: str | None = None
+
+
+class AskResponseRequest(BaseModel):
+    """HTTP Ask 回答请求：answers 顺序与提问的问题顺序一一对应；null 表示整表跳过。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answers: list[AskAnswerItem] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -148,10 +156,8 @@ class Message(BaseModel):
     file_data: str | None = None   # FILE_UPLOAD：base64 编码的文件内容
     local_path: str | None = None  # FILE_UPLOAD：本地文件路径（同盘时优先硬链接）
     # ask_request / ask_response 相关字段
-    question: str | None = None    # ASK_REQUEST：问题文本
-    options: list | None = None    # ASK_REQUEST：选项列表 [{label, value}]
-    option: str | None = None      # ASK_RESPONSE：选中的选项值
-    custom_text: str | None = None # ASK_RESPONSE：自定义输入文本
+    questions: list[dict[str, Any]] | None = None  # ASK_REQUEST：问题列表 [{question, detail, options, multi_select}]
+    answers: list[dict[str, Any]] | None = None     # ASK_RESPONSE：按题回答列表 [{selected: [value], custom_text}]，顺序与 questions 对应
     # stream 相关字段
     stream_id: str | None = None   # STREAM_DELTA / STREAM_DONE：流标识
     delta: str | None = None       # STREAM_DELTA：文本增量

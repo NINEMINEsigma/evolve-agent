@@ -24,6 +24,7 @@ from entity.constant import (
 )
 from entity.puretype import (
     ApprovalResult,
+    AskAnswerItem,
     Message,
     MessageMetrics,
     MessageType,
@@ -63,9 +64,8 @@ class AgentSink(ABC):
     """
 
     @abstractmethod
-    async def ask_question(self, question: str, options: list[dict] | None = None,
-                           session_id: str = "", detail: str = "") -> dict:
-        """向用户提问，等待回答后返回结果。"""
+    async def ask_question(self, questions: list[dict], session_id: str = "") -> dict:
+        """向用户提问（多问题表单），等待回答后返回结果。"""
         ...
 
     @abstractmethod
@@ -609,9 +609,8 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     # -- 提问请求 --
 
-    async def ask_question(self, question: str, options: list[dict] | None = None,
-                           session_id: str = "", detail: str = "") -> dict:
-        """向 WebSocket 发送 ask_request 并等待前端响应。"""
+    async def ask_question(self, questions: list[dict], session_id: str = "") -> dict:
+        """向 WebSocket 发送 ask_request（多问题表单）并等待前端响应。"""
         request_id: str = uuid.uuid4().hex[:8]
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
@@ -627,7 +626,7 @@ class FrontendSink(AsyncSystem, AgentSink):
         try:
             return await self._requests.run_request(
                 lambda: self._ask_question(
-                    ws, session_id, request_id, question, detail, options, fut,
+                    ws, session_id, request_id, questions, fut,
                 ),
                 name="frontend-ask-question",
                 admission=self._admit_interaction,
@@ -647,9 +646,7 @@ class FrontendSink(AsyncSystem, AgentSink):
         ws: WebSocket,
         session_id: str,
         request_id: str,
-        question: str,
-        detail: str,
-        options: list[dict] | None,
+        questions: list[dict],
         fut: asyncio.Future,
     ) -> dict:
         # 模型构造/序列化错误传播，不作为网络异常吞掉。
@@ -657,29 +654,30 @@ class FrontendSink(AsyncSystem, AgentSink):
             "type": "ask_request",
             "session_id": session_id,
             "request_id": request_id,
-            "question": question,
-            "detail": detail,
-            "options": options or [],
+            "questions": questions,
         }, ensure_ascii=False)
         if not await self._send_raw(ws, payload, session_id):
             return {"error": "WebSocket disconnected during question request"}
         result_str: str = await fut
         result: dict = json.loads(result_str)
+        answers: list[dict] | None = result.get("answers")
+        answered_any = bool(answers) and any(
+            a.get("selected") or a.get("custom_text") for a in answers
+        )
         return {
-            "question": question,
-            "option": result.get("option"),
-            "custom_text": result.get("custom_text"),
-            "answered": result.get("option") is not None or result.get("custom_text") is not None,
+            "questions": questions,
+            "answers": answers,
+            "answered": answered_any,
         }
 
-    def resolve_ask(self, request_id: str, option: str | None = None,
-                    custom_text: str | None = None) -> bool:
-        """解析前端发来的提问结果。"""
-        logger.info("Resolve ask | request_id=%s option=%s", request_id, option)
+    def resolve_ask(self, request_id: str, answers: list[AskAnswerItem] | None = None) -> bool:
+        """解析前端发来的提问结果；answers 为按题回答列表，None 表示整表跳过。"""
+        logger.info("Resolve ask | request_id=%s answers=%s", request_id, "skip" if answers is None else f"{len(answers)} items")
         fut = self._pending_asks.pop(request_id, None)
         self._ask_session_map.pop(request_id, None)
         if fut and not fut.done():
-            result = json.dumps({"option": option, "custom_text": custom_text}, ensure_ascii=False)
+            dumped = [a.model_dump(exclude_none=True) if isinstance(a, AskAnswerItem) else a for a in (answers or [])]
+            result = json.dumps({"answers": dumped}, ensure_ascii=False)
             fut.set_result(result)
             logger.info("Resolve ask ok | request_id=%s", request_id)
             return True
@@ -689,7 +687,7 @@ class FrontendSink(AsyncSystem, AgentSink):
     def _deny_session_asks(self, session_id: str) -> None:
         for rid in list(self._ask_session_map.keys()):
             if self._ask_session_map.get(rid) == session_id:
-                self.resolve_ask(rid, option=None, custom_text=None)
+                self.resolve_ask(rid, answers=None)
 
     def _deny_all_asks(self) -> None:
         for rid in list(self._pending_asks.keys()):
@@ -697,7 +695,7 @@ class FrontendSink(AsyncSystem, AgentSink):
             self._ask_session_map.pop(rid, None)
             if fut is not None and not fut.done():
                 fut.set_result(json.dumps(
-                    {"option": None, "custom_text": None}, ensure_ascii=False,
+                    {"answers": None}, ensure_ascii=False,
                 ))
 
     # -- 事件推送 --
@@ -926,8 +924,7 @@ class ParentAgentSink(AgentSink):
     def __init__(self, loop: SubAgentLoop) -> None:  # loop: SubAgentLoop
         self._loop = loop
 
-    async def ask_question(self, question: str, options: list[dict] | None = None,
-                           session_id: str = "", detail: str = "") -> dict:
+    async def ask_question(self, questions: list[dict], session_id: str = "") -> dict:
         """子 Agent 不支持直接提问。"""
         return {"error": "SubAgent does not support Ask — use parent agent tools instead"}
 

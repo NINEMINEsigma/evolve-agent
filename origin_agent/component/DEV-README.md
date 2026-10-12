@@ -57,7 +57,7 @@ ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Applicat
 | `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
 | `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性）；加载只改变已加载集合，返回名称仅供发现，工具仍须通过当前 Loop 的 scope、危险等级与运行时权限过滤 |
 | `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改；用户也可通过命令菜单中的动态沙盒空间管理弹窗直接执行 REST CRUD |
-| `ask_question.py` | `Ask` | 向前端提问 |
+| `ask_question.py` | `Ask` | 向前端提问（多问题表单：一次调用携带 1~N 个问题，每题独立单选/多选 + 可选自定义文本，推送 ask_request 后阻塞等待整表提交；answers 按题返回） |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
 | `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |

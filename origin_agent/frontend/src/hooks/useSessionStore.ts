@@ -3,6 +3,7 @@ import { usePersistentState } from "./usePersistentState";
 import type {
   ApprovalMode,
   ApprovalModeSyncStatus,
+  AskAnswerItem,
   AskRequest,
   ClipboardDisplay,
   ConfirmRequest,
@@ -73,7 +74,7 @@ export interface SessionStore {
   fetchAllTags: () => void;
   handleMessage: (message: WSMessage) => void;
   respondConfirm: (request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string) => void;
-  respondAsk: (request: AskRequest | null, option?: string, customText?: string) => void;
+  respondAsk: (request: AskRequest | null, answers?: AskAnswerItem[] | null) => void;
   newChat: () => void;
   switchSession: (sid: string) => void;
   autoTitleSession: (sid: string) => void;
@@ -153,7 +154,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       fetch(`/api/ask/${ask.request_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ option: null, custom_text: null }),
+        body: JSON.stringify({ answers: null }),
       }).catch(() => {});
     }
     for (const request of pendingConfirmsRef.current) {
@@ -284,12 +285,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         ? previous : [...previous, request]);
       return;
     }
-    if (message.type === WS_IN.ASK_REQUEST && message.request_id && message.question) {
+    if (message.type === WS_IN.ASK_REQUEST && message.request_id && Array.isArray(message.questions) && message.questions.length > 0) {
       const request: AskRequest = {
         request_id: message.request_id,
-        question: message.question,
-        detail: message.detail,
-        options: message.options,
+        questions: message.questions,
       };
       setPendingAsks((previous) => previous.some((item) => item.request_id === request.request_id)
         ? previous : [...previous, request]);
@@ -308,12 +307,12 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }).catch(() => {});
     setPendingConfirms((previous) => previous.filter((item) => item.request_id !== request.request_id));
   }, []);
-  const respondAsk = useCallback((request: AskRequest | null, option?: string, customText?: string) => {
+  const respondAsk = useCallback((request: AskRequest | null, answers?: AskAnswerItem[] | null) => {
     if (!request) return;
     fetch(`/api/ask/${request.request_id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ option: option ?? null, custom_text: customText ?? null }),
+      body: JSON.stringify({ answers: answers ?? null }),
     }).catch(() => {});
     setPendingAsks((previous) => previous.filter((item) => item.request_id !== request.request_id));
   }, []);

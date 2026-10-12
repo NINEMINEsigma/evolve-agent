@@ -542,13 +542,12 @@ async def http_ask(request_id: str, req: Request):
     )
     from system.application import Application
     sink = Application.current().get_system(FrontendSink)
-    sink.resolve_ask(request_id, option=request.option, custom_text=request.custom_text)
-    logger.info("HTTP ask response | request_id=%s option=%s", request_id, request.option)
+    sink.resolve_ask(request_id, answers=request.answers)
+    logger.info("HTTP ask response | request_id=%s answers=%d", request_id, len(request.answers or []))
     return {
         "resolved": True,
         "request_id": request_id,
-        "option": request.option,
-        "custom_text": request.custom_text,
+        "answers": [a.model_dump(exclude_none=True) for a in (request.answers or [])],
     }
 
 
