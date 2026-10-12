@@ -225,7 +225,7 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 白名单路径及RLock由 `ApprovalSystem.allowlist` 的唯一 `ToolAllowlistStore` 持有；模块中只保留无状态格式化和委托业务入口，没有独立锁或配置单例。原JSON格式与读取/尽力保存规则保持，不改变既有授权语义。
 
-- `is_allowed(tool_name, args)` / `add_allowed(tool_name, args)`：按工具名与规范化参数精确匹配；排除 `reason`、`_session_id`、`_pre_approved`、`_approval_action`，并非对该工具所有参数组合授权。主会话 critical 在手动/脱手模式不使用白名单。
+- `is_allowed(tool_name, args)` / `add_allowed(tool_name, args)`：按工具名与规范化参数精确匹配；排除键集合为 `entity/constant/tools.py::TOOL_INTERNAL_ARG_KEYS`（`_session_id`、`_pre_approved`、`_approval_action`）加 `reason`，并非对该工具所有参数组合授权。主会话 critical 在手动/脱手模式不使用白名单。
 
 #### `approval/policy.py` — 审批策略
 

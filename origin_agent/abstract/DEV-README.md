@@ -172,6 +172,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - **动态工具刷新**：`notifications/tools/list_changed`。
 - **并发工具调用**：可开关。
 - 凭据脱敏、提示注入扫描、重连退避。
+- **内部键剥离**：`_make_tool_handler` 下发 `tools/call` 前剥离 `entity/constant/tools.py::TOOL_INTERNAL_ARG_KEYS`（`_session_id` / `_pre_approved` / `_approval_action`）——这些键由分发层与审批执行器注入 args，严格 schema（`additionalProperties: false`）的外部服务端会拒收；内置工具 handler 依赖主动读取这些键，剥离只发生在 MCP 分发边界，不经公共分发层。
 
 配置入口已迁入 `MCPSystem.virtual_awake()`，`component/mcp_tools.py` 只通过 `register_tools(registry, ui_events)` 声明 `MCPRefresh`，不在导入期安装回调或创建连接。`MCPCore` 完整持有服务器表、专用 loop/thread、stdio 进程、stderr 句柄、断路器状态及 OAuth Manager；OAuth 认证任务、回调 HTTP 线程、401 dedup 和 stdio 进程生命周期均经独立静态复核确认闭合。初始并发连接失败清理所有部分成功连接后传播，运行期刷新保留新增/移除结果；`close_admission` 拒绝新工作，`stop_calls` 确认真实任务退出，`shutdown` 等待全部资源（OAuth、stdio、cleanup、loop thread）实际完成后才释放。
 

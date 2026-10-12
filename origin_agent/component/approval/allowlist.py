@@ -8,12 +8,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from entity.constant import TOOL_ALLOWLIST_FILENAME
+from entity.constant import TOOL_ALLOWLIST_FILENAME, TOOL_INTERNAL_ARG_KEYS
 from entity.puretype import ToolAllowlistEntry
 
 logger = logging.getLogger(__name__)
 
-_EXCLUDED_KEYS = {"_session_id", "_pre_approved", "_approval_action", "reason"}
+# 工具执行链路的内部注入键共用 TOOL_INTERNAL_ARG_KEYS；额外排除 reason
+# ——它是模型可传的合法审批参数，仅不参与白名单匹配，MCP 下发侧不剥离。
+_EXCLUDED_KEYS = TOOL_INTERNAL_ARG_KEYS | {"reason"}
 
 
 def _json_safe(value: Any) -> Any:
