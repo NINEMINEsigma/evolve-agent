@@ -42,6 +42,9 @@ SUMMARY_INPUT_MAX_CHARS: int = 1_000_000_000
 # 会话旋转/合并继承时，旧会话保留的尾部轮次数
 INHERIT_LAST_ROUNDS: int = 10
 
+# 历史骨架用户消息摘要的最大字符数 — 供前端轮次导航条展示条目文本
+HISTORY_SKELETON_USER_EXCERPT_CHARS: int = 80
+
 # 元数据提取器角色名 — 用于标题/标签/摘要生成时 LLM 客户端的 character 参数，
 # 明确声明"这不是 agent 在说话，是元数据提取工具在工作"。
 # 对 BaseMessage 无技术效果，但语义上隔离了 agent 角色和元数据生成角色。

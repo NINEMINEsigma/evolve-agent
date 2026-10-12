@@ -111,79 +111,6 @@
   box-shadow: inset 0 0 40px rgba(var(--accent-hover-rgb), 0.08);
 }
 
-/* ── Minimap ── */
-.minimap {
-  width: 100px;
-  flex-shrink: 0;
-  align-self: stretch;
-  min-height: 0;
-  position: relative;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
-  cursor: pointer;
-  overflow: hidden;
-  user-select: none;
-  touch-action: none;
-}
-
-.minimap-dragging {
-  cursor: grabbing;
-}
-
-.minimap-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.minimap-track {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.minimap-block {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  border-radius: 2px;
-  opacity: 0.45;
-}
-
-.minimap:hover .minimap-block {
-  opacity: 0.65;
-}
-
-.minimap-dim-top,
-.minimap-dim-bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  background: rgba(var(--black-rgb), 0.55);
-  pointer-events: none;
-}
-
-.minimap-dim-top {
-  top: 0;
-}
-
-.minimap-dim-bottom {
-  bottom: 0;
-}
-
-.minimap-viewport {
-  position: absolute;
-  left: 3px;
-  right: 3px;
-  border: 1px solid rgba(var(--white-rgb), 0.55);
-  background: rgba(var(--white-rgb), 0.08);
-  border-radius: var(--radius-xs);
-  min-height: 1px;
-  pointer-events: none;
-}
-
 /* ── Scroll to bottom button ── */
 .scroll-to-bottom {
   position: absolute;
@@ -218,39 +145,6 @@
     /* 移到输入框上方，避免被遮挡 */
     bottom: 80px;
     z-index: var(--z-content);
-  }
-}
-
-/* ── Minimap toggle (折叠/展开) ── */
-.minimap-toggle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 48px;
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  background: var(--bg-secondary);
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-content);
-  transition: background var(--duration-fast), color var(--duration-fast);
-  padding: 0;
-}
-
-.minimap-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-@media (max-width: 768px) {
-  .minimap {
-    width: 60px;
   }
 }
 

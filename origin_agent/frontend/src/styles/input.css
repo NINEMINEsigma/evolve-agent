@@ -1,5 +1,5 @@
 /* ── Input bar ── */
-/* 定位上下文为 .chat-area-container，确保 input-bar 只覆盖聊天区域，不覆盖 minimap */
+/* 定位上下文为 .chat-area-container，确保 input-bar 只覆盖聊天区域，不覆盖轮次导航条 */
 .input-bar {
   position: absolute;
   bottom: 16px;

@@ -357,8 +357,8 @@
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
 | Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
 | 会话网页 | `SiteTab`（会话网页 Tab） | 会话网页 Tab 内 iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时右侧 Tab 栏图标可用；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
-| 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话 Tab保留局部消息 DOM 几何预览；移动端默认折叠 |
-| 回到底部按钮 | `.scroll-to-bottom` | 已有聊天内容、初始化完成且物理离底时显示的快捷回底按钮；初始化、小地图拖拽与主动回底期间隐藏，不仅依赖 `detached` 状态 |
+| 轮次导航条 | `RoundNavRail` / `.round-nav` | 主聊天区与子会话卡片共用的轮次导航组件：每条目对应一条 Role 为 `user` 的展示行（杠+内容文本一体），杠按作者角色名 hue 散列着色（与头像一致），当前轮放大+花纹凸显，点击跳转目标消息至视口中部略偏上，桌面 hover/focus 展开浮层显示条目文本，条目过多时虚拟滚动，少轮次时列表垂直居中；窄条常驻（无折叠按钮），触摸端点杠直接跳转 | round navigation rail |
+| 回到底部按钮 | `.scroll-to-bottom` | 已有聊天内容、初始化完成且物理离底时显示的快捷回底按钮；初始化与主动回底期间隐藏，不仅依赖 `detached` 状态 |
 
 ### 输入栏内部组件
 
@@ -390,7 +390,7 @@
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 子会话卡片 | `SubagentCard` | 子会话 Tab内的单卡片视图，含消息流和 `Minimap`；子级 tab 活跃项按会话持久化（`ACTIVE_SUBAGENT_ID`） |
+| 子会话卡片 | `SubagentCard` | 子会话 Tab内的单卡片视图，含消息流和轮次导航条；子级 tab 活跃项按会话持久化（`ACTIVE_SUBAGENT_ID`） |
 | 子会话倒计时 | `SubagentCountdown` / `.cron-countdown-strip` | 子会话空闲收集倒计时条（≤30s 显示）；归属聊天 Tab |
 | Cron 倒计时 | `CronCountdown` / `.cron-countdown-strip` | 定时任务下次执行倒计时条（≤60s 显示）；归属聊天 Tab |
 
@@ -418,7 +418,6 @@
 | 历史内容页 | Gateway 按 History 消息索引范围返回的完整前端渲染内容；不改变 `History` 的整体存储 | history content page |
 | 实时行映射 | WebSocket实时行 ID到正典 History投影行 ID的权威关联；只使用后端实际 History索引，不按正文或顺序猜测 | live History row link |
 | 正典交接 | skeleton目标存在时把实时行提升到正典位置、再由History内容页覆盖临时内容并移除实时副本的过程 | canonical handoff |
-| 逻辑 Minimap 映射 | 主聊天 Minimap 背景按真实/估算气泡高度显示全历史角色分布，高亮和拖拽以 Virtuoso scroller 的物理滚动指标为权威，不把估算高度用于滚动校正 | logical Minimap mapping |
 | 本地性能遥测 | 用户手动开启、仅在浏览器本地记录并导出技术指标、默认关闭且不上传消息内容的诊断能力 | local performance telemetry |
 
 ## §12 前端会话视觉
@@ -461,3 +460,4 @@
 | orchestrator（裸称） | 启动入口（launch entry） | prompt 模板中裸称 orchestrator 指代 run.py 的写法已退役；`SubAgentOrchestrator` 合法保留 |
 | 右侧触发条 | 右侧 Tab 栏（tab rail） | `.right-trigger-strip` 体系已被右侧 Tab 栏替换；2026-10-12 起 Tab 导航改造退役 |
 | 资源抽屉 / 模型配置抽屉 / 会话网页抽屉 / 子会话面板 | 资源 Tab / 模型配置 Tab / 会话网页 Tab / 子会话 Tab | 右侧抽屉体系 tab 化后退役；规范称谓见 §11「Tab 导航体系」 |
+| 小地图 / 逻辑 Minimap 映射 | 轮次导航条（round navigation rail，`RoundNavRail`） | 2026-10-12 起轮次导航改造退役；主聊天区与子会话的小地图（Canvas 逻辑映射 / DOM 几何预览）整体替换为轮次导航条 |

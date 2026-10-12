@@ -117,7 +117,7 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
+| `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和轮次导航条的定位边界，消息序列委托给 `VirtualMessageList` |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
 | `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥；`user`/`assistant` 头像按角色名查角色头像映射，命中渲染 `<img>`（onError 回退首字母） |
@@ -135,7 +135,7 @@ frontend/
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
-| `Minimap.tsx` | 主聊天区使用 Canvas 逻辑 Minimap 映射，将正典骨架与尚未固化的 live 行共同绘制，不测量离屏 DOM；子会话 Tab继续使用局部 DOM 几何模式 |
+| `RoundNavRail.tsx` | 轮次导航条：每条目对应一条 Role 为 `user` 的展示行（杠+内容文本一体，条目虚拟滚动，少轮次时列表垂直居中），杠按作者角色名 hue 散列着色（与头像一致），当前轮放大+花纹凸显并自动保持可见，点击跳转到目标消息（主聊天区经 `ChatVirtualListHandle.jumpToRound`，子会话卡片经本地 DOM 滚动）；当前轮按「已渲染行中最后位于视口参考线（视口顶 + 跳转偏移比例）以上的行」判定；条目在收起/展开两态共用同一套绝对定位布局——杠锚定条目右侧固定位置，文本是杠左侧的覆盖层，桌面 hover/focus 展开浮层只加宽背板并淡入文本，杠的坐标与间距不变；窄条常驻（无折叠按钮），触摸端点杠直接跳转 |
 | `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
 
 `@` 提及支持通过 `/` 逐级查询工作空间子目录；选择目录会保留输入状态并自动进入该目录，选择文件才会插入不可编辑的引用标签。子目录查询期间候选项暂时为空时，`Enter` 和 `Tab` 也不会发送消息或切走输入焦点。只有输入开头或空白后的 `/` 才触发 skill 菜单，目录路径中的 `/` 会作为路径分隔符保留。
@@ -156,7 +156,7 @@ frontend/
 | 组件 | 职责 |
 |---|---|
 | `ClipboardPanel.tsx` | 剪贴板展示面板（聊天 Tab 内） |
-| `SubagentCard.tsx` | 子会话卡片：单会话消息流 + Minimap（子会话 Tab 内） |
+| `SubagentCard.tsx` | 子会话卡片：单会话消息流 + 轮次导航条（子会话 Tab 内） |
 | `TaskProgressPanel.tsx` | 任务进度面板（输入栏抽屉面内，聊天 Tab） |
 | `PlaylistPlayer.tsx` | 播放列表播放器（资源 Tab） |
 | `CronCountdown.tsx` / `SubagentCountdown.tsx` | 倒计时组件（聊天 Tab 内） |
@@ -192,8 +192,8 @@ frontend/
 |---|---|
 | `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；入站消息经 `hooks/wsMessageDecoder.ts` 解码为判别联合 `WSMessage`（流式守卫在 `features/chat/streamEventGuards.ts`），`handleMessage` 按 `type` 字面量分流后交给非流 helpers；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊”；审批模式不写 localStorage/IndexedDB，只有 `HANDSFREE_MODE` 权威消息可更新三态模式，`APPROVAL_PROFILE_CHANGED` 只更新审批 Profile状态 |
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
-| `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
-| `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
+| `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、跳转目标页加载和资源懒加载 |
+| `features/chat/useChatScrollController.ts` | `initializing/following/detached/returning` 四态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、消息高度操作和非 `following` 状态会取消待执行帧；`jumpToRound(rowIndex)` 按展示行索引跳转（未加载先取内容页，目标消息顶部落在视口中部略偏上，近平滑远瞬时） |
 | `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态及图片/音频/视频三路全局回退引用；多模态状态一次 GET 恢复、三路独立 PUT，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
 | `useSessionLlmSelection.ts` | 按会话名称存储、服务端恢复、读取取消与代际隔离、Profile重命名/删除处理 |
 | `useLlmProfileEditor.ts` | 模型配置 Tab只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
@@ -241,18 +241,17 @@ frontend/
 
 - `features/chat/messageVisibility.ts::isMessageVisible` 统一判断，仅隐藏 Role 为 `user` 且角色名为 `system` 的消息；普通用户消息、Agent 回复、工具卡片、系统状态和错误提示保持原有行为。
 - 主聊天区在 `selectChatRenderRows` 完成历史与实时行关联之后过滤展示行。完整骨架、正文缓存、原始 History 索引、实时行和正典交接保持不变，重新打开即可恢复显示；空态和顶部/底部留白依据过滤后的展示行计算，不生成零高度占位行。
-- Virtuoso、小地图、分页加载和回到底部使用同一过滤后展示顺序。页请求先从展示行取原始 History 索引，再按页去重；隐藏行之间的长跨度不会导致额外拉取所有中间页。切换显示视为用户主动高度操作，取消旧回底动作并补取新的可见范围。
-- 子会话卡片与其小地图、工具结果嵌入消息复用同一显示规则；嵌入消息全部隐藏时不保留标题空壳。
+- Virtuoso、轮次导航条、分页加载和回到底部使用同一过滤后展示顺序。页请求先从展示行取原始 History 索引，再按页去重；隐藏行之间的长跨度不会导致额外拉取所有中间页。切换显示视为用户主动高度操作，取消旧回底动作并补取新的可见范围。
+- 子会话卡片与其轮次导航条、工具结果嵌入消息复用同一显示规则；嵌入消息全部隐藏时不保留标题空壳。
 - 该偏好只控制前端显示，不删除 History、不修改模型上下文、消息编辑/删除索引、后端协议或资源索引。
 
 - 握手欢迎文本 `Connected to Evolve Agent` 由 `constants/ws.ts` 与 Gateway 发送处对应；前端仅在消息无 History 索引且不是业务系统状态时将其排除出聊天列表。首次连接和真实重连均如此，顶部连接状态、协议事件和其他系统消息不变，避免欢迎行留在实时 Footer 并在每轮正典交接后重新显露。
 - 快速滚动的 `ChatSeekPlaceholder` 必须使用 Virtuoso 提供的原行 `height` 保留等高 border-box 外壳；内部复用普通骨架视觉，但不得以骨架估算高度替换长消息高度，缺失骨架数据时也保留空壳。用户验收可在开发者工具观察正文/快速占位切换前后的行外壳高度，允许亚像素误差，不要求肉眼辨认瞬间骨架。
-- `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。回底按钮在已有内容、初始化完成且物理离底时显示，初始化、小地图拖拽和主动回底期间隐藏；不只依赖 `detached` 状态。
-- Minimap 拖拽独占滚动控制，底部观察和消息高度操作收尾不能提前退出 `minimap_dragging`。释放时以实际 DOM 位置而非请求目标判断到底；取消/丢失捕获按最后已预览位置幂等收尾，切会话不提交旧拖拽位置。拖拽期间不发起新的可见页请求，已有请求可继续合并但不能接管滚动。
+- `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。回底按钮在已有内容、初始化完成且物理离底时显示，初始化与主动回底期间隐藏；不只依赖 `detached` 状态。
 - 用户主列表滚动立即中止被动追底及未完成回底，实际 scroll 采样在用户意图窗口内更新状态；单纯布局变化不解除离底浏览。回底动作带局部动作序号与会话代际，远距离加载检查页错误与已加载索引，下一布局帧才定位；失败保留错误和回底入口，用户新操作、会话切换与卸载均使旧动作失效。
 
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。
-- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交、skeleton/liveRows 正典交接的布局提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底、主动改变消息高度或开始小地图拖拽时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
+- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交、skeleton/liveRows 正典交接的布局提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底或主动改变消息高度时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
 
 - Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
@@ -262,9 +261,9 @@ frontend/
 - 后端在写入 History 后、`history_sync` 前通过 `system.stream_meta`发送 `stream_id`、`history_index`和`live_history_links`权威关联；用户消息使用 `USER_MESSAGE.index`，工具结果使用实际 History 索引。前端在 skeleton 已存在目标行时把实时消息提升到正典位置，REST内容页覆盖临时内容后移除实时行；目标缺失或请求失败时保留原实时行并报告诊断，不按正文或顺序猜配。
 - 工具消息与普通长消息统一使用气泡 `collapsed` 状态，但入口互斥：工具摘要切换工具详情，普通长消息底部按钮切换正文限高；流式工具消息默认折叠且允许摘要展开/收起。历史页重取按相同 History 行 ID 保留用户折叠选择；其他未命中视口保护的 live 行在正典交接时恢复默认折叠。UI 折叠不提高 live 正典版本，避免交接后留下重复气泡。
 - 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。最新流式消息即使超过一个视口，也不切换到消息顶部；实时提交与列表高度变化在同一浏览器帧内最多合并一次物理底部定位，避免长消息高度变化与 Virtuoso 校正互相竞争。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。
-- 主聊天区逻辑 Minimap 同时绘制正典骨架和当前 live 行；拖动到 live 尾部等价于回到底部。
-- `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供 Minimap 物理高亮与拖拽使用；拖动期间抑制内容页请求，释放时以最终物理位置反查目标范围。
-- 主聊天区 Minimap 的 Canvas 背景按已测量/骨架估算消息高度加权绘制；高亮和拖拽只使用 scroller 的 `scrollTop` / `scrollHeight` / `clientHeight` 物理指标，估算高度不反向修改 Virtuoso 或追底位置。极薄高亮保持真实比例，另以透明扩展命中区保留可抓取性。子会话 Legacy Minimap 保留原 DOM 几何实现。
+- 主聊天区轮次导航条同时呈现正典骨架和当前 live 行中的 user 行；未加载正文的骨架行使用后端投影附带的 `content_excerpt` 摘要。
+- `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供轮次导航条跳转使用；当前轮由 `ChatArea` 按 DOM 参考线判定——已渲染行（`data-render-row-id`）中最后一个顶部位于「视口顶 + `ROUND_NAV_JUMP_OFFSET_RATIO` 视口高度」参考线以上的行所归属的条目，与跳转落点同一条参考线，索引变化才更新高亮。
+- 轮次导航条跳转复用「远距离先加载内容页再定位」模式：`jumpToRound` 在目标行未加载时先 `jumpToLogicalRow` 取页并核对加载结果，再以 `scrollToIndex`（align start + 补偿偏移）把目标消息顶部定位到视口中部略偏上；Virtuoso 条目偏移不含列表顶部安全区 spacer，`useChatScrollController` 的 `topSafeSpacePx` 参数将其补偿进 offset，使落点与 `ChatArea` 当前轮判定的 DOM 参考线严格为同一条线；近距离平滑、远距离瞬时。
 - 资源 Tab使用完整 History 资源索引，不依赖前端已加载正文页。
 - 原“导出会话为 HTML”已移除；虚拟列表不保证浏览器原生查找命中离屏历史。
 
@@ -300,6 +299,7 @@ frontend/
 | `base.css` | 基础样式 |
 | `variables.css` | CSS 变量 |
 | `chat.css` | 聊天布局 |
+| `round-nav.css` | 轮次导航条（杠/条目/当前轮花纹、展开浮层、折叠切换按钮） |
 | `messages.css` | 消息气泡与渲染 |
 | `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |

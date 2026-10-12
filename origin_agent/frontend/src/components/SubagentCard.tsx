@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { SubagentSession } from "../types";
 import MessageItem from "./MessageItem";
-import Minimap from "./Minimap";
+import RoundNavRail from "./RoundNavRail";
 import { subagentFeedbackToChatMessages } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
+import { ROUND_NAV_JUMP_OFFSET_RATIO } from "../constants/roundNav";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { isMessageVisible } from "../features/chat/messageVisibility";
+import { buildRoundNavEntriesFromMessages, type RoundNavEntry } from "../features/chat/roundNav";
 import SubagentAvatar from "../features/characterAvatars/SubagentAvatar";
 
 const STATUS_LABEL: Record<SubagentSession["status"], string> = {
@@ -31,6 +33,51 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
   const chatMessages = useMemo(() => subagentFeedbackToChatMessages(session)
     .filter((message) => isMessageVisible(message.role, message.characterName, showSystemUserMessages)),
   [session, showSystemUserMessages]);
+
+  const roundNavEntries = useMemo(() => buildRoundNavEntriesFromMessages(chatMessages), [chatMessages]);
+  const [currentRoundEntryId, setCurrentRoundEntryId] = useState<string | null>(null);
+  const roundNavFrameRef = useRef<number | null>(null);
+
+  // 当前轮：视口参考线（顶部 + 35% 高度）以上最近的 user 消息
+  useEffect(() => {
+    const chat = chatRef.current;
+    if (!chat || collapsed) return;
+    const update = () => {
+      roundNavFrameRef.current = null;
+      const reference = chat.scrollTop + chat.clientHeight * ROUND_NAV_JUMP_OFFSET_RATIO;
+      let current: string | null = null;
+      for (const entry of roundNavEntries) {
+        const element = chat.querySelector<HTMLElement>(`[data-message-id="${entry.entryId}"]`);
+        if (!element) continue;
+        if (element.offsetTop <= reference) current = entry.entryId;
+        else break;
+      }
+      const next = current ?? roundNavEntries[0]?.entryId ?? null;
+      setCurrentRoundEntryId((previous) => (previous === next ? previous : next));
+    };
+    const schedule = () => {
+      if (roundNavFrameRef.current !== null) return;
+      roundNavFrameRef.current = requestAnimationFrame(update);
+    };
+    schedule();
+    chat.addEventListener("scroll", schedule, { passive: true });
+    return () => {
+      chat.removeEventListener("scroll", schedule);
+      if (roundNavFrameRef.current !== null) cancelAnimationFrame(roundNavFrameRef.current);
+      roundNavFrameRef.current = null;
+    };
+  }, [collapsed, roundNavEntries]);
+
+  const jumpToRoundEntry = useCallback((entry: RoundNavEntry) => {
+    const chat = chatRef.current;
+    if (!chat) return;
+    const element = chat.querySelector<HTMLElement>(`[data-message-id="${entry.entryId}"]`);
+    if (!element) return;
+    chat.scrollTo({
+      top: Math.max(0, element.offsetTop - chat.clientHeight * ROUND_NAV_JUMP_OFFSET_RATIO),
+      behavior: "smooth",
+    });
+  }, []);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setExpandedMessages((prev) => {
@@ -120,7 +167,7 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
           ))}
           <div ref={bottomRef} />
         </div>
-        <Minimap messages={messagesWithCollapse} chatAreaRef={chatRef} />
+        <RoundNavRail entries={roundNavEntries} currentEntryId={currentRoundEntryId} onJump={jumpToRoundEntry} />
       </div>
     )}
   </div>

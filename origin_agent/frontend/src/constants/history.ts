@@ -6,12 +6,14 @@ export const HISTORY_NEAR_BOTTOM_ROWS = 8;
 export const CHAT_SCROLL_USER_INTENT_MS = 700;
 export const HISTORY_SCROLL_SEEK_ENTER = 1200;
 export const HISTORY_SCROLL_SEEK_EXIT = 160;
+// 骨架估算行距（px）— 与 chat.css 消息行距保持同步的估算口径
 export const HISTORY_ROW_GAP_PX = 6;
 // 与 variables.css 的 --header-height: 56px 保持同步；桌面端顶部覆盖层的聊天安全区
 export const CHAT_TOP_SAFE_SPACE_PX = 56;
+// 聊天列表底部留白（px）— 与 chat.css 底部安全区保持同步
 export const CHAT_BOTTOM_SAFE_SPACE_PX = 120;
-export const MINIMAP_THUMB_MIN_HIT_PX = 16;
-export const MINIMAP_MEASUREMENT_EPSILON_PX = 0.5;
+// 滚动物理指标与行高测量的比较精度（px）
+export const CHAT_MEASUREMENT_EPSILON_PX = 0.5;
 
 export const HISTORY_SKELETON_HEIGHTS = {
   user: 72,

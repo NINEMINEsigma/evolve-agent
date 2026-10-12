@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from entity.constant import HISTORY_SKELETON_USER_EXCERPT_CHARS
 from entity.messages import (
     AudioBlock,
     BaseMessage,
@@ -140,6 +141,14 @@ def _build_tool_pairs(messages: list[BaseMessage]) -> tuple[dict[str, _ToolPair]
     return pairs, consumed_results
 
 
+def _user_content_excerpt(message: BaseMessage) -> str | None:
+    """用户消息空白折叠后的截断摘要，供轮次导航条展示；无文本返回 None。"""
+    text = " ".join(content_to_text(message.content).split())
+    if not text:
+        return None
+    return text[:HISTORY_SKELETON_USER_EXCERPT_CHARS]
+
+
 def _skeleton_for_message(
     message: BaseMessage,
     history_index: int,
@@ -156,6 +165,7 @@ def _skeleton_for_message(
             role=message.role.value,
             character_name=character_name,
             is_system_status=isinstance(message, SystemStatusMessage),
+            content_excerpt=_user_content_excerpt(message) if message.role == Role.USER else None,
         ))
     if isinstance(message, CharacterConversationMessage) and message.tool_calls:
         for tool_index, tool_call in enumerate(message.tool_calls):

@@ -6,20 +6,7 @@ import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
 import ToolCallCard from "./ToolCallCard";
 import { useCharacterAvatarUrl } from "../features/characterAvatars/characterAvatarStore";
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const chr = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + chr;
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function hueFromString(str: string): number {
-  return hashString(str) % 360;
-}
+import { hueFromString } from "../utils/color";
 
 const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
 

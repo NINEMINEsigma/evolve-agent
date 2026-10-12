@@ -2,11 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { VirtuosoHandle } from "react-virtuoso";
 import { CHAT_SCROLL_USER_INTENT_MS, HISTORY_NEAR_BOTTOM_ROWS } from "../../constants/history";
 import { DIMENSIONS } from "../../constants/dimensions";
-import {
-  buildHeightWeightedSegments,
-  normalizeScrollMetrics,
-  scrollTopToLogicalRange,
-} from "./minimapGeometry";
+import { ROUND_NAV_JUMP_OFFSET_RATIO, ROUND_NAV_NEAR_JUMP_ROWS } from "../../constants/roundNav";
+import { normalizeScrollMetrics } from "./scrollGeometry";
 import { chatRuntimeController } from "./chatRuntimeController";
 import { useChatRuntimeStore, selectChatRenderRows } from "./chatRuntimeStore";
 import { chatTelemetry } from "./chatTelemetry";
@@ -44,21 +41,16 @@ export type ScrollEvent =
   | { type: "INITIAL_READY" }
   | { type: "USER_LEFT_BOTTOM" }
   | { type: "USER_REACHED_BOTTOM" }
-  | { type: "MINIMAP_START" }
-  | { type: "MINIMAP_END"; atBottom: boolean }
   | { type: "RETURN_START" }
   | { type: "RETURN_DONE" }
   | { type: "SESSION_RESET" };
 
 export function reduceFollowMode(mode: ChatFollowMode, event: ScrollEvent): ChatFollowMode {
-  if (mode === "minimap_dragging" && event.type !== "MINIMAP_END" && event.type !== "SESSION_RESET") return mode;
   switch (event.type) {
     case "SESSION_RESET": return "initializing";
     case "INITIAL_READY": return "following";
     case "USER_LEFT_BOTTOM": return "detached";
     case "USER_REACHED_BOTTOM": return "following";
-    case "MINIMAP_START": return "minimap_dragging";
-    case "MINIMAP_END": return event.atBottom ? "following" : "detached";
     case "RETURN_START": return "returning";
     case "RETURN_DONE": return "following";
     default: return mode;
@@ -77,7 +69,6 @@ export function useChatScrollController(
   const returnFrameRef = useRef<number | null>(null);
   const returnSequenceRef = useRef(0);
   const returnActionRef = useRef<{ sequence: number; generation: number; ready: boolean } | null>(null);
-  const minimapGenerationRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
   const generation = useChatRuntimeStore((state) => state.generation);
   const followMode = useChatRuntimeStore((state) => state.followMode);
@@ -129,8 +120,6 @@ export function useChatScrollController(
     const store = useChatRuntimeStore.getState();
     store.setScrollMetrics(metrics);
     if (store.atBottom !== atBottom) store.setAtBottom(atBottom);
-    // 布局观察不能夺走小地图拖拽的控制权，包括高度操作的收尾。
-    if (store.followMode === "minimap_dragging") return metrics;
     if (store.userHeightMutation) {
       store.finishUserHeightMutation(atBottom);
       return metrics;
@@ -242,7 +231,7 @@ export function useChatScrollController(
   const returnToBottom = useCallback(async () => {
     const state = useChatRuntimeStore.getState();
     const rows = selectChatRenderRows(state);
-    if (!isCurrent() || state.followMode === "minimap_dragging"
+    if (!isCurrent()
       || rows.length === 0
       || !readChatScrollMetrics(scrollerElement) || !virtuosoRef.current) return;
     interruptAutomaticScroll();
@@ -287,46 +276,37 @@ export function useChatScrollController(
     }
   }, [cancelReturn, generation, interruptAutomaticScroll, isCurrent, scheduleReturnToBottom, scrollerElement, transition, virtuosoRef]);
 
-  const beginMinimapDrag = useCallback(() => {
-    if (!isCurrent()) return;
+  const jumpToRound = useCallback(async (rowIndex: number): Promise<void> => {
+    const state = useChatRuntimeStore.getState();
+    const rows = selectChatRenderRows(state);
+    const row = rows[rowIndex];
+    if (!isCurrent() || !row || !virtuosoRef.current) return;
     interruptAutomaticScroll();
-    minimapGenerationRef.current = generation;
-    userIntentUntilRef.current = 0;
-    transition({ type: "MINIMAP_START" });
-  }, [generation, interruptAutomaticScroll, isCurrent, transition]);
-
-  const previewMinimapScrollTop = useCallback((scrollTop: number) => {
-    const state = useChatRuntimeStore.getState();
-    if (!isCurrent() || minimapGenerationRef.current !== state.generation
-      || state.followMode !== "minimap_dragging" || !Number.isFinite(scrollTop)) return;
-    const metrics = readChatScrollMetrics(scrollerElement);
-    if (!metrics) return;
-    const target = Math.max(0, Math.min(scrollTop, metrics.scrollHeight - metrics.viewportHeight));
-    virtuosoRef.current?.scrollTo({ top: target, behavior: "auto" });
-    scheduleScrollMetrics();
-  }, [isCurrent, scheduleScrollMetrics, scrollerElement, virtuosoRef]);
-
-  const commitMinimapDrag = useCallback(async (targetScrollTop: number) => {
-    const state = useChatRuntimeStore.getState();
-    if (!isCurrent() || minimapGenerationRef.current !== state.generation || state.followMode !== "minimap_dragging") return;
-    previewMinimapScrollTop(targetScrollTop);
-    const metrics = sampleScrollMetrics();
-    minimapGenerationRef.current = null;
-    userIntentUntilRef.current = 0;
-    const atBottom = metrics !== null && isChatAtBottom(metrics);
-    transition({ type: "MINIMAP_END", atBottom });
-    const store = useChatRuntimeStore.getState();
-    if (store.userHeightMutation) store.finishUserHeightMutation(atBottom);
-    if (!store.initialReady && metrics) store.setInitialReady(true);
-    if (!metrics) return;
-    if (atBottom) {
-      scrollToPhysicalBottom("auto");
-    } else {
-      const segments = buildHeightWeightedSegments(selectChatRenderRows(store), store.rowHeights, topSafeSpacePx);
-      const range = scrollTopToLogicalRange(metrics, segments);
-      await chatRuntimeController.ensureVisibleRangeLoaded(range.startIndex, range.endIndex);
+    userIntentUntilRef.current = performance.now() + CHAT_SCROLL_USER_INTENT_MS;
+    const loaded = row.historyIndex === null
+      ? Boolean(row.message)
+      : state.loadedHistoryIndices.has(row.historyIndex);
+    const far = !loaded || Math.abs(rowIndex - state.visibleRange.startIndex) > ROUND_NAV_NEAR_JUMP_ROWS;
+    if (!loaded && row.historyIndex !== null) {
+      await chatRuntimeController.jumpToLogicalRow(rowIndex);
+      if (!isCurrent()) return;
+      // loadPage将错误写入store而不是重新抛出，不能把Promise完成视为加载成功。
+      if (!useChatRuntimeStore.getState().loadedHistoryIndices.has(row.historyIndex)) {
+        transition({ type: "USER_LEFT_BOTTOM" });
+        return;
+      }
     }
-  }, [isCurrent, previewMinimapScrollTop, sampleScrollMetrics, scrollToPhysicalBottom, topSafeSpacePx, transition]);
+    if (!isCurrent() || !virtuosoRef.current) return;
+    const metrics = readChatScrollMetrics(scrollerElement);
+    // 目标消息顶部落在视口中部略偏上的舒适位置。
+    // Virtuoso 的条目偏移不包含列表内顶部安全区 spacer，补偿后与 ChatArea 的当前轮参考线严格对齐。
+    const offset = metrics
+      ? Math.round(topSafeSpacePx - metrics.viewportHeight * ROUND_NAV_JUMP_OFFSET_RATIO)
+      : 0;
+    virtuosoRef.current.scrollToIndex({ index: rowIndex, align: "start", offset, behavior: far ? "auto" : "smooth" });
+    transition({ type: "USER_LEFT_BOTTOM" });
+    scheduleScrollMetrics();
+  }, [isCurrent, interruptAutomaticScroll, scrollerElement, scheduleScrollMetrics, topSafeSpacePx, transition, virtuosoRef]);
 
   useLayoutEffect(() => {
     mountedRef.current = true;
@@ -339,7 +319,6 @@ export function useChatScrollController(
       metricsFrameRef.current = null;
       metricsFromScrollRef.current = false;
       userIntentUntilRef.current = 0;
-      minimapGenerationRef.current = null;
     };
   }, [cancelReturn, cancelScheduledFollow, generation, scheduleScrollMetrics]);
 
@@ -362,7 +341,6 @@ export function useChatScrollController(
     const markIntent = () => {
       if (!isCurrent()) return;
       interruptAutomaticScroll();
-      if (useChatRuntimeStore.getState().followMode === "minimap_dragging") return;
       userIntentUntilRef.current = performance.now() + CHAT_SCROLL_USER_INTENT_MS;
       transition({ type: "USER_LEFT_BOTTOM" });
     };
@@ -413,8 +391,6 @@ export function useChatScrollController(
     handleTotalListHeightChanged,
     beginUserHeightMutation,
     returnToBottom,
-    beginMinimapDrag,
-    previewMinimapScrollTop,
-    commitMinimapDrag,
+    jumpToRound,
   };
 }

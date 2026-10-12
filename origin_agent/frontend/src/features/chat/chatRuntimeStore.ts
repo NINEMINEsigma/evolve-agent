@@ -21,7 +21,7 @@ import type {
   StreamBatch,
 } from "./types";
 import { generateUUID } from "../../utils";
-import { MINIMAP_MEASUREMENT_EPSILON_PX } from "../../constants/history";
+import { CHAT_MEASUREMENT_EPSILON_PX } from "../../constants/history";
 import { isLongChatMessage } from "./messageCollapse";
 import { mergeToolCard, toolCardLiveId } from "./toolCards";
 import { STORAGE_KEYS } from "../../constants/storage";
@@ -984,9 +984,9 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   setScrollMetrics: (scrollMetrics) => set((state) => {
     const previous = state.scrollMetrics;
     if (
-      Math.abs(previous.scrollTop - scrollMetrics.scrollTop) < MINIMAP_MEASUREMENT_EPSILON_PX
-      && Math.abs(previous.scrollHeight - scrollMetrics.scrollHeight) < MINIMAP_MEASUREMENT_EPSILON_PX
-      && Math.abs(previous.viewportHeight - scrollMetrics.viewportHeight) < MINIMAP_MEASUREMENT_EPSILON_PX
+      Math.abs(previous.scrollTop - scrollMetrics.scrollTop) < CHAT_MEASUREMENT_EPSILON_PX
+      && Math.abs(previous.scrollHeight - scrollMetrics.scrollHeight) < CHAT_MEASUREMENT_EPSILON_PX
+      && Math.abs(previous.viewportHeight - scrollMetrics.viewportHeight) < CHAT_MEASUREMENT_EPSILON_PX
     ) return state;
     return { scrollMetrics };
   }),
@@ -995,7 +995,7 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     const rowHeights = { ...state.rowHeights };
     for (const entry of entries) {
       if (!entry.id || !Number.isFinite(entry.height) || entry.height <= 0) continue;
-      if (Math.abs((rowHeights[entry.id] ?? 0) - entry.height) < MINIMAP_MEASUREMENT_EPSILON_PX) continue;
+      if (Math.abs((rowHeights[entry.id] ?? 0) - entry.height) < CHAT_MEASUREMENT_EPSILON_PX) continue;
       rowHeights[entry.id] = entry.height;
       changed = true;
     }

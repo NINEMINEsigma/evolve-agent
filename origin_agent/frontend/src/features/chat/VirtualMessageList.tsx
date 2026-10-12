@@ -25,7 +25,7 @@ import { useMessageCharacterHover } from "../../hooks/useMessageCharacterHover";
 import ChatHistoryRow from "./ChatHistoryRow";
 import MessageSkeleton from "./MessageSkeleton";
 import { useChatRuntimeStore, selectChatRenderRows } from "./chatRuntimeStore";
-import { measuredHistoryRowHeights } from "./minimapGeometry";
+import { measuredHistoryRowHeights } from "./scrollGeometry";
 import { chatRuntimeController } from "./chatRuntimeController";
 import { liveBubbleIntersectsViewport } from "./chatViewport";
 import { useChatScrollController } from "./useChatScrollController";
@@ -33,9 +33,7 @@ import type { ChatRenderRow, HistorySkeletonRowDto } from "./types";
 
 export interface ChatVirtualListHandle {
   returnToBottom: () => Promise<void>;
-  beginMinimapDrag: () => void;
-  previewMinimapScrollTop: (scrollTop: number) => void;
-  commitMinimapDrag: (scrollTop: number) => Promise<void>;
+  jumpToRound: (rowIndex: number) => Promise<void>;
 }
 
 interface VirtualMessageListProps {
@@ -214,14 +212,10 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
 
     useImperativeHandle(ref, () => ({
       returnToBottom: scroll.returnToBottom,
-      beginMinimapDrag: scroll.beginMinimapDrag,
-      previewMinimapScrollTop: scroll.previewMinimapScrollTop,
-      commitMinimapDrag: scroll.commitMinimapDrag,
+      jumpToRound: scroll.jumpToRound,
     }), [
       scroll.returnToBottom,
-      scroll.beginMinimapDrag,
-      scroll.previewMinimapScrollTop,
-      scroll.commitMinimapDrag,
+      scroll.jumpToRound,
     ]);
 
     const hasChatContent = renderRows.length > 0 || processing;

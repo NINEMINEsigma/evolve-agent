@@ -74,8 +74,8 @@ class ChatRuntimeController {
 
   async ensureVisibleRangeLoaded(startRow: number, endRow: number): Promise<void> {
     const state = useChatRuntimeStore.getState();
-    if (!state.sessionId || state.skeleton.length === 0 || state.followMode === "minimap_dragging") return;
-    // Virtuoso 和小地图传入的是过滤后的展示行索引，不能直接索引完整骨架。
+    if (!state.sessionId || state.skeleton.length === 0) return;
+    // Virtuoso 传入的是过滤后的展示行索引，不能直接索引完整骨架。
     const rows = selectChatRenderRows(state);
     const start = Math.max(0, startRow - HISTORY_PAGE_OVERSCAN_ROWS);
     const end = Math.min(rows.length - 1, endRow + HISTORY_PAGE_OVERSCAN_ROWS);

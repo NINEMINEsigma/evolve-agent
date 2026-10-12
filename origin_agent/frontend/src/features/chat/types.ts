@@ -16,6 +16,7 @@ export interface HistorySkeletonRowDto {
   tool_index?: number | null;
   tool_call_id?: string | null;
   is_system_status: boolean;
+  content_excerpt?: string | null;
 }
 
 export interface HistoryToolCardDto {
@@ -100,7 +101,6 @@ export type ChatFollowMode =
   | "initializing"
   | "following"
   | "detached"
-  | "minimap_dragging"
   | "returning";
 
 export interface ChatVisibleRange {
@@ -112,14 +112,6 @@ export interface ChatScrollMetrics {
   scrollTop: number;
   scrollHeight: number;
   viewportHeight: number;
-}
-
-export interface ChatMinimapSegment {
-  id: string;
-  role: string;
-  weight: number;
-  startRatio: number;
-  endRatio: number;
 }
 
 export interface LiveChatRow {

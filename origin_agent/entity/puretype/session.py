@@ -211,6 +211,8 @@ class SessionHistorySkeletonRow(BaseModel):
     tool_index: int | None = None
     tool_call_id: str | None = None
     is_system_status: bool = False
+    # 轮次导航条条目文本：仅 user 普通消息行填充，空白折叠后截断
+    content_excerpt: str | None = None
 
 
 class SessionHistorySkeletonResponse(BaseModel):

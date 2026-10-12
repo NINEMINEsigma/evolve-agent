@@ -8,7 +8,6 @@ export const DIMENSIONS = {
   INPUT_MAX_SCROLL:       200,   // 输入框最大滚动高度
   MENU_MAX_HEIGHT:        244,   // 提及菜单最大高度
   MOBILE_BREAKPOINT:      768,   // 移动端断点 (px)
-  MINIMAP_MIN_HEIGHT:     24,    // 小地图最小元素高度
   TREE_INDENT:            16,    // 文件树缩进步长
   AGENTSPACE_SIDEBAR_DEFAULT: 280, // Agentspace 文件树默认宽度
   AGENTSPACE_SIDEBAR_MIN: 190,     // Agentspace 文件树最小宽度

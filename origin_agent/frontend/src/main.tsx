@@ -10,6 +10,7 @@ import "./styles/skeleton.css";
 import "./styles/sidebar.css";
 import "./styles/header.css";
 import "./styles/chat.css";
+import "./styles/round-nav.css";
 import "./styles/agent-stage.css";
 import "./styles/chat-style-scope.css";
 import "./styles/messages.css";

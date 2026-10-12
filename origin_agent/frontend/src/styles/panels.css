@@ -229,18 +229,6 @@
   min-width: 0;
 }
 
-.subagent-chat-wrapper .minimap {
-  width: 60px;
-  flex-shrink: 0;
-  background: transparent;
-  border-left: 1px solid var(--border);
-}
-
-.subagent-chat-wrapper .minimap-block {
-  left: 4px;
-  right: 4px;
-}
-
 .subagent-card {
   padding: 12px;
   margin-bottom: 12px;

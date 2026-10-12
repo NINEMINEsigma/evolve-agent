@@ -1283,3 +1283,8 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 `TaskOwner._records`持有`ManagedTaskRecord`，记录实际Task、请求等待方、预期取消、唯一清理task、固定取消截止、终局错误及交接状态；纯字段模型位于`entity/puretype/lifecycle.py`，不写入History或easysave。`pending`只列活任务，`is_idle`还包含未完成交接；请求异常已交还后不进入应用关闭失败集合。`LifecycleFailure`及异常组中的该类型始终上报，取消清理超时保留活任务及其依赖。
 
 新增公共操作为`run_request/cancel/is_idle`，业务类不得跨类修改记录表。本节描述已实施公共契约，不表示运行验证已通过。
+
+### 轮次导航条替换小地图（2026-10-12）
+
+主聊天区逻辑小地图（Canvas 逻辑映射 + 视口高亮 + 拖拽跳转）与子会话卡片 Legacy 小地图（DOM 几何预览）整体退役，替换为「轮次导航条」（`RoundNavRail`，规范称谓见 DEV-glossary §11，旧称已入 §13 退役表）。每条目对应一条 Role 为 `user` 的展示行，杠+内容文本一体，杠按作者角色名 hue 散列着色（`utils/color.ts` 的 `hueFromString`，与头像一致），当前轮由 `ChatArea` 按 DOM 参考线判定（已渲染行中最后位于「视口顶 + `ROUND_NAV_JUMP_OFFSET_RATIO` 视口高度」以上的行所归属的条目）并放大+花纹凸显；点击跳转经 `useChatScrollController.jumpToRound(rowIndex)`（未加载先 `jumpToLogicalRow` 取页，再 `scrollToIndex` 定位到视口中部略偏上，近平滑远瞬时）。rail 常驻窄条、无折叠按钮，桌面 hover/focus 展开居中浮层，条目过多时虚拟滚动、过少时垂直居中。`ChatFollowMode` 移除 `minimap_dragging`，`ScrollEvent` 移除 `MINIMAP_START/MINIMAP_END`，`ChatVirtualListHandle` 的三方法（beginMinimapDrag/previewMinimapScrollTop/commitMinimapDrag）由 `jumpToRound` 取代；`minimapGeometry.ts` 删除，幸存的 `normalizeScrollMetrics`/`measuredHistoryRowHeights` 迁入 `scrollGeometry.ts`。骨架投影 `SessionHistorySkeletonRow` 新增 `content_excerpt`（仅 user 普通消息行填充，截断长度 `HISTORY_SKELETON_USER_EXCERPT_CHARS`），供轮次导航条展示未加载页的条目文本。无新增 Loop protected 字段或跨类访问。
+

@@ -1,0 +1,124 @@
+/* ── Round navigation rail (轮次导航条) ── */
+
+.round-nav {
+  width: 24px;
+  flex-shrink: 0;
+  align-self: stretch;
+  min-height: 0;
+  position: relative;
+  box-sizing: border-box;
+  /* 顶部安全区仅用于限制列表最大高度的量测，不参与居中（居中相对整条轨） */
+  padding-top: var(--header-height);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  user-select: none;
+}
+
+/* 居中定位承载在自有包裹 div 上（Virtuoso scroller 有内联 position:relative，
+   会击败外部 CSS 的 absolute，不能直接定位它） */
+.round-nav-list-wrap {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+}
+
+.round-nav-list {
+  overscroll-behavior: contain;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.round-nav-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* 条目在收起/展开两种状态下共用同一套绝对定位布局：杠锚定右侧固定位置，
+   文本是杠左侧的覆盖层，展开只加宽背板并淡入文本，杠的坐标与间距永不变。
+   条目必须显式固定高度（杠和文本均为绝对定位，不在流内撑高度）；
+   28px 与 constants/roundNav.ts 的 ROUND_NAV_ENTRY_HEIGHT_PX 保持同步 */
+.round-nav-entry {
+  position: relative;
+  height: 28px;
+  box-sizing: border-box;
+  cursor: pointer;
+  outline: none;
+}
+
+.round-nav-bar {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 16px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
+}
+
+.round-nav-entry:hover .round-nav-bar {
+  opacity: 1;
+}
+
+.round-nav-entry:focus-visible .round-nav-bar {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* 当前轮：放大 + 斜纹花纹凸显 */
+.round-nav-entry--current .round-nav-bar {
+  transform: translateY(-50%) scale(1.35);
+  opacity: 1;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(var(--white-rgb), 0.35) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.round-nav-text {
+  position: absolute;
+  left: 8px;
+  right: 26px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out), visibility var(--duration-fast);
+}
+
+/* 展开态：桌面 hover/focus 时加宽为浮层自右缘向左覆盖，不挤压聊天布局；定位与收起态一致 */
+@media (hover: hover) and (pointer: fine) {
+  .round-nav--expanded .round-nav-list-wrap {
+    width: 260px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(var(--black-rgb), 0.25);
+    z-index: var(--z-content);
+  }
+
+  .round-nav--expanded .round-nav-text {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* 子会话卡片内的窄轨：无顶部栏，不需要安全区 */
+.subagent-chat-wrapper .round-nav {
+  width: 20px;
+  padding-top: 0;
+  background: transparent;
+}
+
+@media (max-width: 768px) {
+  .round-nav {
+    padding-top: 0;
+  }
+}
