@@ -94,7 +94,7 @@ WS /ws/chat?resume=<sid>
 |---|---|
 | `user_message` | 用户发送的文本/图片消息 |
 | `confirm_response` | 审批确认/拒绝 |
-| `ask_response` | Ask 回答 |
+| `ask_response` | Ask 回答（按题 answers 数组，null=整表跳过） |
 | `interrupt` | 中断当前处理 |
 | `file_upload` | 文件上传 |
 | `handsfree_mode` | 切换免审批模式 |
@@ -121,7 +121,7 @@ WS /ws/chat?resume=<sid>
 | `metadata_profile_changed` | 全局元数据 Profile 状态通知；显式携带可空名称、模型和可用性 |
 | `modality_profile_changed` | 图片、音频、视频三路全局回退 Profile 状态通知；一次携带三路可空名称、模型和可用性 |
 | `confirm_request` | 请求用户审批 |
-| `ask_request` | 请求用户回答 |
+| `ask_request` | 请求用户回答（多问题表单：questions 数组，每项含 question/detail/options/multi_select） |
 | `error` | 错误通知 |
 | `pong` | 心跳响应 |
 
@@ -213,11 +213,12 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 | GET | `/api/sessions/{id}/tool-resources` | 工具资源 |
 | GET | `/api/sessions/{id}/subagents` | 当前会话的子代理状态 |
 | POST | `/api/confirm/{request_id}` | 审批响应 |
-| POST | `/api/ask/{request_id}` | 提问响应 |
+| POST | `/api/ask/{request_id}` | 提问响应（请求体 `{answers: [{selected: [str], custom_text} \| null]}`，null=整表跳过） |
 | POST | `/api/interrupt/{session_id}` | 强制中断已经取得处理锁的主会话当前回复 task；按活动 task 判定 idle，返回权威结果（cancelled / timeout / failed / not_found），不取消长期消息 consumer |
 | POST | `/api/file-picker` | 系统文件选择器 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
 | GET | `/api/characters/avatars` | 实时组装主Agent与全部子Agent角色的头像映射（`[avatar]` 元数据键 → `/files` URL，≤5 MiB、不限扩展名）；no-store、不创建 Loop、不依赖会话，组装委托 `system/character_avatars.py` |
+| GET | `/api/characters/profiles` | 实时扫描全部子Agent角色档案（名称、类型、目录/档案逻辑路径、简介、提示词全文、Profile 名称引用、可用性错误），密钥与 Profile 配置内容不出模块；no-store、to_thread，组装委托 `system/character_profiles.py` |
 
 ### Shell会话与 Cron
 

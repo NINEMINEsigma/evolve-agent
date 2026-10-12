@@ -343,11 +343,8 @@ export interface NonStreamWSMessage {
   request_id?: string;
   approved?: boolean;
   action?: string;
-  question?: string;
-  options?: Array<{ label: string; value: string }>;
-  option?: string;
-  custom_text?: string;
-  detail?: string;                    // ASK_REQUEST：问题详细说明（markdown）
+  questions?: AskQuestionItem[];      // ASK_REQUEST：多问题表单（分页向导）
+  answers?: AskAnswerItem[] | null;   // ASK_RESPONSE：按题回答（null=整表跳过）
   target_sessions?: string[];
   visible_characters?: string[];   // 多 Agent 模式：可见角色列表
   response_characters?: string[];  // 多 Agent 模式：需响应角色列表
@@ -435,11 +432,21 @@ export interface ConfirmRequest {
   args?: Record<string, unknown>;   // CONFIRM_REQUEST：完整工具参数 dict（JsonView 渲染用）
 }
 
+export interface AskQuestionItem {
+  question: string;
+  detail?: string;                   // 该题详细说明（markdown 渲染）
+  options?: Array<{ label: string; value: string }>;
+  multi_select?: boolean;            // true 时该题可多选（无上限）；默认单选
+}
+
+export interface AskAnswerItem {
+  selected: string[];
+  custom_text: string | null;
+}
+
 export interface AskRequest {
   request_id: string;
-  question: string;
-  detail?: string;                   // 问题详细说明（markdown 渲染）
-  options?: Array<{ label: string; value: string }>;
+  questions: AskQuestionItem[];      // 多问题表单（分页向导，末题统一提交/跳过）
 }
 
 export interface DownloadInfo {
@@ -541,6 +548,24 @@ export interface CharacterAvatarEntryDto {
 export interface CharacterAvatarsResponseDto {
   main: CharacterAvatarEntryDto;
   characters: CharacterAvatarEntryDto[];
+}
+
+export interface CharacterProfileEntryDto {
+  name: string;
+  character_type: "roleplay" | "task";
+  directory_path: string;
+  profile_path: string;
+  system_prompt: string;
+  system_prompt_paths: string[];
+  system_prompts: string[];
+  description: string;
+  llm_profile_name: string;
+  profile_available: boolean;
+  error: string | null;
+}
+
+export interface CharacterProfilesResponseDto {
+  characters: CharacterProfileEntryDto[];
 }
 
 export interface SessionInfo {

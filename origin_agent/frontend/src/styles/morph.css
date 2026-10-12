@@ -20,8 +20,68 @@
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* LED 跑马灯：标题溢出时自动横向滚动（双份文本衔接，动画 0 → -50% 无缝循环），悬停暂停 */
+.input-morph-title.marquee {
+  display: inline-block;
+  min-width: 100%;
+  animation: morph-title-marquee 12s linear infinite;
+}
+
+.input-morph-title.marquee:hover {
+  animation-play-state: paused;
+}
+
+@keyframes morph-title-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ask 分页向导：题号徽章（已答题带圆点标记）与左右切换箭头 */
+.input-morph-pager-index {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.input-morph-pager-index.answered {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.input-morph-pager-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast), color var(--duration-fast), opacity var(--duration-fast);
+}
+
+.input-morph-pager-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.input-morph-pager-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .input-morph-queue-badge {
@@ -158,4 +218,6 @@
 @media (max-width: 768px) {
   .input-morph-body { max-height: min(40vh, 240px); }
   .morph-btn { padding: 6px 10px; font-size: 12px; }
+  .input-morph-pager-btn { width: 20px; height: 20px; }
+  .input-morph-pager-index { padding: 1px 6px; font-size: 10px; }
 }

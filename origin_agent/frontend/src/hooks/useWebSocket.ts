@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   ApprovalMode,
+  AskAnswerItem,
   AskRequest,
   ClientDiagnostic,
   ConfirmRequest,
@@ -618,8 +619,8 @@ export function useWebSocket() {
   const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string) => {
     sessionRef.current?.respondConfirm(request, action, reason, deniedBy);
   }, []);
-  const respondAsk = useCallback((request: AskRequest | null, option?: string, customText?: string) => {
-    sessionRef.current?.respondAsk(request, option, customText);
+  const respondAsk = useCallback((request: AskRequest | null, answers?: AskAnswerItem[] | null) => {
+    sessionRef.current?.respondAsk(request, answers);
   }, []);
 
   const editMessage = useCallback(async (id: string, content: MessageContent) => {

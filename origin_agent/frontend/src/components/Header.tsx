@@ -37,7 +37,6 @@ interface HeaderProps {
   chatStylePaused: boolean;
   onToggleChatStylePaused: () => void;
   chatStyleStatusText: string;
-  onOpenSandboxSpaces: () => void;
   onOpenPerformanceTelemetry: () => void;
 }
 
@@ -68,7 +67,6 @@ export default function Header({
   chatStylePaused,
   onToggleChatStylePaused,
   chatStyleStatusText,
-  onOpenSandboxSpaces,
   onOpenPerformanceTelemetry,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
@@ -192,17 +190,6 @@ export default function Header({
                 >
                   性能遥测
                 </div>
-                <div
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCmdMenuOpen(false);
-                    setMenuPos(null);
-                    onOpenSandboxSpaces();
-                  }}
-                  data-tooltip="管理全局动态沙盒空间"
-                >
-                  动态沙盒空间
-                </div>
                 <SystemUserMessagesToggle />
                 <div
                   className="context-menu-item"
@@ -299,17 +286,6 @@ export default function Header({
               data-tooltip="打开本地聊天性能遥测"
             >
               性能遥测
-            </div>
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                setCmdMenuOpen(false);
-                setMenuPos(null);
-                onOpenSandboxSpaces();
-              }}
-              data-tooltip="管理全局动态沙盒空间"
-            >
-              动态沙盒空间
             </div>
             <SystemUserMessagesToggle />
             <div

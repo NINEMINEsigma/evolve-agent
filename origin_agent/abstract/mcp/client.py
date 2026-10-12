@@ -110,6 +110,7 @@ from entity.constant import (
     MCP_MAX_BACKOFF_SECONDS as _MAX_BACKOFF_SECONDS,
     MCP_MAX_RECONNECT_RETRIES as _MAX_RECONNECT_RETRIES,
     MCP_MAX_INITIAL_CONNECT_RETRIES as _MAX_INITIAL_CONNECT_RETRIES,
+    TOOL_INTERNAL_ARG_KEYS,
 )
 from entity.puretype import MCPBridgeCall, Role
 from .work import MCPThreadWork
@@ -2275,6 +2276,14 @@ def _make_tool_handler(core: MCPCore, server_name: str, tool_name: str, tool_tim
     """
 
     def _handler(args: dict, **_kwargs) -> dict:
+        # Strip framework-internal keys (injected upstream by the tool
+        # executor and the approval executor) before handing arguments to
+        # the external MCP server. Strict servers validate against their
+        # input schema with additionalProperties: false and reject unknown
+        # properties, so leaking these keys breaks every call. Built-in
+        # tools are unaffected: their handlers read these keys directly,
+        # and this stripping lives only on the MCP dispatch path.
+        args = {k: v for k, v in args.items() if k not in TOOL_INTERNAL_ARG_KEYS}
         with core.admission():
             pass
         # Circuit breaker: if this server has failed too many times

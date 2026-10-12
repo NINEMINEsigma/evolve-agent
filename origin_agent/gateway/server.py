@@ -69,6 +69,7 @@ from entity.puretype import (
     SessionStatus,
     ClientInfo,
     CharacterAvatarsResponse,
+    CharacterProfilesResponse,
     SessionTagsUpdateRequest,
     SessionTitleUpdateRequest,
     SessionMessageEditRequest,
@@ -496,6 +497,21 @@ async def get_character_avatars(response: Response) -> CharacterAvatarsResponse:
     return await asyncio.to_thread(collect_character_avatars, sandbox, runtime)
 
 
+@router.get("/api/characters/profiles", response_model=CharacterProfilesResponse)
+async def get_character_profiles(response: Response) -> CharacterProfilesResponse:
+    """实时扫描全部子Agent角色档案（含提示词全文与错误），密钥不出模块。"""
+    from system.application import Application
+    from system.character_profiles import collect_character_profiles
+    from system.llm_profile_store import LLMProfileStore
+    from system.sandbox import Sandbox
+
+    application = Application.current()
+    sandbox = application.get_system(Sandbox)
+    profile_store = application.get_system(LLMProfileStore)
+    response.headers["Cache-Control"] = "no-store"
+    return await asyncio.to_thread(collect_character_profiles, sandbox, profile_store)
+
+
 @router.get("/api/sessions/{session_id}/subagents")
 async def get_session_subagents(session_id: str):
     """返回当前活跃子会话的快照。"""
@@ -542,13 +558,12 @@ async def http_ask(request_id: str, req: Request):
     )
     from system.application import Application
     sink = Application.current().get_system(FrontendSink)
-    sink.resolve_ask(request_id, option=request.option, custom_text=request.custom_text)
-    logger.info("HTTP ask response | request_id=%s option=%s", request_id, request.option)
+    sink.resolve_ask(request_id, answers=request.answers)
+    logger.info("HTTP ask response | request_id=%s answers=%d", request_id, len(request.answers or []))
     return {
         "resolved": True,
         "request_id": request_id,
-        "option": request.option,
-        "custom_text": request.custom_text,
+        "answers": [a.model_dump(exclude_none=True) for a in (request.answers or [])],
     }
 
 

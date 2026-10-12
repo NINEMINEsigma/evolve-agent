@@ -66,7 +66,7 @@ export default function OnboardingTour({
       {
         target: '[data-tour="tab-rail"]',
         title: "右侧 Tab 栏",
-        content: "屏幕右缘的右侧 Tab 栏切换主界面视图：聊天、资源、子会话、会话网页、模型配置。",
+        content: "屏幕右缘的右侧 Tab 栏切换主界面视图：聊天、资源、子会话、会话网页、模型配置、动态沙盒空间。",
         placement: "left",
       },
       // 步骤 5：资源 Tab

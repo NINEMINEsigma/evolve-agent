@@ -421,6 +421,24 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   toggleMessageCollapse: (id) => set((state) => {
     const historyMessage = state.contentByRowId[id];
     if (historyMessage) {
+      // 正典轨道命中：同步置位关联实时行的 collapseManuallyChanged，
+      // 防止 selectChatRenderRows 的 preserveExpanded 分支把手动展开选择回滚。
+      const linkedLiveIds = Object.entries(state.streamHistoryLinks)
+        .filter(([, historyRowId]) => historyRowId === id)
+        .map(([liveId]) => liveId);
+      if (linkedLiveIds.length) {
+        const liveRows = state.liveRows.map((row) => {
+          if (!linkedLiveIds.includes(row.id) || row.collapseManuallyChanged) return row;
+          return { ...row, collapseManuallyChanged: true };
+        });
+        return {
+          contentByRowId: {
+            ...state.contentByRowId,
+            [id]: { ...historyMessage, collapsed: historyMessage.collapsed === false },
+          },
+          liveRows,
+        };
+      }
       return {
         contentByRowId: {
           ...state.contentByRowId,
@@ -432,12 +450,23 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     if (index < 0) return state;
     const liveRows = [...state.liveRows];
     const row = liveRows[index];
+    // 实时轨道命中：若已映射正典且正典内容存在，同步翻转正典折叠，保证渲染读到的
+    // 正典消息与实时行一致（覆盖收编行实时 ID 变化的场景）；并终止 preserveExpanded 回滚。
+    const linkedHistoryRowId = state.streamHistoryLinks[row.id];
+    const contentByRowId = { ...state.contentByRowId };
+    const canonicalMessage = linkedHistoryRowId ? contentByRowId[linkedHistoryRowId] : undefined;
+    if (canonicalMessage) {
+      contentByRowId[linkedHistoryRowId!] = {
+        ...canonicalMessage,
+        collapsed: row.message.collapsed === false,
+      };
+    }
     liveRows[index] = {
       ...row,
       message: { ...row.message, collapsed: row.message.collapsed === false },
       collapseManuallyChanged: true,
     };
-    return { liveRows };
+    return canonicalMessage ? { liveRows, contentByRowId } : { liveRows };
   }),
 
   linkLiveHistory: (liveId, historyRowId) => set((state) => {

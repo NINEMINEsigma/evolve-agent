@@ -170,6 +170,8 @@ from .agent import (
     CharacterProfile,
     CharacterAvatarEntry,
     CharacterAvatarsResponse,
+    CharacterProfileEntry,
+    CharacterProfilesResponse,
 )
 from .ws import (
     MessageType,
@@ -182,6 +184,7 @@ from .ws import (
     ClientDiagnosticPhase,
     ClientDiagnostic,
     ConfirmResponseRequest,
+    AskAnswerItem,
     AskResponseRequest,
 )
 from .lsp import (
@@ -351,6 +354,8 @@ __all__ = [
     "CharacterProfile",
     "CharacterAvatarEntry",
     "CharacterAvatarsResponse",
+    "CharacterProfileEntry",
+    "CharacterProfilesResponse",
     # ws
     "MessageType",
     "Message",
@@ -359,6 +364,7 @@ __all__ = [
     "StreamEvent",
     "HistoryRowLink",
     "ConfirmResponseRequest",
+    "AskAnswerItem",
     "AskResponseRequest",
     # lsp
     "LSPState",

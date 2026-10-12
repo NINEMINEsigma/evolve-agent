@@ -5,7 +5,6 @@ import Lightbox from "./Lightbox";
 import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
 import PerformanceTelemetryDialog from "./PerformanceTelemetryDialog";
-import DynamicSandboxSpacesDialog from "./DynamicSandboxSpacesDialog";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -33,7 +32,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pinSidebar, setPinSidebar] = useState(false);
   const [pinHeader, setPinHeader] = useState(false);
-  const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
   const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [targetSessions, setTargetSessions] = usePersistentSessionState<string[]>(
@@ -258,7 +256,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
-          modelMenuBlocked={sandboxSpacesOpen || performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
+          modelMenuBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
           forcePin={pinHeader}
           stagePaused={stagePaused}
           onToggleStagePaused={() => setStagePaused((v) => !v)}
@@ -266,7 +264,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           chatStylePaused={chatStylePaused}
           onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
           chatStyleStatusText={chatStyleStatusText}
-          onOpenSandboxSpaces={() => setSandboxSpacesOpen(true)}
           onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
         />
 
@@ -297,13 +294,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
       {performanceTelemetryOpen && (
         <PerformanceTelemetryDialog onClose={() => setPerformanceTelemetryOpen(false)} />
-      )}
-
-      {sandboxSpacesOpen && (
-        <DynamicSandboxSpacesDialog
-          open={sandboxSpacesOpen}
-          onClose={() => setSandboxSpacesOpen(false)}
-        />
       )}
 
       <OnboardingTour

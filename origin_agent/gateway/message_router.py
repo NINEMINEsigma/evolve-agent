@@ -395,7 +395,7 @@ class MessageRouter:
             from system.application import Application
             from entry.agent_sink import FrontendSink
             sink = Application.current().get_system(FrontendSink)
-            sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
+            sink.resolve_ask(msg.request_id, answers=msg.answers)
 
     async def handle_interrupt(self) -> None:
         """处理中断请求：与 HTTP 中断统一走 request_interrupt()。"""

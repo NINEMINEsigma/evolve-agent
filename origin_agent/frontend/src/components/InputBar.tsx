@@ -6,7 +6,7 @@ import RecorderButton from "./RecorderButton";
 import TokenRing from "./TokenRing";
 import PopupLayer from "./primitives/PopupLayer";
 import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSocket";
-import type { AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
+import type { AskAnswerItem, AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -103,7 +103,7 @@ interface InputBarProps {
   // 工具交互队列（ask/confirm 变形）
   pendingAsks: AskRequest[];
   pendingConfirms: ConfirmRequest[];
-  onRespondAsk: (ask: AskRequest, option?: string, customText?: string) => void;
+  onRespondAsk: (ask: AskRequest, answers: AskAnswerItem[] | null) => void;
   onRespondConfirm: (confirm: ConfirmRequest, action: string, reason?: string) => void;
   // 上下文徽章数据
   tokenUsage: number;
@@ -187,6 +187,34 @@ export default function InputBar({
       : null;
   const morphActive = morphItem !== null;
   const queueExtra = pendingConfirms.length + pendingAsks.length - (morphItem ? 1 : 0);
+
+  // ask 分页草稿：按题保存纯文本草稿（当前题实时草稿在 RichInput，切页时写入字典）；
+  // 按队首 ask 的 request_id 变化重置（连续多张表单时 morphActive 不经历 false）
+  const [askDrafts, setAskDrafts] = useState<Record<number, string>>({});
+  const [askPageIndex, setAskPageIndex] = useState(0);
+  // ref 镜像：切页回调内同步读取草稿字典，避免闭包陈旧与 updater 延迟
+  const askDraftsRef = useRef<Record<number, string>>({});
+  const askIdRef = useRef<string | null>(null);
+  const currentAskId = morphItem?.kind === "ask" ? morphItem.ask.request_id : null;
+  useEffect(() => {
+    if (currentAskId !== askIdRef.current) {
+      askIdRef.current = currentAskId;
+      askDraftsRef.current = {};
+      setAskDrafts({});
+      setAskPageIndex(0);
+    }
+  }, [currentAskId]);
+
+  // 分页切换：把当前题实时草稿存入字典，再恢复目标题草稿（无则清空）
+  const goToQuestion = useCallback((next: number) => {
+    const current = useChatRuntimeStore.getState();
+    askDraftsRef.current = { ...askDraftsRef.current, [askPageIndex]: current.draftText };
+    setAskDrafts(askDraftsRef.current);
+    const targetDraft = askDraftsRef.current[next];
+    setInput(targetDraft ?? "");
+    setInputText(targetDraft ?? "");
+    setAskPageIndex(next);
+  }, [askPageIndex, setInput, setInputText]);
 
   // 草稿暂存：进入变形时清空输入框供回答/理由使用，退出变形（队列排空）时还原；
   // 会话切换时丢弃暂存，防止旧会话草稿还原进新会话
@@ -383,12 +411,10 @@ export default function InputBar({
             item={morphItem}
             queueExtra={queueExtra}
             inputText={inputText}
+            drafts={morphItem.kind === "ask" ? askDrafts : {}}
+            onGoToQuestion={goToQuestion}
             onRespondAsk={onRespondAsk}
             onRespondConfirm={onRespondConfirm}
-            onClearInput={() => {
-              setInput("");
-              setInputText("");
-            }}
           />
         )}
         {pendingMessageCount > 0 && (
