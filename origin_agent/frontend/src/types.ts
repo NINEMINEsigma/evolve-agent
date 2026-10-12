@@ -550,6 +550,24 @@ export interface CharacterAvatarsResponseDto {
   characters: CharacterAvatarEntryDto[];
 }
 
+export interface CharacterProfileEntryDto {
+  name: string;
+  character_type: "roleplay" | "task";
+  directory_path: string;
+  profile_path: string;
+  system_prompt: string;
+  system_prompt_paths: string[];
+  system_prompts: string[];
+  description: string;
+  llm_profile_name: string;
+  profile_available: boolean;
+  error: string | null;
+}
+
+export interface CharacterProfilesResponseDto {
+  characters: CharacterProfileEntryDto[];
+}
+
 export interface SessionInfo {
   id: string;
   created_at: number;

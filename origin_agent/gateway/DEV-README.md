@@ -218,6 +218,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 | POST | `/api/file-picker` | 系统文件选择器 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
 | GET | `/api/characters/avatars` | 实时组装主Agent与全部子Agent角色的头像映射（`[avatar]` 元数据键 → `/files` URL，≤5 MiB、不限扩展名）；no-store、不创建 Loop、不依赖会话，组装委托 `system/character_avatars.py` |
+| GET | `/api/characters/profiles` | 实时扫描全部子Agent角色档案（名称、类型、目录/档案逻辑路径、简介、提示词全文、Profile 名称引用、可用性错误），密钥与 Profile 配置内容不出模块；no-store、to_thread，组装委托 `system/character_profiles.py` |
 
 ### Shell会话与 Cron
 

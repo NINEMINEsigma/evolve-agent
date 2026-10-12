@@ -192,6 +192,216 @@
   overflow-y: auto;
 }
 
+/* Characters tab: read-only sub-agent character profile directory */
+.characters-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-primary);
+}
+
+.characters-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+  width: 100%;
+  max-width: 1080px;
+  margin-inline: auto;
+}
+
+.characters-hint {
+  margin: 8px 0 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.12));
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.characters-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.characters-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+  padding: 4px 0;
+}
+
+.character-profile-item {
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
+  border-radius: 10px;
+  background: var(--bg-primary, transparent);
+  overflow: hidden;
+}
+
+.character-profile-item.has-error {
+  border-left: 3px solid var(--danger-color, #e5484d);
+}
+
+.character-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+}
+
+.character-profile-head:hover {
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.08));
+}
+
+.character-profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.character-profile-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.character-profile-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.15));
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+}
+
+.character-profile-llm {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.character-status-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.character-status-dot.ok {
+  background: var(--success-color, #46a758);
+}
+
+.character-status-dot.error {
+  background: var(--danger-color, #e5484d);
+}
+
+.character-run-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+}
+
+.character-profile-details {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 4px 14px 14px;
+  font-size: 12.5px;
+}
+
+.character-profile-error {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--danger-bg, rgba(229, 72, 77, 0.12));
+  color: var(--danger-color, #e5484d);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.character-detail-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.character-detail-label {
+  flex-shrink: 0;
+  min-width: 72px;
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+}
+
+.character-detail-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.character-path {
+  font-family: var(--mono-font, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.character-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.character-prompt-item {
+  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.2));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.character-prompt-label {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(127, 127, 127, 0.9));
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.06));
+  word-break: break-all;
+}
+
+.character-prompt-note {
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.character-prompt-content {
+  margin: 0;
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--mono-font, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .characters-tab-content {
+    padding: 0 12px 16px;
+  }
+}
+
 /* Site tab */
 .site-tab {
   flex: 1;

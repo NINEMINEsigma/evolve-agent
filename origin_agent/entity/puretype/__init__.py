@@ -170,6 +170,8 @@ from .agent import (
     CharacterProfile,
     CharacterAvatarEntry,
     CharacterAvatarsResponse,
+    CharacterProfileEntry,
+    CharacterProfilesResponse,
 )
 from .ws import (
     MessageType,
@@ -352,6 +354,8 @@ __all__ = [
     "CharacterProfile",
     "CharacterAvatarEntry",
     "CharacterAvatarsResponse",
+    "CharacterProfileEntry",
+    "CharacterProfilesResponse",
     # ws
     "MessageType",
     "Message",

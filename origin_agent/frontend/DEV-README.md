@@ -15,7 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与六个 tab 内容层
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与七个 tab 内容层
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
@@ -97,13 +97,15 @@ frontend/
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 六条目（chat/resources/subagents/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 七条目（chat/resources/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
 | `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
 | `features/tabs/ChatTab.tsx` | 聊天 Tab 内容层：ChatArea + ClipboardPanel + 双倒计时条 + InputBar |
 | `features/tabs/ResourcesTab.tsx` | 资源 Tab：四折叠区块（资源/Shell/Cron/动态端点），资源按 tab 激活懒加载 |
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
+| `features/tabs/CharactersTab.tsx` | 角色档案 Tab：全部子Agent 角色档案的只读配置目录；roleplay/task 分组列表 + 展开式详情（profile.md 全文、`[profile]` 引用提示词文件、LLM Profile 名称、错误全文），错误条目高亮、空态引导与“如需修改请在聊天中让主Agent操作”提示；运行状态仅当前会话视角（按角色名匹配 `subagentSessions`，优先 running）；提示词条目由 `buildPromptItems` 尽力对齐（正文与路径不保证一一对应）；数据按 tab 激活重拉并经 Agentspace 事件去抖刷新 |
+| `features/tabs/useCharacterProfiles.ts` | 角色档案数据 hook：激活即重拉 `GET /api/characters/profiles`、`characters/` 相关 Agentspace 事件 1s 去抖刷新、请求代际控制防旧响应覆盖；不依赖会话 ID（档案为全局数据） |
 | `features/tabs/SiteTab.tsx` | 会话网页 Tab：toolbar + iframe；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`） |
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留 |

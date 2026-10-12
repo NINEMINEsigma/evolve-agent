@@ -5,13 +5,14 @@ import type { SessionStageState } from "../../hooks/useSessionStage";
 import type { SessionChatStyleState } from "../../hooks/useSessionChatStyle";
 import ResourcesTab from "./ResourcesTab";
 import SubagentsTab from "./SubagentsTab";
+import CharactersTab from "./CharactersTab";
 import SiteTab from "./SiteTab";
 import LlmTab from "./LlmTab";
 import ChatTab from "./ChatTab";
 import SandboxTab from "./SandboxTab";
 
 /** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
-export type TabId = "chat" | "resources" | "subagents" | "site" | "llm" | "sandbox";
+export type TabId = "chat" | "resources" | "subagents" | "characters" | "site" | "llm" | "sandbox";
 
 /** Shared render context handed to every tab content layer. */
 export interface TabRenderContext {
@@ -70,6 +71,14 @@ const subagentsIcon = (
   </svg>
 );
 
+const charactersIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="12" cy="10" r="3" />
+    <path d="M7.5 17a4.5 4.5 0 0 1 9 0" />
+  </svg>
+);
+
 const siteIcon = (
   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="4" width="20" height="16" rx="2" />
@@ -107,6 +116,7 @@ export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} /> },
   { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} /> },
   { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} /> },
+  { id: "characters", title: "角色档案", icon: charactersIcon, render: (ctx) => <CharactersTab ctx={ctx} /> },
   { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} /> },
   { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} /> },
   { id: "sandbox", title: "动态沙盒空间", icon: sandboxIcon, render: (ctx) => <SandboxTab ctx={ctx} /> },

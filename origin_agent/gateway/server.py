@@ -69,6 +69,7 @@ from entity.puretype import (
     SessionStatus,
     ClientInfo,
     CharacterAvatarsResponse,
+    CharacterProfilesResponse,
     SessionTagsUpdateRequest,
     SessionTitleUpdateRequest,
     SessionMessageEditRequest,
@@ -494,6 +495,21 @@ async def get_character_avatars(response: Response) -> CharacterAvatarsResponse:
     runtime = application.get_system(RuntimeSystem)
     response.headers["Cache-Control"] = "no-store"
     return await asyncio.to_thread(collect_character_avatars, sandbox, runtime)
+
+
+@router.get("/api/characters/profiles", response_model=CharacterProfilesResponse)
+async def get_character_profiles(response: Response) -> CharacterProfilesResponse:
+    """实时扫描全部子Agent角色档案（含提示词全文与错误），密钥不出模块。"""
+    from system.application import Application
+    from system.character_profiles import collect_character_profiles
+    from system.llm_profile_store import LLMProfileStore
+    from system.sandbox import Sandbox
+
+    application = Application.current()
+    sandbox = application.get_system(Sandbox)
+    profile_store = application.get_system(LLMProfileStore)
+    response.headers["Cache-Control"] = "no-store"
+    return await asyncio.to_thread(collect_character_profiles, sandbox, profile_store)
 
 
 @router.get("/api/sessions/{session_id}/subagents")

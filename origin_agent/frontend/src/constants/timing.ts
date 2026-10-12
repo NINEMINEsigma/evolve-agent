@@ -25,6 +25,7 @@ export const TIMING = {
   EDGE_DRAWER_PEEK:      250,     // 边缘抽屉 peek 延迟
   INPUT_DEBOUNCE:        180,     // 输入防抖
   CHARACTER_AVATAR_REFRESH_DEBOUNCE: 1_000, // 角色头像映射事件去抖重拉
+  CHARACTER_PROFILES_REFRESH_DEBOUNCE: 1_000, // 角色档案事件去抖重拉
   MENU_SCROLL_DEBOUNCE:  150,     // 菜单滚动防抖
   USER_SCROLL_INTENT_WINDOW: 200,  // 用户滚动意图有效窗口（ms）
   SMOOTH_SCROLL_FALLBACK:   800,  // scrollend 不可用时的平滑滚动保护回退时间（ms）

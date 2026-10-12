@@ -221,8 +221,9 @@
 │  左侧    ├────────────────────────────────────────────┤  右  │
 │  导航栏  │  主界面区域 (TabStage)                      │  侧  │
 │          │  ├ 聊天 Tab（ChatArea + 输入栏）            │  Tab │
-│ (Sidebar,│  ├ 资源 Tab / 子会话 Tab / 会话网页 Tab     │  栏  │
-│  浮层)   │  └ 模型配置 Tab / 动态沙盒空间 Tab           │      │
+│ (Sidebar,│  ├ 资源 Tab / 子会话 Tab / 角色档案 Tab     │  栏  │
+│  浮层)   │  ├ 会话网页 Tab / 模型配置 Tab               │      │
+│          │  └ 动态沙盒空间 Tab                          │      │
 │          │    （同一时刻显示一个）                      │(Rail)│
 └──────────┴────────────────────────────────────────────┴──────┘
 ```
@@ -233,7 +234,7 @@
 
 ### Tab 导航体系
 
-文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
+文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `CharactersTab.tsx` · `useCharacterProfiles.ts` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
 
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
@@ -243,6 +244,7 @@
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
+| 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
 | 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
 | 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |

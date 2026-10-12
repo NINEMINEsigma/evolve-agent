@@ -101,3 +101,47 @@ class CharacterAvatarsResponse(BaseModel):
 
     characters: list[CharacterAvatarEntry] = Field(default_factory=list)
     """全部子Agent角色条目（含重名与无效条目，由前端处理）。"""
+
+
+class CharacterProfileEntry(BaseModel):
+    """GET /api/characters/profiles 的单个角色档案脱敏条目。"""
+
+    name: str
+    """角色目录名，也是全局唯一的子Agent名称。"""
+
+    character_type: Literal["roleplay", "task"]
+    """角色目录所属类型。"""
+
+    directory_path: str
+    """角色目录的逻辑路径。"""
+
+    profile_path: str
+    """角色档案文件 profile.md 的逻辑路径。"""
+
+    system_prompt: str = ""
+    """profile.md 的完整正文（按 discover() 读取结果原样返回）。"""
+
+    system_prompt_paths: list[str] = Field(default_factory=list)
+    """profile.md.meta [profile] 声明的附加提示词逻辑路径（未对齐正文列表）。"""
+
+    system_prompts: list[str] = Field(default_factory=list)
+    """按加载顺序排列的全部提示词正文；首项通常来自 profile.md。"""
+
+    description: str = ""
+    """profile.md.meta [description] 的简介正文，保留内部换行。"""
+
+    llm_profile_name: str = ""
+    """profile.md.meta [llm_profile] 引用的 LLM Profile 名称（仅名称，无配置内容）。"""
+
+    profile_available: bool = False
+    """档案是否完整可运行（error 为 None 且 Profile 实例存在）。"""
+
+    error: str | None = None
+    """档案不可用时的可展示错误。"""
+
+
+class CharacterProfilesResponse(BaseModel):
+    """GET /api/characters/profiles 的响应体。"""
+
+    characters: list[CharacterProfileEntry] = Field(default_factory=list)
+    """全部角色档案条目（含重名与无效条目，由前端处理）。"""
