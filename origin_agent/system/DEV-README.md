@@ -28,7 +28,7 @@ RuntimeContext继续是不可变BaseModel；system.context不再提供模块级�
 
 ## 生命周期公共工具
 
-`system/lifecycle.py::TaskOwner`仅由所属System持有，不扫描`asyncio.all_tasks()`。`create/track`明确管理后台任务，意外异常或无来源取消会向System上报；有明确调用方等待结果的工作使用`run_request(factory, admission=...)`，普通异常交回请求方，预期请求取消不触发整个应用失败。`LifecycleFailure`及含有它的异常组始终上报，不能被请求级分类隐藏。
+`system/lifecycle.py::TaskOwner`仅由所属System持有，不扫描`asyncio.all_tasks()`。`create/track`明确管理后台任务，意外异常或无来源取消会向System上报；有明确调用方等待结果的工作使用`run_request(factory, admission=...)`，普通异常交回请求方，预期请求取消不触发整个应用失败。`LifecycleFailure`及含有它的异常组始终上报，不能被请求级分类隐藏。例常的连接级失败可在结算前经`mark_expected_failure(task)`标记为预期失败（仅豁免BACKGROUND任务）：结算时不向所属System上报，`LifecycleFailure`及其异常组仍始终上报不被豁免；标记须在首次结算（`terminal_reported`置位）前完成，经done_callback调用时（task已结束、结算未发生）置位仍先于结算生效，返回False表示已错过；调用方需保证标记回调的注册先于`track`的结算回调。
 
 请求任务在执行工厂前通过启动屏障完成所有权登记，并再次检查接收状态。`cancel(task)`先标记预期取消再发出一次取消，不重复打断finally或重置清理截止。请求方再次取消时，可以退出等待，但Owner继续持有同一清理任务；实际子任务超时未退出仍保留强引用并报告失败。`pending`表示活任务，`is_idle`还要求请求结果/取消交接完成。整个Owner关闭只汇总后台与生命周期失败，已交给请求方处理的普通异常不在之后重复上报。
 

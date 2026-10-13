@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
+from entity.constant import (
+    AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS,
+    AGENTSPACE_WS_SEND_TIMEOUT_SECONDS,
+)
 from entity.puretype import (
     AgentspaceEvent,
     AgentspaceEventKind,
@@ -15,6 +20,10 @@ from entity.puretype import (
 from system.agentspace import AgentspaceService
 
 logger = logging.getLogger(__name__)
+
+
+class AgentspaceSendTimeout(TimeoutError):
+    """Per-event send timeout for a slow agentspace WebSocket consumer."""
 
 
 def build_initial_agentspace_events(
@@ -145,17 +154,41 @@ async def forward_agentspace_events(
     *,
     connection_label: str,
 ) -> None:
-    """低优先级转发事件；突发积压只发送一个 resync。"""
+    """低优先级转发事件；突发积压只发送一个 resync。
+
+    单事件发送超过 AGENTSPACE_WS_SEND_TIMEOUT_SECONDS 时抛
+    AgentspaceSendTimeout 终止转发，由调用方标记预期失败并以 1011
+    断连驱逐慢消费者；折叠告警按时间窗限流并携带窗口累计 dropped。
+    """
+    last_warned = -AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS
+    window_dropped_total = 0
     while True:
         first = await queue.get()
         # 先让聊天、审批、中断与心跳等既有任务取得运行机会。
         await asyncio.sleep(0)
         event, dropped = coalesce_agentspace_event(first, queue)
         if dropped:
-            logger.debug(
-                "Agentspace WebSocket events coalesced | connection=%s dropped=%d sequence=%d",
-                connection_label,
-                dropped,
-                event.sequence,
-            )
-        await send_event(event)
+            now = time.monotonic()
+            if now - last_warned >= AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS:
+                if window_dropped_total:
+                    logger.debug(
+                        "Agentspace WebSocket events coalesced | connection=%s "
+                        "dropped=%d sequence=%d (window suppressed: %d events since last warning)",
+                        connection_label, dropped, event.sequence, window_dropped_total,
+                    )
+                else:
+                    logger.debug(
+                        "Agentspace WebSocket events coalesced | connection=%s dropped=%d sequence=%d",
+                        connection_label, dropped, event.sequence,
+                    )
+                last_warned = now
+                window_dropped_total = 0
+            else:
+                window_dropped_total += dropped
+        try:
+            async with asyncio.timeout(AGENTSPACE_WS_SEND_TIMEOUT_SECONDS):
+                await send_event(event)
+        except TimeoutError as exc:
+            raise AgentspaceSendTimeout(
+                f"send exceeded {AGENTSPACE_WS_SEND_TIMEOUT_SECONDS}s"
+            ) from exc

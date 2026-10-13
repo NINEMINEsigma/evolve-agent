@@ -33,6 +33,7 @@ from starlette.websockets import WebSocketState
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from .agentspace_event_bridge import (
+    AgentspaceSendTimeout,
     attach_agentspace_events,
     build_initial_agentspace_events,
     detach_agentspace_events,
@@ -2880,11 +2881,23 @@ async def ws_chat(ws: WebSocket) -> None:
             failure = task.exception()
             if failure is None:
                 return
-            logger.error(
-                "Agentspace WebSocket forwarding failed | session=%s",
-                sid,
-                exc_info=(type(failure), failure, failure.__traceback__),
-            )
+            if isinstance(failure, AgentspaceSendTimeout):
+                # 例常的连接级驱逐：标记预期失败，不触发应用失败关闭。
+                try:
+                    gateway.task_owner.mark_expected_failure(task)
+                except LifecycleFailure:
+                    # Owner 已在关闭收尾；应用本就停止中，无需标记。
+                    pass
+                logger.warning(
+                    "Agentspace WebSocket send timeout; evicting slow connection | session=%s",
+                    sid,
+                )
+            else:
+                logger.error(
+                    "Agentspace WebSocket forwarding failed | session=%s",
+                    sid,
+                    exc_info=(type(failure), failure, failure.__traceback__),
+                )
             try:
                 gateway.spawn_work(
                     ws.close(code=1011, reason="agentspace_event_forward_failed"),
@@ -2894,6 +2907,8 @@ async def ws_chat(ws: WebSocket) -> None:
                 # Gateway 已在关闭：连接会随 stop_server 统一结束。
                 logger.info("Gateway closing; skip agentspace failure close | session=%s", sid)
 
+        # 本回调必须先于下方 task_owner.track 注册：done_callback 按注册顺序
+        # 执行，标记预期失败须在 Owner 的结算回调读取前完成。
         agentspace_event_task.add_done_callback(_close_on_agentspace_failure)
         gateway.task_owner.track(agentspace_event_task)
 

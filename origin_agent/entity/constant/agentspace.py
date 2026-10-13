@@ -17,6 +17,10 @@ AGENTSPACE_INTERNAL_DIR_NAME: str = ".agentspace"
 AGENTSPACE_WATCH_DEBOUNCE_MS: int = 120
 AGENTSPACE_EVENT_QUEUE_SIZE: int = 256
 AGENTSPACE_SSE_HEARTBEAT_SECONDS: float = 15.0
+# 聊天 WebSocket agentspace 事件转发：单事件发送超时（秒，慢消费者驱逐）与
+# 折叠告警限流时间窗（秒，窗口内只记一条 WARNING 并携带累计 dropped）
+AGENTSPACE_WS_SEND_TIMEOUT_SECONDS: float = 20.0
+AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS: float = 60.0
 
 # 编辑器原子写临时文件与恢复冲突命名
 AGENTSPACE_ATOMIC_TMP_SUFFIX: str = ".agentspace.tmp"

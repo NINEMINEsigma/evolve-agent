@@ -995,7 +995,7 @@ classDiagram
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
 | Gateway Agentspace SSE | `RuntimeSystem.shutdown_event` | `RuntimeSystem` | `gateway/server.py::agentspace_events` | 独立 Agentspace 编辑器通过共享进程关闭信号主动结束 SSE，等待任务经 `GatewaySystem.task_owner` 登记，避免阻塞 uvicorn 优雅关闭 |
-| Gateway聊天 WebSocket Agentspace桥接 | `subscribe_events()` / `unsubscribe_events()` | `AgentspaceService` | `gateway/server.py::ws_chat`、`gateway/agentspace_event_bridge.py` | 每条聊天连接订阅一次 EventHub，发送初始 `resync/locks/watcher_error`，积压折叠为 `resync`，断线时取消 task并注销；自动旋转复用物理连接与订阅 |
+| Gateway聊天 WebSocket Agentspace桥接 | `subscribe_events()` / `unsubscribe_events()` | `AgentspaceService` | `gateway/server.py::ws_chat`、`gateway/agentspace_event_bridge.py` | 每条聊天连接订阅一次 EventHub，发送初始 `resync/locks/watcher_error`，积压折叠为 `resync`（日志按时间窗限流携带累计 dropped），断线时取消 task并注销；自动旋转复用物理连接与订阅；单事件发送超时抛 `AgentspaceSendTimeout`，回调经 `TaskOwner.mark_expected_failure` 标记例常驱逐后 1011 断连 |
 | Gateway History REST | `get_session_history_skeleton()` / `get_session_history_page()` / `get_session_history_resources()` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `gateway/server.py` | 主会话只读投影；子Agent虽继承实现但没有对应 Gateway 路由 |
 | Gateway / 搜索 / LSP | `resolve_read()` / `namespace_bases()` | `Sandbox` | `gateway/server.py`、`system/search_engine.py`、`system/lsp.py` | 复用唯一 Sandbox 的动态映射与有效 base |
 
@@ -1296,4 +1296,8 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 ### 轮次导航条替换小地图（2026-10-12）
 
 主聊天区逻辑小地图（Canvas 逻辑映射 + 视口高亮 + 拖拽跳转）与子会话卡片 Legacy 小地图（DOM 几何预览）整体退役，替换为「轮次导航条」（`RoundNavRail`，规范称谓见 DEV-glossary §11，旧称已入 §13 退役表）。每条目对应一条 Role 为 `user` 的展示行，杠+内容文本一体，杠按作者角色名 hue 散列着色（`utils/color.ts` 的 `hueFromString`，与头像一致），当前轮由 `ChatArea` 按 DOM 参考线判定（已渲染行中最后位于「视口顶 + `ROUND_NAV_JUMP_OFFSET_RATIO` 视口高度」以上的行所归属的条目）并放大+花纹凸显；点击跳转经 `useChatScrollController.jumpToRound(rowIndex)`（未加载先 `jumpToLogicalRow` 取页，再 `scrollToIndex` 定位到视口中部略偏上，近平滑远瞬时）。rail 常驻窄条、无折叠按钮，桌面 hover/focus 展开居中浮层，条目过多时虚拟滚动、过少时垂直居中。`ChatFollowMode` 移除 `minimap_dragging`，`ScrollEvent` 移除 `MINIMAP_START/MINIMAP_END`，`ChatVirtualListHandle` 的三方法（beginMinimapDrag/previewMinimapScrollTop/commitMinimapDrag）由 `jumpToRound` 取代；`minimapGeometry.ts` 删除，幸存的 `normalizeScrollMetrics`/`measuredHistoryRowHeights` 迁入 `scrollGeometry.ts`。骨架投影 `SessionHistorySkeletonRow` 新增 `content_excerpt`（仅 user 普通消息行填充，截断长度 `HISTORY_SKELETON_USER_EXCERPT_CHARS`），供轮次导航条展示未加载页的条目文本。无新增 Loop protected 字段或跨类访问。
+
+### TaskOwner 预期失败标记与聊天 WS Agentspace 超时驱逐（2026-10-13）
+
+`ManagedTaskRecord` 新增 `expected_failure` 字段，`TaskOwner.mark_expected_failure(task)` 在任务结算前标记例常预期失败；`_settle` 对已标记的 BACKGROUND 终局异常不再上报所属 System（`LifecycleFailure` 及含它的异常组仍始终上报，不豁免）。首个消费者为聊天 WebSocket 的 Agentspace 事件转发：`forward_agentspace_events` 单事件发送超 `AGENTSPACE_WS_SEND_TIMEOUT_SECONDS` 秒抛 `AgentspaceSendTimeout`（TimeoutError 子类哨兵），`_close_on_agentspace_failure` 先标记预期失败再以 1011 断连驱逐慢消费者连接，折叠日志按 `AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS` 时间窗限流携带窗口累计 dropped（日志级别维持 28bab6b 已定的 debug）。慢消费者超时定性为连接级例常事件而非进程级失败，不再触发应用失败关闭；done_callback 的注册顺序（标记回调先于 track 的结算回调）是该机制的正确性前提。
 

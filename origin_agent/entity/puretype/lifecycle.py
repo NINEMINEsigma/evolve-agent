@@ -28,6 +28,7 @@ class ManagedTaskRecord(BaseModel):
     cancel_deadline: float | None = None
     terminal_error: BaseException | None = None
     terminal_reported: bool = False
+    expected_failure: bool = False
     timeout_error: BaseException | None = None
 
 

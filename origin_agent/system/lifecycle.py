@@ -200,6 +200,13 @@ class TaskOwner:
             or contains_lifecycle_failure(error)
             or abandoned
         )
+        if (
+            record.expected_failure
+            and record.ownership == TaskOwnership.BACKGROUND
+            and not contains_lifecycle_failure(error)
+        ):
+            # 预期失败（如连接级驱逐）不上报所属 System，仅记录终局异常。
+            should_report = False
         if should_report and not record.terminal_reported:
             record.terminal_reported = True
             self._report(error)
@@ -256,6 +263,29 @@ class TaskOwner:
         record.cleanup_task = cleanup
         cleanup.add_done_callback(lambda done: self._cleanup_done(record, done))
         self._changed.set()
+        return True
+
+    def mark_expected_failure(self, task: asyncio.Task[Any]) -> bool:
+        """Mark a tracked background task's terminal exception as expected.
+
+        Expected failures are settled without reporting to the owning
+        system; they represent routine per-connection eviction rather
+        than process-level integrity violations. Marking is an
+        unconditional precondition of settlement, so this is safe to
+        call from a done callback before the owner's own settle
+        callback runs. Returns False only when the record has already
+        been reported/settled (terminal_reported).
+        """
+        self._check_loop()
+        record = self._records.get(task)
+        if record is None:
+            raise LifecycleFailure("Cannot mark a task not registered with this owner")
+        if record.terminal_reported:
+            return False
+        record.expected_failure = True
+        if task.done():
+            self._settle(record)
+            return False
         return True
 
     async def _wait_cancel(self, record: ManagedTaskRecord) -> None:

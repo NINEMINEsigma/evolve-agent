@@ -59,6 +59,8 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 
 Shell会话由 `Application.current().get_system(ShellManager)` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；单条命令完成或当前回复结束不触发停止，未完成任务或后续可复用时保留 Shell会话，只有明确需要销毁整个 Shell 时才调用 `StopShell`。WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。单个 Shell会话的原生 PTY 访问通过生命周期同步边界收敛，停止流程先等待 reader 收尾再关闭原生对象，并保留超时兜底日志；该防御性处理不等同于已确认 `0xC0000005` 根因。
 
+2026-10-13 首次观察到待复现现象（来源：运行时日志）：手动终结主会话停止其遗留 Shell会话时，进程树终止后 ConPTY reader 线程持续阻塞于 `pty.read()`，未在 `SHELL_STOP_WAIT_SECONDS`（5 秒）期限内退出；`_stop_state_blocking` 按设计抛 `LifecycleFailure("Shell reader did not stop")`，经 `RuntimeSystem.record_failure` 放大为全应用 FAILURE 关闭（关闭协议 D6），fast仓库 进程以退出码 1 结束；force_init 启动时回退修复被禁用（fallback仓库 已与 origin仓库 同源），run.py 直接退出。同一失败实例在关闭日志的 ExceptionGroup 中多次嵌套出现，来源是停止任务复用、`_cleanup_failures` 聚合与 `RuntimeSystem.failures` 记录的叠加，属日志表现而非多个独立失败。该行为属停止流程超时兜底的设计内放大，reader 阻塞根因（pywinpty ConPTY 管道读行为）未确认，等待复现后再评估是否收窄此类清理失败的影响面，当前不改代码。
+
 主会话永久删除使用进程内删除中标记封闭并发恢复：Gateway 先使现有 WebSocket失效并停止子Agent，再回收活动回复、运行时 Loop、消息队列、客户端信息和 Cron 注册，最后删除持久化索引/目录及附带资源。已建立连接以 WebSocket 4004关闭码停止旧 ID重连；握手前拒绝通过会话状态接口二次确认。显式恢复已经删除或删除中的 ID不会创建随机新会话，当前前端固定切换到“随意聊聊”。
 
 进化流程：
