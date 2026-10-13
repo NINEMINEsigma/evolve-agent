@@ -92,6 +92,8 @@ _admit_generation在Runtime接收锁内只校验服务接收状态，不执行I/
 
 元数据Profile优先与会话回退语义不变；关闭消息刷新不调用本服务生成接口，仅允许既有钩子做只读查询。既有业务Profile选择及fallback保持；Runtime停止后不新启LLM。全量Application.session_metadata_service引用已迁移为``get_system(SessionMetadataService)``。
 
+首条用户消息自动标题：MessageRouter在准备任务内调用同步入口``maybe_generate_first_title(session_id, text)``（前置「标题为空+文本非空」判定保留在路由层）。入口在同一同步代码段内完成per-session防重集合（``_first_title_pending``）的检查+登记，经``task_owner.create``派发一次性后台任务（不套run_request，与内部实现不嵌套公开包装的惯例一致）。任务体``_first_title_task``按固定分流：LLM成功→``_apply_first_title``写入标题（内存+磁盘）并经SYSTEM消息推送``session_title_updated``；``SessionMetadataError``及未知业务异常→30字符截取回退（``_fallback_title``）后同样写入推送；``ApplicationStoppingError``停机竞态与``LifecycleFailure``（create入口捕获）均静默放弃不写标题，避免把正常停止翻转为失败关闭；``CancelledError``传播；finally对称清理防重集合。``_apply_first_title``中SessionManager/FrontendSink经``Application.current().get_system``动态取得（依赖图不变），update_title磁盘失败与推送失败均仅warning降级不回滚。
+
 ## 审批系统接入
 
 `component/approval/system.py::ApprovalSystem`已实现，依赖RuntimeSystem和LLMProfileStore；会话审批模式、后端管理器和白名单均为该System的叶对象。Application不再定义ApprovalBackendManager或提供审批服务属性。模型请求采用TaskOwner.run_request，关闭先结束实际请求再清除后端缓存引用；审批Profile未配置仍是原有业务状态，三种审批模式与白名单持久化策略保持。

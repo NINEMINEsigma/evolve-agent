@@ -209,6 +209,15 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           fetchSessions();
           return;
         }
+        // session_title_updated：后端常量 SESSION_TITLE_UPDATED_ACTION 的同值字面量
+        // （TS 侧无 import 通道，注释标注来源常量名）
+        if (data.action === "session_title_updated") {
+          if (typeof data.title === "string" && data.title && message.session_id) {
+            setSessions((previous) => previous.map((item) =>
+              item.id === message.session_id ? { ...item, title: data.title } : item));
+          }
+          return;
+        }
         if (Array.isArray(data.agents)) {
           setAgents(data.agents);
           return;

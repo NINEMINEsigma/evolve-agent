@@ -631,14 +631,19 @@ class MessageRouter:
     # -- handle_user_message 子方法 ---------------------------------------
 
     def _auto_generate_title(self, content: Any) -> None:
-        """从首条用户消息自动生成标题。"""
+        """无标题会话的首条用户消息触发一次性 LLM 标题生成。"""
         session_info: SessionInfo | None = _get_sm().get(self.sid)
-        if session_info and not session_info.title and content:
-            text_content: str = _extract_text(content)
-            title: str = text_content.strip()[:30]
-            if len(text_content.strip()) > 30:
-                title += "..."
-            _get_sm().update_title(self.sid, title)
+        if session_info is None or session_info.title:
+            return
+        text_content: str = _extract_text(content)
+        if not text_content.strip():
+            # 纯附件/空文本：跳过，不写入空标题（修复原空标题 bug）
+            return
+        from system.application import Application
+        from system.session_metadata import SessionMetadataService
+        Application.current().get_system(SessionMetadataService).maybe_generate_first_title(
+            self.sid, text_content
+        )
 
     async def _dispatch_subagent_messages(
         self, content: str, target_sessions: list[str],

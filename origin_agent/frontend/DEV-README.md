@@ -203,7 +203,7 @@ frontend/
 | `useLlmProfileEditor.ts` | 模型配置 Tab只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口先按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，再由 `wsMessageDecoder.decodeWSMessage` 将原始 JSON 解码为判别联合 `WSMessage`（非法 JSON / 未知 type / 非法流式载荷在解码层丢弃），避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
 | `wsMessageDecoder.ts` | 入站消息统一解码器：`decodeWSMessage(raw)` 把原始 JSON 字符串转为判别联合 `WSMessage`；JSON 解析失败 / 非对象 / 未知 type 丢弃；`stream_delta` / `stream_done` 经 `streamEventGuards` 实际结构校验（嵌套类型、数字有限、整数、`extra=forbid`），非法载荷丢弃并输出不含正文 / 参数的诊断；旧非流事件暂仅基础检查后透传为 `NonStreamWSMessage`；日志只输出已验证且已知的消息 type |
-| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
+| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；SYSTEM 消息 `session_title_updated`（首条消息自动标题写入）只精确更新单个会话条目的 title，不整体拉取；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |

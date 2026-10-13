@@ -17,6 +17,7 @@ from entity.constant import (
     AUTO_TITLE_CONTENT_MAX,
     META_EXTRACTOR_CHARACTER,
     SESSIONS_DIR_NAME,
+    SESSION_TITLE_UPDATED_ACTION,
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.messages import BaseMessage, CharacterConversationMessage, History
@@ -66,6 +67,8 @@ class SessionMetadataService(AsyncSystem):
         self._session_store: SessionStore | None = None
         self._task_owner: TaskOwner | None = None
         self._admission_closed = False
+        # 进程内 per-session 首条标题防重集合：检查与登记必须在同一同步代码段完成
+        self._first_title_pending: set[str] = set()
 
     async def virtual_awake(self) -> None:
         self._runtime = self.get_system(RuntimeSystem)
@@ -391,6 +394,38 @@ class SessionMetadataService(AsyncSystem):
             raise MetadataGenerationError("元数据模型返回了空标题")
         return title
 
+    async def _generate_title_from_text(self, session_id: str, text: str) -> str:
+        """根据单条用户消息文本生成标题（不读 History）。
+
+        与 ``_generate_title`` 同构：仅上下文来源不同，避免在首条消息
+        尚未提交 History 的准备阶段读取会话历史。
+        """
+        user_prompt = read_template("auto_title_input.txt").replace(
+            "{{context}}",
+            json.dumps(
+                [{"role": "user", "content": text}],
+                ensure_ascii=False,
+            )[-AUTO_TITLE_CONTENT_MAX:],
+        )
+        client = self._create_client(session_id)
+        try:
+            response = await client.chat(
+                [
+                    BaseMessage(role=Role.SYSTEM, content=read_template("auto_title.txt")),
+                    BaseMessage(role=Role.USER, content=user_prompt),
+                ],
+                character=META_EXTRACTOR_CHARACTER,
+            )
+        except (SessionMetadataError, ApplicationStoppingError):
+            raise
+        except Exception as exc:
+            self._preserve_lifecycle_error(exc)
+            raise MetadataGenerationError(f"自动标题生成失败：{exc}") from exc
+        title = (response.content or "").strip().strip("\"'")[:50]
+        if not title:
+            raise MetadataGenerationError("元数据模型返回了空标题")
+        return title
+
     async def _generate_tags(
         self,
         session_id: str,
@@ -529,3 +564,101 @@ class SessionMetadataService(AsyncSystem):
         if not summary:
             raise MetadataGenerationError("元数据模型返回了空工具链摘要")
         return summary
+
+    # -- 首条用户消息自动标题 ----------------------------------------------
+
+    @staticmethod
+    def _fallback_title(text: str) -> str:
+        """LLM 失败时的旧截取回退：前 30 字符 + 省略号。"""
+        stripped = text.strip()
+        # 30 字符上限与 "..." 后缀为单处使用的字面量（自原路由层截取逻辑移植）
+        title = stripped[:30]
+        if len(stripped) > 30:
+            title += "..."
+        return title
+
+    async def _apply_first_title(self, session_id: str, title: str, source: str) -> None:
+        """写入标题（内存+磁盘）并尽力推送前端；失败仅记日志。
+
+        update_title 磁盘失败不掩盖内存成功，继续推送（crash-only：
+        不回滚已完成写入）；推送失败仅降级日志，下次连接 fetchSessions 补齐。
+        """
+        from system.application import Application
+        from gateway.session_manager import SessionManager
+
+        application = Application.current()
+        try:
+            application.get_system(SessionManager).update_title(session_id, title)
+        except Exception:
+            logger.warning(
+                "First title persistence failed | session=%s", session_id, exc_info=True
+            )
+        try:
+            from entry.agent_sink import FrontendSink
+
+            await application.get_system(FrontendSink).emit_system_message(
+                session_id,
+                json.dumps(
+                    {"action": SESSION_TITLE_UPDATED_ACTION, "title": title},
+                    ensure_ascii=False,
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "First title push failed | session=%s", session_id, exc_info=True
+            )
+        logger.info("First title applied | session=%s source=%s", session_id, source)
+
+    async def _first_title_task(self, session_id: str, text: str) -> None:
+        """后台任务体：LLM 生成 → 写入标题 → 推送前端；业务失败回退截取。"""
+        try:
+            title = await self._generate_title_from_text(session_id, text)
+        except asyncio.CancelledError:
+            raise
+        except ApplicationStoppingError:
+            # 停机竞态：不传播、不回退、不写标题，与 session_message_queue
+            # 停机期过滤先例同向（避免把正常停止翻转为失败关闭）。
+            logger.info(
+                "First title generation skipped during shutdown | session=%s", session_id
+            )
+        except SessionMetadataError:
+            await self._apply_first_title(
+                session_id, self._fallback_title(text), "llm-failed"
+            )
+        except BaseException as error:
+            # 未知异常不得泄漏进 record_failure（后台任务异常=应用失败关闭）；
+            # 先放行生命周期失败（LifecycleFailure / 含取消的异常组）。
+            self._preserve_lifecycle_error(error)
+            logger.warning(
+                "First title generation failed unexpectedly | session=%s",
+                session_id,
+                exc_info=error,
+            )
+            await self._apply_first_title(
+                session_id, self._fallback_title(text), "llm-error"
+            )
+        else:
+            await self._apply_first_title(session_id, title, "llm-ok")
+        finally:
+            self._first_title_pending.discard(session_id)
+
+    def maybe_generate_first_title(self, session_id: str, text: str) -> None:
+        """首条用户消息触发的一次性异步标题生成入口（fire-and-forget）。
+
+        前置判定（会话存在、标题为空、文本非空）由调用方完成；本方法只做
+        防重与派发。检查与登记在同一同步代码段内完成，中间不得出现 await。
+        """
+        if session_id in self._first_title_pending:
+            return
+        self._first_title_pending.add(session_id)
+        try:
+            self.task_owner.create(
+                self._first_title_task(session_id, text),
+                name=f"metadata-first-title-{session_id}",
+            )
+        except LifecycleFailure:
+            # 停机窗口内 Owner closing：静默放弃，不沿准备任务触发失败关闭。
+            self._first_title_pending.discard(session_id)
+            logger.info(
+                "First title generation skipped at shutdown | session=%s", session_id
+            )

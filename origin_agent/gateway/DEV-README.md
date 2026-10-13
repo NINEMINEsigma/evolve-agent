@@ -26,7 +26,7 @@ gateway/
 | `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 与 `GatewayPortBusyError`（占用按退出 0 的普通业务拒绝）也在此。 |
 | `lifecycle.py` | `GatewayAdmission`：新业务经 `admit_business()`（要求 RUNNING）；WS 连接经 `admit_connection()`（STARTING/RUNNING）；已建立连接的每条输入经 `require_open_connection()`。`GatewayReadyTracker` 由 uvicorn 子类在 startup 成功后置位。 |
 | `server.py` | 只含静态路由定义的模块级 `APIRouter` 与 `build_router_app() -> FastAPI` 工厂（include_router、挂载 assets、计算 build_hash 存于 `app.state.build_hash`）。不再有模块级 FastAPI 实例、`_agentspace_path`/`_BUILD_HASH` 运行快照、`set_agentspace_path` 或旧 `create_server` 入口；文件上传路径经 `RuntimeSystem.context.agentspace`。 |
-| `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。USER_MESSAGE 在 `route()` 内同步完成目标/字段/Profile 校验并登记输入记录（主会话 `message_queue.accept(ready=False)`），之后才经 `GatewaySystem.spawn_work` 启动准备任务（Profile 就绪、自动标题、客户端信息、子会话转发），准备完成后 `mark_ready`；准备任务非取消异常按 RV9 记录应用失败，记录保留由关闭刷新只落 History。 |
+| `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。USER_MESSAGE 在 `route()` 内同步完成目标/字段/Profile 校验并登记输入记录（主会话 `message_queue.accept(ready=False)`），之后才经 `GatewaySystem.spawn_work` 启动准备任务（Profile 就绪、自动标题——无标题会话首条消息经 `SessionMetadataService.maybe_generate_first_title` 触发 LLM 生成+截取回退、客户端信息、子会话转发），准备完成后 `mark_ready`；准备任务非取消异常按 RV9 记录应用失败，记录保留由关闭刷新只落 History。 |
 | `chat.py` | `SessionManager`：维护会话元数据索引（`_index.json`），提供会话的创建、归档、删除、合并、分支、标签、标题等操作。 |
 | `session_manager.py` | `SessionManager`：在 `chat.py` 的 `SessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。 |
 
@@ -48,7 +48,7 @@ gateway/
 
 | 消息类型 | 处理方法 | 说明 |
 |---|---|---|
-| `USER_MESSAGE` | `route()` 同步接收登记 + `_prepare_user_message` 后台任务 | 先在路由内完成目标/字段/Profile 校验并登记输入记录，再启动准备任务（自动标题、Profile 就绪、子 Agent 转发）；准备失败按 RV9 失败关闭，记录只落 History |
+| `USER_MESSAGE` | `route()` 同步接收登记 + `_prepare_user_message` 后台任务 | 先在路由内完成目标/字段/Profile 校验并登记输入记录，再启动准备任务（自动标题——LLM 生成+截取回退、Profile 就绪、子 Agent 转发）；准备失败按 RV9 失败关闭，记录只落 History |
 | `CONFIRM_RESPONSE` | `handle_confirm_response` | 审批确认/拒绝，解析到 `FrontendSink` |
 | `ASK_RESPONSE` | `handle_ask_response` | 提问回答，解析到 `FrontendSink` |
 | `INTERRUPT` | `handle_interrupt` | WS 兼容中断入口；经 `GatewaySystem.spawn_work` 调用统一 `request_interrupt()` 并通过 done callback 观察异常，前端权威交互使用 HTTP |
@@ -61,7 +61,7 @@ gateway/
 **`USER_MESSAGE` 处理流程（S21）**：
 
 1. `route()` 同步接收：目标会话存在性/归档状态、`llm_profile_name` 字段与 Profile 命中校验；主会话经 `message_queue.accept(ready=False)` 登记输入记录。
-2. `GatewaySystem.spawn_work(_prepare_user_message)`：Profile 就绪（空闲主会话立即切换）、`_auto_generate_title()`、客户端信息合并、`_dispatch_subagent_messages()` 子会话转发、轮次后回调注册。
+2. `GatewaySystem.spawn_work(_prepare_user_message)`：Profile 就绪（空闲主会话立即切换）、`_auto_generate_title()`（无标题会话首条消息触发 LLM 标题生成，失败回退 30 字符截取）、客户端信息合并、`_dispatch_subagent_messages()` 子会话转发、轮次后回调注册。
 3. 准备完成后对主会话记录 `mark_ready`；消费者只按 sequence 连续消费 ready 前缀。
 4. 关闭中不再登记新输入；已登记记录由 SessionManager 关闭刷新只落 History。
 
