@@ -11,6 +11,7 @@
 2. **子包文档再代码**：`origin_agent/` 各子包目录下带有该包的开发文档（`abstract/`、`component/`、`entry/`、`frontend/`、`gateway/`、`subagent/` 均有 `DEV-README.md`）。深入某个目录的代码前先读其 `DEV-*` 文档；修改该目录代码后若行为或约定发生变化，应同步更新对应文档（包括根目录三件套中受影响的部分）。
 3. **不要误认为riper协议的模式转换要求是agent或者system提示器的模式转换**
 4. **你不是项目agent, 你是开发ai助手**你使用的skills等内容在项目根目录的.cursor/和.agents/下
+5. **开发辅助工具入口**：`dev_helpers/README.md` 登记可用工具。读取会话历史时优先使用 `dev_helpers/read_history.py` 的媒体占位输出，具体用法与授权边界见「开发辅助工具」。
 
 ## 硬性警告（违反会破坏构建或丢失工作）
 
@@ -18,7 +19,7 @@
 - **严禁在 `origin_agent/frontend/` 运行 pnpm/npm。** 前端构建只发生在运行时 `workspace/fast_agent_space/frontend/` 内。在 `origin_agent/` 运行 pnpm 会生成 `node_modules/`/`dist/`，`--force_init` 会把它们复制进 workspace 并破坏构建。
 - **严禁替用户运行任何校验命令。** 包括 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint`、`pnpm build`、`python check_env.py` 等。用户报告构建错误时只修改源码，不得通过运行命令复现或验证。
 - **严禁未经用户明确授权运行 `python run.py` / `python check_env.py` 或启动应用。**
-- **严禁直接执行 `origin_agent/`。** `run.py` 会将其复制到 `workspace/fast_agent_space/` 并运行那个副本。禁止 `python origin_agent/__main__.py`，禁止任何通过 `sys.path`/`cwd` 技巧指向 `origin_agent/` 的做法。
+- **严禁直接启动 origin仓库应用。** `run.py` 会将其复制到 `workspace/fast_agent_space/` 并运行那个副本。禁止 `python origin_agent/__main__.py`，禁止通过 `sys.path`/`cwd` 技巧绕过启动入口运行应用。**开发辅助工具例外**：`dev_helpers/` 中的离线辅助脚本允许配置导入路径，复用 origin仓库的数据模型、类型映射与无启动副作用的库接口，以及只读 third库；不得导入/执行 `run.py`、`config.py`、应用入口或创建 Application，不得读取运行时仓库代码。该例外仅允许代码复用，不授权应用启动、构建、校验或持久化写入。
 - **严禁读取、搜索或修改 `workspace/` 下的代码文件。** 它们是 `origin_agent/` 的可丢弃运行时副本。非代码文件（日志、JSON、`.lock`）只读不写。细则见「保护 workspace 目录」。
 - **Git 只读。** 只允许 `git diff` 和 `git log`。所有写操作（`add`、`commit`、`push`、`checkout`、`branch` 等）必须由用户本人执行。
 - **严禁批量编辑脚本。** 只做有针对性的、可逐条审查的修改。
@@ -52,6 +53,7 @@
 ## 仓库布局
 
 ```
+dev_helpers/          ← 开发者与开发助手AI辅助脚本（先读该目录 README.md）
 origin_agent/          ← origin仓库（源码真相源，编辑这里）
 workspace/             ← 整个目录被 gitignore
 third/                 ← git 子模块（easysave、framework），只读
@@ -66,6 +68,16 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 ```
 
 根目录另有 `SOUL.md`（agent 人格档案，首次启动复制到 agentspace）、`GENE.md`、`config_tui.py`（`--interactive` TUI）、`config.json.example`、`scripts/migrate_v0_to_v1.py`（会话存储 v0→v1 迁移）、`.docs/`（示例与引用资料）。
+
+## 开发辅助工具（dev_helpers/）
+
+`dev_helpers/` 专供开发者与开发助手AI使用，不是项目 Agent 的运行时工具，也不属于 origin仓库。使用前阅读 `dev_helpers/README.md`，优先复用 origin仓库和只读 third库的现有接口，避免重复实现序列化协议和模型字段；仅在辅助脚本中实现媒体占位、分页与展示预算等开发用途逻辑。
+
+**读取会话历史时优先使用 `read_history.py`，避免直接把含媒体Base64的 `history.es` 放进上下文。** 用户授权读取具体会话后，在仓库根目录先运行 `python dev_helpers/read_history.py --session <精确会话ID> --summary` 查看消息数与媒体位置，再用 `--start <0-based索引> --limit <条数>` 读取小范围正文；非默认部署/子会话可用 `--path <指定history.es>` 或 `--sessions-root <会话根>`，不扫描目录或猜测会话ID。
+
+该脚本复用 `third/easysave.raw_load()`、`origin_agent/entity/typeref.py::make_config()`、正式 `History` / 媒体类型和 `History_Version`，还原真实模型后只输出带媒体占位符的 JSON。保留工具调用配对原状，不调用会清理未配对工具调用的 `SessionStore.read_history()`；不写回历史，不启动应用，不调用模型。默认单文字字段4000字符、总输出24000字符；文字截断明确报告，总输出超限快速失败，可通过参数调整有限上限。模型导入禁写字节码，避免生成源码目录的 `__pycache__`。
+
+只读取受信任的本地项目历史：easysave按存储类型导入模块，不是处理任意外来 `.es` 的安全沙盒。工具存在不代表获得运行时文件读取、自动化校验或应用启动授权；仍遵守本文件的 workspace保护和用户授权要求。详见 `dev_helpers/README.md`。
 
 ## 启动与生命周期
 

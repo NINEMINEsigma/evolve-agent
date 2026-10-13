@@ -137,6 +137,7 @@
 | 事件出口 | sink 体系：`AgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口 |
 | 入站缓冲 / 出站缓冲 | inbox / outbox（异步消息缓冲；代码标识改名为可选遗留） |
 | 消息体系 | `entity/messages.py` 的 `BaseMessage` 多态模型与 `History` |
+| History辅助读取 | 开发助手AI使用 `dev_helpers/read_history.py` 复用正式History/媒体类型、项目类型映射和只读easysave库，还原真实History后输出保留消息类型与媒体元信息、以占位符替换媒体载荷的 JSON；不启动应用、不改原模型、不写回历史，也不清理未配对工具调用，仅处理受信任的本地项目历史（英文锚点：History diagnostic reader） |
 | 客户端传输诊断 | 前端检测会话预检或 History关键 REST等待超过15秒时产生的脱敏 `client_diagnostic`；显示持久通知，并在会话 WebSocket可用时只写 Gateway warning，不进入聊天 History（英文锚点：`client transport diagnostic`） |
 | Agentspace事件 | `AgentspaceEvent` 文件/锁/重同步元数据；聊天页通过 typed `agentspace_event`复用会话 WebSocket，独立 Agentspace 编辑器通过 SSE接收，载荷沿用既有同源元数据范围 |
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta），LLM 客户端到流消费器的数据 |

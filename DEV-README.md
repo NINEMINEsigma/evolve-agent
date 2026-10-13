@@ -21,6 +21,7 @@ Evolve Agent 是一个以**运行时自我代码进化**为核心目标的 Agent
 > workspace 及其内部目录（fast/slow 空间、agentspace、logs）均为**默认配置名**，可由 config.py 参数（`workspace_path`、`fast_agent_space_path`、`slow_agent_space_path`、`agentspace_path_name`、`logs_path_name`）覆盖；只有 `.fallback/` 为 run.py 硬编码固定名。下列以默认名描述。
 
 ```
+dev_helpers/              <- 开发者与开发助手AI辅助脚本，不属于运行时仓库
 origin_agent/              <- origin仓库：唯一持久化源码真相源（修改这里）
 workspace/                 <- 运行时根（默认名；整体被 gitignore）
   fast_agent_space/        <- fast仓库：当前运行的 agent 副本（默认名）
@@ -35,6 +36,16 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 ## origin仓库内容边界
 
 `origin_agent/` 会被整体派生为 fast仓库、slow仓库和 fallback仓库，因此只允许包含正式运行源码和构建必需文件。禁止在其中新增或保留自动化测试源、测试运行配置、测试夹具和测试专用入口。发现违规内容时，应从 origin仓库定向移除，不得通过复制过滤、`.gitignore` 或其他忽略规则隐藏；运行时仓库的复制语义保持不变。
+
+---
+
+## 开发辅助脚本
+
+`dev_helpers/` 服务于开发者与开发助手AI，独立于 origin仓库和应用生命周期。`read_history.py` 提供 History辅助读取：复用只读 `third/easysave.raw_load()`、项目 `entity.typeref.make_config()`、`History_Version` 和正式History/媒体类型，还原真实History后输出以占位符替换图片/音频/视频载荷的 JSON，并保留消息类型、顺序、媒体身份/发送开关及文字描述。模型公开迭代接口自动保留当前字段；不重复实现对象图协议。`last_user_message` 以索引展示；不调用会清理未配对工具调用的 `SessionStore.read_history()`，不修改原模型或写回任何持久化文件。
+
+辅助脚本允许配置origin/third导入路径复用库代码，但不得启动origin仓库应用、导入运行入口或创建Application；导入依赖禁写字节码。只处理受信任的本地项目History：easysave会导入存储类型，不提供处理外来文件的安全隔离。该例外与工具入口已登记于根目录 `AGENTS.md`。
+
+使用时先执行 `python dev_helpers/read_history.py --session <精确会话ID> --summary`，再用 `--start` / `--limit` 读取小范围正文；默认单文字字段4000字符、总输出24000字符，文字截断显式报告，总输出超限直接失败。默认只读 `workspace/sessions/<ID>/history.es`，不扫描会话目录；自定义路径使用 `--path` 或 `--sessions-root`。脚本完整解析输入文件，降低的是开发助手AI上下文占用，而非文件读取量或进程内存。用户对运行时文件读取的授权规则仍适用。详细接口、边界与已授权实际读取记录见 [dev_helpers/README.md](dev_helpers/README.md)。
 
 ---
 

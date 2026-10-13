@@ -1334,5 +1334,9 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 `zh-CN.json`为正式非代码文案资源，`labels.ts`用Vite raw机制显式校验后导出中文UI文本，源码标识与错误类型保持英文；服务端/协议错误作为中文错误详情区技术数据保留。常量/展示props在原frontend功能包内，无新增全局System、存储或模型接口；后端独立实例/转发/候选写盘契约完全不变。未运行验证。
 
+### History辅助读取复用正式类型（2026-10-14）
+
+开发助手AI专用 `dev_helpers/read_history.py` 复用 `entity.messages.History` / `MediaBlock` / 三种媒体子类、`entity.typeref.make_config()`、`History_Version` 和只读 `third/easysave.raw_load()`，不再维护独立对象图解码器或模型字段表。它只访问History的公开 `messages` / `last_user_message`、消息Role、媒体字段及BaseModel公开迭代接口；不调用配对清理、任何写盘方法或Application，不新增运行时System/protected字段，也不修改还原后的模型。媒体占位只存在于输出字典，未识别媒体类型快速失败。导入origin库是AGENTS.md登记的开发辅助例外，不授权直接启动origin仓库应用；easysave动态类型加载只用于受信任的本地项目历史。
+
 
 
