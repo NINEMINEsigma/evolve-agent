@@ -15,7 +15,8 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与八个 tab 内容层
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与九个 tab 内容层
+│   ├── features/sessionMedia/ ← 中文相册、文案资源、共享预览与媒体详情窗
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
@@ -97,7 +98,7 @@ frontend/
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 八条目（chat/resources/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 九条目（chat/resources/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
 | `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
@@ -116,9 +117,23 @@ frontend/
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
 
-### 会话变量 Tab
+### 媒体输入 Tab
 
-右侧Tab注册表共八项，会话变量位于resources之后，sessionId非空即可打开（没有变量仍可查看空态）。`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
+显示标题「媒体输入」，注册id=media，位于资源Tab之后；sessionId非空即可打开，空History保留空态。相册式网格默认展示图片预览，只附名称/类型/发送状态角标，不在单元内堆元信息或开关表单；点击后在中文详情窗集中显示大预览、原信息和发送开关。单页100个实际图片/音频/视频实例，重复读取不合并，原展示资源Tab不变。
+
+`features/sessionMedia/`含types.ts、api.ts、useSessionMedia.ts、zh-CN.json、labels.ts、MediaPreview.tsx、MediaGalleryTile.tsx、MediaDetailsWindow.tsx；旧MediaInputCard已移除，不保留双展示路径。UI中文值放正式JSON非代码资源，用Vite `?raw`和显式字段校验加载；仅此功能采用资源文件以兼顾UI中文与源码英文，不引入全局多语言框架或新依赖。registry复用labels.title，空态/分页/错误/可访问名称均中文，服务端或协议原文仅作可展开“错误详情”，不伪造翻译。
+
+开关仍由服务端随History保存，前端不写localStorage。非乐观PUT成功才更新自身条目，GET epoch/pending集合避免旧页覆盖并发保存；未知结果中文提示并GET确认，409不当会话删除、单实例404移除该项。15秒截止覆盖正文/解析/解码，离Tab取消等待但不承诺服务端取消PUT。后端和useSessionMedia接口/低频刷新语义不改。
+
+图片挂img并原生lazy，CSS缩略显示原媒体；视频使用局部IntersectionObserver，仅临近视口挂metadata请求并保持静止/muted/无controls/autoplay，button单元内不嵌套交互控件或显式tabindex；音频以通用图标表示，不伪造波形。detail模式才有原生音视频controls，无autoplay；关闭/切资源/离Tab卸载时pause/清src/load。预览不调用转发/模型，原content端点可能取得完整媒体，并非后端缩略文件；不一次发100份视频载荷请求。
+
+MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威页查找；切会话/页/Tab或实例删除即关闭，GET失败保留旧页并禁写。MediaDetailsWindow复用ModalWindow并portal到body，Esc/遮罩/关闭按钮走同一回调；初始焦点关闭按钮，Tab限制在详情边界，关闭后对有效锚点/刷新按钮恢复焦点，隐藏Tab不抢焦点。归档只读、处理中可改、下一请求生效与原多AgentNone后缀均不变。
+
+网格顶部只留简短说明，转发仍收原媒体/新Read默认开启/保存本身不调用模型等说明集中到详情。session-media.css独立控制密集网格/窄屏两列/大预览详情，其他Tab、聊天和全局ModalWindow样式不变。已按v2源码实施，未运行类型检查/构建/应用，由用户人工验收中文/默认预览/点击详情/键盘和播放器生命周期。
+
+## 会话变量 Tab
+
+右侧Tab注册表共九项，会话变量位于媒体输入Tab之后，sessionId非空即可打开（没有变量仍可查看空态）。`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
 
 `features/sessionVariables/`包含types.ts、api.ts、useSessionVariables.ts、presentation.ts及VariableCard.tsx。typed GET `/api/sessions/<id>/variables`严格解码，15秒截止覆盖fetch与响应正文，解析前后检查时长（不能实时中断同步JSON.parse）；退出Tab/切会话取消请求，代际防旧响应覆盖。激活必重拉，现有chatAgentspaceEventBus文件/移动祖先路径命中后1秒去抖刷新，resync重拉，watcher_error提示降级；不新增长连接/轮询。刷新失败保留同会话旧数据并标过期，404清空旧池。
 
@@ -334,7 +349,7 @@ frontend/
 
 ## 动态沙盒空间 Tab
 
-右侧 Tab 栏第六个 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）。所有会话中可用，用户直接管理全局动态沙盒空间。Tab 通过 REST 接口完成列表查询、创建、完整更新和删除，不经过 Agent 工具审批；Sandbox 的名称、路径、描述、只读标志校验仍是唯一权威。列表以 `activeTab` 为懒加载键，每次切入 tab 重拉。空间名称不可修改，目录选择按钮只选择已有目录，手动输入允许暂不存在的绝对目录；删除仅删除配置，不删除目标目录和文件。删除确认使用复用 `LlmConfirmation` 的受控对话框；编辑态挂 `beforeunload` 刷新守卫。会话锁定（SessionLockOverlay）期间随 Tab 栏一起不可达。
+右侧 Tab 栏的动态沙盒空间 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）。所有会话中可用，用户直接管理全局动态沙盒空间。Tab 通过 REST 接口完成列表查询、创建、完整更新和删除，不经过 Agent 工具审批；Sandbox 的名称、路径、描述、只读标志校验仍是唯一权威。列表以 `activeTab` 为懒加载键，每次切入 tab 重拉。空间名称不可修改，目录选择按钮只选择已有目录，手动输入允许暂不存在的绝对目录；删除仅删除配置，不删除目标目录和文件。删除确认使用复用 `LlmConfirmation` 的受控对话框；编辑态挂 `beforeunload` 刷新守卫。会话锁定（SessionLockOverlay）期间随 Tab 栏一起不可达。
 
 
 | `modal.css` | 模态窗口 |
@@ -373,6 +388,7 @@ frontend/
 - 数学公式依赖（`remark-math`、`rehype-katex`、`katex`）随运行时 fast仓库前端副本安装；KaTeX 未知命令采用降级渲染，流式未闭合公式保持原文，块级长公式只在公式区域横向滚动。
 - `origin_agent/frontend/` 不在仓库根目录，静态类型/IDE 感知可能不准确；不要依赖于此处的 TypeScript 类型检查结论。
 - `tsconfig.app.json` 中针对测试文件名和 `src/test/`、`src/tests/`、嵌套 `__tests__/` 目录的排除模式，是隔离 fast仓库合并复制历史残留的正式构建防御；origin仓库仍严禁测试源、测试配置、测试夹具和测试专用入口，不得通过恢复测试依赖迁就残留文件。
+- `tsconfig.app.json` 对退役的 `src/features/sessionMedia/MediaInputCard.tsx` 另有单文件精确排除：origin已移除旧Card及Props，fast仓库合并覆盖不会删除独有旧文件，因此历史残留仍可能被include=src扫描。此排除只阻止退役文件成为编译根，不恢复旧界面/类型、不屏蔽活跃依赖；若正式代码再次import它，仍参与TypeScript检查。不得扩大为整个功能目录排除。用户需把新构建配置同步到实际运行副本，本轮未运行构建验证。
 - 由于前端构建是自动的，修改源码后由用户自行重启 `run.py` 触发重新构建。
 
 ### 统一聊天渲染行

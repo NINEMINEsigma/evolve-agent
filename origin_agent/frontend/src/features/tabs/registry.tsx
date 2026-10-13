@@ -11,9 +11,11 @@ import LlmTab from "./LlmTab";
 import ChatTab from "./ChatTab";
 import SandboxTab from "./SandboxTab";
 import VariablesTab from "./VariablesTab";
+import MediaInputTab from "./MediaInputTab";
+import { mediaInputLabels } from "../sessionMedia/labels";
 
 /** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
-export type TabId = "chat" | "resources" | "variables" | "subagents" | "characters" | "site" | "llm" | "sandbox";
+export type TabId = "chat" | "resources" | "media" | "variables" | "subagents" | "characters" | "site" | "llm" | "sandbox";
 
 /** Shared render context handed to every tab content layer. */
 export interface TabRenderContext {
@@ -60,6 +62,13 @@ const resourcesIcon = (
     <rect x="14" y="3" width="7" height="7" rx="1" />
     <rect x="3" y="14" width="7" height="7" rx="1" />
     <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
+const mediaIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="m10 8 6 4-6 4z" />
   </svg>
 );
 
@@ -123,6 +132,7 @@ const sandboxIcon = (
 export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} /> },
   { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} /> },
+  { id: "media", title: mediaInputLabels.title, icon: mediaIcon, render: (ctx) => <MediaInputTab ctx={ctx} /> },
   { id: "variables", title: "会话变量", icon: variablesIcon, render: (ctx) => <VariablesTab ctx={ctx} /> },
   { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} /> },
   { id: "characters", title: "角色档案", icon: charactersIcon, render: (ctx) => <CharactersTab ctx={ctx} /> },

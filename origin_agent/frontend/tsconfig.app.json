@@ -24,6 +24,7 @@
     "src/**/*.test.tsx",
     "src/test/**/*",
     "src/tests/**/*",
-    "src/**/__tests__/**/*"
+    "src/**/__tests__/**/*",
+    "src/features/sessionMedia/MediaInputCard.tsx"
   ]
 }

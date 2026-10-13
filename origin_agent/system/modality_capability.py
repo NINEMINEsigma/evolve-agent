@@ -43,8 +43,9 @@ from entity.constant import (
     FORWARDED_VIDEO_TAG,
     MODALITY_CAPABILITY_ES_FILENAME,
     MODALITY_CAPABILITY_ES_KEY,
+    SESSION_MEDIA_UNSUPPORTED_ERROR_PATTERNS,
 )
-from entity.puretype import Role, ModalityCapability, LLMProfile, LLMProfileData
+from entity.puretype import Role, ModalityCapability, LLMProfile, LLMProfileData, ModalityType, ModalityDescriptionResult
 from entity.messages import (
     BaseMessage,
     ImageBlock,
@@ -52,6 +53,7 @@ from entity.messages import (
     VideoBlock,
     TextBlock,
     MessageBlock,
+    MediaBlock,
     CharacterConversationMessage,
     ToolResultMessage,
     ToolCall,
@@ -228,6 +230,24 @@ def resolve_modality_reference_profile(
     return active_reference if active_reference is not None else global_reference
 
 
+def _media_description_prompt(media_type: ModalityType) -> str:
+    from system.templates import read_template
+    return read_template(f"forwarded/forwarded_{media_type}_prompt.txt")
+
+
+async def _request_media_description(
+    system: ModalityCapabilitySystem, ref_profile: LLMProfile,
+    media_type: ModalityType, block: MediaBlock,
+) -> str:
+    """复用单跳描述请求；媒体 URL 由目标客户端处理，不由服务器抓取。"""
+    client = create_llm_client(ref_profile.llm_client_name, system.runtime.context, ref_profile)
+    messages = [BaseMessage(role=Role.USER, content=[
+        block.model_copy(), TextBlock(text=_media_description_prompt(media_type)),
+    ])]
+    response = await client.chat(messages)
+    return response.content or ""
+
+
 async def _forward_modality_to_ref_profile(
     system: ModalityCapabilitySystem,
     context: ToolContext | None,
@@ -272,37 +292,29 @@ async def _forward_modality_to_ref_profile(
             f"No active or global reference profile configured for {media_type}"
         )
 
-    ctx = system.runtime.context
     if not ref_profile.llm_client_name:
         return _error_text(
             ref_profile.name,
             f"Referenced profile '{ref_profile.name}' has no llm_client_name",
         )
 
-    # 构造提示词（从模板加载）
-    if media_type == "image":
-        prompt: str = read_template("forwarded/forwarded_image_prompt.txt")
-    elif media_type == "audio":
-        prompt = read_template("forwarded/forwarded_audio_prompt.txt")
-    else:
-        prompt = read_template("forwarded/forwarded_video_prompt.txt")
-
-    # 构造多模态块
-    if media_type == "image":
-        blocks = build_image_content_blocks(media_data, prompt)
-    elif media_type == "audio":
-        blocks = build_audio_content_blocks(media_data, prompt)
-    else:
-        blocks = build_video_content_blocks(media_data, prompt)
-
-    # 构造单条 user 消息
-    messages = [BaseMessage(role=Role.USER, content=blocks)]
-
-    # 建客户端；客户端创建异常属于配置/程序错误，不能伪装成转发结果。
-    client = create_llm_client(ref_profile.llm_client_name, ctx, ref_profile)
+    block = build_media_content_block(media_data, media_type)
+    # 旧工具空媒体仍保持只发文字提示的契约，正式媒体复用共享请求。
+    empty_client = (
+        create_llm_client(ref_profile.llm_client_name, system.runtime.context, ref_profile)
+        if block is None else None
+    )
     try:
-        response = await client.chat(messages)
-        description: str = response.content or ""
+        if block is None:
+            assert empty_client is not None
+            response = await empty_client.chat([BaseMessage(
+                role=Role.USER, content=[TextBlock(text=_media_description_prompt(media_type))],
+            )])
+            description = response.content or ""
+        else:
+            if not isinstance(block, MediaBlock):
+                raise TypeError("Expected a media content block")
+            description = await _request_media_description(system, ref_profile, media_type, block)
         if not description.strip():
             return _error_text(
                 ref_profile.name,
@@ -329,6 +341,63 @@ async def _forward_modality_to_ref_profile(
             context.session_id if context else "", ref_profile.name, media_type, exc,
         )
         return _error_text(ref_profile.name, f"{type(exc).__name__}: {exc}")
+
+
+class ModalityDescriptionError(RuntimeError):
+    """转发返回空描述等协议失败，不能当作明确模态不可用。"""
+
+
+def is_explicit_modality_rejection(exc: Exception, media_type: ModalityType) -> bool:
+    if not isinstance(exc, LLMAPIStatusError) or exc.status_code != 400:
+        return False
+    text = str(exc).lower()
+    return any(pattern.format(media_type=media_type) in text for pattern in SESSION_MEDIA_UNSUPPORTED_ERROR_PATTERNS)
+
+
+async def _describe_media_block(
+    system: ModalityCapabilitySystem, context: ToolContext,
+    active_profile: LLMProfile, block: MediaBlock,
+) -> ModalityDescriptionResult:
+    if isinstance(block, ImageBlock):
+        media_type: ModalityType = "image"
+    elif isinstance(block, AudioBlock):
+        media_type = "audio"
+    elif isinstance(block, VideoBlock):
+        media_type = "video"
+    else:
+        raise TypeError("Unknown media description block")
+    profiles = context.app.get_system(LLMProfileStore)
+    # 解析和深快照共用根对象锁，不能快照已被其他线程移出根的引用。
+    with profiles.locked():
+        reference = resolve_modality_reference_profile(active_profile, media_type, profiles.get_data())
+        if reference is None:
+            return ModalityDescriptionResult(status="unavailable", reason="no_reference")
+        ref_profile = profiles.snapshot_profile(reference)
+    if not ref_profile.llm_client_name or not ref_profile.model:
+        return ModalityDescriptionResult(
+            status="unavailable", profile_name=ref_profile.name, reason="incomplete_profile",
+        )
+    try:
+        description = await _request_media_description(system, ref_profile, media_type, block)
+    except UnsupportedModalityError:
+        return ModalityDescriptionResult(
+            status="unavailable", profile_name=ref_profile.name, reason="unsupported_modality",
+        )
+    except LLMAPIStatusError as exc:
+        if not is_explicit_modality_rejection(exc, media_type):
+            raise
+        return ModalityDescriptionResult(
+            status="unavailable", profile_name=ref_profile.name, reason="unsupported_modality",
+        )
+    if not description.strip():
+        raise ModalityDescriptionError("Referenced Profile returned an empty media description")
+    logger.info(
+        "describe_media | session=%s profile=%s media_type=%s success",
+        context.session_id, ref_profile.name, media_type,
+    )
+    return ModalityDescriptionResult(
+        status="success", description=description, profile_name=ref_profile.name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +571,14 @@ class ModalityCapabilitySystem(AsyncSystem):
         return await self.task_owner.run_request(
             lambda: _forward_modality_to_ref_profile(self, context, active_profile, media_data, media_type),
             name="modality-forward", admission=self._admit,
+        )
+
+    async def describe_media_block(
+        self, context: ToolContext, active_profile: LLMProfile, block: MediaBlock,
+    ) -> ModalityDescriptionResult:
+        return await self.task_owner.run_request(
+            lambda: _describe_media_block(self, context, active_profile, block),
+            name="media-description", admission=self._admit,
         )
 
     def build_modality_prompt_block(self, profile: LLMProfile, agentspace: Path | None = None) -> str:

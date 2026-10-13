@@ -6,18 +6,25 @@ _image/_audio payload 构造，以及 tool result 到 content 的统一转换。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import defaultdict, deque
+from pydantic import BaseModel
 from typing import * # type: ignore
 
-from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock, VideoBlock
-from entity.puretype import MessageContent, Role, LLMProfile
+from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, History, ImageBlock, MessageBlock, TextBlock, VideoBlock
+from entity.puretype import MessageContent, Role, ModalityCapability, ModalityDescriptionResult
 from entity.constant import (
     FORWARDED_AUDIO_TAG,
     FORWARDED_VISION_TAG,
     FORWARDED_VIDEO_TAG,
     SYSTEM_CHARACTER_NAME,
+    SESSION_MEDIA_PLACEHOLDER_TEMPLATE,
 )
+from entry.history_media import HistoryMediaOccurrence, project_media_item
+from system.runtime import RuntimeSystem
+from system.templates import read_template
 from system.modality_capability import (
     ModalityCapabilitySystem,
     resolve_active_model_base_url,
@@ -56,232 +63,177 @@ def is_content_block_error(exc: Exception) -> bool:
     ])
 
 
-async def _forward_unsupported_block(
-    context: "ToolContext",
-    profile: LLMProfile,
-    block: ImageBlock | AudioBlock | VideoBlock,
-    media_type: Literal["image", "audio", "video"],
-    save_callback: "Callable[[str], None] | None" = None,
-) -> str:
-    """处理不支持的多模态块：优先用 forward_result_content，无则转发借用。
+class PreparedMultimodalRequest(BaseModel):
+    """每请求固定的消息视图；原 History 和媒体载荷保持不变。"""
 
-    转发成功后写入 block.forward_result_content（持久化），并调用 save_callback 立即固化。
-    返回描述文本。
-    """
-    # 优先用已有的 forward_result_content
-    if block.forward_result_content:
-        logger.debug(
-            "preprocess_multimodal | reusing existing forward_result_content for %s",
-            media_type,
+    messages: list[BaseMessage]
+    last_user_message: CharacterConversationMessage | None
+    source_history: History
+    source_session_id: str
+
+    @classmethod
+    def capture(
+        cls, messages: list[BaseMessage], history: History, session_id: str,
+        last_user_message: CharacterConversationMessage | None, character_name: str,
+    ) -> PreparedMultimodalRequest:
+        copied: list[BaseMessage] = []
+        last_user: CharacterConversationMessage | None = None
+        for message in messages:
+            if not message.is_visible_to(character_name):
+                continue
+            content = message.content
+            if isinstance(content, list):
+                content = [block.model_copy() for block in content]
+            elif isinstance(content, dict):
+                content = content.copy()
+            snapshot = message.model_copy(update={"content": content})
+            copied.append(snapshot)
+            if message is last_user_message:
+                if not isinstance(snapshot, CharacterConversationMessage):
+                    raise TypeError("Last user message must be a conversation message")
+                last_user = snapshot
+        return cls(
+            messages=copied, last_user_message=last_user,
+            source_history=history, source_session_id=session_id,
         )
-        return block.forward_result_content
 
-    # 无已有描述 → 按活动 Profile 引用优先、全局回退引用次序解析目标。
-    _ref_profile = context.app.get_system(
-        ModalityCapabilitySystem
-    ).resolve_effective_modality_reference_profile(
-        profile,
-        media_type,
+
+async def prepare_main_multimodal_request(
+    messages: list[BaseMessage], context: ToolContext, *,
+    last_user_message: CharacterConversationMessage | None,
+) -> PreparedMultimodalRequest:
+    """首个 await 前固定开关；关闭的媒体绝不在主请求中恢复直传。"""
+    runtime = context.app.get_system(RuntimeSystem)
+    runtime.require_running()
+    if context.loop.is_interrupted():
+        raise asyncio.CancelledError
+    original_last_user = context.loop.history.last_user_message
+    uses_history_last_user = last_user_message is not None and last_user_message is original_last_user
+    original_history = list(context.loop.history.iter_messages())
+    context.loop.ensure_media_identity()
+    if uses_history_last_user:
+        last_user_message = context.loop.history.last_user_message
+    # 旧共享媒体引用拆分时，同步重连源视图，后续工具回环仍持有正式 History 对象。
+    canonical: dict[int, deque[BaseMessage]] = defaultdict(deque)
+    for previous, current in zip(original_history, context.loop.history.iter_messages()):
+        canonical[id(previous)].append(current)
+    for index, message in enumerate(messages):
+        replacements = canonical.get(id(message))
+        if replacements:
+            replacement = replacements.popleft()
+            messages[index] = replacement
+            if message is last_user_message:
+                if not isinstance(replacement, CharacterConversationMessage):
+                    raise TypeError("Last user message must be a conversation message")
+                last_user_message = replacement
+    request = PreparedMultimodalRequest.capture(
+        messages, context.loop.history, context.session_id,
+        last_user_message, context.character_name,
     )
-    if _ref_profile is None:
-        raise ModalityForwardUnavailableError(
-            f"Active model does not support {media_type} in either tool or user messages, "
-            f"and no active or global {media_type} reference profile is configured. "
-            f"Please configure a reference profile or switch to a model that supports {media_type}."
-        )
-
-    # 构造 media_data
-    if isinstance(block, ImageBlock):
-        # 解析 data URL 提取 base64 和 mime_type
-        image_url = block.image_url
-        if image_url.startswith("data:"):
-            # data:image/png;base64,xxxx
-            header, b64 = image_url.split(",", 1)
-            mime_type = header.split(";")[0].split(":")[1]
-            media_data = {"base64": b64, "mime_type": mime_type}
-        else:
-            # 非 data URL（HTTP URL），跳过转发，保留原块
-            logger.warning(
-                "preprocess_multimodal | skipping forward for non-data-URL image: %s",
-                image_url[:50],
-            )
-            return ""
-    elif isinstance(block, VideoBlock):
-        # 解析 data URL 提取 base64 和 mime_type
-        video_url = block.video_url
-        if video_url.startswith("data:"):
-            header, b64 = video_url.split(",", 1)
-            mime_type = header.split(";")[0].split(":")[1]
-            media_data = {"base64": b64, "mime_type": mime_type}
-        else:
-            # 非 data URL（HTTP URL），跳过转发，保留原块
-            logger.warning(
-                "preprocess_multimodal | skipping forward for non-data-URL video: %s",
-                video_url[:50],
-            )
-            return ""
-    else:
-        # AudioBlock
-        media_data = {"base64": block.data, "format": block.format}
-
-    # 转发借用
-    description = await context.app.get_system(
-        ModalityCapabilitySystem
-    ).forward_modality_to_ref_profile(
-        context, profile, media_data, media_type,
+    model_name, _, profile = resolve_active_model_base_url(context)
+    system = context.app.get_system(ModalityCapabilitySystem)
+    has_enabled_media = any(
+        isinstance(block, (ImageBlock, AudioBlock, VideoBlock)) and block.send_multimodal
+        for message in request.messages if isinstance(message.content, list)
+        for block in message.content
     )
-
-    # 写入 forward_result_content（持久化）
-    block.forward_result_content = description
-    if save_callback is not None:
-        save_callback(context.session_id)
-
-    return description
-
-
-async def preprocess_multimodal_blocks(
-    messages: list[BaseMessage],
-    context: "ToolContext",
-    save_callback: "Callable[[str], None] | None" = None,
-) -> list[BaseMessage]:
-    """预检多模态块：自动探查能力，不支持时转发借用替换。
-
-    遍历 messages 中的 ImageBlock/AudioBlock/VideoBlock：
-    - 查缓存 → 有缓存直接判断
-    - 无缓存 → 自动探查（ensure_modality_capability）
-    - tool 消息（role=tool）只看 tool 路径能力（vision/audio/video）
-    - user/其他消息只看 user 路径能力（user_vision/user_audio/user_video）
-    - 对应路径不支持 → 优先用 forward_result_content；无则转发借用并写入 forward_result_content
-      用特殊标签包裹描述后替换该块为 TextBlock（临时 messages 列表，不改持久化历史）
-
-    注意：不能对 tool 和 user 能力做 OR 合并——某模型可能 user_vision=True
-    但 vision=False（tool 消息不支持图片），此时 tool 消息中的 ImageBlock
-    必须被转发替换，否则 provider 会返回 400 错误。
-
-    遇到探查非模态错误时向上抛出异常，由调用方的 except 分支处理。
-
-    Args:
-        messages: 发给 LLM 的消息列表（临时列表，不修改持久化历史中的多模态块）
-        context: 工具执行上下文
-        save_callback: 接收 session_id 的回调，用于转发后持久化 forward_result_content。
-                       传入 None 时不持久化。
-    """
-    model_name, base_url, profile = resolve_active_model_base_url(context)
-
-    # 无 profile 或 model_name → 无需预检
-    if not profile or not model_name:
-        return messages
-
-    # 快速检查 messages 中是否有 ImageBlock 或 AudioBlock 或 VideoBlock
-    has_multimodal = False
-    for msg in messages:
-        if isinstance(msg.content, list):
-            for block in msg.content:
-                if isinstance(block, (ImageBlock, AudioBlock, VideoBlock)):
-                    has_multimodal = True
-                    break
-        if has_multimodal:
-            break
-    if not has_multimodal:
-        return messages
-
-    # 自动探查能力
-    capability = await context.app.get_system(
-        ModalityCapabilitySystem
-    ).ensure_modality_capability(context)
-
-    # 遍历处理每条消息
-    result_messages: list[BaseMessage] = []
-    any_replaced = False
-    for msg in messages:
-        content = msg.content
-        if not isinstance(content, list):
-            result_messages.append(msg)
+    capability: ModalityCapability | None = None
+    if has_enabled_media and profile is not None and model_name:
+        capability = await system.ensure_modality_capability(context)
+    placeholder: str | None = None
+    for message_index, message in enumerate(request.messages):
+        if not isinstance(message.content, list):
             continue
-
-        # tool 消息和 user 消息使用不同的能力字段：
-        # tool 消息只看 vision/audio/video，user 消息只看 user_vision/user_audio/user_video。
-        is_tool_msg = msg.role == Role.TOOL
-        image_supported = capability.vision if is_tool_msg else capability.user_vision
-        audio_supported = capability.audio if is_tool_msg else capability.user_audio
-        video_supported = capability.video if is_tool_msg else capability.user_video
-
-        new_blocks: list[MessageBlock] = []
-        blocks_replaced = False
-        for block in content:
+        blocks: list[MessageBlock] = []
+        for block_index, block in enumerate(message.content):
+            if not isinstance(block, (ImageBlock, AudioBlock, VideoBlock)):
+                blocks.append(block)
+                continue
+            runtime.require_running()
+            if context.loop.is_interrupted():
+                raise asyncio.CancelledError
+            tool_path = message.role == Role.TOOL
             if isinstance(block, ImageBlock):
-                if image_supported:
-                    # 支持 → 原样保留
-                    new_blocks.append(block)
-                else:
-                    # 不支持
-                    description = await _forward_unsupported_block(
-                        context, profile, block,
-                        "image",
-                        save_callback,
-                    )
-                    if description:
-                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_VISION_TAG)))
-                        blocks_replaced = True
-                        any_replaced = True
-                    else:
-                        # 非 data URL 跳过转发，保留原块
-                        new_blocks.append(block)
+                media_type = "image"
+                tag = FORWARDED_VISION_TAG
+                supported = capability.vision if tool_path and capability is not None else capability.user_vision if capability is not None else False
             elif isinstance(block, AudioBlock):
-                if audio_supported:
-                    # 支持 → 原样保留
-                    new_blocks.append(block)
-                else:
-                    # 不支持
-                    description = await _forward_unsupported_block(
-                        context, profile, block,
-                        "audio",
-                        save_callback,
-                    )
-                    if description:
-                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_AUDIO_TAG)))
-                        blocks_replaced = True
-                        any_replaced = True
-                    else:
-                        # 非 data URL 跳过转发，保留原块
-                        new_blocks.append(block)
-            elif isinstance(block, VideoBlock):
-                if video_supported:
-                    # 支持 → 原样保留
-                    new_blocks.append(block)
-                else:
-                    # 不支持
-                    description = await _forward_unsupported_block(
-                        context, profile, block,
-                        "video",
-                        save_callback,
-                    )
-                    if description:
-                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_VIDEO_TAG)))
-                        blocks_replaced = True
-                        any_replaced = True
-                    else:
-                        # 非 data URL 跳过转发，保留原块
-                        new_blocks.append(block)
+                media_type = "audio"
+                tag = FORWARDED_AUDIO_TAG
+                supported = capability.audio if tool_path and capability is not None else capability.user_audio if capability is not None else False
             else:
-                new_blocks.append(block)
+                media_type = "video"
+                tag = FORWARDED_VIDEO_TAG
+                supported = capability.video if tool_path and capability is not None else capability.user_video if capability is not None else False
+            if block.send_multimodal and (supported or profile is None or not model_name):
+                blocks.append(block)
+                continue
+            if block.forward_result_verified and block.forward_result_content and block.forward_result_content.strip():
+                blocks.append(TextBlock(text=wrap_forwarded_description(block.forward_result_content, tag)))
+                continue
+            result = (
+                await system.describe_media_block(context, profile, block)
+                if profile is not None else ModalityDescriptionResult(status="unavailable", reason="no_reference")
+            )
+            runtime.require_running()
+            if context.loop.is_interrupted():
+                raise asyncio.CancelledError
+            if result.status == "success":
+                if result.description is None or not result.description.strip() or result.reason is not None:
+                    raise RuntimeError("Invalid successful media description result")
+                context.loop.commit_media_description(
+                    request.source_session_id, request.source_history, block.media_id, result.description,
+                )
+                blocks.append(TextBlock(text=wrap_forwarded_description(result.description, tag)))
+                continue
+            if result.status != "unavailable" or result.reason is None or result.description is not None:
+                raise RuntimeError("Invalid unavailable media description result")
+            if block.send_multimodal:
+                raise ModalityForwardUnavailableError(
+                    f"Active model does not support {media_type} on this message path and forwarding is unavailable "
+                    f"({result.reason}). Configure a usable reference Profile or switch to a supporting model."
+                )
+            if placeholder is None:
+                placeholder = read_template(SESSION_MEDIA_PLACEHOLDER_TEMPLATE)
+            source = project_media_item(HistoryMediaOccurrence(
+                history_index=message_index, block_index=block_index, message=message, block=block,
+            )).source_path
+            text = (
+                placeholder.replace("{{media_type}}", media_type)
+                .replace("{{media_id}}", block.media_id)
+                .replace("{{source_path}}", source or "unknown")
+                .replace("{{reason}}", result.reason)
+            )
+            blocks.append(TextBlock(text=text))
+        message.content = blocks
+    runtime.require_running()
+    if context.loop.is_interrupted():
+        raise asyncio.CancelledError
+    return request
 
-        if blocks_replaced:
-            # 创建消息副本，避免修改持久化历史
-            result_messages.append(msg.model_copy(update={"content": new_blocks}))
-        else:
-            result_messages.append(msg)
 
-    if any_replaced:
-        logger.debug(
-            "preprocess_multimodal | session=%s model=%s replaced unsupported blocks with forwarded descriptions",
-            context.session_id, model_name,
+def _attach_tool_media_source(
+    blocks: list[MessageBlock], result: dict[str, Any], tool_call_id: str | None,
+) -> None:
+    """从正式工具结果附带逻辑来源；不采信物理 absolute_path。"""
+    source = result.get("path")
+    kind = result.get("type")
+    for block in blocks:
+        if not isinstance(block, (ImageBlock, AudioBlock, VideoBlock)):
+            continue
+        block.source_tool_call_id = tool_call_id
+        matches = (
+            (kind == "image" and isinstance(block, ImageBlock))
+            or (kind == "audio" and isinstance(block, AudioBlock))
+            or (kind == "video" and isinstance(block, VideoBlock))
         )
+        if matches and isinstance(source, str):
+            block.source_path = source
 
-    return result_messages
 
-
-def tool_result_to_content(result: dict[str, Any]) -> dict[str, Any] | list[MessageBlock]:
+def tool_result_to_content(
+    result: dict[str, Any], *, tool_call_id: str | None = None,
+) -> dict[str, Any] | list[MessageBlock]:
     """把原生 dict 工具结果转换为 ToolResultMessage 可用的 content。
 
     - 含 _blocks 字段的 dict：pop _blocks 后经 blocks_from_dicts 转为有序 MessageBlock 列表；
@@ -294,6 +246,7 @@ def tool_result_to_content(result: dict[str, Any]) -> dict[str, Any] | list[Mess
     assert blocks_data is None or isinstance(blocks_data, list), "_blocks must be a list"
     if blocks_data:
         blocks = blocks_from_dicts(blocks_data)
+        _attach_tool_media_source(blocks, result, tool_call_id)
         if result:
             blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
         return blocks
@@ -303,6 +256,8 @@ def tool_result_to_content(result: dict[str, Any]) -> dict[str, Any] | list[Mess
 def tool_result_to_follow_up(
     result: dict,
     character_name: str,
+    *,
+    tool_call_id: str | None = None,
 ) -> tuple[list[BaseMessage] | None, dict[str, Any] | list[MessageBlock]]:
     """提取 _user_blocks，构造 follow_up 用户消息。
 
@@ -318,13 +273,13 @@ def tool_result_to_follow_up(
     user_blocks_data = result.pop("_user_blocks", None)
 
     if not (isinstance(user_blocks_data, list) and user_blocks_data):
-        return None, tool_result_to_content(result)
+        return None, tool_result_to_content(result, tool_call_id=tool_call_id)
 
-    metadata_json = json.dumps(result, ensure_ascii=False)
     blocks: list[MessageBlock] = blocks_from_dicts(user_blocks_data)
+    _attach_tool_media_source(blocks, result, tool_call_id)
 
     if not blocks:
-        return None, tool_result_to_content(result)
+        return None, tool_result_to_content(result, tool_call_id=tool_call_id)
 
     follow_up_msg = CharacterConversationMessage(
         role=Role.USER,
@@ -333,7 +288,7 @@ def tool_result_to_follow_up(
         visible_characters=[character_name],
     )
 
-    remaining_content = tool_result_to_content(result)
+    remaining_content = tool_result_to_content(result, tool_call_id=tool_call_id)
     return [follow_up_msg], remaining_content
 
 

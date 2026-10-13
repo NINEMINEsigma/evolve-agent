@@ -38,3 +38,12 @@ class ModalityProfileStates(BaseModel):
     image: ModalityProfileState
     audio: ModalityProfileState
     video: ModalityProfileState
+
+
+class ModalityDescriptionResult(BaseModel):
+    """成功描述与明确不可用分离；不把错误模板当作成功正文。"""
+
+    status: Literal["success", "unavailable"]
+    description: str | None = None
+    profile_name: str | None = None
+    reason: Literal["no_reference", "incomplete_profile", "unsupported_modality"] | None = None

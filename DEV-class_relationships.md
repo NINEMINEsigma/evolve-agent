@@ -1309,3 +1309,30 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 `ManagedTaskRecord` 新增 `expected_failure` 字段，`TaskOwner.mark_expected_failure(task)` 在任务结算前标记例常预期失败；`_settle` 对已标记的 BACKGROUND 终局异常不再上报所属 System（`LifecycleFailure` 及含它的异常组仍始终上报，不豁免）。首个消费者为聊天 WebSocket 的 Agentspace 事件转发：`forward_agentspace_events` 单事件发送超 `AGENTSPACE_WS_SEND_TIMEOUT_SECONDS` 秒抛 `AgentspaceSendTimeout`（TimeoutError 子类哨兵），`_close_on_agentspace_failure` 先标记预期失败再以 1011 断连驱逐慢消费者连接，折叠日志按 `AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS` 时间窗限流携带窗口累计 dropped（日志级别维持 28bab6b 已定的 debug）。慢消费者超时定性为连接级例常事件而非进程级失败，不再触发应用失败关闭；done_callback 的注册顺序（标记回调先于 track 的结算回调）是该机制的正确性前提。
 
+### 主会话媒体实例发送控制（2026-10-13）
+
+新增继承关系：`MessageBlock → MediaBlock → ImageBlock / AudioBlock / VideoBlock`；`TextBlock`仍直接继承MessageBlock。媒体类的模块路径/type token和as_object输出不变。MediaBlock新增 `media_id: str`、`send_multimodal: bool`、`source_path: str | None`、`source_tool_call_id: str | None`、`forward_result_verified: bool`，原forward_result_content仍归MessageBlock。它们与原媒体同属History对象图，直接由easysave存储，不新增全局媒体System或状态镜像。
+
+| 归属 | 新接口/模型 | 外部访问与责任 |
+|---|---|---|
+| BaseAgentLoop | `_persist_history_value(session_id, history)` | 类内严格保存候选，沿原HistoryPersistenceError/Runtime失败责任 |
+| BaseAgentLoop | `ensure_media_identity`、`get_session_media`、`get_session_media_block` | Gateway和请求准备经公开接口读取；补缺身份先保存，不按历史索引持久控制 |
+| BaseAgentLoop | `set_session_media_enabled` | Gateway解析StrictBool后同步调用，候选先保存再更新原实例，处理中不等process锁 |
+| BaseAgentLoop | `commit_media_description` | 请求准备提交成功描述，校验旧sid/History/ID，first-success-wins，只改缓存不覆盖开关 |
+| entry/history_media.py | HistoryMediaOccurrence与纯函数 | 通过History公开迭代/set_message组织身份、定位、投影和候选，不做I/O或Application查询 |
+| entry/agent_support/multimodal.py | PreparedMultimodalRequest.capture | 非持久业务模型，消息/媒体浅副本固定开关；最后用户指针关联副本而非原对象 |
+| ModalityCapabilitySystem | `describe_media_block` | TaskOwner持有单跳描述请求；通过ToolContext.app公开get_system取得LLMProfileStore，在共享锁内解析并快照引用 |
+| entity/puretype/session_media.py | 四个REST纯模型 | Gateway保留BaseModel返回，前端完整解码轻量协议；无媒体载荷 |
+
+ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。MultiAgentWorker保留原full_messages，使同worker重新开启可恢复媒体；它继续传None，不扩展当前动态后缀行为。临时/普通子Agent独立History不进入新准备路径。工具结果来源由tool_post_dispatch传入转换函数，客户端输入不能覆盖内部身份/开关。
+
+已实施字段/API与请求路径；没有新增protected状态字段、跨类私有字段写入或新的System拓扑。未运行验证，必要写盘失败可能沿现有生命周期终止应用。
+
+### 媒体输入Tab中文相册展示修订（2026-10-14）
+
+按用户反馈，旧MediaInputCard移除；前端新增 `MediaGalleryTile`（预览/名称/状态角标）与 `MediaDetailsWindow`（现有ModalWindow+portal、大预览/信息/发送开关），共用 `MediaPreview`。MediaInputTab只持有selectedMediaId和焦点锚点，详情数据始终从权威页按ID查，不保存独立过期副本；切会话/页/Tab或实例删除关闭，关闭后只对当前有效视图恢复焦点。thumbnail无交互媒体controls或开关，detail才启用播放器；组件清理停止音视频并恢复StrictMode effect重放后的src。
+
+`zh-CN.json`为正式非代码文案资源，`labels.ts`用Vite raw机制显式校验后导出中文UI文本，源码标识与错误类型保持英文；服务端/协议错误作为中文错误详情区技术数据保留。常量/展示props在原frontend功能包内，无新增全局System、存储或模型接口；后端独立实例/转发/候选写盘契约完全不变。未运行验证。
+
+
+

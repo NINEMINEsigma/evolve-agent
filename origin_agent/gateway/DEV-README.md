@@ -194,6 +194,20 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。工具请求和匹配的 ToolResultMessage 在前端投影为一个 `tool_card` 行，结果按 `tool_call_id` 配对并可跨 History 内容页返回；只有孤立结果保留为独立降级行。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
 
+### 主会话媒体输入控制
+
+| 方法 | 端点 | 说明 |
+|---|---|---|
+| GET | `/api/sessions/{id}/history/media?offset=0&limit=100` | 独立媒体实例轻量页，默认100、最多500；含总数/身份/开关/来源/缓存存在性，不含Base64或描述正文 |
+| PUT | `/api/sessions/{id}/history/media/{media_id}` | StrictBool的send_multimodal与expected_send_multimodal必填；候选History严格保存后返回该实例权威状态 |
+| GET | `/api/sessions/{id}/history/media/{media_id}/content` | 用户按需取得单个原媒体；inline返回二进制，HTTP(S)仅307由浏览器读取，服务器不抓取来源URL |
+
+仅查询当前注册主会话Loop，不创建Loop、不另读活动磁盘History。新操作使用RUNNING准入/no-store：会话缺失或删除中404，存在但无Loop或正在旋转409；409不等于会话删除。归档已恢复Loop可GET及补齐旧身份，用户PUT403。处理中允许修改媒体开关，从保存后的下一模型请求生效，已开始请求不撤回。无新WS通知、SSE或轮询。
+
+非法参数/ID/JSON/非boolean请求400，实例消失404，expected冲突409；预览格式不支持415、编码错误400。仅映射专门业务异常，损坏重复ID或必要写盘失败不返回默认清单。GET旧身份补齐可能严格写History，失败沿原HistoryPersistenceError可能导致500与应用失败关闭；归档“用户只读”不豁免系统元数据迁移。预览只解码一个块、无临时文件和Range；nosniff，SVG加sandbox CSP，不能把任意MIME当HTML执行。
+
+清单支持普通/随意聊聊/多Agent主会话，不包括独立子会话或未进入History的上传/Markdown资源。关闭不减少History磁盘体积；PUT仍全量写盘，保存超时的前端须GET确认，不自动重试写入。源码已实施，未运行验证。
+
 ### 消息编辑
 
 | 方法 | 端点 | 说明 |

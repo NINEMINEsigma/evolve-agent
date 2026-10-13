@@ -52,7 +52,7 @@
 |---|---|
 | 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系；内置前缀由 `Namespace` 枚举定义 |
 | 动态沙盒空间 | 用户授权的全局逻辑路径映射（英文锚点：`global dynamic sandbox space`）；独立持久化、仅 fast 模式启用，由 Sandbox 单例管理并供所有 Agent 共享。`is_readonly` 仅表示标准 Sandbox 文件 API 层只读，不是操作系统 ACL |
-| 动态沙盒空间 Tab | 右侧 Tab 栏第六个 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批（英文锚点：`dynamic sandbox spaces tab`） |
+| 动态沙盒空间 Tab | 右侧 Tab 栏的动态沙盒空间 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批（英文锚点：`dynamic sandbox spaces tab`） |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
 | 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。Read 默认仅返回数据；会话视觉源目录的 `redirect` 字段约定由会话视觉资源服务解释，Read 本身不跟随重定向。与会话元数据及工具内部 `_meta` 字段不同。会话视觉重定向实现进度以对应任务文件为准。 |
 | 主Agent角色名 | 运行时由 `RuntimeSystem.main_agent_character_name` 持有的进程级名称，用于 History 角色标记、前端展示与多Agent路由匹配。启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取一次，缺失或异常时回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`（"main-agent"）；运行期由 `RefreshIdentity` 工具（`component/tools/refresh_identity.py`，MAIN scope）重新读取。该机制供未来 `SOUL.md.meta` 扩展更多运行时设定复用。 |
@@ -159,6 +159,7 @@
 
 | 规范称谓 | 定义 |
 |---|---|
+| 媒体实例 | History 中每次进入的独立图片、音频或视频块（英文锚点：History media instance）；即使来源文件或内容相同也分别控制。持久身份与多模态发送开关随 History 保存，新实例默认开启；关闭只改变后续主会话模型请求视图，不删除原媒体，也不禁止向转发模型发送原媒体 |
 | 压缩 | 将早期消息压缩为摘要以释放上下文（`compress_history` 工具；随意聊聊会话用滑动窗口压缩最早 30%） |
 | 工具链 | 历史中一段仅由「带 tool_calls 的 assistant 消息」和 ToolResultMessage 组成的连续消息段；遇到 user / 纯文本 assistant / system 消息即结束（英文锚点：tool chain） |
 | 工具链压缩 | 把完整工具链整段替换为「一次伪造的不可调用工具调用（`CompressedToolChain`）+ 携带链摘要的配对工具结果」；可压缩链要求全部 tool_call 已配对结果（进行中的本轮链天然排除）且原始体积达阈值；摘要由工具链摘要 Profile 生成（英文锚点：tool chain compression） |
@@ -242,12 +243,13 @@
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容的 tab 为禁用态不可点击 | tab rail |
-| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共八个 Tab，顺序为聊天、资源、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
+| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共九个 Tab，顺序为聊天、资源、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 内容层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与 iframe 生命周期） | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
+| 媒体输入 Tab | `MediaInputTab` / `[data-tab-panel="media"]` | 显示标题「媒体输入」；中文相册式网格展示当前主会话 History 的独立媒体实例，默认可见图片预览，点击再显示详情和发送开关。关闭时优先转发描述，无可用转发时占位；下一模型请求生效，原媒体展示保留，子会话不纳入 | media input tab |
 | 会话变量池 | `SessionVariableService` / `ws:sessions/<session_id>/variables/` | 会话归属的数字/字符串 JSON 标量文件集合，同级 `.meta` 配置显示与约束；文件为唯一真相，通用文件工具写入、`ReadSessionVariables` 全量读取；单父继承复制，多父按来源分组，非事务且不随聊天重新生成回滚 | session variable pool |
-| 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；右侧注册表共八个 Tab，位于资源 Tab 后；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
+| 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；右侧注册表共九个 Tab，位于媒体输入 Tab 后；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
 | 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |

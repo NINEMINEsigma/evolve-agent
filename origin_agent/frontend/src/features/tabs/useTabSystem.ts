@@ -17,6 +17,7 @@ export function useTabSystem(ws: WebSocketState) {
     () => ({
       chat: true,
       resources: true,
+      media: Boolean(ws.sessionId),
       variables: Boolean(ws.sessionId),
       subagents: Object.keys(ws.subagentSessions).length > 0,
       characters: true,

@@ -22,7 +22,7 @@ import sys
 import uuid
 from pathlib import Path
 from typing import * # type: ignore
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from pydantic import BaseModel, ValidationError
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
@@ -58,6 +58,10 @@ from entity.constant import (
     LOCAL_FONT_MIME_TYPES,
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
     SESSION_HISTORY_PAGE_MAX_LIMIT,
+    SESSION_MEDIA_DEFAULT_OFFSET,
+    SESSION_MEDIA_DEFAULT_LIMIT,
+    SESSION_MEDIA_MAX_LIMIT,
+    SESSION_MEDIA_ID_PATTERN,
     WEBSOCKET_CLOSE_SESSION_DELETED,
     VISUAL_RAW_PARAM,
     VISUAL_PROBE_PARAM,
@@ -67,6 +71,9 @@ from entity.constant import (
     VISUAL_VERSION_HEADER,
 )
 from entity.puretype import (
+    SessionMediaListResponse,
+    SessionMediaUpdateRequest,
+    SessionMediaUpdateResponse,
     SessionStatus,
     SessionVariablePoolResponse,
     ClientInfo,
@@ -114,6 +121,13 @@ from entity.puretype import (
     SubAgentSnapshotResponse,
     SubAgentUpdate,
 )
+from entity.messages import ImageBlock, VideoBlock
+from entry.history_media import (
+    HistoryMediaConflictError,
+    HistoryMediaNotFoundError,
+    HistoryMediaPreviewError,
+    decode_media_preview,
+)
 from component.approval.system import ApprovalSystem
 from entry.agent_sink import FrontendSink
 from system.llm_profile_store import ProfileConflictError, ProfileNotFoundError
@@ -129,6 +143,7 @@ from system.sandbox import (
 if TYPE_CHECKING:
     from system.application import Application
     from entry.parent_agent_loop import ParentAgentLoop
+    from entry.base_agent_loop import IMainSessionLoop
     from gateway.session_manager import SessionManager
 
 from gateway.session_manager import SessionManager
@@ -752,6 +767,93 @@ async def get_session_history_resources(session_id: str):
     if loop is None:
         raise HTTPException(status_code=404, detail="agent loop not ready")
     return loop.loop.get_session_history_resources()
+
+
+def _require_media_loop(session_id: str, *, writable: bool) -> IMainSessionLoop:
+    """控制只访问现存主会话 Loop，绝不恢复空会话或另读活动磁盘副本。"""
+    from system.application import Application
+    _admit_business_http()
+    manager = Application.current().get_system(SessionManager)
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    info = manager.get(session_id)
+    if info is None:
+        raise RuntimeError("Existing session has no metadata")
+    if writable and info.status == SessionStatus.archived:
+        raise HTTPException(status_code=403, detail="Archived session media cannot be changed")
+    loop = manager.get_loop(session_id)
+    if loop is None:
+        raise HTTPException(status_code=409, detail="Session connection is not ready. Open the session and refresh.")
+    if loop.loop.session_id != session_id:
+        raise HTTPException(status_code=409, detail="Session is rotating; refresh the current session")
+    return loop
+
+
+def _validate_media_id(media_id: str) -> None:
+    if re.fullmatch(SESSION_MEDIA_ID_PATTERN, media_id) is None:
+        raise HTTPException(status_code=400, detail="Invalid media instance identity")
+
+
+@router.get("/api/sessions/{session_id}/history/media")
+async def get_session_media(
+    session_id: str, response: Response,
+    offset: int = SESSION_MEDIA_DEFAULT_OFFSET, limit: int = SESSION_MEDIA_DEFAULT_LIMIT,
+) -> SessionMediaListResponse:
+    if offset < 0 or limit < 1 or limit > SESSION_MEDIA_MAX_LIMIT:
+        raise HTTPException(status_code=400, detail="Invalid media page range")
+    loop = _require_media_loop(session_id, writable=False)
+    response.headers["Cache-Control"] = "no-store"
+    from system.application import Application
+    info = Application.current().get_system(SessionManager).get(session_id)
+    if info is None:
+        raise RuntimeError("Existing session has no metadata")
+    return loop.loop.get_session_media(
+        offset=offset, limit=limit, editable=info.status != SessionStatus.archived,
+    )
+
+
+@router.put("/api/sessions/{session_id}/history/media/{media_id}")
+async def update_session_media(
+    session_id: str, media_id: str, req: Request, response: Response,
+) -> SessionMediaUpdateResponse:
+    _admit_business_http()
+    _validate_media_id(media_id)
+    payload = await _parse_request_model(req, SessionMediaUpdateRequest)
+    # JSON准备期间会话可能旋转/删除；再次定位后同步保存，无await提交间隙。
+    loop = _require_media_loop(session_id, writable=True)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return loop.loop.set_session_media_enabled(
+            media_id, payload.send_multimodal, payload.expected_send_multimodal,
+        )
+    except HistoryMediaNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HistoryMediaConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api/sessions/{session_id}/history/media/{media_id}/content")
+async def get_session_media_content(session_id: str, media_id: str) -> Response:
+    _validate_media_id(media_id)
+    loop = _require_media_loop(session_id, writable=False)
+    try:
+        block = loop.loop.get_session_media_block(media_id)
+        headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+        if isinstance(block, (ImageBlock, VideoBlock)):
+            url = block.image_url if isinstance(block, ImageBlock) else block.video_url
+            if not url.startswith("data:"):
+                parsed = urlsplit(url)
+                if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                    raise HistoryMediaPreviewError("Media preview URL is not supported", 415)
+                return RedirectResponse(url=url, status_code=307, headers=headers)
+        content, mime_type = decode_media_preview(block)
+        if mime_type == "image/svg+xml":
+            headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        return Response(content=content, media_type=mime_type, headers=headers)
+    except HistoryMediaNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HistoryMediaPreviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.put("/api/sessions/{session_id}/messages/{message_index}")

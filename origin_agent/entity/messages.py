@@ -31,7 +31,17 @@ class TextBlock(MessageBlock):
         }
 
 
-class ImageBlock(MessageBlock):
+class MediaBlock(MessageBlock):
+    """持久媒体实例；wire format 只由具体媒体的 as_object 生成。"""
+
+    media_id: str = ""
+    send_multimodal: bool = True
+    source_path: str | None = None
+    source_tool_call_id: str | None = None
+    forward_result_verified: bool = False
+
+
+class ImageBlock(MediaBlock):
     image_url: str = Field(description="The url of the image")
     def as_object(self) -> dict:
         return {
@@ -42,7 +52,7 @@ class ImageBlock(MessageBlock):
         }
 
 
-class VideoBlock(MessageBlock):
+class VideoBlock(MediaBlock):
     video_url: str = Field(description="The url of the video")
     def as_object(self) -> dict:
         return {
@@ -53,7 +63,7 @@ class VideoBlock(MessageBlock):
         }
 
 
-class AudioBlock(MessageBlock):
+class AudioBlock(MediaBlock):
     data: str = Field(description="Base64-encoded audio data (no data URL prefix)")
     format: str = Field(description="Audio format suffix: wav, mp3")
 
@@ -318,7 +328,7 @@ class ToolResultMessage(CharacterMessage):
             role=Role.TOOL,
             character_name=character_name,
             tool_call_id=tool_call_id,
-            content=tool_result_to_content(result),
+            content=tool_result_to_content(result, tool_call_id=tool_call_id),
         )
 
 

@@ -311,6 +311,20 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 ---
 
+## 主会话媒体输入与每请求准备
+
+`history_media.py`提供媒体实例遍历、缺身份归一化、稳定ID定位、轻量分页、候选History及按需预览解析，无Application查询或I/O。控制对象仅为list正文的ImageBlock/AudioBlock/VideoBlock，不扫描Markdown或原工具dict中的文本载荷，不按文件内容去重。
+
+BaseAgentLoop公开 `ensure_media_identity`、`get_session_media`、`get_session_media_block`、`set_session_media_enabled`、`commit_media_description`。身份补齐先保存；开关/成功描述用 `_persist_history_value` 保存候选后更新权威原块，不替换live消息引用，不在处理锁外等整次回复，不在线程池改live History。失败沿已有HistoryPersistenceError上报。正文编辑只有同位置同载荷媒体沿用原实例，否则新实例默认开启。
+
+`multimodal.py::PreparedMultimodalRequest.capture` 在首个await前浅复制消息/块，固定send_multimodal和可信缓存；`prepare_main_multimodal_request`对开启块按tool/user能力直传或转发，对关闭块优先可信描述、可用单跳转发、明确不可用占位，其他错误继续失败。全关闭不做主模型探针。源视图一直保留原媒体，不能把准备后的文字视图赋回循环messages/full_messages。
+
+ParentAgentLoop将最后用户消息按对象身份重连到请求副本，保留动态后缀；MultiAgentWorker仍传None，保持现有后缀语义。描述迟到提交先验证sid/History/实例仍有效，使用最新开关，仅更新成功缓存；不能重建被删除的实例。旧未证明成功的描述不作为可信缓存，已验证描述按实例first-success-wins。
+
+不含子Agent或临时Agent独立历史，不改变原工具结果配对、History整体存储、压缩与旋转策略。原始媒体和前端展示保持，媒体输入Tab的开关从保存后的下一模型请求生效。源码已实施，人工验收/构建尚未运行。
+
+---
+
 ## 与子代理的关系
 
 `ParentAgentLoop` 通过 `main.py` 中挂载的 `SubAgentOrchestrator` 创建子 Agent。子 Agent 本身也是 `BasePrivateChatAgentLoop` 的实现（`SubAgentLoop`），但通过 `ParentAgentSink` 将事件路由回父会话的前端。详见 `../subagent/DEV-README.md`。

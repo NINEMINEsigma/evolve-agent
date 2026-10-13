@@ -1,0 +1,6 @@
+[Media content not provided]
+Media type: {{media_type}}
+History media instance: {{media_id}}
+Logical source: {{source_path}}
+Reason: {{reason}}
+Direct multimodal sending is disabled for this independent History media instance, and no usable forwarded description is available. The original media remains in History and in the frontend display. You have not received its image, audio, or video content in this request; do not invent observations. If direct analysis is needed, ask the user to enable this instance in the media input tab. A new Read creates a separate instance that is enabled by default; it does not restore this instance's setting.

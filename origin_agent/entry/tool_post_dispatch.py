@@ -85,9 +85,9 @@ def prepare_tool_result(
         consumed = result.pop("consumed_client_message_ids", None)
         follow_up = None
         if "_user_blocks" in result:
-            follow_up, content = tool_result_to_follow_up(result, character_name)
+            follow_up, content = tool_result_to_follow_up(result, character_name, tool_call_id=tool_call_id)
         else:
-            content = tool_result_to_content(result)
+            content = tool_result_to_content(result, tool_call_id=tool_call_id)
         message = ToolResultMessage(role=Role.TOOL, character_name=character_name,
                                     tool_call_id=tool_call_id, content=content)
         message._follow_up_messages = follow_up

@@ -41,7 +41,7 @@ from entry.history_projection import history_row_id, has_visible_history_message
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
-from entry.agent_support.multimodal import preprocess_multimodal_blocks
+from entry.agent_support.multimodal import prepare_main_multimodal_request
 import asyncio
 
 if TYPE_CHECKING:
@@ -262,8 +262,8 @@ class MultiAgentWorker:
                 llm_profile=self._llm_profile,
             )
             try:
-                full_messages = await preprocess_multimodal_blocks(
-                    full_messages, _ctx, self._loop.loop.save_history,
+                request = await prepare_main_multimodal_request(
+                    full_messages, _ctx, last_user_message=None,
                 )
             except Exception as exc:
                 if requires_lifecycle_propagation(exc):
@@ -289,7 +289,7 @@ class MultiAgentWorker:
             try:
                 resp = await self._stream_consumer.consume(
                     self._loop.loop.session_id,
-                    full_messages,
+                    request.messages,
                     self._tools,
                     stream_id,
                     on_first_chunk=_mark_streaming,

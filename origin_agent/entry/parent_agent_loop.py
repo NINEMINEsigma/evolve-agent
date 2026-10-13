@@ -63,7 +63,8 @@ from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
     summarize_message_for_log,
-    preprocess_multimodal_blocks,
+    prepare_main_multimodal_request,
+    PreparedMultimodalRequest,
     ModalityForwardUnavailableError,
 )
 from entry.session_manager import LoopSessionManager
@@ -464,7 +465,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 # 探针/转发途中的 provider 错误 → 降级为用户可见错误，不穿透炸轮次。
                 stream_id = uuid.uuid4().hex[:12]
                 try:
-                    messages = await self._preprocess_multimodal_blocks(
+                    request = await self._prepare_multimodal_request(
                         sid, messages, round_id,
                     )
                 except ModalityForwardUnavailableError as exc:
@@ -503,10 +504,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 try:
                     resp = await self._stream_consumer.consume(
-                        sid, messages,
+                        sid, request.messages,
                         self._get_tool_definitions(),
                         stream_id,
-                        last_user_message=self._history.last_user_message,
+                        last_user_message=request.last_user_message,
                         on_first_chunk=_mark_streaming,
                     )
                 except asyncio.CancelledError:
@@ -754,16 +755,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return ""
 
     # ========================================================================
-    # 多模态块预检（委托给 multimodal.preprocess_multimodal_blocks）
+    # 主会话每请求准备：媒体开关、能力路由与最后用户消息引用快照。
     # ========================================================================
 
-    async def _preprocess_multimodal_blocks(
+    async def _prepare_multimodal_request(
         self,
         sid: str,
         messages: list[BaseMessage],
         round_id: str,
-    ) -> list[BaseMessage]:
-        """预检多模态块：委托给 multimodal.preprocess_multimodal_blocks 公共函数。"""
+    ) -> PreparedMultimodalRequest:
+        """请求视图不能覆盖原消息列表，重新开启才能恢复原媒体。"""
         context = ToolContext(
             loop=self,
             session_id=sid,
@@ -771,7 +772,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             character_name=self.current_character_agent,
             llm_profile=self.active_llm_profile,
         )
-        return await preprocess_multimodal_blocks(messages, context, self.save_history)
+        return await prepare_main_multimodal_request(
+            messages, context, last_user_message=self._history.last_user_message,
+        )
 
     # ========================================================================
     # 历史 / 消息构建

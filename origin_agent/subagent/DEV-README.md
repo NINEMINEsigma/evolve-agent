@@ -250,3 +250,8 @@ TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe�
 - 恢复时：`RunSubAgent` 只有显式传入逻辑 `history_path` 才通过 `easysave.load()` 恢复 `.es` 历史。
 - 角色是否长期保留历史由 Agent 自行将临时文件移动到角色目录或其他 `ws:` 路径。
 
+### 主会话媒体输入控制的排除范围
+
+媒体输入Tab只管理当前主会话History的独立媒体实例，普通子Agent和临时Agent的独立History不列入、不增加其控制REST，也不把主会话关闭开关传播到子会话模型请求。共享消息类型新增MediaBlock持久字段不会改变as_object的客户端wire输出；临时Agent仍不持久化。多Agent模式参与者使用主会话共享History，因此遵守该主会话媒体开关，但其动态后缀注入仍保持既有None语义。原显式ReadForward用途与子Agent工具权限不变。
+
+

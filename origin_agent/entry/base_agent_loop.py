@@ -27,6 +27,8 @@ from entity.puretype import (
     SessionHistorySkeletonResponse,
     SessionHistoryPageResponse,
     SessionHistoryResourcesResponse,
+    SessionMediaListResponse,
+    SessionMediaUpdateResponse,
     TokenUsageRecord,
     MessageContent,
     LLMProfile,
@@ -52,6 +54,7 @@ from entity.messages import (
     CharacterConversationMessage,
     CharacterMessage,
     MessageBlock,
+    MediaBlock,
     TextBlock,
 )
 from entity.constant import (
@@ -72,6 +75,16 @@ from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_serializable,
     extract_tool_call_meta,
+)
+from entry.history_media import (
+    HistoryMediaConflictError,
+    HistoryMediaNotFoundError,
+    build_media_history_candidate,
+    ensure_history_media_identity,
+    find_history_media,
+    project_history_media,
+    project_media_item,
+    reuse_unchanged_media_blocks,
 )
 from system.session_store import SessionStore, HistoryPersistenceError
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
@@ -683,18 +696,92 @@ class BaseAgentLoop(ABC):
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
         self.session_id = session_id
 
-    def save_history(self, session_id: str) -> None:
-        """将当前 History 持久化到磁盘。"""
+    def _persist_history_value(self, session_id: str, history: History) -> None:
+        """严格保存指定候选；失败遵守当前 History 生命周期责任。"""
         if self._history_failure is not None:
             raise self._history_failure
         if self._session_store is None:
-            return
+            raise LifecycleFailure("History submission requires a session store")
         try:
-            self._session_store.write_history(session_id, self._history)
+            self._session_store.write_history(session_id, history)
         except HistoryPersistenceError as error:
             self._history_failure = error
             self.app.get_system(RuntimeSystem).record_failure(error)
             raise
+
+    def save_history(self, session_id: str) -> None:
+        """保存正式 History；子会话无存储时仍不增加持久化。"""
+        if self._history_failure is not None:
+            raise self._history_failure
+        if self._session_store is None:
+            return
+        ensure_history_media_identity(self._history)
+        self._persist_history_value(session_id, self._history)
+
+    def ensure_media_identity(self) -> None:
+        """旧身份补齐必须保存成功后才能参与控制或模型请求。"""
+        if self._history_failure is not None:
+            raise self._history_failure
+        if ensure_history_media_identity(self._history):
+            self._persist_history_value(self.session_id, self._history)
+
+    def get_session_media(
+        self, *, offset: int, limit: int, editable: bool,
+    ) -> SessionMediaListResponse:
+        self.ensure_media_identity()
+        return project_history_media(
+            self._history, self.session_id, offset=offset, limit=limit, editable=editable,
+        )
+
+    def get_session_media_block(self, media_id: str) -> MediaBlock:
+        self.ensure_media_identity()
+        return find_history_media(self._history, media_id).block.model_copy()
+
+    def set_session_media_enabled(
+        self, media_id: str, send_multimodal: bool, expected_send_multimodal: bool,
+    ) -> SessionMediaUpdateResponse:
+        """候选先写盘，再修改原实例；不等待完整回复的处理锁。"""
+        self.ensure_media_identity()
+        occurrence = find_history_media(self._history, media_id)
+        block = occurrence.block
+        if block.send_multimodal != send_multimodal:
+            if block.send_multimodal != expected_send_multimodal:
+                raise HistoryMediaConflictError("Media sending state changed; refresh before retrying")
+            replacement = block.model_copy(update={"send_multimodal": send_multimodal})
+            candidate = build_media_history_candidate(self._history, occurrence, replacement)
+            self._persist_history_value(self.session_id, candidate)
+            block.send_multimodal = send_multimodal
+        return SessionMediaUpdateResponse(
+            session_id=self.session_id, item=project_media_item(occurrence),
+        )
+
+    def commit_media_description(
+        self, expected_session_id: str, expected_history: History,
+        media_id: str, description: str,
+    ) -> bool:
+        """迟到结果只改现存实例缓存，绝不覆盖请求期间修改的发送开关。"""
+        if not description.strip():
+            raise ValueError("A verified media description must not be empty")
+        if self.session_id != expected_session_id or self._history is not expected_history:
+            return False
+        self.ensure_media_identity()
+        try:
+            occurrence = find_history_media(self._history, media_id)
+        except HistoryMediaNotFoundError:
+            return False
+        block = occurrence.block
+        if block.forward_result_verified and block.forward_result_content and block.forward_result_content.strip():
+            return False
+        replacement = block.model_copy(update={
+            "forward_result_content": description,
+            "forward_result_verified": True,
+        })
+        candidate = build_media_history_candidate(self._history, occurrence, replacement)
+        self._persist_history_value(self.session_id, candidate)
+        block.forward_result_content = description
+        block.forward_result_verified = True
+        return True
+
 
     def store_tool_result(self, prepared: PreparedToolResult) -> int:
         """同步提交真实消息及其输入预订；成功保存之前不得回显。
@@ -1019,7 +1106,11 @@ class BaseAgentLoop(ABC):
         updates: dict = {}
         if content is not None:
             if isinstance(content, list):
-                updates["content"] = blocks_from_dicts(content)
+                replacement_blocks = blocks_from_dicts(content)
+                updates["content"] = (
+                    reuse_unchanged_media_blocks(msg.content, replacement_blocks)
+                    if isinstance(msg.content, list) else replacement_blocks
+                )
             else:
                 updates["content"] = content
         if visible_characters is not None:

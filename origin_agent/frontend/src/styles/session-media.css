@@ -1,0 +1,65 @@
+/* 中文相册式媒体输入：缩略资源网格与独立详情窗，不影响聊天或其他Tab。 */
+.session-media-tab { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.session-media-content { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 32px; }
+.session-media-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.session-media-toolbar h2 { margin: 0 0 4px; font-size: 20px; }
+.session-media-toolbar span, .session-media-note { font-size: 13px; color: var(--text-secondary); }
+.session-media-note { line-height: 1.65; }
+.session-media-toolbar button, .session-media-pagination button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-elevated); cursor: pointer; }
+.session-media-toolbar button:disabled, .session-media-pagination button:disabled { opacity: .55; cursor: default; }
+.session-media-tab button:focus-visible, .session-media-modal-root button:focus-visible, .session-media-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.session-media-warning { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
+.session-media-warning p { margin: 0 0 8px; }
+.session-media-empty { padding: 24px 12px; color: var(--text-secondary); text-align: center; }
+.session-media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 16px 12px; margin: 20px 0; }
+.session-media-tile { display: block; min-width: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.session-media-tile-image { display: block; position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 8px; background: var(--bg-elevated); }
+.session-media-tile:hover .session-media-tile-image { outline: 1px solid var(--accent); outline-offset: -1px; }
+.session-media-tile-name { display: block; margin-top: 7px; padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; line-height: 1.5; }
+.session-media-type-badge, .session-media-send-badge { position: absolute; max-width: calc(100% - 16px); padding: 3px 6px; border-radius: 4px; font-size: 10px; line-height: 1.3; background: var(--bg-secondary); color: var(--text-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
+.session-media-type-badge { top: 8px; left: 8px; }
+.session-media-send-badge { bottom: 8px; right: 8px; color: var(--accent); }
+.session-media-tile.is-disabled .session-media-send-badge { color: var(--text-secondary); }
+.session-media-send-badge.has-error { border: 1px solid var(--accent); }
+.session-media-preview-view { display: block; position: relative; width: 100%; background: var(--bg-elevated); overflow: hidden; }
+.session-media-preview-view.is-thumbnail { height: 100%; }
+.session-media-preview-view img, .session-media-preview-view video { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.session-media-preview-view .is-loaded { opacity: 1; }
+.session-media-preview-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; pointer-events: none; color: var(--text-secondary); text-align: center; font-size: 12px; }
+.session-media-type-icon { flex-shrink: 0; width: 48px; height: 48px; opacity: .8; }
+.session-media-preview-view.is-thumbnail .session-media-preview-placeholder span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.session-media-preview-view.is-detail { height: clamp(240px, 58vh, 640px); border-radius: 8px; }
+.session-media-preview-view.is-detail img, .session-media-preview-view.is-detail video { object-fit: contain; }
+.session-media-preview-view.is-detail video { opacity: 1; }
+.session-media-preview-view.is-detail.is-audio { display: flex; flex-direction: column; justify-content: center; padding: 24px; min-height: 160px; height: auto; }
+.session-media-preview-view.is-detail audio { width: 100%; }
+.session-media-pagination { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 24px; }
+.session-media-pagination span { color: var(--text-secondary); font-size: 13px; }
+.session-media-modal-root { color: var(--text-primary); }
+.session-media-modal-root .session-media-details-window { width: min(1120px, calc(100vw - 32px)); max-width: 1120px; max-height: min(88vh, 960px); padding: 20px; }
+.session-media-details-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); gap: 24px; }
+.session-media-details-preview { align-self: start; position: sticky; top: 0; min-width: 0; }
+.session-media-details-info { min-width: 0; }
+.session-media-settings { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.session-media-switch { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 8px; font-size: 14px; }
+.session-media-switch input { margin-top: 3px; accent-color: var(--accent); }
+.session-media-setting-state { margin: 6px 0; font-size: 12px; color: var(--accent); }
+.session-media-details-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; margin: 20px 0 0; font-size: 12px; line-height: 1.6; }
+.session-media-details-fields dt { color: var(--text-secondary); }
+.session-media-details-fields dd { margin: 0; overflow-wrap: anywhere; }
+.session-media-details-fields code { font-size: 11px; }
+.session-media-error-details { margin-top: 8px; }
+.session-media-error-details summary { cursor: pointer; }
+.session-media-error-details pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+@media (max-width: 900px) {
+  .session-media-details-layout { grid-template-columns: 1fr; gap: 20px; }
+  .session-media-details-preview { position: static; }
+  .session-media-preview-view.is-detail { height: min(48vh, 420px); }
+}
+@media (max-width: 600px) {
+  .session-media-content { padding: 12px 12px 24px; }
+  .session-media-toolbar { align-items: flex-start; }
+  .session-media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 8px; }
+  .session-media-modal-root .session-media-details-window { padding: 16px; max-height: 90vh; }
+  .session-media-details-fields { gap: 8px 10px; }
+}

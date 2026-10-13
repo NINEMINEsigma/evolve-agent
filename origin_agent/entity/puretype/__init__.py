@@ -39,6 +39,12 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
 所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
 """
 
+from .session_media import (
+    SessionMediaItem,
+    SessionMediaListResponse,
+    SessionMediaUpdateRequest,
+    SessionMediaUpdateResponse,
+)
 from .session_variables import (
     SessionVariableFileIdentity, SessionVariableDirectoryIdentity,
     SessionVariableMetadata, SessionVariableIssue, SessionVariableEntry,
@@ -89,6 +95,7 @@ from .metadata import (
     ToolchainSummaryProfileMutationResponse,
 )
 from .modality import (
+    ModalityDescriptionResult,
     ModalityType,
     ModalityProfileState,
     ModalityProfileUpdateRequest,
@@ -245,6 +252,11 @@ from .agentspace import (
 )
 
 __all__ = [
+    "SessionMediaItem",
+    "SessionMediaListResponse",
+    "SessionMediaUpdateRequest",
+    "SessionMediaUpdateResponse",
+    "ModalityDescriptionResult",
     "SessionVariableFileIdentity", "SessionVariableDirectoryIdentity",
     "SessionVariableMetadata", "SessionVariableIssue", "SessionVariableEntry",
     "SessionVariablePoolResponse", "SessionVariableSnapshotNode",

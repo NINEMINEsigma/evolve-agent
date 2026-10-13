@@ -286,6 +286,18 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 
 ---
 
+## Read媒体来源与主会话发送开关
+
+Read原有能力路由、审批与返回结构保持；`prepare_tool_result`把tool_call_id传给 `tool_result_to_content` / `tool_result_to_follow_up`，实际媒体块记录逻辑path和来源工具ID，不采信absolute_path。user路径follow-up虽然是system角色用户消息，也有可定位的独立媒体实例；客户端传入的内部media_id/send_multimodal/verified不被blocks_from_dicts采纳。
+
+主会话媒体输入Tab控制已经进入History的独立块，不禁止重新Read；每次重新Read的新块默认开启。关闭不会删除原媒体，不影响自定义ReadForward明确把媒体发给指定Profile的用途，也不改变工具集权限或审批。
+
+ModalityCapabilitySystem新 `describe_media_block`返回结构化成功描述/明确不可用；只对明确UnsupportedModality或窄400模态拒绝允许不可用，网络/认证/超时/未知400/空描述失败。主请求准备只缓存成功描述，不再把旧错误模板当成功文字。原Read的 `forward_modality_to_ref_profile`仍返回原str/错误模板协议，正式媒体描述请求复用共享单跳调用，旧空媒体文字提示分支保留；不把工具旧返回格式扩展为本次新REST类型。
+
+旧描述字段未证明成功时，主会话需要描述会重新取得一次成功结果。关闭仍允许向转发模型发原媒体，不是所有模型的隐私禁传。已实施，未运行验证。
+
+---
+
 ## 会话视觉资源重定向
 
 `stage/`、`site/` 与 `chat-style/` 的源目录可以使用同级 `.meta` 文件的 `[redirect]` 字段复用其他逻辑目录。服务端只解析源目录一次，合法目标由稳定视觉入口通过 HTTP 307 使用；缺失或非法配置静默回退源目录。前端 Hook 不解析 `.meta`，只消费最终入口并通过 Agentspace 事件与 HEAD 版本探测刷新。会话状态 REST 和根目录 `custom_hooks/session_meta_hook.py` 可读取三项非持久化视觉资源状态。`Read` 对源目录保留原始元数据语义，并只将非法 `redirect` 原因放入 `meta.redirect`。

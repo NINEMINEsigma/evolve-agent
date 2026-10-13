@@ -86,6 +86,16 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 ---
 
+### 主会话媒体输入的上层边界
+
+主会话每请求由 `entry.agent_support.multimodal.prepare_main_multimodal_request`固定独立媒体实例开关，发送原块、已验证描述或明确未提供内容的TextBlock；原History媒体始终保留。客户端收到的MediaBlock.as_object仍为原图片/音频/视频wire结构，不携带media_id、开关或内部来源字段，不在格式转换器静默删媒体。
+
+关闭时的描述经ModalityCapabilitySystem.describe_media_block单跳取得，成功与明确不可用分开；网络/认证/超时/未知400/空描述继续失败。活动Profile的对应引用优先，全局仅补空引用；明确活动引用不可用不改全局目标。URL直接由目标客户端协议处理，服务器不额外抓取。旧ReadForward显式转发与工具原str返回契约保持。
+
+普通主会话准备副本后将last_user_message精确重连，保持当前后缀；多Agent继续None，不附带改变后缀注入。子Agent/临时Agent独立调用未接入主会话控制。以上为源码实施约定，未运行验证。
+
+---
+
 ## 工具注册表
 
 ### `abstract/tools/registry.py`
