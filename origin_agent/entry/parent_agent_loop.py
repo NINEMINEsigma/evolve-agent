@@ -57,6 +57,7 @@ from system.prompt import (
     build_session_chat_style_block,
     build_session_site_block,
     build_session_stage_block,
+    build_session_variables_block,
 )
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
@@ -231,6 +232,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         stage_block = build_session_stage_block(self.session_id, owner="self")
         if stage_block:
             prompts.append(stage_block)
+        variables_block = build_session_variables_block(self.session_id)
+        if variables_block:
+            prompts.append(variables_block)
         chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
         if chat_style_block:
             prompts.append(chat_style_block)

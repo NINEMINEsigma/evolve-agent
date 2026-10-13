@@ -206,6 +206,14 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 `/regenerate` 与 `/resume` 不在 Gateway 重复登记活动 task；对应 Loop 在取得 `_process_lock` 后自行登记当前回复，并在完整收尾后注销。
 
+### 会话变量池
+
+`GET /api/sessions/{id}/variables`返回SessionVariablePoolResponse，直接复用AgentspaceService.session_variables.read_pool，与ReadSessionVariables的值/meta/issues一致，不创建Loop。no-store、RUNNING准入、读取前后存在性/删除中复检；归档及随意聊聊可读，已删除/删除中404，即使留下变量文件也不会复活会话。
+
+有界读取通过run_in_threadpool执行，HTTP返回BaseModel而非提前降级。已知业务错误映射400（输入/不安全根）、403（根/目录访问）、409（源变化）、413（整池预算）；detail为code/message/path。条目输入问题与constraint保留在成功诊断响应，scan_complete=false明确不完整；意外异常直接交FastAPI，不变成空池。不新增WS类型、SSE连接或独立watcher。
+
+变量存储在工作空间`ws:sessions/<id>/variables/`，与History存储根不同。单父复制、多父来源分组由Loop初始化路径协调；正常永久删除仍只沿既有规则清理聊天目录/索引及资源，不自动清理变量文件。
+
 ### 工具资源与子代理
 
 | 方法 | 端点 | 说明 |

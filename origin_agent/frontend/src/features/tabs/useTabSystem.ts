@@ -17,13 +17,14 @@ export function useTabSystem(ws: WebSocketState) {
     () => ({
       chat: true,
       resources: true,
+      variables: Boolean(ws.sessionId),
       subagents: Object.keys(ws.subagentSessions).length > 0,
       characters: true,
       site: siteStatus.status === "ready",
       llm: true,
       sandbox: true,
     }),
-    [ws.subagentSessions, siteStatus.status],
+    [ws.sessionId, ws.subagentSessions, siteStatus.status],
   );
 
   // Session switch always returns to the chat tab.

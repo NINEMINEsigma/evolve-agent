@@ -68,6 +68,7 @@ from entity.constant import (
 )
 from entity.puretype import (
     SessionStatus,
+    SessionVariablePoolResponse,
     ClientInfo,
     CharacterAvatarsResponse,
     CharacterProfilesResponse,
@@ -411,6 +412,42 @@ async def get_session_tool_resources(session_id: str) -> SessionToolResources:
         update={"dynamic_endpoints": endpoints}
     )
     return resources
+
+
+@router.get("/api/sessions/{session_id}/variables")
+async def get_session_variables(session_id: str, response: Response) -> SessionVariablePoolResponse:
+    """只读会话变量池，不创建 Loop；与 Agent 全量读取复用同一解析服务。"""
+    from starlette.concurrency import run_in_threadpool
+    from system.application import Application
+    from system.agentspace import AgentspaceService
+    from system.session_variables import (
+        SessionVariableInputError, SessionVariableAccessError,
+        SessionVariableLimitError, SessionVariableConflictError,
+    )
+
+    _admit_business_http()
+    manager = _get_sm()
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    response.headers["Cache-Control"] = "no-store"
+    service = Application.current().get_system(AgentspaceService).session_variables
+    try:
+        result = await run_in_threadpool(service.read_pool, session_id)
+    except (SessionVariableInputError, SessionVariableAccessError,
+            SessionVariableLimitError, SessionVariableConflictError) as exc:
+        status = 400
+        if isinstance(exc, SessionVariableAccessError):
+            status = 403
+        elif isinstance(exc, SessionVariableLimitError):
+            status = 413
+        elif isinstance(exc, SessionVariableConflictError):
+            status = 409
+        raise HTTPException(status_code=status, detail={
+            "code": exc.code, "message": str(exc), "path": exc.logical_path,
+        }) from exc
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return result
 
 
 @router.get("/api/sessions/{session_id}/status")

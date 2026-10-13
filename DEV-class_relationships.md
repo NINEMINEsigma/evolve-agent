@@ -1059,6 +1059,14 @@ classDiagram
 
 ---
 
+## 会话变量池叶服务（2026-10-13）
+
+`AgentspaceService`新增protected字段`_session_variables: SessionVariableService | None`，仅由其virtual_awake在取得唯一Sandbox后构造；公开只读`session_variables`属性。无新AsyncSystem、后台Owner、watcher或模块单例，Application拓扑仍为21个System。业务类位于system/session_variables.py，纯字段响应/继承材料位于entity/puretype/session_variables.py，未进入easysave或typeref。
+
+`ReadSessionVariables`及Gateway变量REST经`get_system(AgentspaceService).session_variables.read_pool`调用共享解析；工具通过公开ToolContext.resource_session_id取得主会话归属，并经agentspace_access登记精确文件。Parent/Multi/Sub提示词只用公开构建器追加协议，不读取变量、不新增Loop protected字段；临时Agent空prompt与safe交集不变。
+
+`terminate_and_rotate_session`和BaseAgentLoop.merge_sessions调用capture_inheritance/install_inheritance，在同步初始化scope内完整复制并复查来源/目标、写History，之后归档。安装失败按独占目录二元身份回收，文件四元身份只用于读取变动检测；取消/History/必要清理失败传播，多个失败异常组保留，提交后错误不删除已提交副本。普通子Agent旧parent_session_id不自动重绑，不把独立文件继承宣称为跨文件事务。正常永久删除不清理工作空间变量文件，History重新生成不回滚变量。上述仅源码实施与静态复核，未运行验证。
+
 ## 关键设计变更记录
 
 > **异步架构迁移（已完成源码实施）**（按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`）：`Application` 继承 `AsyncArchitecture`，不持有服务镜像字段；21 个 framework `AsyncSystem` 由 `Application.start()` 按固定拓扑顺序串行注册，业务系统一律经 `app.get_system(T)` 取得。`LLMProfileStore.locked()` 暴露唯一共享 RLock。`Application.frontend_sink` 等旧属性已移除，全量引用迁移为 `get_system(FrontendSink)`；`SubAgentOrchestrator` 为依赖 `SessionManager` 的 `AsyncSystem`。关闭由 `Application.shutdown()` 统一编排并逆拓扑注销。上述为源码实施与静态审阅结果，尚未运行验证。

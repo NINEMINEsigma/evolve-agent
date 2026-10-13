@@ -39,6 +39,12 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
 所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
 """
 
+from .session_variables import (
+    SessionVariableFileIdentity, SessionVariableDirectoryIdentity,
+    SessionVariableMetadata, SessionVariableIssue, SessionVariableEntry,
+    SessionVariablePoolResponse, SessionVariableSnapshotNode,
+    SessionVariableSourceSnapshot, SessionVariableInheritanceData,
+)
 from ._base import (
     MessageContent,
     TypedMessageContent,
@@ -239,6 +245,10 @@ from .agentspace import (
 )
 
 __all__ = [
+    "SessionVariableFileIdentity", "SessionVariableDirectoryIdentity",
+    "SessionVariableMetadata", "SessionVariableIssue", "SessionVariableEntry",
+    "SessionVariablePoolResponse", "SessionVariableSnapshotNode",
+    "SessionVariableSourceSnapshot", "SessionVariableInheritanceData",
     "MCPBridgeCall",
     "MCPOAuthProviderEntry",
     "ManagedTaskRecord",

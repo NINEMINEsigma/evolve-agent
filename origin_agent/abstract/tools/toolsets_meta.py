@@ -33,6 +33,13 @@ def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
         description="Read, write, edit, delete, copy, move, and search files in logical namespaces.",
         usage_guide="""Filesystem tools operate on logical namespace prefixes (ws:, fork:, fix:, skills:, etc.).
 
+Session variable pool conventions:
+- After loading filesystem, ReadSessionVariables reads the current main session's entire variables directory, including nested groups, raw values, metadata and issues. Sub-agents read their parent pool.
+- Values live in ws:sessions/<main_session_id>/variables/*.json as JSON numbers or strings; sibling <name>.json.meta files configure label, description, min, max, integer, percent and display.
+- Write and PatchEdit modify files directly. Limits only produce diagnostics; they do not clamp values. percent=true displays raw value times 100 with a percent sign.
+- Only the main Agent should settle shared state. Read before writing; concurrent file read-modify-write is not atomic. Regeneration and message deletion do not roll back file effects.
+- A rejected pool limit is an error, not an empty pool. scan_complete=false and item issues must remain visible; repair unsupported paths before relying on complete state.
+
 Multimodal Read conventions:
 - The Read tool can read image, audio, and video files. Multimodal capability is automatically probed on first access — no manual probe call needed.
 - The system probes BOTH tool-message and user-message multimodal paths. Results are cached per model+provider, so probing happens only once per unique model+provider combination.

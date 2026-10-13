@@ -1,0 +1,37 @@
+# Session Variable Pool
+
+{{owner_intro}}
+
+The pool is at `ws:sessions/{{session_id}}/{{variables_dir}}/`. It persists numeric and string state for this main session independently of conversation history. Files are the sole source of truth. Do not invent a remembered balance or infer an exact value from a summary.
+
+## Read and write
+
+Load the `filesystem` toolset before using `ReadSessionVariables`. One call reads every variable, including nested groups, original values, normalized metadata, and diagnostic issues. It has no session selector: it reads this main session, or the parent main session for an ordinary sub-agent.
+
+Use existing `Read`, `Write`, `PatchEdit`, `Copy`, `Move`, and `Delete` file tools to manage the files. There are no special variable write tools. Each variable is a `.json` file containing exactly one JSON number or string. For example, `characters/alice/hp.json` can contain `80`, and `characters/alice/name.json` can contain `"Alice"`. Different directories may contain the same filename. Use JSON escaping for multiline strings. Boolean, null, array, and object values are unsupported.
+
+Metadata goes beside the complete filename: `hp.json.meta`. It uses the ordinary `[key]` section format. Supported keys:
+- `label`: display label, otherwise the filename without `.json`; at most 256 characters.
+- `description`: plain-text description, at most 2048 characters.
+- `min`, `max`: finite browser-safe JSON numeric bounds, checking the stored value.
+- `integer`: lowercase `true` or `false`; missing means false. Mathematically integral values such as 1.0 meet this requirement.
+- `percent`: lowercase `true` or `false`; missing means false. When true, the frontend displays the stored value times 100 with `%`: 0.75 becomes 75%. This does not change the value, bounds, or integer check.
+- `display`: `auto`, `number`, `bar`, or `gauge`. Auto uses a bar if valid distinct min/max exist, otherwise a number. Bars/gauges need valid distinct bounds and otherwise fall back to numbers.
+
+Bounds and integer requirements produce warnings; they never clamp, round, or prevent a file write. Numeric metadata does not apply to strings. Unknown metadata keys are retained as data and never execute code. Keep numbers finite and within absolute value 9007199254740991 for reliable browser display.
+
+## Settlement and consistency
+
+Only the main Agent should settle shared balances and other shared variables. Other participants should propose changes or write their own independent directories. Read current values before settlement, including after regeneration. Ordinary file read-modify-write is not atomic. Existing workspace file locks do not mutually exclude Agents. Reading the entire pool is not a cross-file transaction or a guaranteed same-instant snapshot.
+
+Values and metadata are separate files. A direct file overwrite can temporarily contain incomplete text. Inspect issues instead of assuming an invalid value is zero or a pool is empty. `scan_complete=false` means an unsupported subtree was excluded; report it and repair the affected path before relying on complete state. The frontend Tab is read-only, and strings render as plain text.
+
+Read limits are explicit: 512 variables, 4096 nodes, 16 nested directory levels, 64 KiB per file, 512 KiB aggregate file content, 1 MiB encoded response, and a 2-second soft scan deadline. The tool reports a limit error rather than silently returning only part of the pool. Repair, move unneeded files, or request a separately planned capacity change. Links, Windows junctions, and special files are unsupported.
+
+## Lifecycle
+
+Automatic rotation and single-parent branches copy the complete pool and metadata into the new main session. The copy becomes independent: later writes do not synchronize the old and new pools. A multi-parent merge preserves each source under `sources/<source_session_id>/`; consolidate conflicting gameplay states explicitly afterward. Invalid JSON and metadata are copied as their original bytes; an unreadable, linked, or over-limit file blocks complete inheritance. Finish writes and repair the reported path before retrying. The old session remains unchanged if initialization is rejected; there is no silent data-skipping fallback.
+
+Already running sub-agents keep their old parent session ID after a rotation. Their late writes still go to the old pool and are not automatically included in the new one. Complete variable-changing sub-agent work before rotating, or explicitly reconcile the old directory and restart the role in the new session. Do not assume all sub-agent resources migrated when the main session ID changed.
+
+Regenerating a reply or deleting chat messages does not roll back these files. Avoid repeating a settlement that already changed state. Permanently deleting a session leaves its variable files on disk, just like its stage files; cleanup requires an explicit user or Agent file operation. File existence does not mean a deleted session still exists.

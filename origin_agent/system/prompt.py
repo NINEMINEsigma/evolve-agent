@@ -408,6 +408,29 @@ def build_session_stage_block(
     )
 
 
+def build_session_variables_block(
+    session_id: str, *, owner: Literal["self", "parent"] = "self",
+) -> str:
+    """仅注入变量池协议与逻辑路径，不扫描或注入变量值。"""
+    from entity.constant import SESSION_VARIABLE_TEMPLATE_NAME, SESSION_VARIABLES_DIR_NAME
+
+    if not session_id:
+        return ""
+    template = read_template(SESSION_VARIABLE_TEMPLATE_NAME)
+    if not template:
+        return ""
+    intro = (
+        "You share the PARENT main session's variable pool. The ID below is the parent ID, not your own. "
+        "Propose changes to shared balances to the main Agent; do not independently settle them."
+        if owner == "parent" else
+        "This variable pool belongs to your current main session. All participants share this pool; "
+        "only the main Agent should settle shared state."
+    )
+    return (template.replace("{{owner_intro}}", intro)
+            .replace("{{session_id}}", session_id)
+            .replace("{{variables_dir}}", SESSION_VARIABLES_DIR_NAME))
+
+
 def build_session_chat_style_block(
     session_id: str,
     *,

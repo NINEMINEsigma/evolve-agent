@@ -57,6 +57,7 @@ from system.prompt import (
     build_session_chat_style_block,
     build_session_site_block,
     build_session_stage_block,
+    build_session_variables_block,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,6 +243,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         stage_block = build_session_stage_block(self._parent_session_id, owner="parent")
         if stage_block:
             prompts.append(stage_block)
+        variables_block = build_session_variables_block(self._parent_session_id, owner="parent")
+        if variables_block:
+            prompts.append(variables_block)
         chat_style_block = build_session_chat_style_block(self._parent_session_id, owner="parent")
         if chat_style_block:
             prompts.append(chat_style_block)

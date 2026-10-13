@@ -121,6 +121,10 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 异步分发以 `TaskOwner.run_request` 托管完整 handler 操作，使用 Runtime 的同步接收边界及开始前复查。`close_dispatch` 在 STOPPING 期间仍可调用；`cancel_pending_calls` 取消并等待请求任务与结果交接；`wait_idle` 还等待真实同步工作，不用清表表示结束。超时保留资源并抛出生命周期失败。最终关闭仅在没有活工作时通过独立、受持有的异步任务在线程中执行 `executor.shutdown(wait=True)`；主事件循环不阻塞 join，关闭失败继续传播。
 
+### 会话变量只读注册
+
+`component/tools/session_variables.py` 导出显式register_tools，在filesystem工具集注册safe/EVERY同步工具`ReadSessionVariables`，不新增工具集、UI事件或模块实例。其原生工作由ToolRegistry既有执行器持有，执行结果由服务主动检查UTF-8响应预算，不能把未使用的get_max_result_size查询当截断保障。filesystem仍非默认加载；主/参与/普通子/临时Agent均先通过已有LoadToolset加载，临时Agent不获得写权限。usage_guide说明完整读取、原值/meta/问题结构和主Agent单写者约定。
+
 ### `abstract/tools/discover.py`
 
 `discover_builtin_tools(tools_dir, package_prefix, *, registry, ui_events)` 严格读取并解析候选 `.py`，识别顶层同步 `register_tools` 函数，按路径顺序导入后显式调用。辅助模块正常跳过；旧全局注册表导入、导入期注册、语法/读取/导入/注册错误直接失败。命名冲突未授权覆盖时 ToolRegistry 抛错，不把拒绝注册计为成功。

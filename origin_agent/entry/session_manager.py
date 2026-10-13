@@ -352,6 +352,21 @@ async def terminate_and_rotate_session(
             "Failed to extract tail rounds for session old=%s", old_sid
         )
 
+    from system.application import Application
+    from system.agentspace import AgentspaceService
+    from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
+
+    variable_service = Application.current().get_system(AgentspaceService).session_variables
+    if not session_manager.exists(old_sid) or session_manager.is_session_deleting(old_sid):
+        raise MetadataGenerationError("Source session no longer exists")
+    try:
+        inheritance = variable_service.capture_inheritance([old_sid])
+    except SessionVariableError as exc:
+        raise MetadataGenerationError(
+            f"Variable inheritance rejected ({exc.code}) at {exc.logical_path or variable_service.source_path(old_sid)}: "
+            f"{exc}. Repair or move the affected files, finish pending writes, and retry."
+        ) from exc
+
     new_sid: str | None = None
     try:
         new_sid = session_manager.create_with_context(
@@ -360,31 +375,39 @@ async def terminate_and_rotate_session(
             role=Role.USER,
             loop_meta=loop_meta,
         )
-        session_store.copy_active_profile_name(old_sid, new_sid)
-        session_store.copy_loaded_toolsets(old_sid, new_sid)
-
-        summary_history = History()
-        summary_history.add_message(CharacterConversationMessage(
-            role=Role.USER,
-            character_name=USER_CHARACTER_NAME,
-            content=context,
-            visible_characters=(
-                [current_character_agent] if current_character_agent else None
-            ),
-        ))
-        session_store.write_history(new_sid, summary_history)
-    except Exception as exc:
+        with variable_service.install_inheritance(inheritance, new_sid):
+            session_store.copy_active_profile_name(old_sid, new_sid)
+            session_store.copy_loaded_toolsets(old_sid, new_sid)
+            summary_history = History()
+            summary_history.add_message(CharacterConversationMessage(
+                role=Role.USER,
+                character_name=USER_CHARACTER_NAME,
+                content=context,
+                visible_characters=(
+                    [current_character_agent] if current_character_agent else None
+                ),
+            ))
+            session_store.write_history(new_sid, summary_history)
+            for sid in (old_sid, new_sid):
+                if not session_manager.exists(sid) or session_manager.is_session_deleting(sid):
+                    raise SessionVariableConflictError("Session changed during initialization",
+                                                       logical_path=variable_service.source_path(sid))
+    except BaseException as failure:
         if new_sid is not None:
             try:
                 session_manager.remove(new_sid)
-            except Exception:
-                logger.exception(
-                    "Failed to clean incomplete continuation | session=%s",
-                    new_sid,
-                )
-        raise MetadataGenerationError(
-            f"延续会话初始化失败：{exc}"
-        ) from exc
+            except BaseException as cleanup:
+                cleanup_failure = SessionVariableCleanupFailure("Failed to remove incomplete continuation session")
+                cleanup_failure.__cause__ = cleanup
+                raise BaseExceptionGroup("Continuation initialization and cleanup failed",
+                                         [failure, cleanup_failure]) from None
+        if isinstance(failure, SessionVariableError):
+            raise MetadataGenerationError(
+                f"Variable inheritance rejected ({failure.code}) at {failure.logical_path}: {failure}. "
+                "Repair the affected files and retry; the source session was not archived."
+            ) from failure
+        # 取消、必要写盘/清理失败及意外错误保持原异常，不伪装为业务拒绝。
+        raise
 
     session_manager.archive(old_sid, continuation_sid=new_sid)
 

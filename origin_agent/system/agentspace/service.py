@@ -46,6 +46,7 @@ from system.lifecycle import LifecycleFailure
 from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox, SandboxError
 from system.session_visual_resources import SessionVisualResourceService
+from system.session_variables import SessionVariableService
 from .errors import (
     AgentspaceAlreadyExistsError,
     AgentspaceInvalidPathError,
@@ -85,6 +86,7 @@ class AgentspaceService(AsyncSystem):
         self._trash_store: AgentspaceTrashStore | None = None
         self._watcher: AgentspaceWatcher | None = None
         self._visual_resources: SessionVisualResourceService | None = None
+        self._session_variables: SessionVariableService | None = None
         self._pending_changes: dict[str, str] = {}
         self._pending_lock = threading.Lock()
         self._started = False
@@ -113,6 +115,7 @@ class AgentspaceService(AsyncSystem):
             {AGENTSPACE_TRASH_DIR_NAME, AGENTSPACE_INTERNAL_DIR_NAME},
         )
         self._visual_resources = SessionVisualResourceService(sandbox)
+        self._session_variables = SessionVariableService(sandbox)
         # 初始化失败也必须收尾已经取得的资源；取消不能遗留恢复线程。
         loop = asyncio.get_running_loop()
         self._event_hub.bind_loop(loop)
@@ -192,6 +195,12 @@ class AgentspaceService(AsyncSystem):
         if self._visual_resources is None:
             raise LifecycleFailure("AgentspaceService has not been awakened")
         return self._visual_resources
+
+    @property
+    def session_variables(self) -> SessionVariableService:
+        if self._session_variables is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._session_variables
 
     @property
     def watcher_available(self) -> bool:

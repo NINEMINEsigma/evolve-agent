@@ -41,6 +41,7 @@ from system.prompt import (
     build_session_chat_style_block,
     build_session_site_block,
     build_session_stage_block,
+    build_session_variables_block,
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
@@ -967,6 +968,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
             if chat_style_block:
                 system_prompts = system_prompts + [chat_style_block]
+        variables_block = build_session_variables_block(self.session_id)
+        if variables_block:
+            system_prompts = system_prompts + [variables_block]
         dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
         if dynamic_spaces_block:
             system_prompts = system_prompts + [dynamic_spaces_block]

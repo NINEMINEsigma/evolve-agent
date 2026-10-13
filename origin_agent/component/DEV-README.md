@@ -63,8 +63,15 @@ ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Applicat
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
 | `compress_history.py` | `CompressHistory` | 会话历史压缩：旧轮次替换为 Agent 撰写的会话摘要；保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`，链摘要任一失败则整体失败、历史不变） |
+| `session_variables.py` | `ReadSessionVariables` | filesystem工具集的safe整池只读工具；按ToolContext.resource_session_id读取全部数字/字符串、meta和问题，写入仍使用通用文件工具 |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
+
+### 会话变量工具
+
+`ReadSessionVariables` 位于filesystem工具集，需先LoadToolset加载，safe、EVERY、同步handler由既有ToolRegistry执行器持有。没有会话选择参数，普通子Agent/临时Agent读父主会话池；临时Agent仍仅已加载∩TASKAGENT∩safe。service由`get_system(AgentspaceService).session_variables`取得，读取的每个明确文件登记既有回复轮次接触，不锁整树，不创建UI事件。
+
+返回完整原值、raw_value、raw_metadata、normalized metadata、条目/池级issues及scan_complete；工具与REST复用read_pool。无法完整扫描时显式诊断，池级预算拒绝返回error，不返回伪空列表。写入通过Read/Write/PatchEdit管理`ws:sessions/<sid>/variables/`中的JSON标量与同级.meta，数值限制仅提示，percent=true仅显示×100。主Agent统一共享结算，不提供原子增减或聊天回滚。
 
 ### 多模态能力生命周期（S14）
 

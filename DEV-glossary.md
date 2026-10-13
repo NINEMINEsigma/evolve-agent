@@ -242,10 +242,12 @@
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容的 tab 为禁用态不可点击 | tab rail |
-| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式 tab 注册表（id/标题/图标/render）；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
+| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共八个 Tab，顺序为聊天、资源、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 内容层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与 iframe 生命周期） | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
+| 会话变量池 | `SessionVariableService` / `ws:sessions/<session_id>/variables/` | 会话归属的数字/字符串 JSON 标量文件集合，同级 `.meta` 配置显示与约束；文件为唯一真相，通用文件工具写入、`ReadSessionVariables` 全量读取；单父继承复制，多父按来源分组，非事务且不随聊天重新生成回滚 | session variable pool |
+| 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；右侧注册表共八个 Tab，位于资源 Tab 后；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
 | 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |

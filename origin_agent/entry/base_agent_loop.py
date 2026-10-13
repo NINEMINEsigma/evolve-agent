@@ -777,13 +777,19 @@ class BaseAgentLoop(ABC):
             error,
             exc_info=(type(error), error, error.__traceback__),
         )
+        status_text = CONTEXT_LIMIT_METADATA_FAILURE_STATUS
+        from system.session_metadata import MetadataGenerationError
+        from system.session_variables import SessionVariableError
+        if isinstance(error, MetadataGenerationError) and isinstance(error.__cause__, SessionVariableError):
+            # 变量继承拒绝必须把脱敏逻辑路径与修复指引交给用户，不能仅写日志。
+            status_text = f"{status_text}\n{error}"
         self.append_system_status(
-            CONTEXT_LIMIT_METADATA_FAILURE_STATUS,
+            status_text,
             session_id=session_id,
         )
         await self.get_sink().emit_system_message(
             session_id,
-            CONTEXT_LIMIT_METADATA_FAILURE_STATUS,
+            status_text,
         )
 
     def clear_session(self) -> None:
@@ -1392,22 +1398,58 @@ class BaseAgentLoop(ABC):
                 + "\n\n---\n\n".join(tail_blocks)
             )
 
-        new_sid = sm.create_with_context(
-            context=context,
-            parent_sid=sources[0],
-            parents=sources,
-            role=Role.USER,
-        )
-        self._session_store.copy_active_profile_name(sources[0], new_sid)
+        from system.agentspace import AgentspaceService
+        from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
-        summary_history = History()
-        summary_history.add_message(CharacterConversationMessage(
-            role=Role.USER,
-            character_name=SYSTEM_CHARACTER_NAME,
-            content=context,
-            visible_characters=[self.current_character_agent],
-        ))
-        self._session_store.write_history(new_sid, summary_history)
+        variable_service = self.app.get_system(AgentspaceService).session_variables
+        try:
+            for source_id in sources:
+                if not sm.exists(source_id) or sm.is_session_deleting(source_id):
+                    raise SessionVariableConflictError("Source session no longer exists",
+                                                       logical_path=variable_service.source_path(source_id))
+            inheritance = variable_service.capture_inheritance(sources)
+        except SessionVariableError as exc:
+            return SessionMergeResult(
+                merged=False, sources=sources,
+                error=f"Variable inheritance rejected ({exc.code}) at {exc.logical_path or variable_service.source_path(sources[0])}: {exc}. Repair the affected files and retry.",
+            )
+        new_sid: str | None = None
+        try:
+            new_sid = sm.create_with_context(
+                context=context,
+                parent_sid=sources[0],
+                parents=sources,
+                role=Role.USER,
+            )
+            with variable_service.install_inheritance(inheritance, new_sid):
+                self._session_store.copy_active_profile_name(sources[0], new_sid)
+                summary_history = History()
+                summary_history.add_message(CharacterConversationMessage(
+                    role=Role.USER,
+                    character_name=SYSTEM_CHARACTER_NAME,
+                    content=context,
+                    visible_characters=[self.current_character_agent],
+                ))
+                self._session_store.write_history(new_sid, summary_history)
+                for sid in [*sources, new_sid]:
+                    if not sm.exists(sid) or sm.is_session_deleting(sid):
+                        raise SessionVariableConflictError("Session changed during initialization",
+                                                           logical_path=variable_service.source_path(sid))
+        except BaseException as failure:
+            if new_sid is not None:
+                try:
+                    sm.remove(new_sid)
+                except BaseException as cleanup:
+                    cleanup_failure = SessionVariableCleanupFailure("Failed to remove incomplete merged session")
+                    cleanup_failure.__cause__ = cleanup
+                    raise BaseExceptionGroup("Merge initialization and cleanup failed",
+                                             [failure, cleanup_failure]) from None
+            if isinstance(failure, SessionVariableError):
+                return SessionMergeResult(
+                    merged=False, sources=sources,
+                    error=f"Variable inheritance rejected ({failure.code}) at {failure.logical_path}: {failure}. Repair the affected files and retry.",
+                )
+            raise
 
         for source_id in sources:
             sm.archive(source_id, continuation_sid=new_sid)

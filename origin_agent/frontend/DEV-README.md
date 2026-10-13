@@ -15,7 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与七个 tab 内容层
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与八个 tab 内容层
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
@@ -97,7 +97,7 @@ frontend/
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 七条目（chat/resources/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 八条目（chat/resources/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
 | `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
@@ -115,6 +115,18 @@ frontend/
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
+
+### 会话变量 Tab
+
+右侧Tab注册表共八项，会话变量位于resources之后，sessionId非空即可打开（没有变量仍可查看空态）。`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
+
+`features/sessionVariables/`包含types.ts、api.ts、useSessionVariables.ts、presentation.ts及VariableCard.tsx。typed GET `/api/sessions/<id>/variables`严格解码，15秒截止覆盖fetch与响应正文，解析前后检查时长（不能实时中断同步JSON.parse）；退出Tab/切会话取消请求，代际防旧响应覆盖。激活必重拉，现有chatAgentspaceEventBus文件/移动祖先路径命中后1秒去抖刷新，resync重拉，watcher_error提示降级；不新增长连接/轮询。刷新失败保留同会话旧数据并标过期，404清空旧池。
+
+数字支持number/bar/gauge，auto在有效双边范围下用bar；无范围时显式降级number。percent=true显示原值×100加%，整数/范围检查仍来自服务端原值；clamp只限制绘图比例，越界真实数字常显。原文/meta可展开，输入错误、meta错误、constraint分开显示；scan_complete=false警告目录未完整读取。字符串/描述/原文只渲染React纯文本，不运行HTML/Markdown/脚本。SVG和目录按钮可键盘访问，用户只读，修改由Agent文件工具或已有Agentspace编辑器完成。
+
+首版不提供回滚或原子结算；会话删除后文件留存。256/512KiB规模和1MiB输出等服务端限额明确拒绝，不让前端静默裁剪列表。后端验证由用户执行，尚未运行构建/类型检查。
+
+卡片视图与工具调用卡片一致：默认只显示标签、类型、描述、数值/图形与问题；每张卡片有"原始 JSON"切换按钮，用与工具卡片相同的 `react18-json-view`（JsonView）渲染条目对象（含 raw_value/raw_metadata 原文与规范化字段），不显示文件路径，也没有独立"存储原值与元数据"折叠区。raw_metadata 由服务端去除键值分隔换行后的原文构成，值内部多行保留。
 
 ### 聊天区域
 

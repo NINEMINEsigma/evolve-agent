@@ -55,6 +55,7 @@
   background: var(--bg-secondary);
   z-index: var(--z-content);
   padding-top: 56px; /* keep first button below the floating header hotzone */
+  overflow-y: auto; /* all eight tab icons remain reachable in short viewports */
 }
 
 .tab-rail-btn {

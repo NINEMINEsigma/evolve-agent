@@ -234,6 +234,14 @@ graph TD
 
 ---
 
+## 会话变量共享
+
+普通SubAgentLoop动态注入父主会话的会话变量池协议，目录为`ws:sessions/<parent_session_id>/variables/`。ReadSessionVariables为filesystem里的safe工具，先加载工具集后可全量读取父池；仍受既有scope/审批过滤。子Agent应向主Agent提议共享数值变化或写独立目录，既有文件锁不提供Agent之间的读改写互斥。
+
+主会话自动旋转只独立复制变量，不改已运行子Agent的parent_session_id或反馈归属。旧子Agent仍读写旧目录，捕获后更新不自动同步新会话；主Agent需先完成改变量任务，或新会话显式整理旧状态/重启角色。多Agent模式所有参与者使用当前主会话目录，提示词每轮动态注入。
+
+TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe时才可调用该读取工具，没有新增写权限、独立变量池或持久化历史。
+
 ## 历史持久化
 
 - 历史工具参数投影：快照与历史回放共用 `_parse_tool_arguments()`，将 `FunctionCall.arguments` 的 JSON 文本解析为对象。非法 JSON、错误输入类型或非对象 JSON 必须抛出异常，不得静默替换为空字典；原始 History 不变。

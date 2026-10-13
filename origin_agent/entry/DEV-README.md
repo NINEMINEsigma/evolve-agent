@@ -255,6 +255,16 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 ---
 
+## 会话变量提示词与继承
+
+`build_session_variables_block`只注入目录/文件/meta/工具协议，不扫描或自动注入变量值。ParentAgentLoop（含Colloquy继承）每次构建时使用当前session_id，MultiAgentLoop在每个参与Agent启动前动态追加，不写入角色Profile；普通子Agent使用父会话ID，临时Agent继续空系统提示词。
+
+自动旋转公共函数`terminate_and_rotate_session`及BaseAgentLoop.merge_sessions在保障摘要后捕获完整变量材料，再同步创建新会话、独占安装variables和初始化History，提交前复查来源/目标存在且非删除中；成功退出安装scope后才归档来源。单来源保留路径、多来源放sources/<父ID>/。来源文件原bytes保留，包括无效JSON/meta及其他普通文件，不自动修正。
+
+已知无法完整继承时，自动旋转经MetadataGenerationError与既有report_context_limit_rotation_blocked报告修复路径并保留旧会话/触发消息，本轮停止、不自动重试；分支/合并返回merged=false。初始化发生取消、History写失败或意外错误时必要回收新索引/审批缓存和本次变量目标，并传播原异常；必要清理失败以LifecycleFailure/异常组保留。提交后的归档/资源迁移失败不回滚已提交的新会话。索引已有持久化策略并非跨文件事务。
+
+读改写非原子，主Agent统一共享结算；旧子Agent在旋转后保留旧parent_session_id，晚到写入不自动同步。重新生成/删除History消息不回滚变量，永久删除会话保留工作空间变量文件，与stage清理规则一致。
+
 ## `agent_support/` 子模块
 
 ### `messages.py`

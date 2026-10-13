@@ -164,6 +164,18 @@ Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划�
 
 复用已缓存模块仍显式调用声明入口，不重新加载或改写 sys.modules。发现后注册 MCP 管理工具和元数据，远程连接归 MCPSystem；最终注销仅释放发现记录和本次加入的宿主导入路径，注册表条目归原 ToolRegistry/UIEventRouter。Application 完整注册已由 P22 接通；构造发现器不执行扫描或调用 Application.current()。
 
+## 会话变量池
+
+`AgentspaceService.session_variables` 持有唯一无缓存 `SessionVariableService` 叶服务，使用已有 Sandbox，不增加 AsyncSystem、线程、watcher或后台复制任务。逻辑根为 `ws:sessions/<主会话ID>/variables/`，与聊天 History 的 workspace/sessions 根不同；普通子Agent使用父主会话目录，临时Agent不扩大现有工具授权。
+
+JSON文件保存单个数字/字符串，同级完整名称追加 `.meta`。业务键为 label、description、min、max、integer、percent、display；布尔只接受小写true/false，百分比只把显示值乘100。无效值保留原文、配置错误与constraint分别报告，不自动裁剪或改写。`read_pool` 同时供safe工具和REST使用，文件为唯一真相，scan_complete=false明确表示不受支持子树未读取。
+
+读取预算：512变量、4096节点、16层、64KiB单文件、512KiB逻辑内容、1MiB响应与2秒软截止。继承全部来源合计逻辑512KiB，额外复核512KiB，实际读1MiB；超预算明确拒绝，不静默截断。根与子树拒绝符号链接/reparse point，Windows显式检查属性；Sandbox是应用级边界，不是OS ACL。
+
+`capture_inheritance` 捕获全部普通文件原bytes及空目录并复核内容版本；坏JSON/meta仍原bytes继承，无法完整读取则拒绝。`install_inheritance` 独占创建目标，不合并覆盖，初始化scope失败仅按目录身份回收本次目标；原失败与必要清理失败以异常组保留，LifecycleFailure不降级。复制材料及身份均非持久化模型，无easysave格式迁移。
+
+直接Write不是原子覆盖，读整池不是跨文件事务，文件锁不互斥多个Agent。主Agent统一结算，重新生成/删除消息不回滚；旧子Agent旋转后仍写旧父目录，捕获后的变化不自动同步；正常永久删除会话不清理变量文件。
+
 ## 验证约束
 
 本次迁移未由开发助手AI运行测试、类型检查、Lint、构建或应用。只做源文件读取和定向差异审阅；正式运行验证由用户在完整迁移完成后执行。
