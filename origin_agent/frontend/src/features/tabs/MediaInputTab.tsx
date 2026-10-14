@@ -40,11 +40,13 @@ export default function MediaInputTab({ ctx }: { ctx: TabRenderContext }): React
     <div className="tab-panel-safe-top" aria-hidden="true" />
     {active && <div className="session-media-content">
       <header className="session-media-toolbar">
-        <div><h2>{labels.title}</h2><span>{formatMediaLabel(labels.count, { count: page?.total_count ?? 0 })}</span></div>
+        <div>
+          <h2 className="session-media-title-hint" data-tooltip={labels.shortNote}>{labels.title}</h2>
+          <span>{formatMediaLabel(labels.count, { count: page?.total_count ?? 0 })}</span>
+        </div>
         <button ref={refreshButton} type="button" disabled={loading || pendingIds.size > 0 || !ctx.sessionId}
           onClick={() => void refresh()}>{loading ? labels.refreshing : labels.refresh}</button>
       </header>
-      <p className="session-media-note">{labels.shortNote}</p>
       {ctx.currentSessionArchived && <div className="session-media-warning" role="status">{labels.archived}</div>}
       {loading && !page && <div className="session-media-empty" role="status">{labels.loading}</div>}
       {pendingIds.size > 0 && !page && <div className="session-media-empty" role="status">{labels.waitingUpdates}</div>}

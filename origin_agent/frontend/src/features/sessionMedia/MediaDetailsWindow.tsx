@@ -49,14 +49,14 @@ export default function MediaDetailsWindow({
             <label className="session-media-switch">
               <input type="checkbox" checked={item.send_multimodal} disabled={disabled || pending}
                 onChange={(event) => onSetEnabled(event.target.checked)} />
-              <span>{labels.sendLabel}</span>
+              <span className="session-media-label-hint"
+                data-tooltip={[labels.sendDescription, labels.forwardingNote, labels.timingNote].join("\n")}>
+                {labels.sendLabel}
+              </span>
             </label>
             <div className="session-media-setting-state" role="status">
               {pending ? labels.saving : item.send_multimodal ? labels.enabled : labels.disabled}
             </div>
-            <p className="session-media-note">{labels.sendDescription}</p>
-            <p className="session-media-note">{labels.forwardingNote}</p>
-            <p className="session-media-note">{labels.timingNote}</p>
           </div>
           {disabled && <p className="session-media-warning" role="status">{labels.settingsDisabled}</p>}
           {error && <div className="session-media-warning" role="alert">

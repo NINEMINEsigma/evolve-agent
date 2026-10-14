@@ -129,7 +129,7 @@ frontend/
 
 MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威页查找；切会话/页/Tab或实例删除即关闭，GET失败保留旧页并禁写。MediaDetailsWindow复用ModalWindow并portal到body，Esc/遮罩/关闭按钮走同一回调；初始焦点关闭按钮，Tab限制在详情边界，关闭后对有效锚点/刷新按钮恢复焦点，隐藏Tab不抢焦点。归档只读、处理中可改、下一请求生效与原多AgentNone后缀均不变。
 
-网格顶部只留简短说明，转发仍收原媒体/新Read默认开启/保存本身不调用模型等说明集中到详情。session-media.css独立控制密集网格/窄屏两列/大预览详情，其他Tab、聊天和全局ModalWindow样式不变。已按v2源码实施，未运行类型检查/构建/应用，由用户人工验收中文/默认预览/点击详情/键盘和播放器生命周期。
+网格顶部无常驻说明：短提示（点击看详情/独立实例语义）挂在带边框的标题文本上，经全局 data-tooltip 悬停显示；详情窗内转发仍收原媒体/新Read默认开启/保存本身不调用模型/下一请求生效等三条说明合并挂在发送开关标签文本（虚线下划线）的 data-tooltip 上，不再常驻渲染。useGlobalTooltip 的原生捕获监听器挂 document（覆盖 createPortal 到 body 的内容），tooltip.css 未改动。session-media.css独立控制密集网格/窄屏两列/大预览详情，其他Tab、聊天和全局ModalWindow样式不变。已按v2源码实施，未运行类型检查/构建/应用，由用户人工验收中文/默认预览/点击详情/键盘和播放器生命周期。
 
 ## 会话变量 Tab
 
@@ -147,7 +147,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 | 组件 | 职责 |
 |---|---|
-| `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和轮次导航条的定位边界，消息序列委托给 `VirtualMessageList` |
+| `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和轮次导航条的定位边界，消息序列委托给 `VirtualMessageList`；回到底部按钮在 ChatArea 挂载时常驻，不受滚动、初始化、内容数量或处理状态控制 |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
 | `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥；`user`/`assistant` 头像按角色名查角色头像映射，命中渲染 `<img>`（onError 回退首字母） |
@@ -278,7 +278,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 - 握手欢迎文本 `Connected to Evolve Agent` 由 `constants/ws.ts` 与 Gateway 发送处对应；前端仅在消息无 History 索引且不是业务系统状态时将其排除出聊天列表。首次连接和真实重连均如此，顶部连接状态、协议事件和其他系统消息不变，避免欢迎行留在实时 Footer 并在每轮正典交接后重新显露。
 - 快速滚动的 `ChatSeekPlaceholder` 必须使用 Virtuoso 提供的原行 `height` 保留等高 border-box 外壳；内部复用普通骨架视觉，但不得以骨架估算高度替换长消息高度，缺失骨架数据时也保留空壳。用户验收可在开发者工具观察正文/快速占位切换前后的行外壳高度，允许亚像素误差，不要求肉眼辨认瞬间骨架。
-- `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。回底按钮在已有内容、初始化完成且物理离底时显示，初始化与主动回底期间隐藏；不只依赖 `detached` 状态。
+- `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。物理指标继续驱动自动追底与显式回底动作；回到底部按钮由 `ChatArea` 挂载时常驻，不受已有内容、初始化、物理离底、`followMode` 或主动回底状态控制。按钮点击仍复用 `ChatVirtualListHandle.returnToBottom()`；没有可滚动内容时保留按钮但不要求产生位移。用户主列表滚动立即中止被动追底及未完成回底动作，异步回底按动作序号和会话代际取消；失败保留按钮和现有错误状态。
 - 用户主列表滚动立即中止被动追底及未完成回底，实际 scroll 采样在用户意图窗口内更新状态；单纯布局变化不解除离底浏览。回底动作带局部动作序号与会话代际，远距离加载检查页错误与已加载索引，下一布局帧才定位；失败保留错误和回底入口，用户新操作、会话切换与卸载均使旧动作失效。
 
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。

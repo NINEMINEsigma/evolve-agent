@@ -369,7 +369,7 @@
 | Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
 | 会话网页 | `SiteTab`（会话网页 Tab） | 会话网页 Tab 内 iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时右侧 Tab 栏图标可用；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
 | 轮次导航条 | `RoundNavRail` / `.round-nav` | 主聊天区与子会话卡片共用的轮次导航组件：每条目对应一条 Role 为 `user` 的展示行（杠+内容文本一体），杠按作者角色名 hue 散列着色（与头像一致），当前轮放大+花纹凸显，点击跳转目标消息至视口中部略偏上，桌面 hover/focus 展开浮层显示条目文本，条目过多时虚拟滚动，少轮次时列表垂直居中；窄条常驻（无折叠按钮），触摸端点杠直接跳转 | round navigation rail |
-| 回到底部按钮 | `.scroll-to-bottom` | 已有聊天内容、初始化完成且物理离底时显示的快捷回底按钮；初始化与主动回底期间隐藏，不仅依赖 `detached` 状态 |
+| 回到底部按钮 | `.scroll-to-bottom` | `ChatArea` 挂载时常驻的主动回底控制件，不受滚动状态、初始化状态、内容数量或处理状态控制；无内容或没有滚动距离时仍保留，但不要求产生位移 |
 
 ### 输入栏内部组件
 

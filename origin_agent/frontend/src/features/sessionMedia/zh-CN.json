@@ -48,7 +48,7 @@
   "toolCall": "来源工具调用",
   "mimeType": "媒体格式",
   "inlineSize": "内联载荷",
-  "inlineSizeValue": "{{size}} KiB 的 Base64 字符（不是令牌数）",
+  "inlineSizeValue": "{{size}} KiB 的 Base64 字符",
   "remoteMedia": "远程媒体地址，未内联载荷",
   "descriptionCache": "转发描述",
   "cached": "已有可信描述缓存",

@@ -97,17 +97,14 @@ export function useGlobalTooltip() {
       hideTooltip();
     };
 
-    const app = document.getElementById("root");
-    if (app) {
-      app.addEventListener("mouseenter", onMouseEnter, true);
-      app.addEventListener("mouseleave", onMouseLeave, true);
-    }
+    // Native capture listeners on the whole document so data-tooltip also works
+    // inside createPortal content rendered to document.body (e.g. MediaDetailsWindow).
+    document.addEventListener("mouseenter", onMouseEnter, true);
+    document.addEventListener("mouseleave", onMouseLeave, true);
 
     return () => {
-      if (app) {
-        app.removeEventListener("mouseenter", onMouseEnter, true);
-        app.removeEventListener("mouseleave", onMouseLeave, true);
-      }
+      document.removeEventListener("mouseenter", onMouseEnter, true);
+      document.removeEventListener("mouseleave", onMouseLeave, true);
       if (hideTimer) clearTimeout(hideTimer);
       tooltip.remove();
     };

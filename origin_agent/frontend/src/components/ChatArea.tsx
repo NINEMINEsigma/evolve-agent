@@ -52,7 +52,6 @@ export default function ChatArea({
   const listRef = useRef<ChatVirtualListHandle>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const runtime = useChatRuntimeStore();
-  const initialReady = runtime.initialReady;
   const renderRows = selectChatRenderRows(runtime);
   const processing = runtime.processing;
   const isEmpty = renderRows.length === 0 && !processing;
@@ -119,19 +118,17 @@ export default function ChatArea({
           onToggleMessageVisibility={onToggleMessageVisibility}
           topSafeSpacePx={topSafeSpacePx}
         />
-        {!isEmpty && initialReady && (
-          <button
-            type="button"
-            className="scroll-to-bottom"
-            onClick={() => void listRef.current?.returnToBottom()}
-            aria-label="回到最新位置"
-            title="回到最新位置"
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        )}
+        <button
+          type="button"
+          className="scroll-to-bottom"
+          onClick={() => void listRef.current?.returnToBottom()}
+          aria-label="回到最新位置"
+          title="回到最新位置"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
         {children}
       </div>
       <RoundNavRail
