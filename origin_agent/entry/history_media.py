@@ -188,13 +188,38 @@ def project_history_media(
         raise ValueError("Invalid History media page")
     items: list[SessionMediaItem] = []
     total = 0
+    # 同一次遍历同时产出当前页 items 与全 History 聚合，避免为悬停做第二次扫描。
+    enabled_count = 0
+    disabled_count = 0
+    enabled_inline_payload_chars = 0
+    disabled_inline_payload_chars = 0
+    enabled_unknown_payload_count = 0
+    disabled_unknown_payload_count = 0
     for occurrence in iter_history_media(history):
+        projected = project_media_item(occurrence)
         if offset <= total < offset + limit:
-            items.append(project_media_item(occurrence))
+            items.append(projected)
         total += 1
+        if projected.send_multimodal:
+            enabled_count += 1
+            if projected.inline_payload_chars is None:
+                enabled_unknown_payload_count += 1
+            else:
+                enabled_inline_payload_chars += projected.inline_payload_chars
+        else:
+            disabled_count += 1
+            if projected.inline_payload_chars is None:
+                disabled_unknown_payload_count += 1
+            else:
+                disabled_inline_payload_chars += projected.inline_payload_chars
     return SessionMediaListResponse(
         session_id=session_id, history_count=history.count, total_count=total,
         offset=offset, limit=limit, editable=editable, items=items,
+        enabled_count=enabled_count, disabled_count=disabled_count,
+        enabled_inline_payload_chars=enabled_inline_payload_chars,
+        disabled_inline_payload_chars=disabled_inline_payload_chars,
+        enabled_unknown_payload_count=enabled_unknown_payload_count,
+        disabled_unknown_payload_count=disabled_unknown_payload_count,
     )
 
 

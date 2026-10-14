@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentspaceEvent, CharacterProfileEntryDto, CharacterProfilesResponseDto } from "../../types";
-import { fetchWithTimeout } from "../../services/fetchWithTimeout";
+import type { AgentspaceEvent, CharacterProfileEntryDto } from "../../types";
+import { fetchJsonWithTimeout } from "../../services/fetchJsonWithTimeout";
 import { subscribeChatAgentspaceEvents } from "../../services/chatAgentspaceEventBus";
 import { TIMING } from "../../constants/timing";
 
@@ -11,25 +11,25 @@ export interface UseCharacterProfilesState {
   refresh: () => Promise<void>;
 }
 
-/** 拉取角色档案目录并写入 state；请求失败写入 error，旧 profiles 保留。 */
-async function fetchCharacterProfiles(
-  commit: (payload: CharacterProfileEntryDto[] | null, error: string | null) => void,
-): Promise<void> {
-  try {
-    const response = await fetchWithTimeout(
-      "/api/characters/profiles",
-      {},
-      { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "character-profiles" },
-    );
-    if (!response.ok) {
-      commit(null, `HTTP ${response.status}`);
-      return;
-    }
-    const payload = (await response.json()) as CharacterProfilesResponseDto;
-    commit(payload.characters ?? [], null);
-  } catch (error) {
-    commit(null, error instanceof Error ? error.message : String(error));
+/** 严格校验响应形状：characters 缺失或非数组按错误处理，不成功返回 []。 */
+function decodeCharacterProfiles(payload: unknown): CharacterProfileEntryDto[] {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Invalid character profiles response");
   }
+  const characters = (payload as Record<string, unknown>).characters;
+  if (!Array.isArray(characters)) throw new Error("Character profiles payload is not an array");
+  for (const entry of characters) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("Invalid character profile entry");
+    }
+    const item = entry as Record<string, unknown>;
+    if (typeof item.name !== "string" || (item.character_type !== "roleplay" && item.character_type !== "task")) {
+      throw new Error("Invalid character profile identity");
+    }
+    if (typeof item.profile_available !== "boolean") throw new Error("Invalid character profile availability");
+    if (item.error !== null && typeof item.error !== "string") throw new Error("Invalid character profile error");
+  }
+  return characters as CharacterProfileEntryDto[];
 }
 
 /** 判定事件是否可能影响角色档案（事件 path 为 agentspace 相对路径）。 */
@@ -45,28 +45,40 @@ function profileRelevantEvent(event: AgentspaceEvent): boolean {
 
 /**
  * 角色档案数据 hook：激活时重拉，激活期间订阅 Agentspace 事件去抖刷新。
- * 档案为全局数据，不依赖会话 ID；请求代际防止 Tab 快速切换期间旧响应覆盖。
+ * 档案为全局数据，不依赖会话 ID；读取带完整 JSON 截止与卸载取消，代际防止
+ * Tab 快速切换期间旧响应覆盖。
  */
 export function useCharacterProfiles(active: boolean): UseCharacterProfilesState {
   const [profiles, setProfiles] = useState<CharacterProfileEntryDto[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     const generation = ++generationRef.current;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
-    await fetchCharacterProfiles((payload, errorMessage) => {
+    try {
+      const result = await fetchJsonWithTimeout(
+        "/api/characters/profiles", { signal: controller.signal },
+        { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "character-profiles" },
+        decodeCharacterProfiles,
+      );
       if (generationRef.current !== generation) return;
-      if (payload !== null) {
-        setProfiles(payload);
-        setError(null);
-      } else {
-        setError(errorMessage);
+      setProfiles(result);
+      setError(null);
+    } catch (failure) {
+      if (generationRef.current !== generation) return;
+      if (controller.signal.aborted) return;
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      if (generationRef.current === generation) {
+        setLoading(false);
+        requestRef.current = null;
       }
-    });
-    if (generationRef.current === generation) {
-      setLoading(false);
     }
   }, []);
 
@@ -97,6 +109,13 @@ export function useCharacterProfiles(active: boolean): UseCharacterProfilesState
       }
     };
   }, [active, refresh]);
+
+  // 卸载时取消在途读取。
+  useEffect(() => () => {
+    generationRef.current++;
+    requestRef.current?.abort();
+    requestRef.current = null;
+  }, []);
 
   return { profiles, loading, error, refresh };
 }

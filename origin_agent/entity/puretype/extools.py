@@ -18,6 +18,8 @@ class CronTaskInfo(BaseModel):
     run_count: int = 0
     last_run: str | None = None  # ISO 格式时间戳，从未执行时为 None
     log_path: str = ""
+    is_wait: bool = False  # 是否为等待提醒任务（WaitCron），不按 name/command 猜测
+    wait_message: str = ""  # 等待提醒的提示内容，普通 Cron 为空串
 
 
 class DynamicEndpointRequest(BaseModel):

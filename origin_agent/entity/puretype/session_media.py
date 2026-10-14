@@ -30,6 +30,15 @@ class SessionMediaListResponse(BaseModel):
     limit: int
     editable: bool
     items: list[SessionMediaItem] = Field(default_factory=list)
+    # 全 History 媒体聚合（不随分页变化）：开启/关闭直接发送的实例数量。
+    enabled_count: int = 0
+    disabled_count: int = 0
+    # 开启/关闭实例中 inline_payload_chars 非空值之和；字符数，非字节数。
+    enabled_inline_payload_chars: int = 0
+    disabled_inline_payload_chars: int = 0
+    # 开启/关闭实例中 inline_payload_chars 为 None（远程/非内联）的数量。
+    enabled_unknown_payload_count: int = 0
+    disabled_unknown_payload_count: int = 0
 
 
 class SessionMediaUpdateRequest(BaseModel):

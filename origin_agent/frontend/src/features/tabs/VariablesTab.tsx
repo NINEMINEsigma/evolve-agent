@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import VariableCard, { VariableIssues } from "../sessionVariables/VariableCard";
 import { buildVariableGroups } from "../sessionVariables/presentation";
-import { useSessionVariables } from "../sessionVariables/useSessionVariables";
+import { useTabData } from "./TabDataContext";
 import type { VariableGroup } from "../sessionVariables/types";
 import type { TabRenderContext } from "./registry";
 
@@ -28,7 +28,7 @@ function Group({ group, collapsed, toggle }: {
 }
 
 export default function VariablesTab({ ctx }: { ctx: TabRenderContext }): ReactElement {
-  const { pool, loading, error, syncWarning, refresh } = useSessionVariables(ctx.sessionId, ctx.activeTab === "variables");
+  const { pool, loading, error, syncWarning, refresh } = useTabData().variables;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const groups = useMemo(() => buildVariableGroups(pool?.variables ?? []), [pool]);
   useEffect(() => setCollapsed(new Set()), [ctx.sessionId]);

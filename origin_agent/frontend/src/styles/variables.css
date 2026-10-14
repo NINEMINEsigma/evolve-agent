@@ -61,6 +61,7 @@
   --z-content:    10;     /* 结构/导航/内容控件 */
   --z-sidebar:    20;     /* 侧边栏/抽屉叠层 */
   --z-header:     90;     /* header 叠层 */
+  --z-tab-preview: 95;    /* 右侧 Tab 悬停预览小窗：Header 之上、遮罩之下 */
   --z-overlay:    100;    /* 模态/对话框/遮罩/菜单 */
   --z-banner:     1000;   /* 通知横幅 */
   --z-splash:     9998;   /* 骨架屏/启动屏 */

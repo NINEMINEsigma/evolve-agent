@@ -13,6 +13,12 @@ import SandboxTab from "./SandboxTab";
 import VariablesTab from "./VariablesTab";
 import MediaInputTab from "./MediaInputTab";
 import { mediaInputLabels } from "../sessionMedia/labels";
+import type { TabPreviewInput, TabPreviewModel } from "./tabPreviewTypes";
+import {
+  selectChatPreview, selectCharactersPreview, selectLlmPreview, selectMediaPreview,
+  selectResourcesPreview, selectSandboxPreview, selectSitePreview, selectSubagentsPreview,
+  selectVariablesPreview,
+} from "./tabPreviewSelectors";
 
 /** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
 export type TabId = "chat" | "resources" | "media" | "variables" | "subagents" | "characters" | "site" | "llm" | "sandbox";
@@ -48,6 +54,8 @@ export interface TabDefinition {
   title: string;
   icon: ReactNode;
   render: (ctx: TabRenderContext) => ReactNode;
+  /** 可选只读摘要选择器；缺失时该 Tab 摘要不可用，不影响编译。 */
+  preview?: (input: TabPreviewInput) => TabPreviewModel;
 }
 
 const chatIcon = (
@@ -130,13 +138,13 @@ const sandboxIcon = (
 
 /** Declarative tab registry. The rail and the stage both render from this list. */
 export const TAB_REGISTRY: readonly TabDefinition[] = [
-  { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} /> },
-  { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} /> },
-  { id: "media", title: mediaInputLabels.title, icon: mediaIcon, render: (ctx) => <MediaInputTab ctx={ctx} /> },
-  { id: "variables", title: "会话变量", icon: variablesIcon, render: (ctx) => <VariablesTab ctx={ctx} /> },
-  { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} /> },
-  { id: "characters", title: "角色档案", icon: charactersIcon, render: (ctx) => <CharactersTab ctx={ctx} /> },
-  { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} /> },
-  { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} /> },
-  { id: "sandbox", title: "动态沙盒空间", icon: sandboxIcon, render: (ctx) => <SandboxTab ctx={ctx} /> },
+  { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} />, preview: selectChatPreview },
+  { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} />, preview: selectResourcesPreview },
+  { id: "media", title: mediaInputLabels.title, icon: mediaIcon, render: (ctx) => <MediaInputTab ctx={ctx} />, preview: selectMediaPreview },
+  { id: "variables", title: "会话变量", icon: variablesIcon, render: (ctx) => <VariablesTab ctx={ctx} />, preview: selectVariablesPreview },
+  { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} />, preview: selectSubagentsPreview },
+  { id: "characters", title: "角色档案", icon: charactersIcon, render: (ctx) => <CharactersTab ctx={ctx} />, preview: selectCharactersPreview },
+  { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} />, preview: selectSitePreview },
+  { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} />, preview: selectLlmPreview },
+  { id: "sandbox", title: "动态沙盒空间", icon: sandboxIcon, render: (ctx) => <SandboxTab ctx={ctx} />, preview: selectSandboxPreview },
 ];

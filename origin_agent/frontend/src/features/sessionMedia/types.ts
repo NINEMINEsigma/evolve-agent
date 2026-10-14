@@ -17,6 +17,16 @@ export interface SessionMediaItemDto {
   preview_available: boolean;
 }
 
+export interface SessionMediaAggregateDto {
+  total_count: number;
+  enabled_count: number;
+  disabled_count: number;
+  enabled_inline_payload_chars: number;
+  disabled_inline_payload_chars: number;
+  enabled_unknown_payload_count: number;
+  disabled_unknown_payload_count: number;
+}
+
 export interface SessionMediaListResponseDto {
   session_id: string;
   history_count: number;
@@ -25,6 +35,12 @@ export interface SessionMediaListResponseDto {
   limit: number;
   editable: boolean;
   items: SessionMediaItemDto[];
+  enabled_count: number;
+  disabled_count: number;
+  enabled_inline_payload_chars: number;
+  disabled_inline_payload_chars: number;
+  enabled_unknown_payload_count: number;
+  disabled_unknown_payload_count: number;
 }
 
 export interface SessionMediaUpdateResponseDto {
@@ -34,6 +50,7 @@ export interface SessionMediaUpdateResponseDto {
 
 export interface UseSessionMediaState {
   page: SessionMediaListResponseDto | null;
+  aggregate: SessionMediaAggregateDto | null;
   offset: number;
   loading: boolean;
   error: string | null;

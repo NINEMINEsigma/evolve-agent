@@ -18,6 +18,7 @@ import { TAB_REGISTRY } from "../features/tabs/registry";
 import { useTabSystem } from "../features/tabs/useTabSystem";
 import TabRail from "../features/tabs/TabRail";
 import TabStage from "../features/tabs/TabStage";
+import { TabDataProvider } from "../features/tabs/TabDataContext";
 import type { TabRenderContext } from "../features/tabs/registry";
 
 interface LayoutProps {
@@ -271,7 +272,11 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           {ws.sessionLocked ? (
             <SessionLockOverlay onRetry={ws.retryConnect} />
           ) : (
-            <>
+            <TabDataProvider
+              activeTab={tabSystem.activeTab}
+              sessionId={ws.sessionId}
+              currentSessionArchived={currentSessionArchived}
+            >
               <TabStage
                 tabs={TAB_REGISTRY}
                 activeTab={tabSystem.activeTab}
@@ -282,8 +287,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
                 activeTab={tabSystem.activeTab}
                 enabledTabs={tabSystem.enabledTabs}
                 onSwitch={tabSystem.switchTab}
+                renderContext={tabRenderContext}
+                previewBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || contextMenuOpen}
               />
-            </>
+            </TabDataProvider>
           )}
         </div>
       </div>

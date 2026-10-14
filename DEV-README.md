@@ -327,6 +327,21 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 
 关闭不是全局隐私禁传：转发目标仍收到原媒体，新Read产生新默认开启实例。原聊天展示与磁盘/内存History体积不变，开关仍全量写History且首次转发可能有等待/费用。已完成源码实施，尚未运行构建、类型检查或应用验收；由用户按任务文件场景验证。
 
+媒体列表响应 `GET /api/sessions/{id}/history/media` 在分页 `items` 之外新增六个全 History 聚合字段：`enabled_count`/`disabled_count`（开启/关闭直接发送实例数）、`enabled_inline_payload_chars`/`disabled_inline_payload_chars`（对应状态中内联载荷字符之和，字符数非字节数）、`enabled_unknown_payload_count`/`disabled_unknown_payload_count`（`inline_payload_chars=null` 的远程/非内联数量）。聚合由 `entry/history_media.py::project_history_media` 在同次 `iter_history_media` 遍历中计算，包含分页之外的全部实例；前端严格解码并校验 `enabled_count+disabled_count==total_count`、未知载荷数量不超过对应状态数量。
+
+---
+
+## 右侧 Tab 悬停预览
+
+右侧 Tab 栏（九个 Tab：聊天、资源/任务、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间）对「启用且非当前」的图标提供只读悬停预览小窗，形式类似 Windows 任务栏悬停窗口但内容为专门组织的摘要。预览只消费页面已加载快照，悬停/聚焦不发请求、不刷新、不切换 activeTab；未知不伪装为 0（`null` 未读取、`[]` 才计 0）。
+
+- 数据唯一来源：`features/tabs/TabDataContext.tsx` 的唯一 Provider 持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，正式 Tab 与预览共享同一快照。
+- 摘要纯选择器 `tabPreviewSelectors.ts` 九个选择器 + `useTabPreview.ts` 只读组装 + `TabHoverPreview.tsx`/`useAnchoredHoverPreview.ts` 悬停状态机与几何；中文文案集中在 `tabPreviewLabels.json`。
+- 媒体摘要使用两根独立只读进度条（开启/关闭占比 = 状态数量/总数），展示内联载荷字符与未统计数量；聚合独立于当前分页（`useSessionMedia` 的 `aggregate`），翻页不改变全局统计，切会话/404 才清空。
+- 变量摘要显示总数/数字/字符串/无效/问题数与扫描完整性，严格区分读取中、尚未读取、空池、错误四态。
+- 资源摘要追加最近一项普通 Cron / WaitCron（`is_wait` 只读身份），共同按 `next_run` 升序、`task_id` 字典序打破并列；本地倒计时仅在预览显示时运行。
+- 会话资源（Shell/Cron/动态端点）改由 `useSessionStore` 的 Scope 快照（sid+generation）承载，`useWebSocket` 的原轮询经 Token 校验提交，杜绝迟到响应污染新会话。已完成源码实施，尚未运行构建、类型检查或应用验收。
+
 ---
 
 ## 开发者阅读顺序建议

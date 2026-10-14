@@ -76,7 +76,11 @@ function item(payload: unknown): SessionMediaItemDto {
 }
 
 export function decodeSessionMediaList(payload: unknown, expectedSessionId: string): SessionMediaListResponseDto {
-  const value = record(payload, ["session_id", "history_count", "total_count", "offset", "limit", "editable", "items"]);
+  const value = record(payload, [
+    "session_id", "history_count", "total_count", "offset", "limit", "editable", "items",
+    "enabled_count", "disabled_count", "enabled_inline_payload_chars", "disabled_inline_payload_chars",
+    "enabled_unknown_payload_count", "disabled_unknown_payload_count",
+  ]);
   const sessionId = text(value.session_id);
   if (sessionId !== expectedSessionId) throw new Error("Media response belongs to a different session");
   const offset = integer(value.offset);
@@ -92,9 +96,23 @@ export function decodeSessionMediaList(payload: unknown, expectedSessionId: stri
     || items.some((entry) => entry.history_index >= historyCount)) {
     throw new Error("Inconsistent media response page");
   }
+  // 全 History 聚合：非负安全整数，且与总页数/各状态数量保持一致性。
+  const enabledCount = integer(value.enabled_count);
+  const disabledCount = integer(value.disabled_count);
+  const enabledInline = integer(value.enabled_inline_payload_chars);
+  const disabledInline = integer(value.disabled_inline_payload_chars);
+  const enabledUnknown = integer(value.enabled_unknown_payload_count);
+  const disabledUnknown = integer(value.disabled_unknown_payload_count);
+  if (enabledCount + disabledCount !== total
+    || enabledUnknown > enabledCount || disabledUnknown > disabledCount) {
+    throw new Error("Inconsistent media aggregate");
+  }
   return {
     session_id: sessionId, history_count: historyCount, total_count: total,
     offset, limit, editable: flag(value.editable), items,
+    enabled_count: enabledCount, disabled_count: disabledCount,
+    enabled_inline_payload_chars: enabledInline, disabled_inline_payload_chars: disabledInline,
+    enabled_unknown_payload_count: enabledUnknown, disabled_unknown_payload_count: disabledUnknown,
   };
 }
 

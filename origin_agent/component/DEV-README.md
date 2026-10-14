@@ -283,6 +283,7 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 - 命令统一通过 SubprocessRunner 执行，使用独立 `CRON_PROCESS_SESSION_PREFIX` 键；关闭先冻结和终止命令，再在线程中 join 全部 Timer。期限内未结束保留资源、错误汇总传播；不以清空集合宣告成功，主事件循环不阻塞 join。
 - 全局冻结不修改持久 `should_schedule`；已实际执行的一次性任务才提交计数/结束状态。JSON 快照及原子写全过程使用同一锁，持久化失败报告生命周期失败；会话迁移在同一锁内更新所属会话，继续持有正在运行的任务。关闭后的迟到输出仅保留执行结局/日志，不向模型投递新工作。
 - 结果仍经主会话队列或子会话 Inbox 投递；输入投递记录及只落History关闭在 S16/S17 完成，激活/停止由 Application 统一编排。REST 协议保持 `/api/sessions/{id}/cron-tasks/...`。
+- `entity/puretype/extools.py::CronTaskInfo` 增加只读字段 `is_wait: bool = False` 与 `wait_message: str = ""`，由 `_build_task_info` 显式映射 `_CronTask.is_wait`/`wait_message`（普通 Cron 为 false/空串，不按 name/command 猜测）；不改调度、持久化、审批、Timer 或执行语义。
 
 ---
 

@@ -4,13 +4,13 @@ import { SESSION_MEDIA } from "../../constants/sessionMedia";
 import MediaDetailsWindow from "../sessionMedia/MediaDetailsWindow";
 import MediaGalleryTile from "../sessionMedia/MediaGalleryTile";
 import { formatMediaLabel, mediaInputLabels as labels } from "../sessionMedia/labels";
-import { useSessionMedia } from "../sessionMedia/useSessionMedia";
+import { useTabData } from "./TabDataContext";
 import type { TabRenderContext } from "./registry";
 
 export default function MediaInputTab({ ctx }: { ctx: TabRenderContext }): ReactElement {
   const active = ctx.activeTab === "media";
   const { page, offset, loading, error, stale, pendingIds, itemErrors, refresh, setOffset, setEnabled } =
-    useSessionMedia(ctx.sessionId, active, ctx.currentSessionArchived);
+    useTabData().media;
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const anchor = useRef<HTMLButtonElement | null>(null);
   const refreshButton = useRef<HTMLButtonElement | null>(null);

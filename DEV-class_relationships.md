@@ -1338,5 +1338,15 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 开发助手AI专用 `dev_helpers/read_history.py` 复用 `entity.messages.History` / `MediaBlock` / 三种媒体子类、`entity.typeref.make_config()`、`History_Version` 和只读 `third/easysave.raw_load()`，不再维护独立对象图解码器或模型字段表。它只访问History的公开 `messages` / `last_user_message`、消息Role、媒体字段及BaseModel公开迭代接口；不调用配对清理、任何写盘方法或Application，不新增运行时System/protected字段，也不修改还原后的模型。媒体占位只存在于输出字典，未识别媒体类型快速失败。导入origin库是AGENTS.md登记的开发辅助例外，不授权直接启动origin仓库应用；easysave动态类型加载只用于受信任的本地项目历史。
 
+### 右侧 Tab 悬停预览与会话资源 Scope 快照（2026-10-14）
+
+新增只读前端能力，不改变 Agent Loop 继承关系、protected 字段归属或任何后端 System：
+
+- `entity/puretype/extools.py::CronTaskInfo` 增加只读响应字段 `is_wait`/`wait_message`（`component/cron_router.py::_build_task_info` 显式映射 `_CronTask`），前端 `types.ts::CronTask` 增加对应可选字段；不改调度/持久化/审批/Timer/执行。
+- `entity/puretype/session_media.py::SessionMediaListResponse` 增加六个全 History 聚合字段，由 `entry/history_media.py::project_history_media` 在同次遍历计算；分页与内容端点/开关语义不变。前端 `UseSessionMediaState` 增加独立 `aggregate`（翻页保留、切会话/404 清空）。
+- 前端会话资源三源（Shell/Cron/动态端点）改由 `hooks/useSessionStore.ts` 的 `SessionResourceScope`（sessionId+generation）快照承载，`hooks/useSessionResourceSnapshot.ts` 提供唯一 data + 在途读与 Token 校验，`hooks/useWebSocket.ts` 原轮询经 Token/Scope 提交；旧数组 API 由同一快照派生，不再是第二份 state。
+- 共享数据：`features/tabs/TabDataContext.tsx` 唯一 Provider 持有 characters/sandbox/media/variables 四个 hook 各一份，正式 Tab 与只读预览共享。悬停预览（`useTabPreview`/`tabPreviewSelectors`/`TabHoverPreview`/`useAnchoredHoverPreview`/`tabPreviewLabels.json`/`constants/tabPreview.ts`）只消费已加载快照，不发请求、不刷新、不切换 activeTab。
+- 无 Loop protected 字段新增，无 Application 单例或持久化迁移；中文文案为正式 JSON 数据资源，源码标识保持英文。
+
 
 

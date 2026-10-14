@@ -1,17 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type {
   ApprovalMode,
   AskAnswerItem,
   AskRequest,
+  ClipboardDisplay,
   ClientDiagnostic,
   ConfirmRequest,
+  CronTask,
+  DynamicEndpoint,
   HistoryRowLink,
   InterruptResponse,
   MessageContent,
   NonStreamWSMessage,
+  ShellInfo,
   SubagentSession,
+  TaskProgress,
   WSMessage,
 } from "../types";
+import type { SessionToolResourcesDto } from "../types/sessionResources";
 import { collectClientInfo } from "../constants/clientInfo";
 import { COLLOQUY_SID } from "../constants/session";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -26,6 +32,7 @@ import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
 import { publishChatAgentspaceEvent } from "../services/chatAgentspaceEventBus";
 import { clientDiagnosticFrame, routeChatTransportMessage } from "./chatTransportRouting";
+import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
 import { useMainSessionActivityPolling } from "../features/chat/useMainSessionActivityPolling";
 import { useSubagentManager } from "./useSubagentManager";
 import { useUploadManager, type UploadManager } from "./useUploadManager";
@@ -34,8 +41,106 @@ import { useWebSocketConnection } from "./useWebSocketConnection";
 export type { PendingImage, PendingAudio, PendingVideo } from "./useUploadManager";
 export type WebSocketState = ReturnType<typeof useWebSocket>;
 
+const CRITICAL_TIMEOUT_MS = TIMING.CRITICAL_REQUEST_TIMEOUT;
+
 function isApprovalMode(value: unknown): value is ApprovalMode {
   return value === "manual" || value === "handsfree" || value === "yolo";
+}
+
+function objectValue(payload: unknown): Record<string, unknown> {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Expected a JSON object");
+  }
+  return payload as Record<string, unknown>;
+}
+
+/** Shell 列表：列表必须存在且为数组；逐项核对归属、running 与身份字段类型。 */
+function decodeSessionShells(payload: unknown, sessionId: string): ShellInfo[] {
+  const value = objectValue(payload);
+  const raw = value.shells;
+  if (!Array.isArray(raw)) throw new Error("Shells payload is not an array");
+  return raw.map((entry) => {
+    const item = objectValue(entry);
+    if (item.session_id !== sessionId) throw new Error("Shell belongs to a different session");
+    if (typeof item.shell_id !== "string" || typeof item.running !== "boolean") {
+      throw new Error("Invalid shell entry");
+    }
+    return entry as ShellInfo;
+  });
+}
+
+/** Cron 列表：列表必须存在且为数组；should_schedule 为 boolean、next_run 为 string|null。 */
+function decodeSessionCronTasks(payload: unknown): CronTask[] {
+  const value = objectValue(payload);
+  const raw = value.tasks;
+  if (!Array.isArray(raw)) throw new Error("Cron tasks payload is not an array");
+  return raw.map((entry) => {
+    const item = objectValue(entry);
+    if (typeof item.task_id !== "string" || typeof item.should_schedule !== "boolean") {
+      throw new Error("Invalid cron task entry");
+    }
+    if (item.next_run !== null && typeof item.next_run !== "string") {
+      throw new Error("Invalid cron next_run");
+    }
+    if (item.is_wait !== undefined && typeof item.is_wait !== "boolean") {
+      throw new Error("Invalid cron wait flag");
+    }
+    if (item.wait_message !== undefined && typeof item.wait_message !== "string") {
+      throw new Error("Invalid cron wait message");
+    }
+    return entry as CronTask;
+  });
+}
+
+/** 工具资源：顶层 session_id 必须等于请求 Scope，容器类型逐项校验。 */
+function decodeSessionToolResources(payload: unknown, sessionId: string): SessionToolResourcesDto {
+  const value = objectValue(payload);
+  if (value.session_id !== sessionId) throw new Error("Tool resources belong to a different session");
+  const taskProgress = objectValue(value.task_progress);
+  const clipboard = objectValue(value.clipboard_display);
+  const rawEndpoints = value.dynamic_endpoints;
+  if (!Array.isArray(rawEndpoints)) throw new Error("Invalid dynamic endpoints payload");
+  const dynamicEndpoints = rawEndpoints.map((entry) => {
+    const item = objectValue(entry);
+    if (typeof item.name !== "string" || typeof item.url !== "string"
+      || typeof item.agent_name !== "string" || typeof item.created_at !== "number"
+      || !Number.isFinite(item.created_at)) {
+      throw new Error("Invalid dynamic endpoint entry");
+    }
+    return entry as DynamicEndpoint;
+  });
+  return {
+    session_id: sessionId,
+    task_progress: taskProgress as Record<string, TaskProgress>,
+    clipboard_display: clipboard as Record<string, ClipboardDisplay>,
+    dynamic_endpoints: dynamicEndpoints,
+  };
+}
+
+/** 子会话快照：外层 session_id 与请求 Scope 一致，subagents 为非数组对象。 */
+function decodeSessionSubagents(payload: unknown, sessionId: string): Record<string, SubagentSession> {
+  const value = objectValue(payload);
+  if (value.session_id !== sessionId) throw new Error("Subagents belong to a different session");
+  const subagents = value.subagents;
+  if (subagents === null || typeof subagents !== "object" || Array.isArray(subagents)) {
+    throw new Error("Invalid subagents payload");
+  }
+  for (const entry of Object.values(subagents as Record<string, unknown>)) {
+    const item = objectValue(entry);
+    if (typeof item.session_id !== "string" || typeof item.name !== "string") {
+      throw new Error("Invalid subagent entry");
+    }
+    if (item.status !== "running" && item.status !== "completed" && item.status !== "terminated") {
+      throw new Error("Invalid subagent status");
+    }
+    if (!Array.isArray(item.feedback) || !Array.isArray(item.pending_approvals)) {
+      throw new Error("Invalid subagent lists");
+    }
+    if (item.interactive !== undefined && typeof item.interactive !== "boolean") {
+      throw new Error("Invalid subagent interactive flag");
+    }
+  }
+  return subagents as Record<string, SubagentSession>;
 }
 
 export function useWebSocket() {
@@ -52,19 +157,38 @@ export function useWebSocket() {
 
   const fetchToolResourcesRef = useRef(async (sid: string) => {
     if (!sid) return;
+    const owner = sessionRef.current;
+    if (!owner || owner.sessionId !== sid) return;
+    // 端点快照使用自己的 Token（同一 sid 同源在途读取合并）；子会话读取独立进行。
+    const endpointToken = owner.dynamicEndpointResource.beginRequest();
+    const scope = { sessionId: sid, generation: owner.resourceScope.generation };
     const [toolRes, subagentRes] = await Promise.allSettled([
-      fetch(`/api/sessions/${sid}/tool-resources`).then((response) => response.json()),
-      fetch(`/api/sessions/${sid}/subagents`).then((response) => response.json()),
+      endpointToken
+        ? fetchJsonWithTimeout(
+            `/api/sessions/${sid}/tool-resources`, { signal: endpointToken.signal },
+            { timeoutMs: CRITICAL_TIMEOUT_MS, phase: "tool-resources" },
+            (payload) => decodeSessionToolResources(payload, sid),
+          )
+        : Promise.reject(new Error("Tool resources read skipped")),
+      fetchJsonWithTimeout(
+        `/api/sessions/${sid}/subagents`, {},
+        { timeoutMs: CRITICAL_TIMEOUT_MS, phase: "subagents" },
+        (payload) => decodeSessionSubagents(payload, sid),
+      ),
     ]);
-    if (sessionRef.current?.sessionId !== sid) return;
-    if (toolRes.status === "fulfilled") {
-      sessionRef.current.setTaskProgress(toolRes.value.task_progress || {});
-      sessionRef.current.setClipboardDisplays(toolRes.value.clipboard_display || {});
-      sessionRef.current.setDynamicEndpoints(toolRes.value.dynamic_endpoints || []);
+    if (!owner.isResourceScopeCurrent(scope)) return;
+    if (endpointToken) {
+      if (toolRes.status === "fulfilled") {
+        owner.setTaskProgress(toolRes.value.task_progress);
+        owner.setClipboardDisplays(toolRes.value.clipboard_display);
+        owner.dynamicEndpointResource.completeRequest(endpointToken, toolRes.value.dynamic_endpoints);
+      } else {
+        owner.dynamicEndpointResource.failRequest(endpointToken, "tool-resources 请求失败");
+      }
     }
-    if (subagentRes.status === "fulfilled" && subagentRes.value.subagents) {
+    if (subagentRes.status === "fulfilled") {
       subagentRef.current.mergeSnapshot(sid, {
-        subagents: subagentRes.value.subagents as Record<string, SubagentSession>,
+        subagents: subagentRes.value,
       });
     }
   });
@@ -102,7 +226,7 @@ export function useWebSocket() {
   }
 
   useEffect(() => { connRef.current = conn; }, [conn]);
-  useEffect(() => { sessionRef.current = session; }, [session]);
+  useLayoutEffect(() => { sessionRef.current = session; }, [session]);
   useEffect(() => { uploadRef.current = upload; }, [upload]);
   useEffect(() => { subagentRef.current = subagent; }, [subagent]);
   useEffect(() => { llmProfilesRef.current = llmProfiles; }, [llmProfiles]);
@@ -731,10 +855,33 @@ export function useWebSocket() {
     if (!session.sessionId) return;
     const sid = session.sessionId;
     const fetchTasks = () => {
-      fetch(`/api/sessions/${sid}/shells`).then((response) => response.json())
-        .then((data) => sessionRef.current?.setShells(data.shells || [])).catch(() => {});
-      fetch(`/api/sessions/${sid}/cron-tasks`).then((response) => response.json())
-        .then((data) => sessionRef.current?.setCronTasks(data.tasks || [])).catch(() => {});
+      const owner = sessionRef.current;
+      if (!owner || owner.sessionId !== sid) return;
+      const scope = { sessionId: sid, generation: owner.resourceScope.generation };
+      const shellToken = owner.shellResource.beginRequest();
+      const cronToken = owner.cronResource.beginRequest();
+      if (shellToken) {
+        fetchJsonWithTimeout(
+          `/api/sessions/${sid}/shells`, { signal: shellToken.signal },
+          { timeoutMs: CRITICAL_TIMEOUT_MS, phase: "shells" },
+          (payload) => decodeSessionShells(payload, sid),
+        ).then((shells) => {
+          if (owner.isResourceScopeCurrent(scope)) owner.shellResource.completeRequest(shellToken, shells);
+        }).catch(() => {
+          if (owner.isResourceScopeCurrent(scope)) owner.shellResource.failRequest(shellToken, "shells 请求失败");
+        });
+      }
+      if (cronToken) {
+        fetchJsonWithTimeout(
+          `/api/sessions/${sid}/cron-tasks`, { signal: cronToken.signal },
+          { timeoutMs: CRITICAL_TIMEOUT_MS, phase: "cron-tasks" },
+          (payload) => decodeSessionCronTasks(payload),
+        ).then((tasks) => {
+          if (owner.isResourceScopeCurrent(scope)) owner.cronResource.completeRequest(cronToken, tasks);
+        }).catch(() => {
+          if (owner.isResourceScopeCurrent(scope)) owner.cronResource.failRequest(cronToken, "cron-tasks 请求失败");
+        });
+      }
       fetchToolResourcesRef.current(sid);
     };
     fetchTasks();
@@ -782,6 +929,8 @@ export function useWebSocket() {
     setShells: session.setShells,
     cronTasks: session.cronTasks,
     setCronTasks: session.setCronTasks,
+    resourceSnapshots: session.resourceSnapshots,
+    resourceScope: session.resourceScope,
     subagentIdleCountdown: subagent.subagentIdleCountdown,
     terminatingSessions: session.terminatingSessions,
     generatingTitleSessions: session.generatingTitleSessions,

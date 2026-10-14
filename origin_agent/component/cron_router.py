@@ -469,4 +469,5 @@ def _build_task_info(task: _CronTask) -> CronTaskInfo:
     return CronTaskInfo(task_id=task.task_id, name=task.name, schedule_type=task.schedule_type,
                         schedule_value=task.schedule_value, command=list(task.command),
                         should_schedule=task.should_schedule, next_run=_iso_time(task.next_run),
-                        run_count=task.run_count, last_run=_iso_time(task.last_run), log_path=task.log_path)
+                        run_count=task.run_count, last_run=_iso_time(task.last_run), log_path=task.log_path,
+                        is_wait=task.is_wait, wait_message=task.wait_message)

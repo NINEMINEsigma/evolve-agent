@@ -508,6 +508,9 @@ export interface CronTask {
   max_runs?: number;
   should_schedule: boolean;
   log_path: string;
+  // WaitCron 只读身份：缺字段视为普通 Cron，不按 name/command 猜测。
+  is_wait?: boolean;
+  wait_message?: string;
 }
 
 export interface ChatMessage {

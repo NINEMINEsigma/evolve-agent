@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
+import { useSessionResourceSnapshot } from "./useSessionResourceSnapshot";
+import type {
+  SessionResourceScope,
+  SessionResourceSnapshots,
+  SessionResourceState,
+} from "../types/sessionResources";
 import type {
   ApprovalMode,
   ApprovalModeSyncStatus,
@@ -49,6 +55,12 @@ export interface SessionStore {
   setClipboardDisplays: React.Dispatch<React.SetStateAction<Record<string, ClipboardDisplay>>>;
   dynamicEndpoints: DynamicEndpoint[];
   setDynamicEndpoints: React.Dispatch<React.SetStateAction<DynamicEndpoint[]>>;
+  shellResource: SessionResourceState<ShellInfo[]>;
+  cronResource: SessionResourceState<CronTask[]>;
+  dynamicEndpointResource: SessionResourceState<DynamicEndpoint[]>;
+  resourceSnapshots: SessionResourceSnapshots;
+  resourceScope: SessionResourceScope;
+  isResourceScopeCurrent: (scope: SessionResourceScope) => boolean;
   agents: string[];
   setAgents: React.Dispatch<React.SetStateAction<string[]>>;
   mergeMode: boolean;
@@ -108,7 +120,7 @@ function operationError(data: unknown, fallback: string): string {
 export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionStore {
   const [pendingConfirms, setPendingConfirms] = useState<ConfirmRequest[]>([]);
   const [pendingAsks, setPendingAsks] = useState<AskRequest[]>([]);
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionIdState] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [contextTokens, setContextTokens] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -117,12 +129,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [approvalModeSyncStatus, setApprovalModeSyncStatus] = useState<ApprovalModeSyncStatus>("loading");
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
-  const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
-  const [shells, setShells] = useState<ShellInfo[]>([]);
-  const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
@@ -145,9 +154,43 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const pendingConfirmsRef = useRef<ConfirmRequest[]>([]);
   const callbacksRef = useRef(callbacks);
   const ignoreStaleRef = useRef(false);
+  // 会话资源归属：sid 与单调代际；effect 同步 ref，用 sidRef 在 render 期判定真实变化。
+  const resourceScopeRef = useRef<SessionResourceScope>({ sessionId: "", generation: 0 });
+  const sidRef = useRef("");
+  const shellResource = useSessionResourceSnapshot<ShellInfo[]>(resourceScopeRef);
+  const cronResource = useSessionResourceSnapshot<CronTask[]>(resourceScopeRef);
+  const dynamicEndpointResource = useSessionResourceSnapshot<DynamicEndpoint[]>(resourceScopeRef);
+
+  const isResourceScopeCurrent = useCallback(
+    (scope: SessionResourceScope): boolean => {
+      const current = resourceScopeRef.current;
+      return current.sessionId === scope.sessionId && current.generation === scope.generation;
+    },
+    [],
+  );
+
+  // 唯一 sessionId 写入口：真实变化时先同步 scope、重置三源，再提交 React state。
+  const setSessionId = useCallback<React.Dispatch<React.SetStateAction<string>>>(
+    (update) => {
+      const previous = sidRef.current;
+      const next = typeof update === "function" ? (update as (prev: string) => string)(previous) : update;
+      if (next === previous) {
+        setSessionIdState(next);
+        return;
+      }
+      sidRef.current = next;
+      resourceScopeRef.current = { sessionId: next, generation: resourceScopeRef.current.generation + 1 };
+      shellResource.reset();
+      cronResource.reset();
+      dynamicEndpointResource.reset();
+      setSessionIdState(next);
+    },
+    [shellResource.reset, cronResource.reset, dynamicEndpointResource.reset],
+  );
   useEffect(() => { pendingAsksRef.current = pendingAsks; }, [pendingAsks]);
   useEffect(() => { pendingConfirmsRef.current = pendingConfirms; }, [pendingConfirms]);
   useEffect(() => { callbacksRef.current = callbacks; }, [callbacks]);
+  useEffect(() => { sidRef.current = sessionId; }, [sessionId]);
 
   const clearPendingInteractions = useCallback(() => {
     for (const ask of pendingAsksRef.current) {
@@ -203,7 +246,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setContextTokens(0);
           setTaskProgress({});
           setClipboardDisplays({});
-          setDynamicEndpoints([]);
           clearPendingInteractions();
           callbacksRef.current.onSessionRotated?.(data.new_sid, oldSid);
           fetchSessions();
@@ -337,7 +379,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setContextTokens(0);
     setTaskProgress({});
     setClipboardDisplays({});
-    setDynamicEndpoints([]);
     setInterruptStatus("idle");
     setApprovalModeSyncStatus("loading");
     setOperationNotice(null);
@@ -567,9 +608,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     sessions, setSessions, searchQuery, setSearchQuery,
     approvalMode, setApprovalMode, approvalModeSyncStatus, setApprovalModeSyncStatus,
     taskProgress, setTaskProgress, clipboardDisplays, setClipboardDisplays,
-    dynamicEndpoints, setDynamicEndpoints, agents, setAgents,
+    dynamicEndpoints: dynamicEndpointResource.snapshot.data ?? [],
+    setDynamicEndpoints: dynamicEndpointResource.setData,
+    shellResource, cronResource, dynamicEndpointResource,
+    resourceSnapshots: {
+      shells: shellResource.snapshot,
+      cronTasks: cronResource.snapshot,
+      dynamicEndpoints: dynamicEndpointResource.snapshot,
+    },
+    resourceScope: resourceScopeRef.current,
+    isResourceScopeCurrent,
+    agents, setAgents,
     mergeMode, setMergeMode, selectedForMerge, setSelectedForMerge,
-    shells, setShells, cronTasks, setCronTasks,
+    shells: shellResource.snapshot.data ?? [], setShells: shellResource.setData,
+    cronTasks: cronResource.snapshot.data ?? [], setCronTasks: cronResource.setData,
     terminatingSessions, generatingTitleSessions, generatingTagSessions, generatingSummarySessions,
     operationNotice, showOperationNotice, dismissOperationNotice,
     interruptStatus, setInterruptStatus, allTags, ignoreStaleRef,

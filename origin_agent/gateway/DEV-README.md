@@ -208,6 +208,8 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 清单支持普通/随意聊聊/多Agent主会话，不包括独立子会话或未进入History的上传/Markdown资源。关闭不减少History磁盘体积；PUT仍全量写盘，保存超时的前端须GET确认，不自动重试写入。源码已实施，未运行验证。
 
+列表响应的 `items` 分页保持不变，另在顶层增加六个全 History 聚合字段：`enabled_count`、`disabled_count`、`enabled_inline_payload_chars`、`disabled_inline_payload_chars`、`enabled_unknown_payload_count`、`disabled_unknown_payload_count`，由 `entry/history_media.py::project_history_media` 在同次遍历中计算（含分页之外的全部实例）；`session_id`/`history_count`/`total_count`/`offset`/`limit`/`editable` 与内容端点、PUT 开关语义不变。
+
 ### 消息编辑
 
 | 方法 | 端点 | 说明 |
@@ -252,7 +254,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主动推送。WebSocket 断线不停止 Shell；自动旋转迁移所有权；手动终结、永久删除和应用关闭负责停止。
 
-Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronRouter)`，不再导入cron_tools获取服务。任务持久化、调度和实际命令属于CronRouter；应用冻结不同于用户取消，不删除持久任务或把未执行任务标为完成。激活由 Application 在全部 System 唤醒且 Gateway ready 后统一执行，关闭编排由 Application 统一执行。
+Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronRouter)`，不再导入cron_tools获取服务。任务持久化、调度和实际命令属于CronRouter；应用冻结不同于用户取消，不删除持久任务或把未执行任务标为完成。激活由 Application 在全部 System 唤醒且 Gateway ready 后统一执行，关闭编排由 Application 统一执行。`GET /api/sessions/{id}/cron-tasks` 原样返回 `CronTaskInfo` 列表，响应新增只读字段 `is_wait`/`wait_message`（等待提醒身份与内容），路由、调度与执行语义不变。
 
 ### LLM Profile
 

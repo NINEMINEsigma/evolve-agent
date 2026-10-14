@@ -103,6 +103,145 @@
   .tab-rail { width: 40px; flex-basis: 40px; padding-top: 0; }
 }
 
+/* ── Right tab hover preview card (read-only) ── */
+.popup-layer.tab-hover-preview {
+  z-index: var(--z-tab-preview);
+  pointer-events: auto;
+  animation: tab-hover-preview-fade var(--duration-fast) var(--ease-out);
+}
+
+@keyframes tab-hover-preview-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tab-hover-preview-inner {
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.tab-hover-preview-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.tab-hover-preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tab-hover-preview-section-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.tab-hover-preview-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tab-hover-preview-row-label {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.tab-hover-preview-row-value {
+  text-align: right;
+  word-break: break-word;
+}
+
+.tab-hover-preview-row.tone-muted .tab-hover-preview-row-value {
+  color: var(--text-muted);
+}
+
+.tab-hover-preview-row.tone-warning .tab-hover-preview-row-value {
+  color: var(--status-warning);
+}
+
+.tab-hover-preview-notice {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tab-hover-preview-footnote {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+/* Media summary: two independent read-only progress bars */
+.tab-hover-preview-media {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tab-hover-preview-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tab-hover-preview-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tab-hover-preview-progress-label.progress-enabled { color: var(--accent); }
+.tab-hover-preview-progress-label.progress-disabled { color: var(--text-secondary); }
+
+.tab-hover-preview-progress-value {
+  color: var(--text-primary);
+}
+
+.tab-hover-preview-progress-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.tab-hover-preview-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.tab-hover-preview-progress-fill.progress-enabled { background: var(--accent); }
+.tab-hover-preview-progress-fill.progress-disabled { background: var(--status-info); }
+
+/* Variables summary: compact count grid */
+.tab-hover-preview-section-variables .tab-hover-preview-row {
+  justify-content: space-between;
+}
+
+@media (max-width: 768px) {
+  .popup-layer.tab-hover-preview { max-width: calc(100vw - 16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-layer.tab-hover-preview { animation: none; }
+}
+
 /* ── Tab content layers ── */
 
 /* Chat tab: transparent wrapper, ChatArea handles its own layout */

@@ -3,10 +3,25 @@ import { SESSION_MEDIA } from "../../constants/sessionMedia";
 import { useChatRuntimeStore } from "../chat/chatRuntimeStore";
 import { fetchSessionMedia, SessionMediaRequestError, updateSessionMedia } from "./api";
 import { mediaInputLabels } from "./labels";
-import type { SessionMediaItemDto, SessionMediaListResponseDto, UseSessionMediaState } from "./types";
+import type {
+  SessionMediaAggregateDto, SessionMediaItemDto, SessionMediaListResponseDto, UseSessionMediaState,
+} from "./types";
+
+function aggregateOf(page: SessionMediaListResponseDto): SessionMediaAggregateDto {
+  return {
+    total_count: page.total_count,
+    enabled_count: page.enabled_count,
+    disabled_count: page.disabled_count,
+    enabled_inline_payload_chars: page.enabled_inline_payload_chars,
+    disabled_inline_payload_chars: page.disabled_inline_payload_chars,
+    enabled_unknown_payload_count: page.enabled_unknown_payload_count,
+    disabled_unknown_payload_count: page.disabled_unknown_payload_count,
+  };
+}
 
 export function useSessionMedia(sessionId: string, active: boolean, archived: boolean): UseSessionMediaState {
   const [page, setPage] = useState<SessionMediaListResponseDto | null>(null);
+  const [aggregate, setAggregate] = useState<SessionMediaAggregateDto | null>(null);
   const [offset, changeOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,8 +34,8 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
   const writes = useRef(new Map<string, AbortController>());
   const refreshWanted = useRef(false);
   const scope = useRef<string | null>(null);
-  const current = useRef({ sessionId, active, archived, offset, stale, page });
-  current.current = { sessionId, active, archived, offset, stale, page };
+  const current = useRef({ sessionId, active, archived, offset, stale, page, aggregate });
+  current.current = { sessionId, active, archived, offset, stale, page, aggregate };
 
   const refresh = useCallback(async () => {
     if (!sessionId || !active || current.current.sessionId !== sessionId || !current.current.active) return;
@@ -48,6 +63,8 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
         changeOffset(0);
         return;
       }
+      // 先独立提交聚合，再提交当前页；翻页期间旧聚合仍可用。
+      setAggregate(aggregateOf(result));
       setPage(result);
       setStale(false);
       setError(null);
@@ -55,7 +72,10 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
     } catch (failure) {
       if (generation.current !== owner || readEpoch.current !== epoch
         || current.current.sessionId !== sessionId || !current.current.active || controller.signal.aborted) return;
-      if (failure instanceof SessionMediaRequestError && failure.status === 404) setPage(null);
+      if (failure instanceof SessionMediaRequestError && failure.status === 404) {
+        setPage(null);
+        setAggregate(null);
+      }
       setStale(true);
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -137,6 +157,7 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
     if (scope.current !== sessionId) {
       scope.current = sessionId;
       setPage(null);
+      setAggregate(null);
       changeOffset(0);
       setError(null);
       setItemErrors({});
@@ -188,6 +209,7 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
 
   return {
     page: page !== null && page.session_id === sessionId && page.offset === offset ? page : null,
+    aggregate: scope.current === sessionId ? aggregate : null,
     offset, loading, error, stale, pendingIds, itemErrors, refresh, setOffset, setEnabled,
   };
 }

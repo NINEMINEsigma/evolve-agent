@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CharacterProfileEntryDto, SubagentSession } from "../../types";
 import SubagentAvatar from "../characterAvatars/SubagentAvatar";
-import { useCharacterProfiles } from "./useCharacterProfiles";
+import { useTabData } from "./TabDataContext";
 import type { TabRenderContext } from "./registry";
 
 /** 单个提示词条目：路径标签与正文（null 表示无展开正文）。 */
@@ -87,9 +87,7 @@ const RUN_STATUS_TEXT: Record<SubagentSession["status"], string> = {
  * the hint bar tells the user to ask the main agent in chat.
  */
 export default function CharactersTab({ ctx }: { ctx: TabRenderContext }) {
-  const { profiles, loading, error, refresh } = useCharacterProfiles(
-    ctx.activeTab === "characters",
-  );
+  const { profiles, loading, error, refresh } = useTabData().characters;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (key: string) => {

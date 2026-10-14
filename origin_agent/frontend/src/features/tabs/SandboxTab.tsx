@@ -2,23 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import { LlmConfirmation } from "../../components/llm/LlmProfileDialogs";
 import type {
   DynamicSandboxSpace,
-  DynamicSandboxSpaceWithAvailability,
 } from "../../types";
 import {
   createDynamicSandboxSpace,
-  listDynamicSandboxSpaces,
   pickDynamicSandboxDirectory,
   removeDynamicSandboxSpace,
   updateDynamicSandboxSpace,
 } from "../../services/dynamicSandboxSpacesApi";
 import "../../styles/llm-profile.css";
+import { useTabData } from "./TabDataContext";
 import type { TabRenderContext } from "./registry";
 
 /**
  * Sandbox tab: global dynamic sandbox space management, de-modalized from the
- * old command-menu dialog. No overlay, no close button. The list lazy-loads
- * on every entry into this tab (activeTab key, ResourcesTab pattern); the
- * viewing/editing state machine and REST semantics are preserved verbatim.
+ * old command-menu dialog. No overlay, no close button. The list is held by the
+ * shared TabDataProvider (lazy-loads on every entry via the activeTab effect);
+ * the viewing/editing state machine and REST semantics are preserved verbatim.
  * Drafts survive tab switches and session switches because the layer stays
  * mounted; a beforeunload guard covers page reload while editing.
  */
@@ -31,38 +30,31 @@ const EMPTY_SPACE: DynamicSandboxSpace = {
 };
 
 export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
-  const [spaces, setSpaces] = useState<DynamicSandboxSpaceWithAvailability[]>([]);
+  const { spaces, loading, error: listError, refresh: refreshSpaces } = useTabData().sandbox;
   const [selectedName, setSelectedName] = useState("");
   const [draft, setDraft] = useState<DynamicSandboxSpace>(EMPTY_SPACE);
   const [editing, setEditing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const error = operationError ?? listError;
 
   const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await listDynamicSandboxSpaces();
-      setSpaces(data.spaces);
-      setError(null);
-      setSelectedName((current) => {
-        if (current && data.spaces.some((space) => space.name === current)) return current;
-        return data.spaces[0]?.name ?? "";
-      });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    const data = await refreshSpaces();
+    if (data === null) return;
+    setSelectedName((current) => {
+      if (current && data.some((space) => space.name === current)) return current;
+      return data[0]?.name ?? "";
+    });
+  }, [refreshSpaces]);
 
   // Lazy-load key: every entry into this tab re-fetches the list.
   useEffect(() => {
     if (ctx.activeTab === "sandbox") void refresh();
   }, [ctx.activeTab, refresh]);
 
-  const selected = spaces.find((space) => space.name === selectedName) ?? null;
+  const spacesList = spaces ?? [];
+  const selected = spacesList.find((space) => space.name === selectedName) ?? null;
 
   useEffect(() => {
     if (!editing) {
@@ -90,7 +82,7 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
     setSelectedName("");
     setDraft({ ...EMPTY_SPACE });
     setEditing(true);
-    setError(null);
+    setOperationError(null);
   }, []);
 
   const startEdit = useCallback(() => {
@@ -102,18 +94,18 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
       is_readonly: selected.is_readonly,
     });
     setEditing(true);
-    setError(null);
+    setOperationError(null);
   }, [selected]);
 
   const cancelEdit = useCallback(() => {
     setEditing(false);
-    setError(null);
-    if (!selected && spaces.length > 0) setSelectedName(spaces[0].name);
-  }, [selected, spaces]);
+    setOperationError(null);
+    if (!selected && spacesList.length > 0) setSelectedName(spacesList[0].name);
+  }, [selected, spacesList]);
 
   const save = useCallback(async () => {
     if (!draft.name.trim() || !draft.path.trim() || !draft.description.trim()) {
-      setError("名称、路径和用途描述不能为空");
+      setOperationError("名称、路径和用途描述不能为空");
       return;
     }
     setBusy(true);
@@ -133,7 +125,7 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
       setSelectedName(next.name);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setOperationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -149,7 +141,7 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
       setDeleteTarget(null);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setOperationError(cause instanceof Error ? cause.message : String(cause));
       setDeleteTarget(null);
     } finally {
       setBusy(false);
@@ -161,9 +153,9 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
     try {
       const path = await pickDynamicSandboxDirectory();
       if (path !== null) setDraft((current) => ({ ...current, path }));
-      setError(null);
+      setOperationError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setOperationError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -186,19 +178,19 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
               <button className="modal-btn modal-btn--secondary" onClick={() => void refresh()} disabled={loading}>重试</button>
             </div>
           )}
-          {loading && spaces.length === 0 ? (
+          {loading && spaces === null ? (
             <div className="dynamic-sandbox-empty">正在加载动态沙盒空间…</div>
           ) : (
             <div className="dynamic-sandbox-layout">
               <div className="dynamic-sandbox-list">
-                {spaces.length === 0 ? (
+                {spacesList.length === 0 ? (
                   <div className="dynamic-sandbox-empty">尚未配置动态沙盒空间</div>
-                ) : spaces.map((space) => (
+                ) : spacesList.map((space) => (
                   <button
                     key={space.name}
                     type="button"
                     className={`dynamic-sandbox-list-item${space.name === selectedName ? " active" : ""}`}
-                    onClick={() => { setSelectedName(space.name); setEditing(false); setError(null); }}
+                    onClick={() => { setSelectedName(space.name); setEditing(false); setOperationError(null); }}
                     disabled={busy}
                   >
                     <strong>{space.name}:</strong>
@@ -228,7 +220,7 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
           )}
         </div>
         <footer className="llm-edit-footer">
-          <span>{busy ? "正在处理…" : editing ? (selected ? "编辑既有空间配置" : "正在新增空间配置") : selected ? `已选中：${selected.name}` : spaces.length === 0 ? "尚未配置任何空间" : "从左侧列表选择一个空间"}</span>
+          <span>{busy ? "正在处理…" : editing ? (selected ? "编辑既有空间配置" : "正在新增空间配置") : selected ? `已选中：${selected.name}` : spacesList.length === 0 ? "尚未配置任何空间" : "从左侧列表选择一个空间"}</span>
           <div className="llm-inline-actions">
             {editing ? (
               <>

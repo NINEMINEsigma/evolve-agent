@@ -239,7 +239,7 @@
 
 ### Tab 导航体系
 
-文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `CharactersTab.tsx` · `useCharacterProfiles.ts` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
+文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `TabRail.tsx` · `TabStage.tsx` · `TabDataContext.tsx` · `useTabPreview.ts` · `TabHoverPreview.tsx` · `tabPreviewTypes.ts` · `tabPreviewSelectors.ts` · `tabPreviewLabels.json` · `useDynamicSandboxSpaces.ts` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `CharactersTab.tsx` · `useCharacterProfiles.ts` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
 
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
@@ -257,6 +257,8 @@
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
 | 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |
 | Tab 安全区 | `.tab-panel-safe-top` | 各非聊天 tab 顶部 56px 安全留白，避开顶部栏浮层热区 | tab safe area |
+| 右侧 Tab 预览小窗 | `TabHoverPreview` / `.tab-hover-preview` | 鼠标悬停或键盘聚焦启用且非当前的 Tab 图标时，在图标左侧显示的只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 Tab；点击卡片不切 Tab，Escape 关闭且同次悬停不重开；与名称 tooltip 互斥 | tab rail hover preview |
+| 只读已有数据 | — | 预览只读取各 Tab 已取得的快照（`data` 为 null 表示尚未读取，`[]` 才是已知空）；未知不伪装为 0，读取中/旧快照/读取失败分项表达 | read-only loaded data |
 
 ### Agentspace 编辑器
 
