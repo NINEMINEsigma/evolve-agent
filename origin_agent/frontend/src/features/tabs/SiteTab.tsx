@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TabRenderContext } from "./registry";
 
 /**
- * Session site tab: toolbar + iframe preview of ws:sessions/<id>/site/.
+ * Session site tab: iframe preview + bottom toolbar for ws:sessions/<id>/site/.
  * Probe state is injected via ctx.siteStatus (single probe source lives in
  * useTabSystem); this component only renders and refreshes.
  */
@@ -42,20 +42,11 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="site-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
       <div className="site-tab-body">
         {status === "missing" || status === "idle" ? (
           <div className="drawer-empty">尚未部署网页</div>
         ) : (
           <>
-            <div className="site-toolbar">
-              <button className="site-btn" onClick={handleRefresh} title="刷新">刷新</button>
-              <button className="site-btn" onClick={handleFullscreen} title="全屏">
-                {isFullscreen ? "退出全屏" : "全屏"}
-              </button>
-              <button className="site-btn" onClick={handleNewTab} title="新标签页打开">新标签页</button>
-              <button className="site-btn" onClick={handleDownloadZip} title="下载整站 zip">下载</button>
-            </div>
             <div className="site-viewport" ref={frameRef}>
               <iframe
                 key={reloadKey}
@@ -64,6 +55,14 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
                 allowFullScreen
                 title="session-site"
               />
+            </div>
+            <div className="site-toolbar">
+              <button className="site-btn" onClick={handleRefresh} title="刷新">刷新</button>
+              <button className="site-btn" onClick={handleFullscreen} title="全屏">
+                {isFullscreen ? "退出全屏" : "全屏"}
+              </button>
+              <button className="site-btn" onClick={handleNewTab} title="新标签页打开">新标签页</button>
+              <button className="site-btn" onClick={handleDownloadZip} title="下载整站 zip">下载</button>
             </div>
           </>
         )}

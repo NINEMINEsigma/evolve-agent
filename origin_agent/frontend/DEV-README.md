@@ -112,7 +112,7 @@ frontend/
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
 | `features/tabs/CharactersTab.tsx` | 角色档案 Tab：全部子Agent 角色档案的只读配置目录；roleplay/task 分组列表 + 展开式详情（profile.md 全文、`[profile]` 引用提示词文件、LLM Profile 名称、错误全文），错误条目高亮、空态引导与“如需修改请在聊天中让主Agent操作”提示；运行状态仅当前会话视角（按角色名匹配 `subagentSessions`，优先 running）；提示词条目由 `buildPromptItems` 尽力对齐（正文与路径不保证一一对应）；档案数据从共享 `TabDataContext` 读取（唯一 hook 实例在 Provider，激活条件 `activeTab==="characters"`），不再直接调用 hook |
 | `features/tabs/useCharacterProfiles.ts` | 角色档案数据 hook（Provider 内唯一实例）：激活即重拉 `GET /api/characters/profiles`（完整 JSON 截止 + 卸载取消）、`characters/` 相关 Agentspace 事件 1s 去抖刷新、请求代际控制防旧响应覆盖；载荷缺失或非数组按错误处理，不成功返回 `[]`；不依赖会话 ID（档案为全局数据） |
-| `features/tabs/SiteTab.tsx` | 会话网页 Tab：toolbar + iframe；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`） |
+| `features/tabs/SiteTab.tsx` | 会话网页 Tab：iframe 占剩余高度，刷新／全屏／新标签页／下载按钮栏在可视底部常驻并独占一行，不遮挡网页；不渲染顶部 56px 安全留白，接受现有桌面顶部栏热区／状态胶囊／展开浮层覆盖网页顶部；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`），全屏目标仍仅为网页视口 |
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留；列表改从共享 `TabDataContext` 读取（`spaces` 初次为 null 表示未读，成功 `[]` 才为空），本地 `operationError` 与列表 `error` 分开显示 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |

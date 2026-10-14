@@ -253,10 +253,10 @@
 | 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；右侧注册表共九个 Tab，位于媒体输入 Tab 后；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
-| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
+| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；按钮栏在可视底部常驻并独占一行、不遮挡网页，不使用顶部安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
 | 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |
-| Tab 安全区 | `.tab-panel-safe-top` | 各非聊天 tab 顶部 56px 安全留白，避开顶部栏浮层热区 | tab safe area |
+| Tab 安全区 | `.tab-panel-safe-top` | 使用此安全区的非聊天 Tab 顶部保留 56px 安全留白，避开顶部栏浮层热区；会话网页 Tab 例外，不渲染该安全留白，按钮栏位于底部 | tab safe area |
 | 右侧 Tab 预览小窗 | `TabHoverPreview` / `.tab-hover-preview` | 鼠标悬停或键盘聚焦启用且非当前的 Tab 图标时，在图标左侧显示的只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 Tab；点击卡片不切 Tab，Escape 关闭且同次悬停不重开；与名称 tooltip 互斥 | tab rail hover preview |
 | 只读已有数据 | — | 预览只读取各 Tab 已取得的快照（`data` 为 null 表示尚未读取，`[]` 才是已知空）；未知不伪装为 0，读取中/旧快照/读取失败分项表达 | read-only loaded data |
 

@@ -420,14 +420,14 @@
 
 /* ── Session Site ── */
 
-/* toolbar：顶部一行按钮 */
+/* toolbar：底部常驻一行按钮，独占空间而不遮挡网页 */
 .site-toolbar {
   display: flex;
   flex-direction: row;
   gap: 8px;
   align-items: center;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   background: var(--bg-elevated);
   flex-shrink: 0;
 }
@@ -448,7 +448,7 @@
   border-color: var(--accent);
 }
 
-/* 视口：撑满 toolbar 之下全部剩余空间，自适应宽高 */
+/* 视口：撑满底部 toolbar 之上全部剩余空间，自适应宽高 */
 .site-viewport {
   flex: 1;
   min-height: 0;
