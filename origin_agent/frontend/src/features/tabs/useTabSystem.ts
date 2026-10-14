@@ -8,7 +8,12 @@ import type { TabId } from "./registry";
  * session switch and page reload both fall back to the chat tab.
  */
 export function useTabSystem(ws: WebSocketState) {
-  const [activeTab, setActiveTab] = useState<TabId>("chat");
+  const [activeTabState, setActiveTabState] = useState<{ sessionId: string; tab: TabId }>({
+    sessionId: ws.sessionId,
+    tab: "chat",
+  });
+  // Reset the exposed tab synchronously before session-change effects run.
+  const activeTab = activeTabState.sessionId === ws.sessionId ? activeTabState.tab : "chat";
 
   // Single site probe source for the whole tab system (survives tab switches).
   const siteStatus = useSessionSite(ws.sessionId);
@@ -30,22 +35,22 @@ export function useTabSystem(ws: WebSocketState) {
 
   // Session switch always returns to the chat tab.
   useEffect(() => {
-    setActiveTab("chat");
+    setActiveTabState({ sessionId: ws.sessionId, tab: "chat" });
   }, [ws.sessionId]);
 
   // Active tab became disabled -> fall back to chat.
   useEffect(() => {
     if (!enabledTabs[activeTab]) {
-      setActiveTab("chat");
+      setActiveTabState({ sessionId: ws.sessionId, tab: "chat" });
     }
-  }, [activeTab, enabledTabs]);
+  }, [activeTab, enabledTabs, ws.sessionId]);
 
   const switchTab = useCallback(
     (id: TabId) => {
       if (!enabledTabs[id]) return;
-      setActiveTab(id);
+      setActiveTabState({ sessionId: ws.sessionId, tab: id });
     },
-    [enabledTabs],
+    [enabledTabs, ws.sessionId],
   );
 
   return { activeTab, enabledTabs, switchTab, siteStatus };

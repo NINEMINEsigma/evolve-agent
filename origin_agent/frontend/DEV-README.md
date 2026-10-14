@@ -99,9 +99,9 @@ frontend/
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
 | `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 九条目（chat/resources/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
-| `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；持有 `useSessionSite` 唯一探测源；禁用 tab 切换静默忽略 |
+| `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 唯一 HEAD 探测源；禁用 tab 切换静默忽略 |
 | `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击；对启用且非当前图标接入只读悬停/聚焦预览（`useAnchoredHoverPreview` + `useTabPreview`），窗口显示时 `aria-describedby` 指向小窗，预览与名称 tooltip 互斥 |
-| `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 内容层，`visibility` 切换不卸载（保护聊天滚动与 iframe 生命周期）；切换时对 site iframe 执行 blur 兜底 |
+| `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 外层，`visibility` 切换不卸载（保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活后才创建，SiteTab 仅随 sessionId key 变化或外层卸载重建；切换时对 site iframe 执行 blur 兜底 |
 | `features/tabs/TabDataContext.tsx` | 无 DOM 的唯一 Provider：持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，供正式 Tab 与只读预览共享同一快照；不随普通 Tab/会话切换重建，仅随锁定分支卸载；缺 Provider 时 `useTabData` 快速失败 |
 | `features/tabs/useDynamicSandboxSpaces.ts` | 动态沙盒空间列表唯一持有者：只读列表与手动 `refresh`，不自动读取（激活读取仍由 SandboxTab effect 驱动） |
 | `features/tabs/useTabPreview.ts` | 只读摘要数据组装：把 TabDataProvider / chatRuntimeStore / WebSocket 快照投影为纯 `TabPreviewInput` 并运行选择器；不发请求，仅资源预览且有下一项时运行本地 1 秒 tick |
@@ -112,7 +112,7 @@ frontend/
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
 | `features/tabs/CharactersTab.tsx` | 角色档案 Tab：全部子Agent 角色档案的只读配置目录；roleplay/task 分组列表 + 展开式详情（profile.md 全文、`[profile]` 引用提示词文件、LLM Profile 名称、错误全文），错误条目高亮、空态引导与“如需修改请在聊天中让主Agent操作”提示；运行状态仅当前会话视角（按角色名匹配 `subagentSessions`，优先 running）；提示词条目由 `buildPromptItems` 尽力对齐（正文与路径不保证一一对应）；档案数据从共享 `TabDataContext` 读取（唯一 hook 实例在 Provider，激活条件 `activeTab==="characters"`），不再直接调用 hook |
 | `features/tabs/useCharacterProfiles.ts` | 角色档案数据 hook（Provider 内唯一实例）：激活即重拉 `GET /api/characters/profiles`（完整 JSON 截止 + 卸载取消）、`characters/` 相关 Agentspace 事件 1s 去抖刷新、请求代际控制防旧响应覆盖；载荷缺失或非数组按错误处理，不成功返回 `[]`；不依赖会话 ID（档案为全局数据） |
-| `features/tabs/SiteTab.tsx` | 会话网页 Tab：iframe 占剩余高度，刷新／全屏／新标签页／下载按钮栏在可视底部常驻并独占一行，不遮挡网页；不渲染顶部 56px 安全留白，接受现有桌面顶部栏热区／状态胶囊／展开浮层覆盖网页顶部；site 状态经 ctx 注入（探测唯一源在 `useTabSystem`），全屏目标仍仅为网页视口 |
+| `features/tabs/SiteTab.tsx` | 会话网页 Tab：首次激活且入口 ready、URL 可用时才创建 iframe/工具栏，未激活时只有外壳，不加载网页正文或脚本；局部 `hasBeenActivated` 在同会话切 Tab 后保留，registry 的 sessionId key 在切会话时重置，返回原会话也重新等待点击；首次加载后隐藏 Tab 仍沿用热刷新，入口删除后同会话重部署可自动重建。iframe 占剩余高度，刷新／全屏／新标签页／下载按钮栏在可视底部常驻并独占一行，不遮挡网页；不渲染顶部 56px 安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 状态经 ctx 注入（提前运行的 HEAD 探测唯一源在 `useTabSystem`），全屏目标仍仅为网页视口 |
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留；列表改从共享 `TabDataContext` 读取（`spaces` 初次为 null 表示未读，成功 `[]` 才为空），本地 `operationError` 与列表 `error` 分开显示 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
@@ -253,7 +253,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `features/characterAvatars/useCharacterAvatarSync.ts` | 挂载时拉取 `GET /api/characters/avatars`，订阅聊天页 Agentspace 事件（`SOUL.md.meta` / `characters/` 命中或 `resync`）后去抖重拉；失败静默保留旧映射 |
 | `features/characterAvatars/SubagentAvatar.tsx` | 子会话 Tab子级 tab 与卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
-| `useSessionSite.ts` | 会话网页状态：通过稳定入口的服务端重定向取得最终 `index.html` URL；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时隐藏入口；探测唯一实例由 `features/tabs/useTabSystem.ts` 持有，会话网页 Tab经 ctx 消费 |
+| `useSessionSite.ts` | 会话网页状态：提前通过 HEAD 探测稳定入口并跟随服务端重定向取得最终 `index.html` URL，不获取网页正文；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时禁用 Tab；探测唯一实例由 `features/tabs/useTabSystem.ts` 持有，SiteTab 经 ctx 消费，正文只在该会话首次激活会话网页 Tab 后由 iframe 加载 |
 | `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：服务端解析重定向，按最终 CSS URL 获取内容；PostCSS 作用域处理并按最终 URL重写 CSS `url()`，禁止 `@import` |
 

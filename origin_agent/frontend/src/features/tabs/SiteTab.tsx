@@ -4,12 +4,18 @@ import type { TabRenderContext } from "./registry";
 /**
  * Session site tab: iframe preview + bottom toolbar for ws:sessions/<id>/site/.
  * Probe state is injected via ctx.siteStatus (single probe source lives in
- * useTabSystem); this component only renders and refreshes.
+ * useTabSystem). The iframe loads on first activation and stays mounted across
+ * same-session tab switches; the registry's session key resets activation.
  */
 export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
+  const [hasBeenActivated, setHasBeenActivated] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
   const { status, reloadKey, urls, refresh } = ctx.siteStatus;
+
+  useEffect(() => {
+    if (ctx.activeTab === "site") setHasBeenActivated(true);
+  }, [ctx.activeTab]);
 
   // Fullscreen state sync
   useEffect(() => {
@@ -45,12 +51,12 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
       <div className="site-tab-body">
         {status === "missing" || status === "idle" ? (
           <div className="drawer-empty">尚未部署网页</div>
-        ) : (
+        ) : (hasBeenActivated || ctx.activeTab === "site") && status === "ready" && urls !== null ? (
           <>
             <div className="site-viewport" ref={frameRef}>
               <iframe
                 key={reloadKey}
-                src={urls?.indexUrl}
+                src={urls.indexUrl}
                 sandbox="allow-scripts allow-popups allow-forms allow-same-origin"
                 allowFullScreen
                 title="session-site"
@@ -65,7 +71,7 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
               <button className="site-btn" onClick={handleDownloadZip} title="下载整站 zip">下载</button>
             </div>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

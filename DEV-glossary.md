@@ -236,7 +236,7 @@
 ```
 
 > 启动屏（`SplashScreen`）和骨架屏（`SkeletonScreen`）作为覆盖层叠加在整体布局之上，分别用于开屏动画和首次连接前的占位。
-> 各 tab 内容层常驻挂载（grid 叠放 + `visibility` 切换，不卸载），切换会话或页面刷新统一回到聊天 Tab。
+> 各 tab 外层常驻挂载（grid 叠放 + `visibility` 切换，同会话切 Tab 不卸载），切换会话或页面刷新统一回到聊天 Tab。会话网页内部 iframe 仅在首次激活该 Tab 后创建，之后同会话保留；SiteTab 按 sessionId key 在切会话时重建，返回原会话也重新等待点击。提前运行的 HEAD 入口探测不等于加载网页正文。
 > 会话锁定（`SessionLockOverlay`）时主界面区域与右侧 Tab 栏整体替换为锁定提示页。
 
 ### Tab 导航体系
@@ -247,7 +247,7 @@
 |---|---|---|---|
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容的 tab 为禁用态不可点击 | tab rail |
 | Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共九个 Tab，顺序为聊天、资源、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 只加注册条目 + `useTabSystem` 中一行启用派生 | tab registry |
-| 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 内容层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与 iframe 生命周期） | tab stage |
+| 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
 | 媒体输入 Tab | `MediaInputTab` / `[data-tab-panel="media"]` | 显示标题「媒体输入」；中文相册式网格展示当前主会话 History 的独立媒体实例，默认可见图片预览，点击再显示详情和发送开关。关闭时优先转发描述，无可用转发时占位；下一模型请求生效，原媒体展示保留，子会话不纳入 | media input tab |
@@ -255,7 +255,7 @@
 | 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；右侧注册表共九个 Tab，位于媒体输入 Tab 后；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
-| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览；按钮栏在可视底部常驻并独占一行、不遮挡网页，不使用顶部安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 未部署时禁用；探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
+| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览，首次激活且入口可用时才加载正文；同会话切 Tab 保留 iframe，切会话/刷新后重新等待点击；首次激活后隐藏 Tab 仍可热刷新，入口删除后同会话重部署可自动重建。按钮栏在可视底部常驻并独占一行、不遮挡网页，不使用顶部安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 未部署时禁用；提前运行的 HEAD 探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
 | 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |
 | Tab 安全区 | `.tab-panel-safe-top` | 使用此安全区的非聊天 Tab 顶部保留 56px 安全留白，避开顶部栏浮层热区；会话网页 Tab 例外，不渲染该安全留白，按钮栏位于底部 | tab safe area |
@@ -371,7 +371,7 @@
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
 | Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
-| 会话网页 | `SiteTab`（会话网页 Tab） | 会话网页 Tab 内 iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时右侧 Tab 栏图标可用；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
+| 会话网页 | `SiteTab`（会话网页 Tab） | 会话网页 Tab 内 iframe 首次激活时加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时右侧 Tab 栏图标可用，HEAD 探测不加载正文；同会话切 Tab 保留网页，切会话/刷新后重置；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
 | 轮次导航条 | `RoundNavRail` / `.round-nav` | 主聊天区与子会话卡片共用的轮次导航组件：每条目对应一条 Role 为 `user` 的展示行（杠+内容文本一体），杠按作者角色名 hue 散列着色（与头像一致），当前轮放大+花纹凸显，点击跳转目标消息至视口中部略偏上，桌面 hover/focus 展开浮层显示条目文本，条目过多时虚拟滚动，少轮次时列表垂直居中；窄条常驻（无折叠按钮），触摸端点杠直接跳转 | round navigation rail |
 | 回到底部按钮 | `.scroll-to-bottom` | `ChatArea` 挂载时常驻的主动回底控制件，不受滚动状态、初始化状态、内容数量或处理状态控制；无内容或没有滚动距离时仍保留，但不要求产生位移 |
 

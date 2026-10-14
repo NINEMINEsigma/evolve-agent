@@ -144,7 +144,7 @@ export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "variables", title: "会话变量", icon: variablesIcon, render: (ctx) => <VariablesTab ctx={ctx} />, preview: selectVariablesPreview },
   { id: "subagents", title: "子会话", icon: subagentsIcon, render: (ctx) => <SubagentsTab ctx={ctx} />, preview: selectSubagentsPreview },
   { id: "characters", title: "角色档案", icon: charactersIcon, render: (ctx) => <CharactersTab ctx={ctx} />, preview: selectCharactersPreview },
-  { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab ctx={ctx} />, preview: selectSitePreview },
+  { id: "site", title: "会话网页", icon: siteIcon, render: (ctx) => <SiteTab key={ctx.sessionId} ctx={ctx} />, preview: selectSitePreview },
   { id: "llm", title: "模型配置", icon: llmIcon, render: (ctx) => <LlmTab ctx={ctx} />, preview: selectLlmPreview },
   { id: "sandbox", title: "动态沙盒空间", icon: sandboxIcon, render: (ctx) => <SandboxTab ctx={ctx} />, preview: selectSandboxPreview },
 ];

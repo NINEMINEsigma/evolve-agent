@@ -1364,5 +1364,12 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 - 共享数据：`features/tabs/TabDataContext.tsx` 唯一 Provider 持有 characters/sandbox/media/variables 四个 hook 各一份，正式 Tab 与只读预览共享。悬停预览（`useTabPreview`/`tabPreviewSelectors`/`TabHoverPreview`/`useAnchoredHoverPreview`/`tabPreviewLabels.json`/`constants/tabPreview.ts`）只消费已加载快照，不发请求、不刷新、不切换 activeTab。
 - 无 Loop protected 字段新增，无 Application 单例或持久化迁移；中文文案为正式 JSON 数据资源，源码标识保持英文。
 
+### 会话网页首次激活加载（2026-10-14）
+
+会话网页的入口探测与正文加载分离：`features/tabs/useTabSystem.ts` 仍持有唯一 `useSessionSite`，提前 HEAD 探测并复用原 WebSocket Agentspace 事件/HEAD 版本轮询；`SiteTab` 只有首次激活且入口 ready、URL 可用时才创建 iframe 与工具栏，未点击时不加载网页正文或运行脚本。局部 `hasBeenActivated` 在同会话切 Tab 后保留，原部署热刷新与按钮行为保持；首次激活后隐藏 Tab 也可热刷新，入口删除后同会话重部署可自动重建。
+
+`useTabSystem` 的局部 `activeTabState` 携带 sessionId，render 同步将归属不匹配的旧活跃状态派生为 chat，再由 effect 提交当前会话聊天状态，避免旧 site 激活值在新会话首次 render 触发加载。注册表仅给 `SiteTab` 增加 sessionId React key，切会话重建其激活/全屏状态与 ref，返回原会话也重新等待点击；其他 Tab 外层、共享 Provider 与模型/动态沙盒草稿不重建，主界面区域仍使用 grid/visibility。
+
+本次无后端类、Agent Loop protected 字段、跨类私有访问、System 拓扑、网络协议或持久化格式变化，无新增依赖。已按任务文件 v2 清单实施源码，尚未运行构建、类型检查或应用验收。
 
 
