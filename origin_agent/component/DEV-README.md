@@ -63,9 +63,18 @@ ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Applicat
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
 | `compress_history.py` | `CompressHistory` | 会话历史压缩：旧轮次替换为 Agent 撰写的会话摘要；保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`，链摘要任一失败则整体失败、历史不变） |
+| `compress_tool_chains.py` | `CompressToolChains` | 无业务参数，仅压缩全部历史中的完整工具链，不截断轮次或插入会话摘要；普通用户消息与不带工具调用的回复保留，未完成链及纯压缩占位链跳过；`core` / `MAIN` / `critical` / `no_timeout`，无符合条件链时成功返回零计数且不写历史 |
 | `session_variables.py` | `ReadSessionVariables` | filesystem工具集的safe整池只读工具；按ToolContext.resource_session_id读取全部数字/字符串、meta和问题，写入仍使用通用文件工具 |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
+
+### 压缩工具共享逻辑
+
+`tools/_history_compression.py::prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0)` 返回非持久化 `ToolChainReplacement` 列表，不修改 History。该消息后纯类型定义于 `entity/puretype_after/session.py`，通过 `entity.puretype_after` 显式导入，直接引用正式 `BaseMessage`，不由工具模块调用 `model_rebuild` 补装配；只有索引字段的 `ToolChainSpan` 仍属于消息前纯类型。`CompressHistory` 指定保留轮次起点，`CompressToolChains` 从全部历史起点扫描；链摘要统一由 `SessionMetadataService.generate_tool_chain_summary()` 生成，未设置工具链摘要 Profile 时回退目标会话活动 Profile。阈值复用 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符），不新增配置或模型用途引用。
+
+所有摘要成功后才按逆序替换并保存；生成失败或期间取消不提交压缩，保存错误沿已有 History 生命周期传播，不声称写盘失败会自动回滚已修改的内存。`CompressToolChains` 提交前还检查协作式中断，成功保存后调用公开 `BaseAgentLoop.reset_context_tokens()`。无符合条件链时不调用模型、不保存、不重置计数。返回 `success`、`tool_chains_compressed`、`messages_removed`（消息数净减少量）、`remaining`（本工具结果追加前的 History 消息数）。链内工具调用消息的正文及媒体也会被摘要替代，只有链外消息保持原样；字符阈值不保证摘要 token 数一定更少。
+
+两工具的 `critical` 在手动/脱手模式由用户审批，YOLO 模式免审批。`MAIN` 范围保留普通模式和随意聊聊会话，不向多Agent模式、子Agent或临时Agent扩展。本次没有新增 UI 事件或工具集；源码已实施，未运行构建、校验或应用验收。
 
 ### 会话变量工具
 

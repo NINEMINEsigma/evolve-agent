@@ -1,7 +1,11 @@
-"""
-puretype 包 — 只含有不包含任何方法定义的类型定义。
+"""Pre-message pure types, with no method definitions.
 
-原始单文件 puretype.py 拆分为以下子模块：
+This package must not depend on entity.messages or entity.puretype_after,
+including through TYPE_CHECKING imports. Types that require defined message
+models belong in the sibling entity.puretype_after package, which exports them
+independently. The message definition layer must not import that later package.
+
+The original puretype.py module is split by responsibility:
     _base       : MessageContent, TypedMessageContent, ContentBlock, content block models, Role, ToolDangerLevel, ToolAvailability
     approval    : ApprovalMode, SessionApprovalModeState, ApprovalPolicy, ApprovalOutcome,
                   ApprovalResult, ApprovalProfileUpdateRequest, ApprovalProfileState,
@@ -36,7 +40,9 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     extools     : CronTaskInfo, DynamicEndpointInfo, DynamicEndpointRequest
     agentspace  : AgentspaceEntry/Event/FileSnapshot/Lock/Trash 与 REST 请求模型
 
-所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
+Retained public pre-message types are explicitly re-exported here, preserving
+``from entity.puretype import X`` for those types only. Post-message types are
+not re-exported here; import them from entity.puretype_after.
 """
 
 from .session_media import (

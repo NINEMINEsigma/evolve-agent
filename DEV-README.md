@@ -97,7 +97,7 @@ Shell会话由 `Application.current().get_system(ShellManager)` 统一持有。A
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
 | `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、路径工具、会话存储、模板、LSP（`lsp.py`）、转换工具 | 见下文 |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
-| `entity/` | 常量与纯类型定义：`messages.py`（`BaseMessage` 体系）、`puretype/`（包）、`constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
+| `entity/` | 常量与消息体系：`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
 | `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
 
 ---
@@ -269,7 +269,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`Sandbox`），由 `virtual_awake` 取得依赖并完成原 start 工作（绑定 EventHub、恢复垃圾桶、启动 watcher）；持有 `visual_resources: SessionVisualResourceService` 只读叶服务。统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、`AgentspaceEventHub`和用户变更摘要；Gateway 将同一事件总线适配为独立编辑器 SSE与聊天 WebSocket typed事件，内置工具通过该服务协作。watcher 启动失败不再降级（D2）。
 - `system/llm_profile_store.py`：`LLMProfileStore` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`），无参构造，由 `virtual_awake` 取得 `RuntimeContext` 确定 agentspace 路径并加载 v2 根对象。Store 自身创建唯一的共享 `threading.RLock`，通过 `locked()` 上下文管理器暴露同一把锁，替代原 `Application.profile_lock`；SessionMetadataService、审批后端及 Gateway Profile CRUD 经此接口进入事务边界。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工、审批 Profile、全局元数据 Profile、工具链摘要 Profile以及图片/音频/视频三条全局多模态回退引用均使用根列表中的实例引用，Gateway 通过 `get_system(LLMProfileStore)` 的单 Profile CRUD 和全局用途引用接口修改。写入先准备候选根、成功保存后提交共享内存，不再捕获任意异常做内存回滚；更新通过显式两阶段复制并重连引用图准备候选，提交保留原 Profile 实例身份和引用身份。删除可在同次根保存中清空审批/元数据/工具链摘要引用，但其他 Profile 与全局多模态引用仍阻止删除。不存在的文件允许初始化，已有文件缺 v2 key 直接失败；不启用未知存储字段跳过，缺失字段仍遵循 easysave/Pydantic 默认值语义。存储层保留外层临时文件原子替换，不做备份清理专属重试；Profile 文件与会话名称指针不构成跨文件事务。
 - 前端模型配置抽屉通过“模型配置 / 全局配置引用”分页分别管理 Profile 定义和全局用途引用。模型定义按客户端、端点纵向分组，详情单项展开、先只读后编辑；切分页保留内存草稿，离开未保存配置时明确确认。会话待用 Profile 选择只在顶部栏修改，浏览器按会话独立保存名称；无本地覆盖时通过 `GET /api/sessions/{id}/llm-profile` 读取持久化指针及既有全局最近使用回退。选择本身不写服务端，发送到主会话或重新生成才提交；`resume` 保持后端当前配置。全局配置引用页还管理工具链摘要 Profile 与图片、音频、视频三条独立回退引用，状态分别经 `/api/toolchain-summary/profile`、`/api/modality/profiles` 和 `toolchain_summary_profile_changed`、`modality_profile_changed` 同步。旧浏览器全局选择不猜测迁移到任何会话。
-- `system/session_metadata.py`：`SessionMetadataService` 已改为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`LLMProfileStore`），无参构造，由 `virtual_awake` 取得依赖并创建本服务的 `SessionStore`。不创建独立 Profile 事务锁，原 `Application.profile_lock` 语义统一经 `LLMProfileStore.locked()` 访问同一把共享 RLock。全局元数据 Profile优先；未配置时按目标会话持久化的活动 Profile回退。统一生成标题、标签和摘要，并为分支、合并与自动旋转提供摘要保障。明确配置不可用时不静默回退。工具链摘要 Profile（`LLMProfileData.toolchain_summary_profile`）为 `CompressHistory` 折叠工具链生成紧凑链摘要（`generate_tool_chain_summary`），未配置时回退到目标会话活动 Profile；解析/校验/客户端创建与元数据共用 `_resolve_session_profile_fallback`、`_assert_profile_usable`、`_create_client_for_profile`，模板为 `toolchain_summary.txt` / `toolchain_summary_input.txt`。五个完整异步操作通过 `TaskOwner.run_request()` 登记，包含读取、模型调用、解析与必要写盘；普通请求异常交回原业务边界，用户取消不被误报为整个应用失败。首条用户消息自动标题经同步入口 `maybe_generate_first_title`（路由层判定无标题+非空文本后调用）：同一同步代码段内检查+登记 per-session 防重集合，`task_owner.create` 派发一次性后台任务（不套 run_request）；LLM 失败回退 30 字符截取，停机竞态静默放弃，`CancelledError` 传播，finally 对称清理防重。`close_admission()` 在 STOPPING 期间仍可封闭接收，`cancel_pending()` 等待实际任务及结果交接，生命周期/清理失败继续传播。关闭消息刷新不调用生成接口。
+- `system/session_metadata.py`：`SessionMetadataService` 已改为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`LLMProfileStore`），无参构造，由 `virtual_awake` 取得依赖并创建本服务的 `SessionStore`。不创建独立 Profile 事务锁，原 `Application.profile_lock` 语义统一经 `LLMProfileStore.locked()` 访问同一把共享 RLock。全局元数据 Profile优先；未配置时按目标会话持久化的活动 Profile回退。统一生成标题、标签和摘要，并为分支、合并与自动旋转提供摘要保障。明确配置不可用时不静默回退。工具链摘要 Profile（`LLMProfileData.toolchain_summary_profile`）为 `CompressHistory` 和独立 `CompressToolChains` 折叠工具链生成紧凑链摘要（`generate_tool_chain_summary`），未配置时回退到目标会话活动 Profile；解析/校验/客户端创建与元数据共用 `_resolve_session_profile_fallback`、`_assert_profile_usable`、`_create_client_for_profile`，模板为 `toolchain_summary.txt` / `toolchain_summary_input.txt`。五个完整异步操作通过 `TaskOwner.run_request()` 登记，包含读取、模型调用、解析与必要写盘；普通请求异常交回原业务边界，用户取消不被误报为整个应用失败。首条用户消息自动标题经同步入口 `maybe_generate_first_title`（路由层判定无标题+非空文本后调用）：同一同步代码段内检查+登记 per-session 防重集合，`task_owner.create` 派发一次性后台任务（不套 run_request）；LLM 失败回退 30 字符截取，停机竞态静默放弃，`CancelledError` 传播，finally 对称清理防重。`close_admission()` 在 STOPPING 期间仍可封闭接收，`cancel_pending()` 等待实际任务及结果交接，生命周期/清理失败继续传播。关闭消息刷新不调用生成接口。
 - `abstract/tools/registry.py`：`ToolRegistry` 已迁移为依赖 RuntimeSystem 的 AsyncSystem，模块级单例与兼容代理已移除。异步工具通过 TaskOwner.run_request 托管；同步工具由唯一执行器持有真实 Future，取消等待不删除仍在运行的线程登记。停止分发、请求取消、真实工作等待及线程池异步关闭分别核对结局，生命周期失败继续传播。工具声明/发现已在 S20 迁移为 `ToolDiscoverySystem` 的显式 `register_tools(registry, ui_events)` 协议。
 - `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 component 子包与可选 custom_tools，显式调用同步 `register_tools` 并登记唯一模块集合；最后注册 MCP 管理工具和工具集元数据，不重新建立 MCP 连接。语法/读取/导入/注册错误及旧全局声明直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
 - `system/lifecycle.py`：`TaskOwner.create/track` 负责后台任务，`run_request` 负责有明确结果等待方的请求。`cancel` 登记预期取消并复用固定截止；`is_idle` 同时要求任务结束和交接完成，取消后仍运行的任务不能从所有权记录中移除。原生线程/子进程仍由各 System 持有真实资源，不由异步包装任务的结束替代。
@@ -301,7 +301,8 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 ### `entity/`
 
 - `entity/messages.py`：`BaseMessage` 消息体系，包括 `BaseMessage`、`CharacterConversationMessage`、`CharacterSystemMessage`、`ToolResultMessage`、`History` 等。所有 LLM 调用统一使用 `list[BaseMessage]` 而非 `list[dict]`；`History.remove_message_with_pairing()` 返回稳定的 `SessionMessageDeletionResult`。
-- `entity/puretype/`：纯数据类型包，按职责拆分为 `_base`、`approval`、`llm`、`skills`、`session`、`subagent`、`agent`、`ws`、`lsp`、`runtime`、`extools` 子模块。包括 `LLMResponse`、`StreamChunk`、`Role`、`ToolAvailability`、`ToolDangerLevel`、子Agent编排结果/快照模型以及 Agent Loop 公共操作结果模型。
+- `entity/puretype/`：消息前纯类型包，不依赖正式消息类；按职责拆分为 `_base`、`approval`、`llm`、`skills`、`session`、`subagent`、`agent`、`ws`、`lsp`、`runtime`、`extools` 子模块。包括 `LLMResponse`、`StreamChunk`、`Role`、`ToolAvailability`、`ToolDangerLevel`、子Agent编排结果/快照模型以及 Agent Loop 公共操作结果模型。`ToolChainSpan` 仅含索引，仍位于 `puretype/session.py`。
+- `entity/puretype_after/`：消息后纯类型包，供依赖正式消息类的纯字段模型使用。`session.py::ToolChainReplacement` 保持 `start` / `end` / `messages: list[BaseMessage]`，直接导入真实 `BaseMessage`，无需压缩工具补装配。依赖方向为 `puretype_after → messages → puretype`，后期包也可依赖前期包；前期包不得直接、间接或仅在 `TYPE_CHECKING` 下反向依赖消息体系或后期包，消息定义层的模块级依赖不得反向导入后期包。两个包分别显式导出自己的类型，前期包不重新导出后期类型；这里的先后是类型依赖顺序，不是应用生命周期阶段。既有持久化类的定义路径、类型映射和存储版本保持不变。
 - `entity/gentype.py`：泛型工具类型（`RefWrapper[T]` 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值，如工具循环计数器）。
 - `entity/constant/`：按职责拆分的全局常量包。`constant/__init__.py` 显式重新导出历史公共名称，保持 `from entity.constant import ...` 兼容；`sandbox.py` 保留 `Namespace` 与 `is_namespaced_path()`，其余常量按基础、限制、超时、协议、Shell、文件系统、搜索、Agentspace、上传、聊天样式、HTTP、LLM、Agent、子Agent、多Agent、Cron、会话搜索、Watching、Skill、随意聊聊和 easysave 版本职责分模块维护。
 
@@ -312,6 +313,14 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 `stream_meta`中的 `live_history_links`仍是唯一权威关联来源。历史页面乱序、关联缺失、身份不匹配或页面错误时保留实时行，不按正文或数组顺序猜配。`ChatLiveFooter`只承载等待状态、页错误和底部留白，流结束可见性判断改为查询统一聊天列表。
 
 ---
+
+## 独立工具链压缩
+
+`core` 工具集新增 `CompressToolChains`（`component/tools/compress_tool_chains.py`），没有业务参数，仅压缩当前会话全部历史中的完整工具链。用户消息、system 消息和不带工具调用的普通回复保持原样；工具链内带调用的 assistant 正文及工具结果由链摘要替代，不截断会话轮次、不要求 Agent 编写会话摘要。每条链须含真实工具调用、全部调用已有配对结果，并达到既有 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符）；未完成链及纯 `CompressedToolChain` 占位链跳过，含新增真实调用的混合链仍可压缩。
+
+`CompressHistory` 仍替换旧轮次并压缩保留轮次内的链，二者共用 `component/tools/_history_compression.py::prepare_tool_chain_replacements()`，由唯一 `SessionMetadataService` 使用工具链摘要 Profile（未配置则回退目标会话活动 Profile）逐链生成摘要。共享入口只返回非持久化 `ToolChainReplacement`，所有摘要成功后才修改 History；生成失败/期间取消不提交压缩，写盘失败沿原生命周期传播，不伪装成功或承诺内存自动回滚。无可压缩链时返回零计数，不调用模型或写历史。两工具通过公开 `BaseAgentLoop.reset_context_tokens()` 重置旧 prompt token 计数，不修改累计用量。
+
+新工具与现有压缩工具同为 `MAIN` / `critical` / `no_timeout`：普通模式主Agent和随意聊聊会话可用，手动/脱手模式由用户审批，YOLO免审批；不扩展到多Agent、子Agent或临时Agent，不新增工具集、模型配置、UI事件或持久化版本。源码已实施并静态复核，未运行校验、构建或应用验收。
 
 ## 主会话媒体实例发送控制
 

@@ -668,6 +668,10 @@ class BaseAgentLoop(ABC):
         self._ensure_token_record_loaded()
         return self._token_record.prompt_tokens
 
+    def reset_context_tokens(self) -> None:
+        """Invalidate the previous prompt token count after History compression."""
+        self._token_record.prompt_tokens = 0
+
     async def _push_usage_update(self, session_id: str) -> None:
         """推送 token 消耗到前端。"""
         try:

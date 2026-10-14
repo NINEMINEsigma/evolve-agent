@@ -23,7 +23,7 @@ entry/
 └── agent_support/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换
-    ├── tool_chain_compress.py    ← 工具链检测与重打包（CompressHistory 的链压缩纯函数层）
+    ├── tool_chain_compress.py    ← 两个压缩工具共用的工具链检测与重打包纯函数层
     └── multimodal.py             ← 多模态处理与 content block 清洗
                                        NOTE: content_to_text 会自动过滤 JSON 中所有 _ 前缀字段（_image/_meta/_queued_messages/_note），
                                        避免 base64 或工具链嵌入消息载荷泄露到前端/日志。_meta 与 _queued_messages 等内部字段通过 emit_tool_result 的独立参数传递，分别由工具卡片元信息和嵌入消息区域渲染。
@@ -43,7 +43,7 @@ entry/
   - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`；上下文携带必填 `round_id`，明确 `ws:` 文件接触通过 `agentspace_access()` fail-closed 登记。`request_evolution()` 仅登记本次调用的进化意图标记，由所属 Loop 在工具结果严格保存后消费并请求关闭。
   - `ToolContext.resource_session_id`：长期资源归属的主会话 ID；主Agent/参与Agent使用当前主会话，子Agent/临时Agent使用公开 `parent_session_id`。
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
-  - 通用持久化方法：`save_history()`、`load_history()`。
+  - 通用持久化方法：`save_history()`、`load_history()`；压缩工具通过公开 `reset_context_tokens()` 将上一请求的 prompt token 计数置零，不直接访问 `_token_record`，累计 token 消耗保持不变。
   - 前端 History 只读投影：`get_session_history_skeleton(start_index)`、`get_session_history_page(start_index, limit)`、`get_session_history_resources()`；普通模式、多Agent模式与随意聊聊会话共享实现。子Agent虽继承该能力，但 Gateway 不为子会话暴露对应 REST。
   - 会话操作结果：`edit_session_message()`、`delete_session_messages()`、`delete_single_message()`、`regenerate_response()`、`get_tool_resources()`、`merge_sessions()` 均返回 `entity.puretype.session` 中的稳定 `BaseModel`；调用方通过属性访问；Gateway 普通 HTTP 返回值保留模型，由 FastAPI 自动序列化，显式 Response 则在发送边界编码。`LoopSessionManager._transfer_session_runtime_resources()` 同样返回 `SessionRuntimeResourceTransferResult`，不再通过字典键读取迁移状态。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
@@ -251,7 +251,9 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 4. 迁移运行态资源（工具副作用、cron 任务）。
 5. 前端通过 `session_rotated` 系统消息刷新。
 
-上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩（`agent_support/tool_chain_compress.py` 检测与重打包，链摘要模板 `toolchain_summary.txt` / `toolchain_summary_input.txt`，由工具链摘要 Profile 生成）。
+上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩；独立 `CompressToolChains` 则仅扫描全部历史中的完整工具链，不截断轮次、不插入会话摘要。两者共用 `component/tools/_history_compression.py` 的替换准备入口，纯检测与构造仍位于 `agent_support/tool_chain_compress.py`，链摘要使用 `toolchain_summary.txt` / `toolchain_summary_input.txt` 及工具链摘要 Profile。未完成链和纯压缩占位链不参与；含新增真实调用的混合链仍可压缩。
+
+`ParentAgentLoop._run_tool_loop()` 在本批工具结果提交后通过 `_get_full_history()` 重建下一请求上下文，压缩不需要修改循环内的旧请求列表。所有链摘要生成成功后才逆序替换、严格保存 History，再调用公开 `reset_context_tokens()`；保存失败传播，不保证共享内存自动回滚。此次保留原 `MAIN` 可用范围，不改多Agent或子会话请求路径。
 
 ---
 
@@ -282,10 +284,10 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 ### `tool_chain_compress.py`
 
-- `detect_compressible_chains(messages, min_chars) -> list[ToolChainSpan]`：检测可压缩工具链（链内 tool_call 全部已配对结果、原始体积达 `TOOL_CHAIN_COMPRESS_MIN_CHARS`）；进行中的本轮链因缺少结果天然排除。
+- `detect_compressible_chains(messages, min_chars) -> list[ToolChainSpan]`：检测可压缩工具链（链内 tool_call 全部已配对结果、含真实调用、原始体积达 `TOOL_CHAIN_COMPRESS_MIN_CHARS`）；进行中的本轮链因缺少结果天然排除，纯压缩占位链跳过。
 - `chain_to_summary_input(chain_messages) -> str`：链文本化（复用 `messages_to_text`，不设全局截断）。
 - `build_compressed_chain_messages(chain_messages, summary) -> list[BaseMessage]`：把整链重打包为「伪造的 `CompressedToolChain` 调用（不可调用，参数携带调用数与工具名清单）+ 携带链摘要的配对 ToolResultMessage」。
-- 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` 经 `SessionMetadataService.generate_tool_chain_summary()` 预生成，全部成功后才通过 `History.replace_range()` 应用替换。
+- 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` / `CompressToolChains` 通过 `component/tools/_history_compression.py::prepare_tool_chain_replacements()` 共用 `SessionMetadataService.generate_tool_chain_summary()` 预生成，返回 `entity.puretype_after` 显式导出的 `ToolChainReplacement`，全部成功后调用方才通过 `History.replace_range()` 应用替换。`ToolChainSpan` 仅含索引，继续定义于消息前纯类型 `entity/puretype/session.py`；`ToolChainReplacement` 持有正式消息实例，定义于消息后纯类型 `entity/puretype_after/session.py` 并直接导入 `BaseMessage`，不再由业务模块补装配。两者因类型依赖不同分属两个时期，检测与重打包职责保持不变。
 
 ### `history_projection.py`
 

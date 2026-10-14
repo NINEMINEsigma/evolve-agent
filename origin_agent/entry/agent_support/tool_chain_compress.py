@@ -10,7 +10,8 @@
   配对 ToolResultMessage，配对约束由构造保证。
 
 本模块只做纯函数式检测与构造，不访问运行时服务；摘要生成由调用方
-（CompressHistory 工具）经 SessionMetadataService 完成。
+（CompressHistory / CompressToolChains 工具）经共享准备逻辑调用
+SessionMetadataService 完成。
 """
 
 from __future__ import annotations
@@ -75,7 +76,8 @@ def detect_compressible_chains(
     可压缩条件：
     1. 链内每个 tool_call 的 id 都能在整条历史中找到配对 ToolResultMessage
        （进行中的调用没有结果，其所在链整体被排除）；
-    2. 链的原始文本体积不低于 ``min_chars``。
+    2. 链的原始文本体积不低于 ``min_chars``；
+    3. 链内至少包含一次真实工具调用，纯压缩占位链不重复摘要。
     """
     result_ids: set[str] = {
         msg.tool_call_id for msg in messages if isinstance(msg, ToolResultMessage)
@@ -89,15 +91,21 @@ def detect_compressible_chains(
             continue
         start = index
         call_ids: list[str] = []
+        has_real_call = False
         size = 0
         while index < total and _is_chain_member(messages[index]):
             current = messages[index]
             if isinstance(current, CharacterConversationMessage) and current.tool_calls:
                 call_ids.extend(tc.id for tc in current.tool_calls)
+                has_real_call = has_real_call or any(
+                    tc.function.name != COMPRESSED_TOOL_CHAIN_CALL_NAME
+                    for tc in current.tool_calls
+                )
             size += _message_size(current)
             index += 1
         if (
-            all(call_id in result_ids for call_id in call_ids)
+            has_real_call
+            and all(call_id in result_ids for call_id in call_ids)
             and size >= min_chars
         ):
             spans.append(ToolChainSpan(start=start, end=index))

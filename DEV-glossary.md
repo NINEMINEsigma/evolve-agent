@@ -137,6 +137,8 @@
 | 事件出口 | sink 体系：`AgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口 |
 | 入站缓冲 / 出站缓冲 | inbox / outbox（异步消息缓冲；代码标识改名为可选遗留） |
 | 消息体系 | `entity/messages.py` 的 `BaseMessage` 多态模型与 `History` |
+| 消息前纯类型 | 英文锚点：pre-message pure types。`entity.puretype` 中不依赖正式消息类的纯数据类型，可在 `entity.messages` 定义前加载；不得直接、间接或仅在 `TYPE_CHECKING` 下反向依赖消息体系或消息后纯类型 |
+| 消息后纯类型 | 英文锚点：post-message pure types。`entity.puretype_after` 中依赖正式消息类的纯数据类型，在消息定义完成后直接引用真实类型；可以依赖消息体系及消息前纯类型，由本包独立导出，前期包和消息定义层不得反向导入它。这里的先后表示类型依赖顺序，不是应用生命周期阶段 |
 | History辅助读取 | 开发助手AI使用 `dev_helpers/read_history.py` 复用正式History/媒体类型、项目类型映射和只读easysave库，还原真实History后输出保留消息类型与媒体元信息、以占位符替换媒体载荷的 JSON；不启动应用、不改原模型、不写回历史，也不清理未配对工具调用，仅处理受信任的本地项目历史（英文锚点：History diagnostic reader） |
 | 客户端传输诊断 | 前端检测会话预检或 History关键 REST等待超过15秒时产生的脱敏 `client_diagnostic`；显示持久通知，并在会话 WebSocket可用时只写 Gateway warning，不进入聊天 History（英文锚点：`client transport diagnostic`） |
 | Agentspace事件 | `AgentspaceEvent` 文件/锁/重同步元数据；聊天页通过 typed `agentspace_event`复用会话 WebSocket，独立 Agentspace 编辑器通过 SSE接收，载荷沿用既有同源元数据范围 |
@@ -161,9 +163,9 @@
 | 规范称谓 | 定义 |
 |---|---|
 | 媒体实例 | History 中每次进入的独立图片、音频或视频块（英文锚点：History media instance）；即使来源文件或内容相同也分别控制。持久身份与多模态发送开关随 History 保存，新实例默认开启；关闭只改变后续主会话模型请求视图，不删除原媒体，也不禁止向转发模型发送原媒体 |
-| 压缩 | 将早期消息压缩为摘要以释放上下文（`compress_history` 工具；随意聊聊会话用滑动窗口压缩最早 30%） |
+| 压缩 | 将早期消息压缩为摘要以释放上下文（`CompressHistory` 工具；随意聊聊会话用滑动窗口压缩最早 30%）；只压缩工具链时使用独立工具 `CompressToolChains`，不截断会话轮次 |
 | 工具链 | 历史中一段仅由「带 tool_calls 的 assistant 消息」和 ToolResultMessage 组成的连续消息段；遇到 user / 纯文本 assistant / system 消息即结束（英文锚点：tool chain） |
-| 工具链压缩 | 把完整工具链整段替换为「一次伪造的不可调用工具调用（`CompressedToolChain`）+ 携带链摘要的配对工具结果」；可压缩链要求全部 tool_call 已配对结果（进行中的本轮链天然排除）且原始体积达阈值；摘要由工具链摘要 Profile 生成（英文锚点：tool chain compression） |
+| 工具链压缩 | 把完整工具链整段替换为「一次伪造的不可调用工具调用（`CompressedToolChain`）+ 携带链摘要的配对工具结果」；可压缩链要求全部 tool_call 已配对结果（进行中的本轮链天然排除）、包含真实工具调用且原始体积达阈值；纯压缩占位链跳过，与新增真实调用组成的完整链仍可压缩。摘要由工具链摘要 Profile 生成；`CompressHistory` 压缩保留轮次内的链，`CompressToolChains` 无业务参数、扫描全部历史且不替换会话对话，二者共享摘要准备逻辑（英文锚点：tool chain compression） |
 | 工具链摘要 Profile | `LLMProfileData.toolchain_summary_profile` 全局实例引用（英文锚点：toolchain summary Profile）；为被折叠的工具链生成紧凑摘要；未配置时回退到目标会话主Agent正在使用的活动 Profile；通过前端「模型配置 Tab → 全局配置引用」页选择 |
 | 摘要 | 会话级总结文本（`summary.txt`，终结/旋转时生成） |
 | 旋转（rotation） | 上下文超限时自动终结当前会话并产生子会话的机制 |

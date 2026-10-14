@@ -20,6 +20,7 @@ classDiagram
         +is_interrupted()
         +get_token_usage()
         +get_context_tokens()
+        +reset_context_tokens()
         +get_session_messages()
         +get_session_history_skeleton()
         +get_session_history_page()
@@ -1034,6 +1035,7 @@ classDiagram
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
 | `ToolchainSummaryProfileUpdateRequest` / `ToolchainSummaryProfileState` / `ToolchainSummaryProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 工具链摘要 Profile REST 请求、权威状态与变更响应 |
 | `ToolChainSpan` | `entity/puretype/session.py` | `BaseModel` | 可压缩工具链在 History 中的半开索引区间 [start, end) |
+| `ToolChainReplacement` | `entity/puretype_after/session.py` | `BaseModel` | 消息后纯类型的非持久化替换材料：`start` / `end` 与直接引用正式消息类的 `messages: list[BaseMessage]`，供两个压缩工具共用摘要准备逻辑 |
 | `ModalityProfileState` / `ModalityProfileUpdateRequest` / `ModalityProfileMutationResponse` / `ModalityProfileStates` | `entity/puretype/modality.py` | `BaseModel` | 图片、音频、视频三路全局回退 Profile 的 REST 状态、更新请求和完整状态快照 |
 | `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |
 | `InboxMessage` | `entry/base_agent_loop.py` | `BaseModel` | 收件箱消息基类，含 `to_text()` |
@@ -1068,6 +1070,20 @@ classDiagram
 `terminate_and_rotate_session`和BaseAgentLoop.merge_sessions调用capture_inheritance/install_inheritance，在同步初始化scope内完整复制并复查来源/目标、写History，之后归档。安装失败按独占目录二元身份回收，文件四元身份只用于读取变动检测；取消/History/必要清理失败传播，多个失败异常组保留，提交后错误不删除已提交副本。普通子Agent旧parent_session_id不自动重绑，不把独立文件继承宣称为跨文件事务。正常永久删除不清理工作空间变量文件，History重新生成不回滚变量。上述仅源码实施与静态复核，未运行验证。
 
 ## 关键设计变更记录
+
+### 消息前/后纯类型划分（2026-10-14）
+
+保留 `entity.puretype` 作为消息前纯类型包，新增同级 `entity.puretype_after` 作为消息后纯类型包。依赖方向为 `puretype_after → messages → puretype`，后期包也可直接依赖前期包；两个时期表示类型依赖顺序，不对应 Application 生命周期阶段。前期包不得直接、间接或仅在 `TYPE_CHECKING` 下引用消息体系或后期包，消息定义层的模块级依赖不得反向导入后期包。两个包分别通过各自 `__init__.py` 显式导出，不建立统一聚合或旧入口的后期类型兼容别名。
+
+`ToolChainSpan` 只有索引字段，继续留在 `puretype/session.py`；与它配合的 `ToolChainReplacement` 因持有正式消息实例列表迁入 `puretype_after/session.py`，直接导入 `BaseMessage`。共享压缩准备入口同步迁移导入并删除跨层 `model_rebuild`，函数签名、摘要准备与提交行为保持。已有持久化类型路径、type token、typeref 映射和存储版本均不变，后期替换材料仍不持久化；没有新增 System、运行时初始化或 Agent Loop 字段。本次已实施源码，未运行导入验证、构建或应用验收。
+
+### 独立工具链压缩（2026-10-14）
+
+新增 `CompressToolChains` 与现有 `CompressHistory` 分工：前者仅替换全部历史中的完整工具链，不截断轮次、不插入会话摘要，后者保持旧轮次截断及保留轮次链压缩。两个 handler 共用 `component/tools/_history_compression.py::prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0)`，该入口只准备摘要及 `ToolChainReplacement`，不修改 History、不查询 Application；唯一摘要服务仍由 handler 的 `ToolContext.app.get_system(SessionMetadataService)` 取得，无新 System、缓存或全局生命周期对象。
+
+`ToolChainReplacement` 为 `entity/puretype_after/session.py` 中的消息后纯类型 BaseModel，包含半开区间与正式 `BaseMessage` 列表，经 `entity.puretype_after` 显式导出，不加入 easysave/typeref。它在定义模块中直接导入真实 `BaseMessage`，不再放在消息前纯类型包中，也不再由共享准备模块调用 `model_rebuild` 补装配；导入期不查询运行时或注册工具。
+
+`BaseAgentLoop.reset_context_tokens()` 是新公开接口，仅清零原 `_token_record.prompt_tokens`；两工具通过它替代跨类私有字段访问，不新增 protected 字段。检测层要求链包含真实调用，跳过纯 `CompressedToolChain` 占位链。摘要全部成功才逆序替换，保存沿原 `save_history` 责任；新工具提交前检查协作式中断，无符合条件链时不保存或调用模型。原 `MAIN` / `critical` / `no_timeout` 范围保持，不扩展其他 Loop；本轮未完成的压缩调用不被配对清理删除。源码已实施，未运行验证。
 
 > **异步架构迁移（已完成源码实施）**（按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`）：`Application` 继承 `AsyncArchitecture`，不持有服务镜像字段；21 个 framework `AsyncSystem` 由 `Application.start()` 按固定拓扑顺序串行注册，业务系统一律经 `app.get_system(T)` 取得。`LLMProfileStore.locked()` 暴露唯一共享 RLock。`Application.frontend_sink` 等旧属性已移除，全量引用迁移为 `get_system(FrontendSink)`；`SubAgentOrchestrator` 为依赖 `SessionManager` 的 `AsyncSystem`。关闭由 `Application.shutdown()` 统一编排并逆拓扑注销。上述为源码实施与静态审阅结果，尚未运行验证。
 

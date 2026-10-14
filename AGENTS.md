@@ -135,17 +135,18 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 ## 类定义规范
 
 - **尽量使用 BaseModel。** 语义上适合作为数据模型的类应直接或间接继承 `pydantic.BaseModel`。例外：需要自定义元类/Mixin 且 BaseModel 会导致冲突时，以及运行时工具类、异常类、枚举类、ABC 抽象基类等不适合作为数据模型的场景。
-- **纯数据类放入 `entity/puretype/` 包。** 仅含字段、不含任何方法（含 `__init__`、普通方法、类方法、静态方法、property 等）的类，集中定义在 `entity/puretype/` 包中。包内按职责拆分子模块（`_base`、`approval`、`llm`、`skills`、`session`、`agent`、`ws`、`lsp`、`runtime`、`extools`），所有公共名称通过 `__init__.py` 再导出。
+- **纯数据类按消息依赖划分为两个包。** 仅含字段、不含任何方法（含 `__init__`、普通方法、类方法、静态方法、property 等）的类，按职责集中定义：不依赖正式消息类的消息前纯类型放入 `entity/puretype/`；依赖 `entity.messages` 正式消息类的消息后纯类型放入同级 `entity/puretype_after/`。两个包分别通过各自的 `__init__.py` 显式再导出；`entity.puretype` 不得直接、间接或仅在 `TYPE_CHECKING` 下依赖 `entity.messages` / `entity.puretype_after`，`entity.messages` 的模块级依赖不得反向导入后期包。前期包不得重新导出后期类型，不使用业务模块的 `model_rebuild` 补装配跨层依赖。
 - **带方法/校验器的模型放业务模块。** 需要方法、`@field_validator` / `@model_validator` 校验器或业务逻辑的类不属于 pure type，应放在对应业务模块。
 
 | 场景 | 位置 |
 |---|---|
-| 纯数据类（无方法） | `entity/puretype/` 包内对应子模块 |
+| 消息前纯类型（无方法，不依赖正式消息类） | `entity/puretype/` 包内对应子模块 |
+| 消息后纯类型（无方法，依赖正式消息类） | `entity/puretype_after/` 包内对应子模块 |
 | 带验证/转换/业务方法的模型 | 对应业务模块 |
 | 工具类 / 异常类 / 枚举 | 按职责分散到各模块 |
 | 项目级常量 | `entity/constant/` 包内对应职责子模块 |
 
-新增纯数据类时先判断是否有方法；没有则优先放入 `entity/puretype/` 中合适的子模块，并在 `__init__.py` 中再导出。
+新增纯数据类时先判断是否有方法；没有则按是否依赖正式消息类，放入 `entity/puretype/` 或 `entity/puretype_after/` 中合适的职责子模块，并在所属包的 `__init__.py` 中再导出。两个时期表示类型依赖顺序，不要求应用启动时手工安排导入。
 
 ### Application全局单例
 

@@ -44,11 +44,7 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
         SessionMetadataError,
         SessionMetadataService,
     )
-    from entry.agent_support.tool_chain_compress import (
-        build_compressed_chain_messages,
-        chain_to_summary_input,
-        detect_compressible_chains,
-    )
+    from component.tools._history_compression import prepare_tool_chain_replacements
 
     loop = context.loop
     session_id = context.session_id
@@ -97,31 +93,21 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     # 6. 检测保留区可压缩工具链并预生成全部链摘要。
     # 在任何历史变更之前完成全部模型调用：任一失败整体返回错误，历史保持原样。
     snapshot = list(history.iter_messages())
-    chain_spans = detect_compressible_chains(snapshot[keep_start_idx:])
     metadata_service = context.app.get_system(SessionMetadataService)
-    chain_replacements: list[tuple[int, int, list]] = []
     try:
-        for span in chain_spans:
-            start = keep_start_idx + span.start
-            end = keep_start_idx + span.end
-            chain_text = chain_to_summary_input(snapshot[start:end])
-            chain_summary = await metadata_service.generate_tool_chain_summary(
-                session_id, chain_text
-            )
-            chain_replacements.append(
-                (
-                    start,
-                    end,
-                    build_compressed_chain_messages(snapshot[start:end], chain_summary),
-                )
-            )
+        chain_replacements = await prepare_tool_chain_replacements(
+            snapshot,
+            session_id=session_id,
+            metadata_service=metadata_service,
+            start_index=keep_start_idx,
+        )
     except SessionMetadataError as exc:
         return tool_error(f"Tool chain summary generation failed: {exc}")
 
     # 7. 应用链重打包（从后往前，避免索引位移）。
     # 链完全位于保留区内，截断边界的 user 消息索引不受影响。
-    for start, end, replacement in reversed(chain_replacements):
-        history.replace_range(start, end, replacement)
+    for replacement in reversed(chain_replacements):
+        history.replace_range(replacement.start, replacement.end, replacement.messages)
 
     # 8. 截断（保留尾部）
     # 注意：截断后不调用 remove_unpaired_tool_calls()，
@@ -143,7 +129,7 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     loop.save_history(session_id)
 
     # 11. 重置 token 计数
-    loop._token_record.prompt_tokens = 0
+    loop.reset_context_tokens()
 
     # 12. 通知前端
     await context.sink.emit_system_message(session_id, "压缩完成")
