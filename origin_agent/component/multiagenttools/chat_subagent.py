@@ -1,7 +1,7 @@
 """向子 Agent 发送消息。
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。父 Agent 通过此工具向指定子 Agent 发送消息，消息进入收件箱，
+模块声明顶层 ``TOOLSET`` 对象，由 ToolDiscoverySystem 发现并注册。
+父 Agent 通过此工具向指定子 Agent 发送消息，消息进入收件箱，
 在子 Agent 工具链结束后合并注入上下文。
 """
 
@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
@@ -52,10 +58,9 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Failed to chat with subagent: {exc}")
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register chat subagent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class ChatSubAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="ChatSubAgent",
         toolset="multiagent",
         schema={
@@ -148,8 +153,13 @@ If the sub-agent is still generating its current response, the call fails with:
                 "required": ["session_id", "message", "user_name", "message_type"],
             },
         },
-        handler=_handle_chat_subagent,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
         availability=ToolAvailability.MAIN,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_chat_subagent(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(ChatSubAgentTool(),))

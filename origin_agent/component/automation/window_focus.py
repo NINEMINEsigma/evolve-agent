@@ -1,6 +1,6 @@
 """窗口焦点工具 — 通过 HWND 将指定窗口设为前台焦点。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``WindowFocus``。
 
 仅兼容 Windows。使用 ``ctypes`` 调用 ``user32.dll`` Win32 API，
 无第三方依赖。
@@ -14,8 +14,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -126,16 +126,10 @@ def _handle_window_focus(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register WindowFocus into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="WindowFocus",
-        toolset="automation",
-        schema={
+_WINDOW_FOCUS_SCHEMA = {
         # 通过 HWND 将窗口设为前台焦点。
         # 前置条件：仅 Windows；需先用 WindowFind 获取 HWND。
         # 调用效果：恢复最小化/最大化窗口并强制置顶到前台，采用多级降级策略。
@@ -176,6 +170,26 @@ Restores the window (if minimized/maximized) and brings it to the foreground usi
             },
             "required": ["hwnd"],
         },
-    },
-    handler=_handle_window_focus,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class WindowFocusTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="WindowFocus",
+            toolset="automation",
+            schema=_WINDOW_FOCUS_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_window_focus(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(WindowFocusTool(),))

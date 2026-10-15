@@ -1,113 +1,31 @@
 """剪贴板展示工具 — 在前端顶部显示可一键复制的文本区域。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 2 个工具：
-  - ``SetClipboardDisplay``  — 创建或更新可复制展示区域
-  - ``ClearClipboardDisplay`` — 清除展示区域
-
-由 ``finalize_tool_result`` 检测后通过 ``clipboard_display`` 事件推送到前端。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``SetClipboardDisplayTool`` 与 ``ClearClipboardDisplayTool`` 实例。``handle``
+只更新会话工具资源分区并返回结果 payload；结果写入所属 History 并保存后的
+``after_handle`` 再通过 ``ToolContext.sink.emit_clipboard_display`` 把现有 JSON
+payload 推送到前端。主体正常返回的业务 error 结果同样进入 ``after_handle``，
+但不发送成功 UI 更新。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    ToolPostprocessEffect,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
-    from entry.base_agent_loop import ToolContext
-
 logger = logging.getLogger(__name__)
-
-
-# ── emit handler ────────────────────────────────────────────────
-
-
-async def _emit_clipboard_display(
-    result: Any, sink: AgentSink, session_id: str, tool_name: str,
-) -> None:
-    """将 clipboard display tool result 推送到前端。"""
-    payload = json.dumps(result, ensure_ascii=False)
-    await sink.emit_clipboard_display(session_id, tool_name, payload)
-
-
-# ── handler ─────────────────────────────────────────────────────────
-
-
-async def _handle_set_clipboard_display(args: dict[str, Any], context: ToolContext|None = None) -> dict:
-    """创建或更新前端可复制展示区域。
-
-    参数：
-        display_id: 展示区域唯一标识（同一 display_id 会覆盖更新）
-        label:      展示区域标题/描述
-        content:    要展示的文本内容，点击即可复制
-    """
-    display_id: str = str(args.get("display_id", "")).strip()
-    label: str = str(args.get("label", "")).strip()
-    content: str = str(args.get("content", ""))
-    session_id: str = str(args.get("_session_id", ""))
-
-    if not display_id:
-        return tool_error("'display_id' is required")
-
-    info: dict[str, Any] = {
-        "display_id": display_id,
-        "label": label or display_id,
-        "content": content,
-    }
-
-    # 磁盘为唯一真相：写当前会话分区（store 为 None 或 session_id 为空时跳过落盘）
-    store = context.loop.session_store if context else None
-    if session_id and store is not None:
-        try:
-            values = store.read_partition(session_id, "clipboard_display")
-            values[display_id] = info
-            store.update_tool_resources(session_id, "clipboard_display", values)
-        except Exception:
-            logger.warning("Failed to persist clipboard display | session=%s", session_id, exc_info=True)
-
-    logger.info("Clipboard display updated | session=%s display=%s", session_id, display_id)
-
-    return tool_result(**info)
-
-
-async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolContext|None = None) -> dict:
-    """清除前端指定展示区域。
-
-    参数：
-        display_id: 要清除的展示区域标识。不提供则清除该会话所有展示区域。
-    """
-    display_id: str = str(args.get("display_id", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
-
-    cleared: list[str] = []
-    # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
-    store = context.loop.session_store if context else None
-    if session_id and store is not None:
-        try:
-            values = store.read_partition(session_id, "clipboard_display")
-            if display_id:
-                if display_id in values:
-                    del values[display_id]
-                    cleared.append(display_id)
-            else:
-                cleared = list(values.keys())
-                values.clear()
-            store.update_tool_resources(session_id, "clipboard_display", values)
-        except Exception:
-            logger.warning("Failed to persist cleared clipboard display | session=%s", session_id, exc_info=True)
-
-    logger.info("Clipboard display cleared | session=%s displays=%s", session_id, cleared)
-
-    return tool_result(
-        success=True,
-        cleared=cleared,
-        message=f"Cleared clipboard display: {', '.join(cleared) if cleared else 'none'}"
-    )
 
 
 # ── schema 常量 ────────────────────────────────────────────────────
@@ -205,28 +123,131 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
 }
 
 
-# ── 注册 ────────────────────────────────────────────────────────────
+# ── 工具类 ─────────────────────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register clipboard display tools and their UI event handlers."""
-    registry.register(
-        name="SetClipboardDisplay",
-        toolset="clipboard",
-        schema=_SET_CLIPBOARD_DISPLAY_SCHEMA,
-        handler=_handle_set_clipboard_display,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
-    ui_events.register("SetClipboardDisplay", _emit_clipboard_display)
 
-    registry.register(
-        name="ClearClipboardDisplay",
-        toolset="clipboard",
-        schema=_CLEAR_CLIPBOARD_DISPLAY_SCHEMA,
-        handler=_handle_clear_clipboard_display,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
-    ui_events.register("ClearClipboardDisplay", _emit_clipboard_display)
+class _ClipboardDisplayTool(BaseTool):
+    """剪贴板展示工具共享的对象契约；``after_handle`` 只推送提交后的结果 payload。"""
+
+    async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        result = execution.result
+        # 业务错误正常返回也进入 after，但不发送成功 UI 更新。
+        if result is not None and "error" in result:
+            return ToolPostprocessEffect()
+        await execution.context.sink.emit_clipboard_display(
+            execution.context.session_id,
+            self.name,
+            json.dumps(result, ensure_ascii=False),
+        )
+        return ToolPostprocessEffect()
+
+
+class SetClipboardDisplayTool(_ClipboardDisplayTool):
+    """创建或更新前端可复制展示区域。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="SetClipboardDisplay",
+            toolset="clipboard",
+            schema=_SET_CLIPBOARD_DISPLAY_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """创建或更新前端可复制展示区域。
+
+        参数：
+            display_id: 展示区域唯一标识（同一 display_id 会覆盖更新）
+            label:      展示区域标题/描述
+            content:    要展示的文本内容，点击即可复制
+        """
+        args = execution.arguments
+        display_id: str = str(args.get("display_id", "")).strip()
+        label: str = str(args.get("label", "")).strip()
+        content: str = str(args.get("content", ""))
+        session_id: str = execution.context.session_id
+
+        if not display_id:
+            return ToolHandlerResult(result=tool_error("'display_id' is required"))
+
+        info: dict[str, Any] = {
+            "display_id": display_id,
+            "label": label or display_id,
+            "content": content,
+        }
+
+        # 磁盘为唯一真相：写当前会话分区（store 为 None 或 session_id 为空时跳过落盘）
+        store = execution.context.loop.session_store
+        if session_id and store is not None:
+            try:
+                values = store.read_partition(session_id, "clipboard_display")
+                values[display_id] = info
+                store.update_tool_resources(session_id, "clipboard_display", values)
+            except Exception:
+                logger.warning("Failed to persist clipboard display | session=%s", session_id, exc_info=True)
+
+        logger.info("Clipboard display updated | session=%s display=%s", session_id, display_id)
+
+        return ToolHandlerResult(result=tool_result(**info))
+
+
+class ClearClipboardDisplayTool(_ClipboardDisplayTool):
+    """清除前端指定展示区域。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ClearClipboardDisplay",
+            toolset="clipboard",
+            schema=_CLEAR_CLIPBOARD_DISPLAY_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """清除前端指定展示区域。
+
+        参数：
+            display_id: 要清除的展示区域标识。不提供则清除该会话所有展示区域。
+        """
+        args = execution.arguments
+        display_id: str = str(args.get("display_id", "")).strip()
+        session_id: str = execution.context.session_id
+
+        cleared: list[str] = []
+        # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
+        store = execution.context.loop.session_store
+        if session_id and store is not None:
+            try:
+                values = store.read_partition(session_id, "clipboard_display")
+                if display_id:
+                    if display_id in values:
+                        del values[display_id]
+                        cleared.append(display_id)
+                else:
+                    cleared = list(values.keys())
+                    values.clear()
+                store.update_tool_resources(session_id, "clipboard_display", values)
+            except Exception:
+                logger.warning("Failed to persist cleared clipboard display | session=%s", session_id, exc_info=True)
+
+        logger.info("Clipboard display cleared | session=%s displays=%s", session_id, cleared)
+
+        return ToolHandlerResult(result=tool_result(
+            success=True,
+            cleared=cleared,
+            message=f"Cleared clipboard display: {', '.join(cleared) if cleared else 'none'}"
+        ))
+
+
+# ── 工具集对象声明 ──────────────────────────────────────────────────
+
+TOOLSET = BaseToolSet(
+    name="clipboard",
+    tools=(
+        SetClipboardDisplayTool(),
+        ClearClipboardDisplayTool(),
+    ),
+)

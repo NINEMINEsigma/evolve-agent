@@ -1,14 +1,14 @@
 ---
 name: create-eve-tool
-description: 通过一次一个问题的质询流程引导用户为 Evolve Agent 项目创建新工具。结合 grill-me 质询方法论和显式注册协议，逐个决策点澄清工具的 name、toolset、schema、handler、danger_level 等字段，最终生成包含 imports、handler 和 register_tools(registry, ui_events) 的完整 .py 文件。当用户想创建新工具、注册新工具、添加 Agent 工具，或提到“新建工具”“create tool”“register tool”时使用。
+description: 通过一次一个问题的质询流程引导用户为 Evolve Agent 项目创建新工具。结合 grill-me 质询方法论和对象工具声明协议，逐个决策点澄清工具的 name、toolset、schema、danger_level、accepts_following_calls 等字段以及 before/handle/after 阶段与元数据，最终生成包含 import、BaseTool 子类和顶层 TOOLSET = BaseToolSet(...) 的完整 .py 文件。当用户想创建新工具、注册新工具、添加 Agent 工具，或提到“新建工具”“create tool”“register tool”时使用。
 disable-model-invocation: true
 ---
 
 # Create Evolve Tool — 质询式工具创建 Skill
 
-> **理念**：工具质量的上限取决于意图的清晰度。在写下任何一行注册代码之前，先把工具的语义边界、副作用、危险级别逐个澄清。
+> **理念**：工具质量的上限取决于意图的清晰度。在写下任何一行工具代码之前，先把工具的语义边界、副作用、危险级别、调用态与批次边界逐个澄清。
 
-本 skill 借用 grill-me 的一次一问质询方法论，沿工具注册的决策树逐个澄清字段，最终输出符合工具注册规范的完整 `.py` 文件。
+本 skill 借用 grill-me 的一次一问质询方法论，沿对象工具声明的决策树逐个澄清字段，最终输出符合对象工具契约的完整 `.py` 文件。
 
 ---
 
@@ -20,8 +20,8 @@ disable-model-invocation: true
 [PHASE: Init]
 [PHASE: Interrogate]
 [PHASE: Schema]
-[PHASE: Handler]
-[PHASE: Register]
+[PHASE: Phases]
+[PHASE: Metadata]
 [PHASE: Verify]
 [PHASE: Output]
 ```
@@ -40,14 +40,17 @@ disable-model-invocation: true
 1. 读取用户对工具的初始描述。
 2. 构建工具决策树，识别需要澄清的决策点及其依赖顺序：
    - `name` — 工具名称（snake_case，唯一）
-   - `toolset` — 工具集归属（core / fs / web / ...）
+   - `toolset` — 工具集归属（core / filesystem / multiagent / browser / ... 或自定义工具集名）
    - `description` — 英文描述 + 上方中文注释
    - `parameters` — JSON Schema 参数定义
-   - `handler` — 处理函数签名与逻辑
+   - `handle` — 工具主体逻辑、返回值与错误策略
+   - `before_handle` / `after_handle` — 是否需要在工具调用前准备或提交后收尾
    - `is_async` — 是否异步
    - `availability` — 可用范围（ToolAvailability 位掩码）
    - `danger_level` — 危险级别（safe / write / dangerous / critical）
-   - `no_timeout` — 是否禁用超时
+   - `accepts_following_calls` — 同批后续调用接收声明
+   - `no_timeout` / `max_result_size_chars` — 超时与结果上限
+   - `check_fn` / `requires_env` — 运行期可用性与环境依赖
 3. 说明本次质询的范围和预计深度。
 
 ### [PHASE: Interrogate] 2. 质询主循环
@@ -73,8 +76,8 @@ disable-model-invocation: true
 
 - 一次只问**一个问题**。
 - 每个问题附带**推荐答案**。
-- 按**依赖顺序**遍历：先 `name` → `toolset` → `description` → `parameters` → `danger_level` → `is_async` → `no_timeout` → `availability`，再进入 `handler` 逻辑。
-- 当答案可通过检查现有工具获得时，**优先探索代码库**。用 Grep 搜索 `registry.register(` 找现有工具作为参考。
+- 按**依赖顺序**遍历：先 `name` → `toolset` → `description` → `parameters` → `danger_level` → `is_async` → `accepts_following_calls` → `no_timeout` → `availability`，再进入 `handle` 逻辑与 `before_handle` / `after_handle` 阶段。
+- 当答案可通过检查现有工具获得时，**优先探索代码库**。用 Grep 搜索 `^TOOLSET = ` 或 `BaseTool` 子类找现有工具作为参考。
 - 不接受"待定"或模糊答案——追问到具体为止。
 - 整个会话使用**中文**。工具的 `description` 字段内容用**英文**编写（遵循工具注册规范）。
 
@@ -90,35 +93,47 @@ disable-model-invocation: true
 
 每个参数遵循工具注册规范：中文注释在上方，英文 `description` 在下方。
 
-### [PHASE: Handler] 4. Handler 函数设计
+### [PHASE: Phases] 4. 阶段方法设计
 
-澄清 handler 的：
+对象工具有三个调用阶段，均接收本次调用独有的 `ToolExecution`：
 
-- 函数名（`_handle_<tool_name>`）
-- 签名（参数列表）
-- 核心逻辑流程（伪代码级别）
-- 返回值结构
-- 错误处理策略
+- `handle(execution) -> ToolHandlerResult`（**必须实现**）：工具主体，执行实际业务操作。返回值用 `ToolHandlerResult(result=..., state=...)` 包装，`result` 为 LLM 看到的结果 dict，`state` 为可在 `after_handle` 读取的非持久化调用态。
+- `before_handle(execution)`（可选）：在审批通过后、主体之前准备本次调用，默认空实现。
+- `after_handle(execution) -> ToolPostprocessEffect`（可选）：**仅在结果提交 History 后**执行，用于提交后收尾（替换结果 payload、发送 UI 事件、请求停止本轮或进化等），默认返回空效果。
+
+澄清每个阶段的：
+
+- 主体逻辑流程（伪代码级别）
+- 返回值结构（`tool_result(...)` / `tool_error(...)`）
+- 错误处理策略：`handle` 抛出的异常会被分发层转换为 error payload，业务错误应显式返回 `tool_error(...)`
 - 副作用与前置条件
+- 调用态：跨阶段的材料应放进 `execution.state`，**不得**改共享工具实例、Application 或持久化存储
+- 需要的 `after_handle` 效果：`replacement_result`、`suppress_tool_result_event`（必须同时显式 discard 自身 ID）、`stop_current_round`、`loop_replaced`、`evolution_requested`、`completion_message`
 
-### [PHASE: Register] 5. 注册属性确认
+### [PHASE: Metadata] 5. 注册元数据确认
 
-确认 `registry.register()` 的其余属性：
+确认 `BaseTool.__init__` 的其余元数据（即 `TOOLSET = BaseToolSet(...)` 中工具实例的字段）：
 
-- `is_async` — handler 是 `async def` 时设为 `True`；同步阻塞 handler 保持 `False`，由 ToolRegistry 唯一执行器持有真实线程任务
-- `availability` — 使用 `ToolAvailability` 指定可用范围
-- `danger_level` — `safe` / `write` / `dangerous` / `critical`
+- `is_async` — `handle` / `after_handle` 是 `async def` 时设为 `True`；同步阻塞任务保持 `False`，由 ToolRegistry 唯一执行器持有真实线程任务
+- `availability` — 使用 `ToolAvailability` 指定可用范围（`MAIN` / `SUBAGENT` / `MULTI_AGENT` / `TASKAGENT` / `EVERY`）
+- `danger_level` — `safe` / `write` / `dangerous` / `critical`；`dangerous` 及以上需审批，`critical` 只能由用户亲自批准
+- `accepts_following_calls` — 默认 `True`；设为 `False` 表示同一模型响应中其后的 tool calls 在审批与执行前视为未发生（压缩类边界工具常见）
 - `no_timeout` — 长阻塞工具设为 `True`
+- `max_result_size_chars` — 结果上限，省略使用工具集默认
+- `check_fn` / `requires_env` — 运行期可用性与环境依赖检查
+- 工具集 `BaseToolSet(name=..., description=..., usage_guide=..., loaded_by_default=..., check_fn=..., requires_env=...)`，并可用 `preheat()` 做一次注册期可用性检查（不启动重量资源）
 
 ### [PHASE: Verify] 6. 事前校验
 
 生成代码前进行 pre-check：
 
 - `name` 是否与现有工具冲突？（Grep 搜索 `name="<tool_name>"`）
+- `toolset` 是否与工具所属 `BaseToolSet.name` 一致？（`BaseToolSet` 构造会校验，二者必须相同）
 - `description` 是否包含所有必需段落（Prerequisites / Effect / Returns / When to Use / Side Effects）？
 - 中文注释是否覆盖了每个 `description` 字段？
-- `handler` 函数名是否与 `_handle_` 前缀一致？
-- `danger_level` 是否与工具实际副作用匹配？
+- `handle` 是否返回 `ToolHandlerResult`？业务错误是否用 `tool_error(...)` 显式返回？
+- 跨阶段材料是否只放在 `execution.state`，未写入共享工具实例？
+- `danger_level` 是否与工具实际副作用匹配？`accepts_following_calls` 是否符合批次语义？
 - `parameters` 的 `required` 列表是否合理？
 
 发现问题则回到对应 PHASE 追问。
@@ -129,17 +144,16 @@ disable-model-invocation: true
 
 ```python
 # 文件头部：imports（只导入必要的）
-# handler 函数：_handle_<tool_name>(args, context) -> dict
-# 唯一同步声明入口：register_tools(registry, ui_events) -> None
-# registry.register(...) 与 ui_events.register(...) 只能在显式声明入口中调用
+# BaseTool 子类：__init__ 声明元数据与 schema；handle 实现主体；可选 before_handle / after_handle
+# 顶层固定名称声明：TOOLSET = BaseToolSet(name="<toolset>", tools=(<YourTool>(),))
 ```
 
 文件应：
 
 - 包含所有必要的 import 语句
-- handler 函数带完整类型注解
-- 导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，所有工具与事件注册都放在该入口中
-- 导入只定义函数、常量和类型；不得在导入期取得 Application、注册工具或创建连接。handler 执行时通过 ToolContext 的 app 或 `Application.current().get_system(T)` 取得唯一 System
+- 工具类继承 `BaseTool`，`__init__` 调用 `super().__init__(...)` 传入元数据，`handle`（及可选阶段）带完整类型注解
+- 导出顶层固定名称 `TOOLSET = BaseToolSet(...)`，一个模块只能声明一个 `TOOLSET`
+- 导入只创建无连接工具对象；不得在导入期取得 Application、注册工具（`registry.register` / `register_tool` / `register_toolset`）或创建连接，也不得导入 `abstract.tools.ui_event_router`。需要运行时服务时在 `handle` 内通过 `execution.context.app.get_system(...)` 取得
 - `description` 字段按工具注册规范：中文注释在上方，英文内容在下方
 - markdown 分段：Prerequisites / Effect / Returns / When to Use / Side Effects
 
@@ -163,10 +177,13 @@ disable-model-invocation: true
 
 生成代码时必须遵守以下规则：
 
-1. **自动发现**：AST 扫描顶层同步 `register_tools` 函数，按路径排序导入后显式传入唯一 ToolRegistry/UIEventRouter 调用。同一次发现每个模块只调用一次；已有 Python 模块缓存不影响显式注册。旧模块级注册、读取/语法/导入/注册错误直接失败，不能用吞错或修改 `sys.modules` 修补。可选 `custom_tools/` 不存在时跳过；必需内置目录缺失属于错误。
-2. **description 字段**：内容用**英文**编写，上方必须附带**中文注释**。
-3. **markdown 分段**：description 内按段落写明工具功能、前置条件（Prerequisites）、调用效果（Effect）、返回值（Returns）、何时使用（When to Use）、副作用（Side Effects）。
-4. **中文注释位置**：每个 `description` 字段（包括嵌套参数的 description）上方必须有中文注释解释行为。
+1. **对象声明与自动发现**：工具模块以顶层固定名称 `TOOLSET`（常量 `TOOLSET_DECLARATION_NAME`）声明 `BaseToolSet`，其中持有 `BaseTool` 子类实例。ToolDiscoverySystem 按 AST 只识别顶层 `TOOLSET`，按路径排序导入后交给唯一 `ToolRegistry` 以 `register_toolset(toolset, merge=True)` 注册并对每个声明执行一次 `preheat()`；Python 模块缓存不替代显式对象注册。以下退役协议直接失败：顶层 `register_tools` 函数、`registry.register()`/`register_tool()`/`register_toolset()` 顶层调用、`abstract.tools.ui_event_router` 导入、`abstract.tools.registry` 的 `registry` 全局导入、导入期注册，以及任何读取/语法/导入/注册错误。可选 `custom_tools/` 不存在时跳过；必需内置目录缺失属于错误。
+2. **四阶段与调用态**：阶段为工具调用前 `before_handle`、工具主体 `handle`、工具调用后处理 `after_handle`；每次调用携带独立 `ToolExecution`，跨阶段材料只放 `execution.state`，不得写入共享工具实例或持久化。
+3. **提交后 after**：`after_handle` 只在主体正常返回且结果提交 History 后执行；主体业务错误仍进入，主体抛出异常转换的 error 不进入。
+4. **批次声明**：`accepts_following_calls=False` 时同一模型响应中其后的 tool calls 在审批与执行前视为未发生。
+5. **description 字段**：内容用**英文**编写，上方必须附带**中文注释**。
+6. **markdown 分段**：description 内按段落写明工具功能、前置条件（Prerequisites）、调用效果（Effect）、返回值（Returns）、何时使用（When to Use）、副作用（Side Effects）。
+7. **中文注释位置**：每个 `description` 字段（包括嵌套参数的 description）上方必须有中文注释解释行为。
 
 ---
 
@@ -179,48 +196,61 @@ disable-model-invocation: true
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from abstract.tools.registry import ToolRegistry
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    ToolPostprocessEffect,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-if TYPE_CHECKING:
-    from entry.base_agent_loop import ToolContext
 
-
-async def _handle_<tool_name>(args: dict[str, Any], context: ToolContext) -> dict:
-    """Execute the requested operation."""
-    # 仅在 handler 执行时读取 context.app.get_system(...)。
-    return {"result": "..."}
-
-
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    registry.register(
-        name="<tool_name>",
-        toolset="<toolset>",
-        schema={
-            # 工具功能、前置条件、调用效果、返回值、典型场景、副作用。
-            "description": "<English description with Prerequisites/Effect/Returns/When to Use/Side Effects>",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "<param1>": {
-                        "type": "string",
-                        # 参数说明。
-                        "description": "<English description>",
+class MyTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="<tool_name>",
+            toolset="<toolset>",
+            schema={
+                # 工具功能、前置条件、调用效果、返回值、典型场景、副作用。
+                "description": "<English description with Prerequisites/Effect/Returns/When to Use/Side Effects>",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "<param1>": {
+                            "type": "string",
+                            # 参数说明。
+                            "description": "<English description>",
+                        },
                     },
+                    "required": ["<param1>"],
                 },
-                "required": ["<param1>"],
             },
-        },
-        handler=_handle_<tool_name>,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN,
-        no_timeout=False,
-    )
-    # 有 UI 事件时在此调用 ui_events.register(...)，不要导入全局实例。
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN,
+            accepts_following_calls=True,
+            no_timeout=False,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        # 仅在执行时读取运行时服务；跨阶段材料写入 execution.state。
+        result = await execution.context.app.get_system(SomeSystem).run(execution.arguments)
+        return ToolHandlerResult(result=result)
+
+    async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        # 仅在结果提交 History 后运行；默认空效果，需要时返回替换/停止/完成效果。
+        return ToolPostprocessEffect()
+
+
+TOOLSET = BaseToolSet(
+    name="<toolset>",
+    tools=(MyTool(),),
+    description="<Short toolset description>",
+)
 ```
 
 ---

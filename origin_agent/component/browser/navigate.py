@@ -3,7 +3,7 @@
 BrowserGoto / BrowserRefresh / BrowserBack / BrowserForward。
 所有导航都是改变浏览器状态的显式动作：schema 行为规范要求
 跳转前与用户确认目标；可能重定向到登录页的目标先向用户说明。
-模块导入时通过 ``registry.register()`` 注册。
+工具对象通过模块级 ``TOOLSET``（``BaseToolSet``）声明；导入期只创建无连接工具对象。
 """
 
 from __future__ import annotations
@@ -11,8 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
 from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
@@ -127,7 +126,7 @@ async def _handle_browser_forward(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 工具类与工具集
 # ---------------------------------------------------------------------------
 
 _GOTO_DESCRIPTION = """Navigates the current tab to a URL and waits for the page to load.
@@ -151,120 +150,158 @@ Navigates to `url`, waiting for the given load state (default networkidle). Retu
 - Changes browser state (navigation); reversible via back/forward.
 - Do NOT use for destructive flows without user consent."""
 
-
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register browser navigate tools into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="BrowserGoto",
-        toolset="browser",
-        schema={
-        # 导航当前标签页到指定 URL 并等待加载完成。
-        #
-        # ## 行为规范
-        # - 导航是显式状态变更：执行前与用户确认目标 URL。
-        # - 若目标可能重定向到登录页，先向用户说明并请其确认或介入。
-        "description": _GOTO_DESCRIPTION,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
-                },
-                "url": {
-                    "type": "string",
-                    # 目标 URL。必须以 http:// 或 https:// 开头。
-                    "description": "The URL to navigate to. Must start with http:// or https://.",
-                },
-                "wait": {
-                    "type": "string",
-                    # 等待的加载状态：commit / domcontentloaded / load / networkidle（默认）。
-                    "description": "Load state to wait for: commit / domcontentloaded / load / networkidle (default).",
-                    "default": "networkidle",
-                },
-                "timeout": {
-                    "type": "integer",
-                    # 导航超时毫秒（默认 30000）。
-                    "description": "Navigation timeout in milliseconds (default 30000).",
-                    "default": 30000,
-                },
+_BROWSER_GOTO_SCHEMA = {
+    # 导航当前标签页到指定 URL 并等待加载完成。
+    #
+    # ## 行为规范
+    # - 导航是显式状态变更：执行前与用户确认目标 URL。
+    # - 若目标可能重定向到登录页，先向用户说明并请其确认或介入。
+    "description": _GOTO_DESCRIPTION,
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
             },
-            "required": ["tab"],
-        },
-    },
-    handler=_handle_browser_goto,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
-
-    registry.register(
-        name="BrowserRefresh",
-        toolset="browser",
-        schema={
-        # 刷新当前页面并等待网络空闲。可逆状态变更。
-        "description": "Reloads the current page and waits for network idle. Returns the resulting URL and title. Reversible state change.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
-                },
+            "url": {
+                "type": "string",
+                # 目标 URL。必须以 http:// 或 https:// 开头。
+                "description": "The URL to navigate to. Must start with http:// or https://.",
             },
-            "required": ["tab"],
-        },
-    },
-    handler=_handle_browser_refresh,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
-
-    registry.register(
-        name="BrowserBack",
-        toolset="browser",
-        schema={
-        # 历史后退。返回跳转后 URL 与标题；无历史时报错。
-        "description": "Navigates back in history. Returns the resulting URL and title; errors when there is no history.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
-                },
+            "wait": {
+                "type": "string",
+                # 等待的加载状态：commit / domcontentloaded / load / networkidle（默认）。
+                "description": "Load state to wait for: commit / domcontentloaded / load / networkidle (default).",
+                "default": "networkidle",
             },
-            "required": ["tab"],
-        },
-    },
-    handler=_handle_browser_back,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
-
-    registry.register(
-        name="BrowserForward",
-        toolset="browser",
-        schema={
-        # 历史前进。返回跳转后 URL 与标题；无前向历史时报错。
-        "description": "Navigates forward in history. Returns the resulting URL and title; errors when there is no forward history.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
-                },
+            "timeout": {
+                "type": "integer",
+                # 导航超时毫秒（默认 30000）。
+                "description": "Navigation timeout in milliseconds (default 30000).",
+                "default": 30000,
             },
-            "required": ["tab"],
         },
+        "required": ["tab"],
     },
-    handler=_handle_browser_forward,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
+}
+
+_BROWSER_REFRESH_SCHEMA = {
+    # 刷新当前页面并等待网络空闲。可逆状态变更。
+    "description": "Reloads the current page and waits for network idle. Returns the resulting URL and title. Reversible state change.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
+            },
+        },
+        "required": ["tab"],
+    },
+}
+
+_BROWSER_BACK_SCHEMA = {
+    # 历史后退。返回跳转后 URL 与标题；无历史时报错。
+    "description": "Navigates back in history. Returns the resulting URL and title; errors when there is no history.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
+            },
+        },
+        "required": ["tab"],
+    },
+}
+
+_BROWSER_FORWARD_SCHEMA = {
+    # 历史前进。返回跳转后 URL 与标题；无前向历史时报错。
+    "description": "Navigates forward in history. Returns the resulting URL and title; errors when there is no forward history.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
+            },
+        },
+        "required": ["tab"],
+    },
+}
+
+
+class BrowserGotoTool(BaseTool):
+    """导航当前标签页到指定 URL。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserGoto",
+            toolset="browser",
+            schema=_BROWSER_GOTO_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_goto(execution.arguments))
+
+
+class BrowserRefreshTool(BaseTool):
+    """刷新当前页面并等待网络空闲。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserRefresh",
+            toolset="browser",
+            schema=_BROWSER_REFRESH_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_refresh(execution.arguments))
+
+
+class BrowserBackTool(BaseTool):
+    """历史后退。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserBack",
+            toolset="browser",
+            schema=_BROWSER_BACK_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_back(execution.arguments))
+
+
+class BrowserForwardTool(BaseTool):
+    """历史前进。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserForward",
+            toolset="browser",
+            schema=_BROWSER_FORWARD_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_forward(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="browser",
+    tools=(BrowserGotoTool(), BrowserRefreshTool(), BrowserBackTool(), BrowserForwardTool()),
+)

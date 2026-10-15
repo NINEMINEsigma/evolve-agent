@@ -8,16 +8,16 @@
 from __future__ import annotations
 
 from abstract.tools.registry import ToolRegistry
+from abstract.tools.tool import BaseToolSet
 
 
-def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
-    """注册所有内置工具集的简短描述和详细使用说明。"""
-    registry.register_toolset(
+BUILTIN_TOOLSETS = (
+    BaseToolSet(
         name="core",
         description="Essential tools: ask questions, search sessions, compress history, show tool metadata, manage skills, load toolsets.",
         loaded_by_default=True,
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="sandbox",
         description="Manage fast-mode global dynamic sandbox spaces through critical user-approved add/remove tools.",
         usage_guide="""Global dynamic sandbox spaces are shared by all Agents in fast mode.
@@ -27,8 +27,8 @@ def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
 - AddSandboxSpace never overwrites an existing name; remove the old space before adding changed configuration.
 - is_readonly must be supplied explicitly. Read-only is enforced by Sandbox file APIs, not by OS-level process isolation.
 - The Colloquy session intentionally cannot load this management toolset.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="filesystem",
         description="Read, write, edit, delete, copy, move, and search files in logical namespaces.",
         usage_guide="""Filesystem tools operate on logical namespace prefixes (ws:, fork:, fix:, skills:, etc.).
@@ -48,8 +48,8 @@ Multimodal Read conventions:
 - If both tool and user message paths are unsupported but a reference profile is configured, the content is forwarded to the referenced profile's model for a text description, returned in the `description` field.
 - If both paths are unsupported and no reference is configured, Read returns an error and does not read the file.
 - In the user-message fallback path, do NOT call any more tools after receiving the result containing `_user_blocks` — respond directly so the follow-up user message with the media content is delivered to you in the next turn.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="shell",
         description="Create and control persistent interactive Windows ConPTY Shell sessions.",
         usage_guide="""Shell sessions preserve working directory, environment, and interactive process state across tool calls.
@@ -62,20 +62,20 @@ Multimodal Read conventions:
 - Command text does not expand ws:/fork: paths. Use namespace_env returned by StartShell.
 - Use the returned EVOLVE_PYTHON environment reference for the Agent's Python interpreter and pip.
 - Never use Shell tools in place of dedicated Read, Write, PatchEdit, SearchFiles, or Grep tools.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="code",
         description="Validate and evolve the agent's own source code.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="frontend",
         description="Validate frontend builds by running package manager install and build.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="lsp",
         description="Language server protocol diagnostics, references, definitions, and symbols.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="progress",
         description="Create, update, and clear frontend progress bars for multi-step tasks.",
         usage_guide="""Progress bar conventions:
@@ -86,12 +86,12 @@ Multimodal Read conventions:
 - After all steps finish, set current equal to total and keep the progress bar visible — do NOT call ClearTaskProgress yet.
 - The progress bar must remain visible until the user has reviewed and accepted the work. Only call ClearTaskProgress after user confirmation or explicit request to clean up.
 - If the task is cancelled or aborted, call ClearTaskProgress to remove the stale bar.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="clipboard",
         description="Create and manage one-click copy areas in the frontend top panel.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="multiagent",
         description="Register, run, chat with, stop, and manage sub-agents; enter and exit multi-agent mode.",
         usage_guide="""Sub-agent conventions:
@@ -114,32 +114,39 @@ Task agent dispatch conventions:
 - Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
 - Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
 - Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="extools",
         description="Web fetch, archive tools, diff tools.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="cron",
         description="Schedule, list, cancel, trigger, and copy one-shot background cron tasks; wait reminders.",
         usage_guide="""Cron tool conventions:
 - Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
 - Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.""",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="dynamic",
         description="Register, unregister, and list dynamic HTTP POST endpoints for real-time callbacks.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="archive",
         description="Compress and decompress files and directories into archives (zip, tar, 7z).",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="automation",
         description="Desktop automation: window management, mouse, keyboard, screen capture, template matching.",
-    )
-    registry.register_toolset(
+    ),
+    BaseToolSet(
         name="browser",
         description="Browser control via CDP: navigate, click, type, scroll, screenshot, query elements.",
-    )
+    ),
+)
+
+
+def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
+    """Merge the fixed metadata objects after all built-in tool declarations."""
+    for toolset in BUILTIN_TOOLSETS:
+        registry.register_toolset(toolset, merge=True)

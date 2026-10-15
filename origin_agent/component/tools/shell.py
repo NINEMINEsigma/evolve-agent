@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result,
+)
 from entity.constant import (
     SHELL_DEFAULT_TYPE,
     SHELL_READ_DEFAULT_CHARS,
@@ -298,60 +299,67 @@ This destroys the persistent Shell environment and can corrupt work performed by
 
 # ── 注册 ─────────────────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register Shell session tools."""
-    del ui_events  # Shell tools have no UI event handlers
-    registry.register(
-        name="StartShell",
-        toolset="shell",
-        schema=_START_SHELL_SCHEMA,
-        handler=_handle_start_shell,
-        is_async=True,
-        check_fn=_shell_available,
-        danger_level=ToolDangerLevel.dangerous,
-        availability=ToolAvailability.EVERY,
-    )
+class StartShellTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="StartShell", toolset="shell", schema=_START_SHELL_SCHEMA,
+            is_async=True, check_fn=_shell_available,
+            danger_level=ToolDangerLevel.dangerous, availability=ToolAvailability.EVERY,
+        )
 
-    registry.register(
-        name="ReadShell",
-        toolset="shell",
-        schema=_READ_SHELL_SCHEMA,
-        handler=_handle_read_shell,
-        is_async=True,
-        check_fn=_shell_available,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.EVERY,
-    )
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_start_shell(execution.arguments, execution.context))
 
-    registry.register(
-        name="WriteShell",
-        toolset="shell",
-        schema=_WRITE_SHELL_SCHEMA,
-        handler=_handle_write_shell,
-        is_async=True,
-        check_fn=_shell_available,
-        danger_level=ToolDangerLevel.dangerous,
-        availability=ToolAvailability.EVERY,
-    )
 
-    registry.register(
-        name="InterruptShell",
-        toolset="shell",
-        schema=_INTERRUPT_SHELL_SCHEMA,
-        handler=_handle_interrupt_shell,
-        is_async=True,
-        check_fn=_shell_available,
-        danger_level=ToolDangerLevel.dangerous,
-        availability=ToolAvailability.EVERY,
-    )
+class ReadShellTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="ReadShell", toolset="shell", schema=_READ_SHELL_SCHEMA,
+            is_async=True, check_fn=_shell_available,
+            danger_level=ToolDangerLevel.safe, availability=ToolAvailability.EVERY,
+        )
 
-    registry.register(
-        name="StopShell",
-        toolset="shell",
-        schema=_STOP_SHELL_SCHEMA,
-        handler=_handle_stop_shell,
-        is_async=True,
-        check_fn=_shell_available,
-        danger_level=ToolDangerLevel.dangerous,
-        availability=ToolAvailability.EVERY,
-    )
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_read_shell(execution.arguments, execution.context))
+
+
+class WriteShellTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="WriteShell", toolset="shell", schema=_WRITE_SHELL_SCHEMA,
+            is_async=True, check_fn=_shell_available,
+            danger_level=ToolDangerLevel.dangerous, availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_write_shell(execution.arguments, execution.context))
+
+
+class InterruptShellTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="InterruptShell", toolset="shell", schema=_INTERRUPT_SHELL_SCHEMA,
+            is_async=True, check_fn=_shell_available,
+            danger_level=ToolDangerLevel.dangerous, availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_interrupt_shell(execution.arguments, execution.context))
+
+
+class StopShellTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="StopShell", toolset="shell", schema=_STOP_SHELL_SCHEMA,
+            is_async=True, check_fn=_shell_available,
+            danger_level=ToolDangerLevel.dangerous, availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_stop_shell(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(
+    name="shell",
+    tools=(StartShellTool(), ReadShellTool(), WriteShellTool(), InterruptShellTool(), StopShellTool()),
+)

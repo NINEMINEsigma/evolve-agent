@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, ToolPostprocessEffect,
+    tool_error, tool_result,
+)
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
@@ -25,66 +27,37 @@ from gateway.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 
-async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
+async def _prepare_exit_multi_agent(execution: ToolExecution) -> ToolHandlerResult:
     """退出多 Agent 协作模式，回到普通模式。
 
     预期参数: 无
     """
-    session_id: str = str(args.get("_session_id", "")).strip()
-
-    if not session_id:
-        return tool_error("'_session_id' is required")
-
-    app = Application.current()
+    session_id = execution.context.session_id
+    app = execution.context.app
 
     # 获取当前 MultiAgentLoop
     _multi_loop = app.get_system(SessionManager).get_loop(session_id)
     if _multi_loop is None:
-        return tool_error(f"No active loop found for session {session_id}")
+        return ToolHandlerResult(tool_error(f"No active loop found for session {session_id}"))
     elif isinstance(_multi_loop.loop, MultiAgentLoop):
         multi_loop = _multi_loop.loop
     else:
-        return tool_error(f"Current loop is not {MultiAgentLoop.__name__}; already in normal mode")
+        return ToolHandlerResult(tool_error(f"Current loop is not {MultiAgentLoop.__name__}; already in normal mode"))
 
-    # 提取共享资源：history 和 sink
-    # MultiAgentLoop._sink 实际存储的是 FrontendSink 实例（由 enter_multi_agent 传入），
-    # 但 get_sink() 返回类型标注为 AgentSink 父类，需 cast 收窄。
-    history = multi_loop.history
-    sink = cast(FrontendSink, multi_loop.get_sink())
-    history_store_dir = multi_loop.history_store_dir
-
-    # 创建新的 ParentAgentLoop
-    parent_loop = ParentAgentLoop(
-        app=app,
-        session_id=session_id,
-        frontend_sink=sink,
-        history_store_dir=history_store_dir,
-    )
-    parent_loop.set_session_manager(app.get_system(SessionManager))
-
-    # 用多 Agent 模式的共享历史覆盖 ParentAgentLoop 初始化时从磁盘加载的历史
-    parent_loop.load_history(history)
-
-    # 继承加载状态
-    parent_loop._loaded_toolsets = multi_loop.get_loaded_toolsets()
-    parent_loop._persist_loaded_toolsets()
-
-    # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
-    # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
-    # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
-    await app.get_system(SessionManager).replace_loop(session_id, parent_loop)
-
-    return tool_result(
-        success=True,
-        mode="normal",
-        message=f"Session {session_id} exited multi-agent mode, back to normal mode",
+    # 目标Loop构造和真实替换必须晚于本工具结果的严格保存。
+    return ToolHandlerResult(
+        result=tool_result(
+            success=True,
+            mode="normal",
+            message=f"Session {session_id} exited multi-agent mode, back to normal mode",
+        ),
+        state=multi_loop,
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register exit multi-agent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class ExitMultiAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="ExitMultiAgent",
         toolset="multiagent",
         availability=ToolAvailability.MULTI_AGENT,
@@ -148,6 +121,31 @@ def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
                 "properties": {},
             },
         },
-        handler=_handle_exit_multi_agent,
         is_async=True,
     )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return await _prepare_exit_multi_agent(execution)
+
+    async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        if execution.state is None:
+            return ToolPostprocessEffect()
+        multi_loop = execution.state
+        context = execution.context
+        manager = context.app.get_system(SessionManager)
+        current = manager.get_loop(context.session_id)
+        if current is None or current.loop is not multi_loop:
+            raise RuntimeError("Session Loop changed during normal-mode preparation")
+        parent_loop = ParentAgentLoop(
+            app=context.app, session_id=context.session_id,
+            frontend_sink=cast(FrontendSink, multi_loop.get_sink()),
+            history_store_dir=multi_loop.history_store_dir,
+        )
+        parent_loop.set_session_manager(manager)
+        parent_loop.load_history(multi_loop.history)
+        parent_loop.load_toolsets(list(multi_loop.get_loaded_toolsets()))
+        await manager.replace_loop(context.session_id, parent_loop)
+        return ToolPostprocessEffect(loop_replaced=True, stop_current_round=True)
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(ExitMultiAgentTool(),))

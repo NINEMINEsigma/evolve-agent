@@ -1,7 +1,7 @@
 """停止子 Agent 会话。
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。父 Agent 通过此工具强制终止指定子 Agent 会话，
+模块声明顶层 ``TOOLSET`` 对象，由 ToolDiscoverySystem 发现并注册。
+父 Agent 通过此工具强制终止指定子 Agent 会话，
 落盘完整会话历史。
 """
 
@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
@@ -39,10 +45,9 @@ async def _handle_stop_subagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Failed to stop subagent: {exc}")
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register stop subagent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class StopSubAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="StopSubAgent",
         toolset="multiagent",
         schema={
@@ -109,8 +114,13 @@ The returned history path is temporary. Use Copy or Move if you want to retain t
                 "required": ["session_id"],
             },
         },
-        handler=_handle_stop_subagent,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
         availability=ToolAvailability.MAIN,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_stop_subagent(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(StopSubAgentTool(),))

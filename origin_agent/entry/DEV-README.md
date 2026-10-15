@@ -19,7 +19,9 @@ entry/
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
 ├── tool_executor.py              ← ToolExecutor（统一工具调用执行器）
-├── tool_post_dispatch.py         ← finalize_tool_result（工具后处理）
+├── tool_execution.py             ← accept_tool_batch（工具批次接收声明）
+├── tool_pairing.py               ← 共享中断配对辅助（不反向导入 Loop/ToolExecutor）
+├── tool_post_dispatch.py         ← PreparedToolResult + ToolPostprocessor（提交后工具后处理）
 └── agent_support/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换
@@ -31,6 +33,22 @@ entry/
 
 ---
 
+## 工具对象与四阶段执行（2026-10-15）
+
+工具来源为 `BaseTool` 子类与顶层 `TOOLSET`，`ToolRegistry` 只持有对象；来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。`prepare_tool_result()` 为明确函数定义；`PreparedToolResult.execution` 关联本次工具调用，只有 `store_tool_result()` 成功提交后才写回 `history_index`/`result_message`。拒绝、中断结果不持有 execution，不进入专属 after，但仍按已有通知路径回显。
+
+`ToolPostprocessor`（`tool_post_dispatch.py`）由主会话 ToolExecutor 和子会话 Loop 分别持有唯一实例。主体正常返回（含业务错误）且结果已提交后，通过 ToolRegistry 的 `async_postprocess(execution)` 请求托管执行 after；等待期间与取消信号竞速，超出短清理窗口仍保留真实任务强引用。`replacement_result` 同时更新正式消息和通知投影，并保留耗时、输入预订元信息；禁止更新已经离开 History 的结果。抑制工具结果事件时必须显式丢弃自身 ID，避免卡片永远等待。after 失败在工具循环内明确重新传播，不降级为普通工具错误。
+
+ParentAgentLoop/MultiAgentWorker 在 assistant tool_calls 写入前通过 `accept_tool_batch()` 保留声明接受前缀，对后续项发送 `tool_calls_discarded`（携带 `session_id`/`stream_id`/`tool_call_ids`），中断补齐只针对接受前缀；已提交后被压缩移除的调用仍视为已执行，不能补回。工具上下文携带非持久化 `stream_id`。MultiAgentWorker 在下次请求前从共享 History 重建上下文。公共中断配对构造位于 `tool_pairing.py`，只依赖 `entity.messages`/`entity.puretype`，不反向导入 Loop/ToolExecutor。
+
+EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult` 不再有 `evolution_requested`，ToolExecutor 提前消费和 `store_tool_result()` 关闭分支已移除。停止效果先配对本批未执行接受项，再追加完成文本并结束当前轮。普通子Agent仍内存提交、停止时保存，临时Agent仍不保存。`abstract/tools/ui_event_router.py`、`HandlerToolAdapter` 与函数注册发现均已从源码移除。
+
+## 历史更新指令（2026-10-15）
+
+两种压缩工具在实际结构替换并严格保存后同步调用 `ToolExecution.mark_history_updated()`，保存与标记之间没有 await。该调用级事实独立于 after 是否成功返回；`ToolPostprocessor` 成功路径在结果回填保存后发送 typed `history_updated`，再发送 `ToolPostprocessEffect.system_message` 和未抑制的工具结果。取消/后续失败时仍根据已提交标记尝试发送失效通知，然后传播原异常；通知失败与原错误以异常组保留，不发送压缩成功系统消息。完成系统通知不再在压缩 after 内等待，也不复用进化的 assistant `completion_message`。
+
+压缩返回的 `discarded_tool_call_ids` 只用于内部移除事实/suppress 校验，Postprocessor不再发送 `tool_calls_discarded`；后者只由 `accept_tool_batch` 为从未被接受的批次后缀发送。suppress同时要求已提交结构更新标记及自身ID在移除集合中。`AgentSink.emit_history_updated(session_id)` 不依赖 stream_id，FrontendSink沿既有TaskOwner/发送截止统一序列化 `HistoryUpdatedEvent`；ParentAgentSink不向父主会话投递子会话History更新。当前实际触发方仅为两种主会话压缩工具，普通追加、业务拒绝和零链结果回填不触发。源码已接入，尚未运行验证。
+
 ## 关键抽象
 
 ### `BaseAgentLoop` / `BasePrivateChatAgentLoop` / `IMainSessionLoop`
@@ -40,7 +58,7 @@ entry/
 - **`BaseAgentLoop`**：最基础的循环抽象，包含：
   - `Inbox` 带类型消息队列（`UserMessage`；SubAgentLoop 父→子通道使用，主会话已切 SessionMessageQueue）。
   - 取消控制（`interrupt()`、`is_interrupted()`）。
-  - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`；上下文携带必填 `round_id`，明确 `ws:` 文件接触通过 `agentspace_access()` fail-closed 登记。`request_evolution()` 仅登记本次调用的进化意图标记，由所属 Loop 在工具结果严格保存后消费并请求关闭。
+  - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`；上下文携带必填 `round_id`，明确 `ws:` 文件接触通过 `agentspace_access()` fail-closed 登记。`request_evolution()` 仅登记本次调用的进化意图标记；结果提交 History 后由工具实例的 `after_handle()` 通过 `consume_evolution_request()` 唯一消费并在其中请求关闭，不再由所属 Loop 读取。
   - `ToolContext.resource_session_id`：长期资源归属的主会话 ID；主Agent/参与Agent使用当前主会话，子Agent/临时Agent使用公开 `parent_session_id`。
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`；压缩工具通过公开 `reset_context_tokens()` 将上一请求的 prompt token 计数置零，不直接访问 `_token_record`，累计 token 消耗保持不变。
@@ -156,7 +174,7 @@ Gateway在创建后台任务前的多目标接收与ready准备已由 S21 完成
 
 `tool_executor.py` 中的 `ToolExecutor` 是统一工具调用执行器：
 
-- 封装单个工具调用的完整流程：取消检查、parse error 处理、审批（复用 `execute_with_approval`）、registry 分发、异常转换、前端事件推送和 UI 事件路由。
+- 封装单个工具调用的完整流程：取消检查、parse error 处理、审批（复用 `execute_with_approval`）、registry 分发、异常转换、前端事件推送，以及结果提交后交给 `ToolPostprocessor.after_committed()` 的专属后处理。
 - `execute(tc, session_id, *, round_id, ...) -> ToolResultMessage`：执行单个工具调用；`round_id` 传入每个 `ToolContext`。
 - `get_tool_stats()`：返回工具调用统计。
 - 审批或 dispatch 等待与主会话取消事件竞速；handler task 取消只等待正式清理窗口，超时 task 由 `_cancel_cleanup_tasks` 强引用并在最终结束时观察异常，禁止无限阻塞主轮次。
@@ -210,7 +228,7 @@ sequenceDiagram
             PAL->>TE: execute(tc, session_id)
             TE->>APP: execute_with_approval()
             APP-->>TE: approval decision
-            TE->>TR: async_dispatch(tool_name, args)
+            TE->>TR: async_dispatch(execution)
             TR-->>TE: tool result
             TE-->>FS: tool_result event
             TE-->>PAL: ToolResultMessage
@@ -231,7 +249,7 @@ sequenceDiagram
 7. 对 tool_call 执行 `ToolExecutor.execute()`：按主会话策略检查审批模式、危险等级与白名单；手动模式 safe/write 直接执行，critical 在手动/脱手模式由用户审批，YOLO 全部免审批。该流程也适用于多Agent模式中的所有参与Agent，不使用独立子会话策略。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
-> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 将消息写入工具结果内部 `_queued_messages`，并返回 `consumed_client_message_ids`，经 `finalize_tool_result` 分离后分别透传到 `tool_result.embedded_messages` 与顶层字段 → 前端在工具调用卡片的独立嵌入消息区域展示消息并移除匹配徽章（不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
+> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 将消息写入工具结果内部 `_queued_messages`，并返回 `consumed_client_message_ids`，经提交后工具后处理通道分离后分别透传到 `tool_result.embedded_messages` 与顶层字段 → 前端在工具调用卡片的独立嵌入消息区域展示消息并移除匹配徽章（不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
 
 ---
 

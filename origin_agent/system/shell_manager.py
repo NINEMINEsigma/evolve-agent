@@ -857,6 +857,11 @@ class ShellManager(AsyncSystem):
         reader = state.reader_thread
         if reader is None or reader.ident is None:
             state.reader_exited.set()
+        # TODO：调查终止进程树后 pywinpty/ConPTY reader 仍未退出的既存故障。
+        # 2026-10-13 会话终结时首次记录，2026-10-16 03:50:39 显式 StopShell 再现
+        # （session=91c8567f965b，shell=384128d6e160）；非本次工具对象化新增的停止逻辑。
+        # 需确认阻塞 read 的安全唤醒/退出机制及 PTY 关闭顺序，保留原生访问串行化
+        # 和真实线程退出确认；根因未定，不以吞异常或单纯延长超时替代修复。
         if not state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS):
             failures.append(LifecycleFailure(f"Shell reader did not stop: {state.shell_id}"))
             raise BaseExceptionGroup("Shell reader cleanup failed", failures)

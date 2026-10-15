@@ -1,6 +1,7 @@
 """前端验证工具 — 验证进化的前端代码能否构建。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``ValidateFrontendTool`` 实例；``handle`` 复用无状态 ``_handle_validate_frontend`` 函数。
 在目标前端目录（默认 fast 模式下为 ``fork:frontend``）中
 运行 ``<pkg_mgr> install`` 和 ``<pkg_mgr> run build``，
 以在进化交换前捕获 TypeScript 或构建错误。
@@ -12,8 +13,7 @@ import logging
 import subprocess  # nosec
 from typing import Any, Dict
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from entity.puretype import ToolAvailability
 from system.pkgmgr import detect_package_manager
@@ -230,16 +230,23 @@ Creates `node_modules/` and `dist/` in the target directory. Long-running (up to
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 工具类与工具集
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register the ValidateFrontend tool."""
-    del ui_events  # ValidateFrontend has no UI event handler
-    registry.register(
-        name="ValidateFrontend",
-        toolset="frontend",
-        schema=_VALIDATE_FRONTEND_SCHEMA,
-        handler=_handle_validate_frontend,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+
+class ValidateFrontendTool(BaseTool):
+    """验证进化的前端代码能否构建。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ValidateFrontend",
+            toolset="frontend",
+            schema=_VALIDATE_FRONTEND_SCHEMA,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_validate_frontend(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="frontend", tools=(ValidateFrontendTool(),))

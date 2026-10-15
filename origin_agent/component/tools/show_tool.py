@@ -5,15 +5,15 @@ danger_level / toolset 四字段），未命中再按工具集匹配（返回该
 可见工具名列表）。仅返回当前 loop 上下文下实际可调用的工具，不可见或不
 存在的名称按单条 error 返回，不阻塞其余项。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 ``ShowTool`` 工具。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``ShowTool``。
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.registry import ToolRegistry
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from entity.constant import COLLOQUY_TOOLSET_WHITELIST
 
@@ -105,7 +105,7 @@ def _handle_show_tool(args: dict[str, Any], context: ToolContext | None = None) 
     for raw in names:
         name: str = str(raw).strip()
         # 先按工具匹配
-        entry = tool_registry.get_entry(name)
+        entry = tool_registry.get_tool(name)
         if entry is not None and name in visible:
             results[name] = {
                 "no_timeout": entry.no_timeout,
@@ -195,13 +195,15 @@ The visible set depends on the current loop type (parent / sub-agent / colloquy 
 # 注册
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register the ShowTool tool."""
-    del ui_events  # ShowTool has no UI event handler
-    registry.register(
-        name="ShowTool",
-        toolset="core",
-        schema=_SHOW_TOOL_SCHEMA,
-        handler=_handle_show_tool,
-        danger_level=ToolDangerLevel.safe,
-    )
+class ShowTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="ShowTool", toolset="core", schema=_SHOW_TOOL_SCHEMA,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_show_tool(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(name="core", tools=(ShowTool(),))

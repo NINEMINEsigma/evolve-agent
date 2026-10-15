@@ -142,6 +142,7 @@
 | History辅助读取 | 开发助手AI使用 `dev_helpers/read_history.py` 复用正式History/媒体类型、项目类型映射和只读easysave库，还原真实History后输出保留消息类型与媒体元信息、以占位符替换媒体载荷的 JSON；不启动应用、不改原模型、不写回历史，也不清理未配对工具调用，仅处理受信任的本地项目历史（英文锚点：History diagnostic reader） |
 | 客户端传输诊断 | 前端检测会话预检或 History关键 REST等待超过15秒时产生的脱敏 `client_diagnostic`；显示持久通知，并在会话 WebSocket可用时只写 Gateway warning，不进入聊天 History（英文锚点：`client transport diagnostic`） |
 | Agentspace事件 | `AgentspaceEvent` 文件/锁/重同步元数据；聊天页通过 typed `agentspace_event`复用会话 WebSocket，独立 Agentspace 编辑器通过 SSE接收，载荷沿用既有同源元数据范围 |
+| 历史更新指令 | 后端在已提交的 History 发生非追加变更后发送的 `history_updated` 下行通知（英文锚点：history updated event）；要求前端使旧历史视图/请求失效并完整重载骨架与按需正文，不刷新页面、不重放工具。普通追加仍用 `history_sync`，未接受的批次后缀仍用 `tool_calls_discarded` |
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta），LLM 客户端到流消费器的数据 |
 | 流式事件 | 前端实时输出的 `StreamDeltaEvent` / `StreamDoneEvent`；按 `type` 区分的纯数据模型，进程内保留工具载荷与计时模型，WebSocket发送边界才序列化；不同于 Provider 产生的 `StreamChunk`（英文锚点：stream event） |
 | 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
@@ -187,12 +188,18 @@
 | 非固着器 | 仅实现 `hook_message` 的钩子：产出**非持久化**扩展块（`dynamic_message_suffix`，当轮注入） |
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
-| 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，按显式工具注册入口声明 |
-| 显式工具注册入口 | 英文锚点：explicit tool registration entrypoint。工具模块顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，由 ToolDiscoverySystem 在依赖就绪后调用；模块导入只定义声明，工具与 UI 事件注册只使用传入的唯一实例 |
+| 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，声明模块级 `TOOLSET: BaseToolSet` 对象，由 ToolDiscoverySystem 发现并注册 | custom tool |
+| 工具集对象声明 | 模块级固定名称 `TOOLSET` 的 `BaseToolSet` 实例；导入期只创建无连接工具对象，注册期由 ToolRegistry 执行预热 | TOOLSET object declaration |
+| 工具调用前 | 工具实例 `before_handle(execution)` 阶段；发生在审批通过后、工具主体之前，只处理当前调用准备 | before handle |
+| 工具主体 | 工具实例 `handle(execution)` 阶段，执行实际业务操作 | handle |
+| 工具调用后处理 | 工具实例 `after_handle(execution)` 阶段；History 成功提交后执行，默认空实现，异常按快速失败传播 | after handle |
+| 同批后续调用接收声明 | 工具实例 `accepts_following_calls` 元数据；默认 true，false 时同一模型响应中其后的 tool calls 在执行前视为未发生 | accepts-following-calls declaration |
+| 工具集预热 | `BaseToolSet.preheat()` 在工具集注册时执行一次的可用性检查；不替代运行期 check_fn/环境检查 | toolset preheat |
+| 显式工具注册入口（退役） | 旧 `register_tools(registry, ui_events)` 函数注册协议；新工具必须使用 `TOOLSET` 对象声明 | _Avoid_: register_tools |
+| 工具集条目（退役） | 旧 `ToolsetEntry` 元数据镜像；新工具集使用 `BaseToolSet` 对象 | _Avoid_: ToolsetEntry |
 | 自定义LLM客户端 | `custom_llm_client/` 下的 `.py` LLM 客户端扩展 |
 | 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件（当前无运行时接入，保留目录供未来用途） |
 | MCP 桥接 | `component/mcp_tools.py` 将外部 MCP server 工具注册进工具注册表 |
-| 工具集条目 | `ToolsetEntry`：工具集的独立元数据实体（名称、描述、是否默认加载） | ToolsetEntry |
 | 工具集加载意图 | 会话曾经调用 `LoadToolset` 加载过的工具集名称集合，持久化在 SessionStore（`loaded_toolsets.json`） | loaded toolsets |
 | 有效工具集合 | 按"已加载工具集 + 当前 Loop 可见性（`ToolAvailability`）+ `check_fn` 可用性"动态计算的实际工具列表 | effective tools |
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |

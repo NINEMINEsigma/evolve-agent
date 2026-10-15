@@ -7,6 +7,7 @@ independently. The message definition layer must not import that later package.
 
 The original puretype.py module is split by responsibility:
     _base       : MessageContent, TypedMessageContent, ContentBlock, content block models, Role, ToolDangerLevel, ToolAvailability
+    tool        : ToolBatchDecision
     approval    : ApprovalMode, SessionApprovalModeState, ApprovalPolicy, ApprovalOutcome,
                   ApprovalResult, ApprovalProfileUpdateRequest, ApprovalProfileState,
                   ApprovalProfileMutationResponse, ToolCallMeta, ToolAllowlistEntry
@@ -72,6 +73,7 @@ from ._base import (
     ToolDangerLevel,
     ToolAvailability,
 )
+from .tool import ToolBatchDecision
 from .approval import (
     ApprovalMode,
     SessionApprovalModeState,
@@ -202,6 +204,7 @@ from .ws import (
     StreamDeltaEvent,
     StreamDoneEvent,
     StreamEvent,
+    HistoryUpdatedEvent,
     HistoryRowLink,
     ClientDiagnosticKind,
     ClientDiagnosticPhase,
@@ -294,6 +297,7 @@ __all__ = [
     "Role",
     "ToolDangerLevel",
     "ToolAvailability",
+    "ToolBatchDecision",
     # approval
     "ApprovalMode",
     "SessionApprovalModeState",
@@ -398,6 +402,7 @@ __all__ = [
     "StreamDeltaEvent",
     "StreamDoneEvent",
     "StreamEvent",
+    "HistoryUpdatedEvent",
     "HistoryRowLink",
     "ConfirmResponseRequest",
     "AskAnswerItem",

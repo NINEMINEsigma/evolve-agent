@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, ToolPostprocessEffect,
+    tool_error, tool_result,
+)
 from abstract.llm.loader import create_llm_client
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME
@@ -32,30 +34,25 @@ from gateway.session_manager import SessionManager
 logger = logging.getLogger(__name__)
 
 
-async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
+async def _prepare_enter_multi_agent(execution: ToolExecution) -> ToolHandlerResult:
     """进入多 Agent 协作模式。
 
     预期参数:
         agents: list[str] — 可选，参与协作的 Agent 角色名列表。
                   缺省时自动使用全部动态发现且有效的子Agent。
     """
-    from system.application import Application
-
-    session_id: str = str(args.get("_session_id", "")).strip()
-
-    if not session_id:
-        return tool_error("'_session_id' is required")
-
-    app = Application.current()
+    args = execution.arguments
+    session_id = execution.context.session_id
+    app = execution.context.app
 
     # 获取当前 ParentAgentLoop
     _parent_loop = app.get_system(SessionManager).get_loop(session_id)
     if _parent_loop is None:
-        return tool_error(f"No active loop found for session {session_id}")
+        return ToolHandlerResult(tool_error(f"No active loop found for session {session_id}"))
     elif isinstance(_parent_loop.loop, ParentAgentLoop):
         parent_loop = _parent_loop.loop
     else:
-        return tool_error(f"loop is not {ParentAgentLoop.__name__}")
+        return ToolHandlerResult(tool_error(f"loop is not {ParentAgentLoop.__name__}"))
 
     main_agent_name = parent_loop.current_character_agent
 
@@ -76,7 +73,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             try:
                 profiles[name] = resolver.require(name)
             except Exception as exc:
-                return tool_error(str(exc), name=name)
+                return ToolHandlerResult(tool_error(str(exc), name=name))
     else:
         agents = []
         for profile in all_profiles:
@@ -96,16 +93,11 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             profiles[profile.name] = profile
             agents.append(profile.name)
         if not agents:
-            return tool_error("No available sub-agents found in character directories")
+            return ToolHandlerResult(tool_error("No available sub-agents found in character directories"))
 
     # 将主Agent自身加入参与者列表。
     if main_agent_name not in agents:
         agents.insert(0, main_agent_name)
-
-    # 停止所有子 Agent
-    from subagent.orchestrator import SubAgentOrchestrator
-    if app.get_system(SubAgentOrchestrator):
-        await app.get_system(SubAgentOrchestrator).shutdown(session_id)
 
     # 加载多 Agent 系统提示词模板
     template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
@@ -152,42 +144,21 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     for profile in agent_profiles.values():
         profile.tools = tools
 
-    # 获取共享 History 和 sink
-    history = parent_loop.history
-    sink = parent_loop.get_sink()
-
-    # 创建 MultiAgentLoop 并替换
-    multi_loop = MultiAgentLoop(
-        app=app,
-        session_id=session_id,
-        history=history,
-        agents=agent_profiles,
-        sink=sink,
-        main_agent_name=main_agent_name,
-        history_store_dir=parent_loop.history_store_dir,
-    )
-
-    # 继承加载状态
-    multi_loop._loaded_toolsets = parent_loop.get_loaded_toolsets()
-    multi_loop._persist_loaded_toolsets()
-
-    # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
-    # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
-    # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
-    await app.get_system(SessionManager).replace_loop(session_id, multi_loop)
-
-    return tool_result(
-        success=True,
-        mode="multi_agent",
-        agents=agents,
-        message=f"Session {session_id} switched to multi-agent mode with agents: {', '.join(agents)}",
+    # 只准备模型档案；关闭子Agent、创建目标Loop和替换都在提交后的after执行。
+    return ToolHandlerResult(
+        result=tool_result(
+            success=True,
+            mode="multi_agent",
+            agents=agents,
+            message=f"Session {session_id} switched to multi-agent mode with agents: {', '.join(agents)}",
+        ),
+        state=(parent_loop, agent_profiles, main_agent_name),
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register enter multi-agent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class EnterMultiAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="EnterMultiAgent",
         toolset="multiagent",
         availability=ToolAvailability.MAIN,
@@ -287,6 +258,33 @@ def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
                 },
             },
         },
-        handler=_handle_enter_multi_agent,
         is_async=True,
     )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return await _prepare_enter_multi_agent(execution)
+
+    async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        if execution.state is None:
+            return ToolPostprocessEffect()
+        from subagent.orchestrator import SubAgentOrchestrator
+
+        parent_loop, agent_profiles, main_agent_name = execution.state
+        context = execution.context
+        app = context.app
+        manager = app.get_system(SessionManager)
+        current = manager.get_loop(context.session_id)
+        if current is None or current.loop is not parent_loop:
+            raise RuntimeError("Session Loop changed during multi-Agent preparation")
+        await app.get_system(SubAgentOrchestrator).shutdown(context.session_id)
+        multi_loop = MultiAgentLoop(
+            app=app, session_id=context.session_id, history=parent_loop.history,
+            agents=agent_profiles, sink=parent_loop.get_sink(),
+            main_agent_name=main_agent_name, history_store_dir=parent_loop.history_store_dir,
+        )
+        multi_loop.load_toolsets(list(parent_loop.get_loaded_toolsets()))
+        await manager.replace_loop(context.session_id, multi_loop)
+        return ToolPostprocessEffect(loop_replaced=True, stop_current_round=True)
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(EnterMultiAgentTool(),))

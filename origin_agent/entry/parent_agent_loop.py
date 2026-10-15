@@ -602,7 +602,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     character_name=self.current_character_agent,
                 )
 
-                # 存储 assistant 消息（含 tool_calls）
+                # 在 assistant History 提交前截断批次；丢弃项不进入审批或配对。
+                from abstract.tools.registry import ToolRegistry
+                from entry.tool_execution import accept_tool_batch
+                resp = await accept_tool_batch(
+                    resp, self.app.get_system(ToolRegistry), self._frontend_sink, sid, stream_id,
+                )
+
+                # 存储 assistant 消息（含已接受 tool_calls）
                 msg_index = self._store_assistant_with_tools(sid, resp)
                 tool_card_targets = {
                     tc.id: history_row_id(msg_index, SessionHistoryRowKind.tool_card, tool_index)
@@ -626,7 +633,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         self._frontend_sink, sid, links=tool_links,
                     )
                 async def emit_tool_card_result_link(tool_msg: ToolResultMessage) -> None:
-                    target = tool_card_targets.get(tool_msg.tool_call_id)
+                    # after 可截断或替换更早History，不能重用调用前的整数索引。
+                    target = None
+                    for current_index, message in enumerate(self._history.iter_messages()):
+                        if isinstance(message, CharacterConversationMessage) and message.tool_calls:
+                            for tool_index, call in enumerate(message.tool_calls):
+                                if call.id == tool_msg.tool_call_id:
+                                    target = history_row_id(current_index, SessionHistoryRowKind.tool_card, tool_index)
                     if target is None:
                         logger.warning(
                             "Missing tool card target | session=%s tool_call_id=%s",
@@ -645,6 +658,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     collected_metrics.append((sid, msg_index, resp.metrics))
 
                 # 委托给 ToolExecutor 执行工具调用
+                postprocessing = False
+                committed_tool_ids: set[str] = set()
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
@@ -654,24 +669,31 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             character_name=self.current_character_agent,
                             llm_profile=self.active_llm_profile,
                             activity_id=activity_id,
+                            stream_id=stream_id,
                         )
                         tool_msg = prepared.message
                         tool_result_index = self.store_tool_result(prepared)
+                        committed_tool_ids.add(tc.id)
                         messages.append(tool_msg)
-                        from abstract.tools.ui_event_router import UIEventRouter
-                        await prepared.emit(self._frontend_sink, self.app.get_system(UIEventRouter))
-                        await emit_tool_card_result_link(tool_msg)
+                        postprocessing = True
+                        effect = await self._tool_executor.postprocessor.after_committed(
+                            prepared, self._frontend_sink,
+                        )
+                        postprocessing = False
+                        if not effect.suppress_tool_result_event:
+                            await emit_tool_card_result_link(tool_msg)
                         await self._push_usage_update(sid)
                         _executed_tool_msgs.append(tool_msg)
 
-                        # 进化关闭由 store_tool_result 在严格保存后经
-                        # RuntimeSystem 请求；此处不再解析结果文本。
-                        if prepared.evolution_requested:
-                            self._append(
-                                sid, Role.ASSISTANT,
-                                "Evolution complete, restarting to apply new code...",
+                        if effect.stop_current_round or effect.loop_replaced:
+                            self.complete_unexecuted_tool_calls(
+                                resp.tool_calls, committed_tool_ids,
+                                self.current_character_agent, "postprocess",
                             )
-                            return "Evolution complete, restarting to apply new code..."
+                            if effect.completion_message:
+                                self._append(sid, Role.ASSISTANT, effect.completion_message)
+                            return effect.completion_message or ""
+
 
                     # 延迟注入 follow_up 消息（当前轮所有工具调用完成后）
                     for tm in _executed_tool_msgs:
@@ -680,9 +702,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                                 self._history.add_message(fu_msg)
                                 self.save_history(sid)
                 except asyncio.CancelledError:
-                    # 强制取消仍需补齐未执行 tool_calls，保持 History 消息配对。
+                    # 已被 after 压缩移除的结果也属于已提交，禁止重新补回。
                     _assistant_ids = {t.id for t in resp.tool_calls}
-                    _executed_ids = {
+                    _executed_ids = committed_tool_ids | {
                         m.tool_call_id
                         for m in self._history.iter_messages()
                         if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
@@ -700,7 +722,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     self.append_system_status("已中断", session_id=sid)
                     raise
                 except Exception as error:
-                    if requires_lifecycle_propagation(error):
+                    if postprocessing or requires_lifecycle_propagation(error):
                         raise
                     # 非取消异常同样补齐 tool_calls，再按既有错误路径降级。
                     logger.exception("Tool loop failed for session=%s", sid)

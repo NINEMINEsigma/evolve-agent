@@ -1,6 +1,6 @@
 """窗口查找工具 — 通过标题定位 Win32 窗口并返回 HWND。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``WindowFind``。
 
 仅兼容 Windows。使用 ``ctypes`` 调用 ``user32.dll`` Win32 API，
 无第三方依赖。
@@ -16,8 +16,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -167,16 +167,10 @@ def _handle_window_find(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register WindowFind into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="WindowFind",
-        toolset="automation",
-        schema={
+_WINDOW_FIND_SCHEMA = {
         # 通过窗口标题查找窗口，返回所有匹配窗口的 HWND 及尺寸信息。
         # 前置条件：仅 Windows；目标窗口必须存在且可见。
         # 调用效果：遍历所有可见顶层窗口，返回标题包含指定字符串的全部窗口。
@@ -228,6 +222,26 @@ Inspect the `matches` array to pick the correct window by its full title, then p
             },
             "required": ["window_title"],
         },
-    },
-    handler=_handle_window_find,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class WindowFindTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="WindowFind",
+            toolset="automation",
+            schema=_WINDOW_FIND_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_window_find(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(WindowFindTool(),))

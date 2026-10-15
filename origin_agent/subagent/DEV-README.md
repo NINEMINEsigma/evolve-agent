@@ -27,7 +27,17 @@ component/multiagenttools/   ← 多代理 / 子Agent工具
 
 ---
 
+## 工具对象与四阶段执行（2026-10-15）
+
+普通子Agent和临时Agent已接入对象工具 execution 与共享 `ToolPostprocessor`，不调用主会话 `ToolExecutor.execute()`，父Agent审批、脱手模式与临时Agent的 TASKAGENT∩safe 授权保持不变。每批模型调用先按工具声明截断，再写 assistant History；被声明丢弃的调用不审批、不执行、不补结果。
+
+`store_tool_result()` 仅写内存 History并绑定真实结果/index，之后执行 after。主体异常转换的错误结果不运行 after；主体正常返回的业务错误仍运行 after。after 异常在工具批次与外层 run 的普通异常边界均继续传播。取消/停止只配对已接受且尚未执行的调用；阶段完成文本进入本子会话History和反馈，不写入父会话主聊天卡片。
+
+普通子Agent依旧在停止时严格保存最终 History；TaskAgent整个流程不新增 History持久化。工具来源已统一为 `BaseTool` 子类与顶层 `TOOLSET`，共享 `ToolPostprocessor` 取代旧函数工具适配器与事件路由；来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，本阶段未运行测试、校验、导入或应用。
+
 ## 两套多代理系统
+
+`ParentAgentSink.emit_history_updated()`不向父主会话发送子会话History更新；当前两种压缩工具仍为MAIN范围，不开放给普通子Agent或临时Agent。新增指令不会改变父Agent审批、safe-only授权、内存提交与停止保存边界。
 
 ### 1. 子代理模式（SubAgent）
 

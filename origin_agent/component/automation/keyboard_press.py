@@ -1,6 +1,6 @@
 """按键工具 — 模拟按键（如 Enter、Esc、Tab）及组合键。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``KeyboardPress``。
 
 两种模式：
 - **前台模式**（不传 hwnd）：使用 ``pyautogui`` 模拟按键，需要目标窗口在前台。
@@ -25,8 +25,8 @@ import logging
 from ctypes import wintypes
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -274,16 +274,10 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register KeyboardPress into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="KeyboardPress",
-        toolset="automation",
-        schema={
+_KEYBOARD_PRESS_SCHEMA = {
         # 模拟按键或组合键，支持前台 pyautogui 和后台两种模式。
         # 前置条件：前台模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：前台模式用 pyautogui 按键；
@@ -353,7 +347,27 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
             },
             "required": ["key"],
         },
-    },
-    handler=_handle_keyboard_press,
-    check_fn=_check_pyautogui,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class KeyboardPressTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="KeyboardPress",
+            toolset="automation",
+            schema=_KEYBOARD_PRESS_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+            check_fn=_check_pyautogui,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_keyboard_press(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(KeyboardPressTool(),))

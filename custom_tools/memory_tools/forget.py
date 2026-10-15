@@ -3,8 +3,13 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolRegistry, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_result,
+)
 from custom_tools.memory_tools._store import (
     FALLBACK_SESSION,
     load_all_memory,
@@ -40,10 +45,9 @@ def _handle_forget(args: dict[str, Any], context: ToolContext | None = None) -> 
 # ── 注册 ─────────────────────────────────────────────────────
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register Forget tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class ForgetTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="Forget",
         toolset="memory_tools",
         schema={
@@ -91,6 +95,11 @@ Writes to the agent's memory file on disk. Deleted entries are no longer recalle
                 "required": ["id"],
             },
         },
-        handler=_handle_forget,
         is_async=False,
-    )
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_forget(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(name="memory_tools", tools=(ForgetTool(),))

@@ -25,7 +25,6 @@ def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
     from abstract.mcp.system import MCPSystem
     from abstract.tools.discover import ToolDiscoverySystem
     from abstract.tools.registry import ToolRegistry
-    from abstract.tools.ui_event_router import UIEventRouter
     from component.approval.system import ApprovalSystem
     from component.browser.system import BrowserSystem
     from component.cron_router import CronRouter
@@ -55,7 +54,6 @@ def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
         ApprovalSystem(),
         FrontendSink(),
         ToolRegistry(),
-        UIEventRouter(),
         LSPManager(),
         BrowserSystem(),
         ModalityCapabilitySystem(),

@@ -25,7 +25,6 @@ from entity.messages import (
 from entity.puretype import Role
 from subagent.context import SubRuntimeContext
 from entry.tool_post_dispatch import PreparedToolResult
-from abstract.tools.ui_event_router import UIEventRouter
 from entry.base_agent_loop import UserMessage
 from subagent.loop import SubAgentLoop, format_user_message
 from entry.tool_executor import _interrupted_result
@@ -56,7 +55,7 @@ class TaskAgentLoop(SubAgentLoop):
             return False
         from system.application import Application
         tool_registry = Application.current().get_system(ToolRegistry)
-        entry = tool_registry.get_entry(name)
+        entry = tool_registry.get_tool(name)
         if entry is None:
             return False
         if entry.toolset not in self._loaded_toolsets:
@@ -83,6 +82,7 @@ class TaskAgentLoop(SubAgentLoop):
         _cron = Application.current().get_system(CronRouter)
         _cron.register(self.session_id, self)
         active_round_id = self.begin_agentspace_round(self.current_character_agent)
+        postprocessing = False
         try:
             # 初始 prompt 也先进入可追踪 Inbox；临时Agent关闭时只做内存交接。
             from system.runtime import RuntimeSystem
@@ -138,6 +138,10 @@ class TaskAgentLoop(SubAgentLoop):
                     self._emit("assistant", content=resp.content, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
 
+                from abstract.tools.registry import ToolRegistry
+                batch = self.app.get_system(ToolRegistry).plan_tool_batch(resp.tool_calls)
+                resp = resp.model_copy(update={"tool_calls": batch.accepted})
+
                 # 存储带 tool_calls 的 assistant 消息
                 tool_calls_data: list[HistoryToolCall] = [
                     HistoryToolCall(
@@ -160,6 +164,7 @@ class TaskAgentLoop(SubAgentLoop):
                 self._history.add_message(assistant_msg)
 
                 # 处理工具调用：完整授权交集内直接执行，其余直接拒绝且不进入审批。
+                committed_tool_ids: set[str] = set()
                 try:
                     _executed_tool_msgs: list[PreparedToolResult] = []
                     for i, tc in enumerate(resp.tool_calls):
@@ -194,11 +199,25 @@ class TaskAgentLoop(SubAgentLoop):
                             )
 
                         self.store_tool_result(prepared)
-                        await prepared.emit(
-                            self.get_sink(),
-                            self.app.get_system(UIEventRouter),
-                        )
+                        committed_tool_ids.add(tc.id)
+                        postprocessing = True
+                        effect = await self._tool_postprocessor.after_committed(prepared, self.get_sink())
+                        postprocessing = False
                         tool_msg = prepared.message
+                        if effect.stop_current_round or effect.loop_replaced:
+                            self.complete_unexecuted_tool_calls(
+                                resp.tool_calls, committed_tool_ids,
+                                self.current_character_agent, "postprocess",
+                            )
+                            if effect.completion_message:
+                                self._history.add_message(CharacterConversationMessage(
+                                    role=Role.ASSISTANT, character_name=self.current_character_agent,
+                                    content=effect.completion_message,
+                                ))
+                                self.append_feedback(effect.completion_message)
+                            self._completed = True
+                            self._round_active = False
+                            return
                         from entry.agent_support.multimodal import content_to_text
                         raw_content = content_to_text(tool_msg.content)
                         self._maybe_record_tool_failure(tc.name, raw_content)
@@ -212,12 +231,12 @@ class TaskAgentLoop(SubAgentLoop):
                             for fu_msg in tm.message._follow_up_messages:
                                 self._history.add_message(fu_msg)
                 except BaseException as exc:
-                    must_propagate = requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
+                    must_propagate = postprocessing or requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
                     logger.exception(
                         "TaskAgent tool loop failed | session=%s", self.session_id,
                     )
                     _assistant_ids = {t.id for t in resp.tool_calls}
-                    _executed_ids = {
+                    _executed_ids = committed_tool_ids | {
                         m.tool_call_id
                         for m in self._history.iter_messages()
                         if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
@@ -245,7 +264,7 @@ class TaskAgentLoop(SubAgentLoop):
             )
 
         except Exception as exc:
-            if requires_lifecycle_propagation(exc):
+            if postprocessing or requires_lifecycle_propagation(exc):
                 raise
             logger.exception("TaskAgentLoop error for session=%s: %s", self.session_id, exc)
         finally:

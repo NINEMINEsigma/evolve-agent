@@ -1,7 +1,8 @@
 """BrowserWait — 等待页面/元素达到指定状态（safe）。
 
 供 goto/click 等操作后同步状态：等网络空闲或等元素可见/隐藏。
-无任何副作用。模块导入时通过 ``registry.register()`` 注册。
+无任何副作用。工具对象通过模块级 ``TOOLSET``（``BaseToolSet``）声明；
+导入期只创建无连接工具对象。
 """
 
 from __future__ import annotations
@@ -9,8 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
 from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
@@ -75,27 +75,21 @@ async def _handle_browser_wait(args: dict[str, Any]) -> dict:
     return tool_result(waited=True, condition=selector or "networkidle", state=state if selector else None)
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register BrowserWait into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="BrowserWait",
-        toolset="browser",
-        schema={
-        # 等待页面或元素达到指定状态。
-        #
-        # ## 调用效果
-        # - 提供 selector：等待该元素达到 state（attached/detached/visible/hidden，默认 visible）。
-        # - 不提供 selector：等待页面网络空闲（networkidle）。
-        # - 超时（默认 2000ms）未满足则返回错误。
-        #
-        # ## 何时使用
-        # - BrowserGoto / BrowserClick 等操作后同步页面状态。
-        # - 等待动态加载的元素出现后再读取。
-        #
-        # ## 副作用/注意
-        # - 只读等待，无副作用；正常模式下无需审批。
-        "description": """Waits for the page or an element to reach a given state.
+_BROWSER_WAIT_SCHEMA = {
+    # 等待页面或元素达到指定状态。
+    #
+    # ## 调用效果
+    # - 提供 selector：等待该元素达到 state（attached/detached/visible/hidden，默认 visible）。
+    # - 不提供 selector：等待页面网络空闲（networkidle）。
+    # - 超时（默认 2000ms）未满足则返回错误。
+    #
+    # ## 何时使用
+    # - BrowserGoto / BrowserClick 等操作后同步页面状态。
+    # - 等待动态加载的元素出现后再读取。
+    #
+    # ## 副作用/注意
+    # - 只读等待，无副作用；正常模式下无需审批。
+    "description": """Waits for the page or an element to reach a given state.
 
 ## Effect
 - With `selector`: waits until that element reaches `state` (attached/detached/visible/hidden, default visible).
@@ -108,38 +102,53 @@ def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
 
 ## Side Effects / Notes
 - Read-only wait; no side effects; no approval needed in normal mode.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
-                },
-                "selector": {
-                    "type": "string",
-                    # 可选：CSS 选择器，等待该元素达到 state。缺省时等待网络空闲。
-                    "description": "Optional: CSS selector to wait for. Omit to wait for network idle.",
-                    "default": "",
-                },
-                "state": {
-                    "type": "string",
-                    # 元素状态：attached / detached / visible / hidden（默认 visible）。仅与 selector 搭配。
-                    "description": "Element state to wait for: attached / detached / visible / hidden (default visible). Only used with selector.",
-                    "default": "visible",
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    # 等待超时毫秒（默认 2000）。
-                    "description": "Timeout in milliseconds (default 2000).",
-                    "default": 2000,
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
             },
-            "required": ["tab"],
+            "selector": {
+                "type": "string",
+                # 可选：CSS 选择器，等待该元素达到 state。缺省时等待网络空闲。
+                "description": "Optional: CSS selector to wait for. Omit to wait for network idle.",
+                "default": "",
+            },
+            "state": {
+                "type": "string",
+                # 元素状态：attached / detached / visible / hidden（默认 visible）。仅与 selector 搭配。
+                "description": "Element state to wait for: attached / detached / visible / hidden (default visible). Only used with selector.",
+                "default": "visible",
+            },
+            "timeout_ms": {
+                "type": "integer",
+                # 等待超时毫秒（默认 2000）。
+                "description": "Timeout in milliseconds (default 2000).",
+                "default": 2000,
+            },
         },
+        "required": ["tab"],
     },
-    handler=_handle_browser_wait,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
+}
+
+
+class BrowserWaitTool(BaseTool):
+    """等待页面或元素达到指定状态。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserWait",
+            toolset="browser",
+            schema=_BROWSER_WAIT_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_wait(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="browser", tools=(BrowserWaitTool(),))

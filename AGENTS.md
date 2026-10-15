@@ -90,7 +90,7 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
   - 退出码 `0` → 正常停止
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 提升、重启。**备份与提升均为 `copytree(dirs_exist_ok=True)` 合并覆盖，不再先 rmtree**（避免前端 `node_modules`/`dist` 重新下载安装；目标侧独有旧文件残留）。各阶段（backup/swap/complete）追加写入 `workspace/logs/evolution.status` 供前端展示。
   - 其他 → 进入 fallback：`.fallback` 缺失时先从 origin 补齐，仍无 `__main__.py` 则退出；否则运行 `.fallback/__main__.py --mode fallback --fix_fork <fast> --fix <logs/fast_agent_runtime_error.log>` 修复。修复成功（退出码 0）回到循环重启 fast，失败则退出（日志见 `logs/fallback_agent_runtime_error.log`）。
-- 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志，`asyncio.run` 结束后解除关闭硬截止）→ `main.py::App`（创建唯一 Application、平台信号处理、等待关闭、退出码映射）→ `system/application.py::Application`（继承 `AsyncArchitecture` 的进程级单例；`start()` 按固定拓扑顺序注册 21 个 AsyncSystem 并在全部唤醒后开放输入，`shutdown()` 统一执行业务停止、History 提交与逆拓扑注销，`Application.current()` 访问）。
+- 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志，`asyncio.run` 结束后解除关闭硬截止）→ `main.py::App`（创建唯一 Application、平台信号处理、等待关闭、退出码映射）→ `system/application.py::Application`（继承 `AsyncArchitecture` 的进程级单例；`start()` 按固定拓扑顺序注册 20 个 AsyncSystem 并在全部唤醒后开放输入，`shutdown()` 统一执行业务停止、History 提交与逆拓扑注销，`Application.current()` 访问）。
 - 前端在 agent 目录内由 `_build_frontend()` 用 `<pkg_mgr> install && <pkg_mgr> run build`（`CI=true`，包管理器优先 pnpm 回退 npm，由 `system/pkgmgr.py` 检测）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过，`--frontend_force_build` 可强制重建。
 
 ## 沙盒命名空间（system/sandbox.py）
@@ -114,9 +114,11 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 
 ## 工具注册与发现
 
-工具模块导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`；在入口内调用 `registry.register()` 和必要的 `ui_events.register()`，使用传入的唯一实例。模块导入只定义函数、常量和类型，不查询 Application、不注册工具、不创建连接。handler 执行时再通过 ToolContext/app 的 `get_system(T)` 取得业务服务。
+工具模块导出顶层 `TOOLSET` 对象（`BaseToolSet`），其中持有 `BaseTool` 子类实例；模块导入只创建无连接、无 Application 查询的工具对象，不执行工具注册或创建运行时连接。工具实例通过 `before_handle`、`handle`、`after_handle` 实现工具调用前、工具主体和 History 提交后的工具调用后处理；工具集通过 `preheat()` 执行一次注册期预热。
 
-`ToolDiscoverySystem` 按 AST 识别显式入口，按路径排序导入并调用，保留本次已注册模块集合；Python 模块缓存不替代显式注册。旧全局 registry/UI 路由导入、顶层注册、源码读取/语法/导入/注册错误直接失败；仅可选 `custom_tools/` 不存在时跳过。完整应用装配进度以任务文件为准，中间源码不可启动。
+`ToolDiscoverySystem` 按 AST 识别固定名称 `TOOLSET` 声明，按路径排序导入后交给唯一 `ToolRegistry` 注册并预热；Python 模块缓存不替代显式对象注册。旧 `register_tools(registry, ui_events)`、裸 `registry.register()` 顶层注册、全局 UI 路由导入、源码读取/语法/导入/预热/注册错误直接失败；仅可选 `custom_tools/` 不存在时跳过。完整应用装配进度以任务文件为准，中间源码不可启动。
+
+`accepts_following_calls` 是工具实例的内部批次边界声明，默认接受同批后续调用。压缩工具可声明不接受后续调用；该声明在审批和执行前决定，不由 after 返回控制。工具执行材料、History 引用和阶段状态属于单次调用，不得写入共享工具实例、Application 或持久化存储。
 
 ## 记忆与上下文钩子（custom_hooks/）
 

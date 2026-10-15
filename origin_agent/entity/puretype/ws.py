@@ -43,6 +43,7 @@ class MessageType(str, Enum):
     ASSISTANT_MESSAGE = "assistant_message"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    TOOL_CALLS_DISCARDED = "tool_calls_discarded"
     CONFIRM_REQUEST = "confirm_request"
     CONFIRM_RESPONSE = "confirm_response"
     ASK_REQUEST = "ask_request"
@@ -61,6 +62,7 @@ class MessageType(str, Enum):
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
     HISTORY_SYNC = "history_sync"
+    HISTORY_UPDATED = "history_updated"
     LLM_PROFILE_CHANGED = "llm_profile_changed"
     APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
     METADATA_PROFILE_CHANGED = "metadata_profile_changed"
@@ -68,6 +70,15 @@ class MessageType(str, Enum):
     MODALITY_PROFILE_CHANGED = "modality_profile_changed"
     AGENTSPACE_EVENT = "agentspace_event"
     CLIENT_DIAGNOSTIC = "client_diagnostic"
+
+
+class HistoryUpdatedEvent(BaseModel):
+    """Invalidate a committed session History view without reloading the page."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    type: Literal[MessageType.HISTORY_UPDATED] = MessageType.HISTORY_UPDATED
+    session_id: str = Field(min_length=1)
 
 
 class StreamDeltaEvent(BaseModel):
@@ -170,6 +181,7 @@ class Message(BaseModel):
     response_characters: list[str] | None = None  # USER_MESSAGE：需响应角色列表
     # tool_call / tool_result / confirm_request 相关字段
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
+    tool_call_ids: list[str] | None = None  # TOOL_CALLS_DISCARDED：被丢弃的工具调用 ID
     character_name: str | None = None  # 消息发送者角色名
     index: int | None = None  # 消息在持久化历史中的索引
     is_system_status: bool | None = None  # SYSTEM：是否为已持久化的系统状态消息

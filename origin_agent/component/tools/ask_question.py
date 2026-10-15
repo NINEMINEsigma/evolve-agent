@@ -1,6 +1,6 @@
 """提问工具 — agent 向用户提问，提供预设选项和/或自定义输入。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 函数。
+通过模块级 ``TOOLSET`` 对象声明工具。
 工作流程：
   1. agent 调用 ask_question，传入问题、选项列表和是否允许自定义输入
   2. 服务端通过 WebSocket 向前端推送 ask_request 消息
@@ -14,8 +14,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
@@ -200,17 +201,17 @@ The agent thread blocks until the user responds. Do not call this inside backgro
 
 # ── 注册 ─────────────────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register the Ask tool into the explicit runtime registry."""
-    del ui_events  # Ask has no UI event handler
-    registry.register(
-        name="Ask",
-        toolset="core",
-        schema=_ASK_SCHEMA,
-        handler=_handle_ask_question,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        no_timeout=True,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-        resets_turn_counter=True,
-    )
+class AskTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="Ask", toolset="core", schema=_ASK_SCHEMA,
+            is_async=True, danger_level=ToolDangerLevel.safe, no_timeout=True,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+            resets_turn_counter=True,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_ask_question(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="core", tools=(AskTool(),))

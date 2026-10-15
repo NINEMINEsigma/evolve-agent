@@ -1,4 +1,26 @@
-"""工具注册、显式声明发现与 framework 生命周期入口。"""
+"""Tool object contracts, registry and explicit object discovery."""
 
-from .registry import ToolRegistry, ToolEntry, ToolsetEntry, tool_error, tool_result
+from .tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    ToolPostprocessEffect,
+    tool_error,
+    tool_result,
+)
+from .registry import ToolRegistry
 from .discover import ToolDiscoverySystem, discover_builtin_tools
+
+__all__ = [
+    "BaseTool",
+    "BaseToolSet",
+    "ToolExecution",
+    "ToolHandlerResult",
+    "ToolPostprocessEffect",
+    "ToolRegistry",
+    "ToolDiscoverySystem",
+    "discover_builtin_tools",
+    "tool_error",
+    "tool_result",
+]

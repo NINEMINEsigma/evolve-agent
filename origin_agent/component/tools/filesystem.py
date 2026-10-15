@@ -1,6 +1,6 @@
 """文件系统工具 — 所有路径均为逻辑路径（带命名空间前缀）。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+模块导出 ``TOOLSET`` 对象，工具类通过调用态材料访问当前会话。
 每个工具 handler 通过 ``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例解析路径。
 
 路径格式：``namespace:relative/path``
@@ -26,8 +26,9 @@ import mimetypes
 import re
 from typing import Any, Dict, TYPE_CHECKING
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result,
+)
 from entity.puretype import ToolDangerLevel
 from entity.constant import (
     EDIT_FILE_MAX_CHARS,
@@ -1191,7 +1192,7 @@ async def _handle_grep(
 
 
 # ---------------------------------------------------------------------------
-# 工具字段、schema 常量和处理函数只在本模块声明；ToolDiscoverySystem 显式调用 register_tools。
+# 工具字段、schema 常量和无状态业务处理在本模块声明；ToolDiscoverySystem 注册 TOOLSET 对象。
 # ---------------------------------------------------------------------------
 
 
@@ -1939,72 +1940,74 @@ Fallback results include warning and engine="python".
 # register
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register filesystem tools."""
-    del ui_events
+class ReadTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="Read", toolset="filesystem", schema=_READ_SCHEMA, no_timeout=True, is_async=True,
+        )
 
-    registry.register(
-        name="Read",
-        toolset="filesystem",
-        schema=_READ_SCHEMA,
-        handler=_handle_read,
-        no_timeout=True,
-        is_async=True,
-    )
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_read(execution.arguments, execution.context))
 
-    registry.register(
-        name="Write",
-        toolset="filesystem",
-        schema=_WRITE_SCHEMA,
-        handler=_handle_write,
-        danger_level=ToolDangerLevel.write,
-    )
 
-    registry.register(
-        name="Delete",
-        toolset="filesystem",
-        schema=_DELETE_SCHEMA,
-        handler=_handle_delete,
-        danger_level=ToolDangerLevel.write,
-    )
+class WriteTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="Write", toolset="filesystem", schema=_WRITE_SCHEMA, danger_level=ToolDangerLevel.write)
 
-    registry.register(
-        name="PatchEdit",
-        toolset="filesystem",
-        schema=_PATCHEDIT_SCHEMA,
-        handler=_handle_edit,
-        danger_level=ToolDangerLevel.write,
-    )
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_write(execution.arguments, execution.context))
 
-    registry.register(
-        name="Copy",
-        toolset="filesystem",
-        schema=_COPY_SCHEMA,
-        handler=_handle_copy,
-        danger_level=ToolDangerLevel.write,
-    )
 
-    registry.register(
-        name="Move",
-        toolset="filesystem",
-        schema=_MOVE_SCHEMA,
-        handler=_handle_move,
-        danger_level=ToolDangerLevel.write,
-    )
+class DeleteTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="Delete", toolset="filesystem", schema=_DELETE_SCHEMA, danger_level=ToolDangerLevel.write)
 
-    registry.register(
-        name="SearchFiles",
-        toolset="filesystem",
-        schema=_SEARCHFILES_SCHEMA,
-        handler=_handle_search_files,
-        is_async=True,
-    )
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_delete(execution.arguments, execution.context))
 
-    registry.register(
-        name="Grep",
-        toolset="filesystem",
-        schema=_GREP_SCHEMA,
-        handler=_handle_grep,
-        is_async=True,
-    )
+
+class PatchEditTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="PatchEdit", toolset="filesystem", schema=_PATCHEDIT_SCHEMA, danger_level=ToolDangerLevel.write)
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_edit(execution.arguments, execution.context))
+
+
+class CopyTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="Copy", toolset="filesystem", schema=_COPY_SCHEMA, danger_level=ToolDangerLevel.write)
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_copy(execution.arguments, execution.context))
+
+
+class MoveTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="Move", toolset="filesystem", schema=_MOVE_SCHEMA, danger_level=ToolDangerLevel.write)
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_move(execution.arguments, execution.context))
+
+
+class SearchFilesTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="SearchFiles", toolset="filesystem", schema=_SEARCHFILES_SCHEMA, is_async=True)
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_search_files(execution.arguments, execution.context))
+
+
+class GrepTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="Grep", toolset="filesystem", schema=_GREP_SCHEMA, is_async=True)
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_grep(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(
+    name="filesystem",
+    tools=(ReadTool(), WriteTool(), DeleteTool(), PatchEditTool(), CopyTool(), MoveTool(), SearchFilesTool(), GrepTool()),
+)
 

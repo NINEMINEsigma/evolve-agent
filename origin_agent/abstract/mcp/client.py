@@ -95,6 +95,7 @@ from typing import IO, Any, Callable, Coroutine, TYPE_CHECKING
 
 from urllib.parse import urlparse
 
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult
 from system.convert import as_bool
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner,
@@ -1475,26 +1476,14 @@ class MCPServerTask:
                 pass
             new_mcp_tools = tools_result.tools
 
-            # 2. Re-register with fresh tool list. Avoid nuke-and-repave for
-            # all names: live agent turns may already have tool-call IDs
-            # pointing at existing handler functions. Replacing entries
-            # in-place is enough for unchanged names and avoids transient
-            # "tool not connected" / stale-handler races during startup
-            # notifications. Tools absent from the fresh list are no longer
-            # callable, so remove only those stale registry entries first.
-            stale_tool_names = old_tool_names - {
-                f"mcp_{sanitize_mcp_name_component(self.name)}_"
-                f"{sanitize_mcp_name_component(tool.name)}"
-                for tool in new_mcp_tools
-            }
-            for tool_name in stale_tool_names:
-                registry.deregister(tool_name)
-
-            # 3. Re-register with fresh tool list
+            # 同名工具在 Registry 锁内原子替换；资源/提示词辅助工具也参与新旧集合比较。
+            # 在途 ToolExecution 继续持有旧对象，不先注销仍然存在的名称。
             self._tools = new_mcp_tools
             self._registered_tool_names = _register_server_tools(
                 self.name, self, self._config
             )
+            for tool_name in old_tool_names - set(self._registered_tool_names):
+                registry.deregister(tool_name)
 
             # 5. Log what changed (user-visible notification)
             new_tool_names = set(self._registered_tool_names)
@@ -2268,12 +2257,34 @@ def _interpolate_env_vars(value):
 # Handler / check-fn factories
 # ---------------------------------------------------------------------------
 
-def _make_tool_handler(core: MCPCore, server_name: str, tool_name: str, tool_timeout: float):
-    """Return a sync handler that calls an MCP tool via the background loop.
+class MCPToolSet(BaseToolSet):
+    """Declare server metadata without owning or starting its connection."""
 
-    The handler conforms to the registry's dispatch interface:
-    ``handler(args_dict, **kwargs) -> dict``
-    """
+    def __init__(self, server_name: str) -> None:
+        super().__init__(name=f"mcp-{server_name}", description=f"MCP server: {server_name}")
+
+
+class MCPTool(BaseTool):
+    """Bridge an MCP operation into the shared invocation lifecycle."""
+
+    def __init__(
+        self, *, name: str, toolset: str, schema: dict[str, Any],
+        operation: Callable[[dict[str, Any]], dict[str, Any]],
+        check_fn: Callable[[], bool],
+    ) -> None:
+        super().__init__(
+            name=name, toolset=toolset, schema=schema,
+            description=schema["description"], check_fn=check_fn,
+        )
+        # 远端操作由动态发现构造；连接、重连、超时和原生资源仍由 MCPCore 持有。
+        self._operation = operation
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=self._operation(execution.arguments))
+
+
+def _make_tool_handler(core: MCPCore, server_name: str, tool_name: str, tool_timeout: float):
+    """Return a sync MCP operation used by MCPTool on the Registry's executor."""
 
     def _handler(args: dict, **_kwargs) -> dict:
         # Strip framework-internal keys (injected upstream by the tool
@@ -2712,7 +2723,7 @@ def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
                      and ``.inputSchema``.
 
     Returns:
-        A dict suitable for ``registry.register(schema=...)``.
+        A dict used as the schema of an MCPTool object.
     """
     safe_tool_name = sanitize_mcp_name_component(mcp_tool.name)
     safe_server_name = sanitize_mcp_name_component(server_name)
@@ -2894,6 +2905,8 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
 
     registered_names: list[str] = []
     toolset_name = f"mcp-{name}"
+    if registry.get_toolset(toolset_name) is None:
+        registry.register_toolset(MCPToolSet(name))
 
     # Selective tool loading: honour include/exclude lists from config.
     # Rules (matching issue #690 spec):
@@ -2928,14 +2941,15 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
         if existing_toolset is not None and existing_toolset != toolset_name:
             raise ValueError(f"MCP tool name collision: {tool_name_prefixed} belongs to {existing_toolset}")
 
-        registry.register(
-            name=tool_name_prefixed,
-            toolset=toolset_name,
-            schema=schema,
-            handler=_make_tool_handler(core, name, mcp_tool.name, server.tool_timeout),
-            check_fn=_make_check_fn(core, name),
-            is_async=False,
-            description=schema["description"],
+        registry.register_tool(
+            MCPTool(
+                name=tool_name_prefixed,
+                toolset=toolset_name,
+                schema=schema,
+                operation=_make_tool_handler(core, name, mcp_tool.name, server.tool_timeout),
+                check_fn=_make_check_fn(core, name),
+            ),
+            replace=True,
         )
         registered_names.append(tool_name_prefixed)
         if tool_name_prefixed not in server._registered_tool_names:
@@ -2961,20 +2975,20 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
         if existing_toolset is not None and existing_toolset != toolset_name:
             raise ValueError(f"MCP utility name collision: {util_name} belongs to {existing_toolset}")
 
-        registry.register(
-            name=util_name,
-            toolset=toolset_name,
-            schema=schema,
-            handler=handler,
-            check_fn=check_fn,
-            is_async=False,
-            description=schema["description"],
+        registry.register_tool(
+            MCPTool(
+                name=util_name,
+                toolset=toolset_name,
+                schema=schema,
+                operation=handler,
+                check_fn=check_fn,
+            ),
+            replace=True,
         )
         registered_names.append(util_name)
         if util_name not in server._registered_tool_names:
             server._registered_tool_names.append(util_name)
 
-    registry.register_toolset(name=toolset_name, description=f"MCP server: {name}")
     if registered_names:
         registry.register_toolset_alias(name, toolset_name)
 

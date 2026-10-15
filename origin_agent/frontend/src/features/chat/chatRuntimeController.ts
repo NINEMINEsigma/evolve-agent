@@ -6,7 +6,15 @@ import type { ClientDiagnostic } from "../../types";
 import { RequestTimeoutError } from "../../services/fetchWithTimeout";
 import type { RegenerateTrimPayload } from "./types";
 
+interface HistoryReloadRequest {
+  sessionId: string;
+  generation: number;
+  promise: Promise<void>;
+  pendingCount: number | null;
+}
+
 class ChatRuntimeController {
+  private historyReload: HistoryReloadRequest | null = null;
   private controllers = new Set<AbortController>();
   private pageRequests = new Map<string, { promise: Promise<void> }>();
   private diagnosticReporter: ((diagnostic: ClientDiagnostic) => void) | null = null;
@@ -42,8 +50,76 @@ class ChatRuntimeController {
     useChatRuntimeStore.getState().resetSession();
   }
 
+  reloadHistory(sessionId: string, liveCutoffVersion?: number): Promise<void> {
+    const state = useChatRuntimeStore.getState();
+    if (!sessionId || state.sessionId !== sessionId) return Promise.resolve();
+    this.abortAll();
+    state.invalidateHistory(sessionId, liveCutoffVersion);
+    return this.retryHistoryReload();
+  }
+
+  private retryHistoryReload(): Promise<void> {
+    const state = useChatRuntimeStore.getState();
+    if (!state.sessionId) return Promise.resolve();
+    if (this.historyReload?.sessionId === state.sessionId
+      && this.historyReload.generation === state.generation) return this.historyReload.promise;
+    const request: HistoryReloadRequest = {
+      sessionId: state.sessionId,
+      generation: state.generation,
+      promise: Promise.resolve(),
+      pendingCount: null,
+    };
+    this.historyReload = request;
+    state.setSkeletonLoading(true);
+    state.setSkeletonError(null);
+    request.promise = this.readHistoryReload(request);
+    return request.promise;
+  }
+
+  private async readHistoryReload(request: HistoryReloadRequest): Promise<void> {
+    const { sessionId, generation } = request;
+    try {
+      const skeleton = await this.withController((signal) => fetchHistorySkeleton(sessionId, 0, signal));
+      if (!this.isCurrent(sessionId, generation)) return;
+      const start = Math.max(0, skeleton.history_count - HISTORY_PAGE_SIZE);
+      const page = skeleton.history_count > 0
+        ? await this.withController((signal) => fetchHistoryPage(
+          sessionId, start, HISTORY_PAGE_SIZE, signal,
+        ))
+        : null;
+      if (!this.isCurrent(sessionId, generation)) return;
+      useChatRuntimeStore.getState().applyHistoryReload(
+        skeleton.rows, skeleton.history_count,
+        page?.rows.map(historyContentRowToChatMessage) ?? [],
+        page?.start_index ?? 0, page?.end_index ?? 0, generation,
+      );
+      request.pendingCount = Math.max(
+        request.pendingCount ?? 0, skeleton.history_count, page?.history_count ?? 0,
+      );
+      while (request.pendingCount !== null && this.isCurrent(sessionId, generation)) {
+        const count = request.pendingCount;
+        request.pendingCount = null;
+        if (count > useChatRuntimeStore.getState().knownHistoryCount) {
+          await this.syncHistory(sessionId, generation, count);
+        }
+      }
+      if (this.isCurrent(sessionId, generation)) useChatRuntimeStore.getState().reconcileCanonicalTail();
+    } catch (error) {
+      if (this.isAbort(error) || !this.isCurrent(sessionId, generation)) return;
+      if (error instanceof RequestTimeoutError) this.reportTimeout(error, sessionId, generation);
+      useChatRuntimeStore.getState().setSkeletonError(this.errorMessage(error));
+    } finally {
+      if (this.historyReload === request) this.historyReload = null;
+      if (this.isCurrent(sessionId, generation)) useChatRuntimeStore.getState().setSkeletonLoading(false);
+    }
+  }
+
   async initialize(sessionId: string, historyCount: number): Promise<void> {
     const store = useChatRuntimeStore.getState();
+    if (store.sessionId === sessionId && (store.historyReloadRequired
+      || this.historyReload?.generation === store.generation && this.historyReload.sessionId === sessionId)) {
+      return this.retryHistoryReload();
+    }
     if (store.sessionId !== sessionId) this.beginSession(sessionId);
     const generation = useChatRuntimeStore.getState().generation;
     store.setSkeletonLoading(true);
@@ -74,7 +150,13 @@ class ChatRuntimeController {
   }
 
   async ensureVisibleRangeLoaded(startRow: number, endRow: number): Promise<void> {
+    const reload = this.historyReload;
+    if (reload) {
+      await reload.promise;
+      if (!this.isCurrent(reload.sessionId, reload.generation)) return;
+    }
     const state = useChatRuntimeStore.getState();
+    if (state.historyReloadRequired) return;
     if (!state.sessionId || state.skeleton.length === 0) return;
     // Virtuoso 传入的是过滤后的展示行索引，不能直接索引完整骨架。
     const rows = selectChatRenderRows(state);
@@ -105,6 +187,7 @@ class ChatRuntimeController {
 
   async jumpToLogicalRow(rowIndex: number): Promise<void> {
     const state = useChatRuntimeStore.getState();
+    if (state.historyReloadRequired || this.historyReload) return;
     const row = selectChatRenderRows(state)[rowIndex];
     if (!row || row.historyIndex === null) return;
     const start = Math.max(0, row.historyIndex - Math.floor(HISTORY_PAGE_SIZE / 2));
@@ -114,15 +197,35 @@ class ChatRuntimeController {
   async syncCanonicalHistory(historyCount: number): Promise<void> {
     const state = useChatRuntimeStore.getState();
     if (!state.sessionId) return;
-    const sessionId = state.sessionId;
-    const generation = state.generation;
+    if (state.historyReloadRequired || this.historyReload?.sessionId === state.sessionId) {
+      const promise = this.retryHistoryReload();
+      if (this.historyReload) {
+        this.historyReload.pendingCount = Math.max(this.historyReload.pendingCount ?? 0, historyCount);
+      }
+      return promise;
+    }
+    return this.syncHistory(state.sessionId, state.generation, historyCount);
+  }
+
+  private async syncHistory(sessionId: string, generation: number, historyCount: number): Promise<void> {
+    if (!this.isCurrent(sessionId, generation)) return;
+    const state = useChatRuntimeStore.getState();
     try {
       if (historyCount < state.knownHistoryCount) {
         const full = await this.withController((signal) =>
           fetchHistorySkeleton(sessionId, 0, signal));
         if (!this.isCurrent(sessionId, generation)) return;
-        useChatRuntimeStore.getState().replaceSkeleton(full.rows, full.history_count);
-        useChatRuntimeStore.getState().clearLive();
+        const store = useChatRuntimeStore.getState();
+        if (full.history_count < store.knownHistoryCount) {
+          store.replaceSkeleton(full.rows, full.history_count);
+          store.clearLive();
+        } else if (full.history_count > store.knownHistoryCount) {
+          store.appendSkeleton(
+            full.rows.filter((row) => row.history_index >= store.knownHistoryCount), full.history_count,
+          );
+        }
+        // WS计数可能早于完整重载的REST快照，不能据迟到计数清掉新的实时行。
+        historyCount = full.history_count;
       } else if (historyCount > state.knownHistoryCount) {
         const suffix = await this.withController((signal) =>
           fetchHistorySkeleton(sessionId, state.knownHistoryCount, signal));
@@ -184,8 +287,14 @@ class ChatRuntimeController {
   }
 
   async loadResources(force = false): Promise<void> {
+    const reload = this.historyReload;
+    if (reload) {
+      await reload.promise;
+      if (!this.isCurrent(reload.sessionId, reload.generation)) return;
+    }
     const state = useChatRuntimeStore.getState();
-    if (!state.sessionId || state.resourcesLoading || (state.resources && !force)) return;
+    if (!state.sessionId || state.historyReloadRequired
+      || state.resourcesLoading || (state.resources && !force)) return;
     const sessionId = state.sessionId;
     const generation = state.generation;
     state.setResourcesLoading(true);
@@ -208,6 +317,14 @@ class ChatRuntimeController {
 
   retryPage(startIndex: number, endIndex: number): void {
     const state = useChatRuntimeStore.getState();
+    const reload = this.historyReload;
+    if (reload) {
+      void reload.promise.then(() => {
+        if (this.isCurrent(reload.sessionId, reload.generation)) this.retryPage(startIndex, endIndex);
+      });
+      return;
+    }
+    if (state.historyReloadRequired) return;
     void this.loadPage(
       state.sessionId,
       state.generation,
@@ -217,6 +334,7 @@ class ChatRuntimeController {
   }
 
   abortAll(): void {
+    this.historyReload = null;
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.pageRequests.clear();
@@ -242,6 +360,7 @@ class ChatRuntimeController {
           page.rows.map(historyContentRowToChatMessage),
           page.start_index,
           page.end_index,
+          this.historyReload?.generation === generation,
         );
       })
       .catch((error) => {

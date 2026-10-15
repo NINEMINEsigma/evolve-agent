@@ -112,10 +112,12 @@ WS /ws/chat?resume=<sid>
 | `stream_done` | `StreamDoneEvent`：必填非空 `session_id` / `stream_id` 与字符串 `finish_reason`；可选 `content`、`MessageMetrics`，缺失正文保留累计输出，显式空字符串表示空正文。 |
 | `tool_call` | 工具调用开始 |
 | `tool_result` | 工具执行结果；工具链中被消费的排队消息通过 `embedded_messages` 独立传输，不混入普通结果 JSON。 |
+| `tool_calls_discarded` | 同一模型批次中因前序工具 `accepts_following_calls=False` 被截断、在执行前视为未发生的调用；顶层携带 `session_id`、`stream_id` 与 `tool_call_ids`，前端据此移除对应实时工具卡片。 |
 | `task_progress` | 任务进度更新 |
 | `clipboard_display` | 剪贴板展示更新 |
 | `subagent_update` | 子会话状态更新 |
-| `history_sync` | 正典历史同步元数据；正文通过 REST 加载 |
+| `history_sync` | 正典历史同步元数据；普通追加与轮次状态仍走该事件，正文通过 REST 加载 |
+| `history_updated` | `HistoryUpdatedEvent`：仅含固定 type 与非空 session_id。已提交历史发生非追加变更时要求前端完整重载历史骨架与按需正文；不刷新页面、不重放工具，也不依赖消息数下降。 |
 | `agentspace_event` | 聊天页会话视觉使用的 typed Agentspace事件；载荷沿用既有文件、锁和重同步元数据范围 |
 | `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
 | `metadata_profile_changed` | 全局元数据 Profile 状态通知；显式携带可空名称、模型和可用性 |

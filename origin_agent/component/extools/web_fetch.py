@@ -1,7 +1,7 @@
 """Web fetch tool — fetches a URL and returns its content as plain text.
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。
+模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有 ``WebFetchTool`` 实例；
+由 ToolDiscoverySystem 显式发现并注册。
 """
 
 from __future__ import annotations
@@ -12,8 +12,14 @@ import urllib.request
 from html.parser import HTMLParser
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.constant import DEFAULT_USER_AGENT, TOOL_RESULT_PREVIEW_CHARS, WEB_FETCH_MAX_CHARS
 
 logger = logging.getLogger(__name__)
@@ -131,16 +137,10 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Tool object declaration
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register web fetch tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
-        name="WebFetch",
-        toolset="extools",
-        schema={
+_WEB_FETCH_SCHEMA = {
             # 获取指定 URL 的内容并以纯文本形式返回。
             # HTML 页面会自动转换为文本（去除 script、style、noscript 标签）。
             # 内容超过 {WEB_FETCH_MAX_CHARS} 字符时，完整内容保存到 ws:logs/web_fetch/ 文件，
@@ -213,6 +213,25 @@ Oversized:
                 },
                 "required": ["url"],
             },
-        },
-        handler=_handle_web_fetch,
-    )
+}
+
+
+class WebFetchTool(BaseTool):
+    """获取 URL 内容并以纯文本返回；HTML 页面自动去除 script/style。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="WebFetch",
+            toolset="extools",
+            schema=_WEB_FETCH_SCHEMA,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """获取 URL 内容。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=_handle_web_fetch(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="extools",
+    tools=(WebFetchTool(),),
+)

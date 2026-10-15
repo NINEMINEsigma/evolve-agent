@@ -1,6 +1,6 @@
 """鼠标点击工具 — 支持屏幕坐标点击和窗口后台点击两种模式。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``MouseClick``。
 
 两种模式：
 - **屏幕坐标模式**（不传 hwnd）：使用 ``pyautogui.click(x, y)`` 在屏幕绝对坐标点击。
@@ -20,8 +20,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -159,16 +159,10 @@ def _handle_mouse_click(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register MouseClick into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="MouseClick",
-        toolset="automation",
-        schema={
+_MOUSE_CLICK_SCHEMA = {
         # 模拟鼠标点击，支持屏幕坐标点击和窗口后台点击两种模式。
         # 前置条件：屏幕模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：屏幕模式移动光标到坐标并点击；后台模式通过 PostMessage 发送点击消息。
@@ -248,7 +242,27 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
             },
             "required": ["x", "y"],
         },
-    },
-    handler=_handle_mouse_click,
-    check_fn=_check_pyautogui,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class MouseClickTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="MouseClick",
+            toolset="automation",
+            schema=_MOUSE_CLICK_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+            check_fn=_check_pyautogui,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_mouse_click(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(MouseClickTool(),))

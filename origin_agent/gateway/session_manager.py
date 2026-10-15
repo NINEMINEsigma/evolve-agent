@@ -22,7 +22,6 @@ from entity.puretype import (
 from system.session_store import SessionStore
 from framework import AsyncSystem
 from abstract.tools.registry import ToolRegistry
-from abstract.tools.ui_event_router import UIEventRouter
 from entry.agent_sink import FrontendSink
 from system.runtime import RuntimeSystem
 from system.llm_profile_store import LLMProfileStore
@@ -58,7 +57,7 @@ class SessionManager(AsyncSystem):
     def __init__(self) -> None:
         super().__init__(dependencies=(
             RuntimeSystem, LLMProfileStore, SessionMetadataService, ApprovalSystem,
-            FrontendSink, ToolRegistry, UIEventRouter, CronRouter, AgentspaceService,
+            FrontendSink, ToolRegistry, CronRouter, AgentspaceService,
             ShellManager, ModalityCapabilitySystem,
         ))
         self._chat_sm: ChatSessionManager

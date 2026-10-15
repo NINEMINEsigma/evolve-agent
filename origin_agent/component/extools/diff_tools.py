@@ -1,8 +1,7 @@
 """Diff 工具集 — 多维度代码对比。
 
-每个对比维度以独立工具注册；核心差异算法由 ``_compare_dirs()`` 统一实现。
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。
+每个对比维度以独立工具对象声明；核心差异算法由 ``_compare_dirs()`` 统一实现。
+模块导出顶层 ``TOOLSET``（``BaseToolSet``），由 ToolDiscoverySystem 显式发现并注册。
 
 工具清单
 ========
@@ -28,8 +27,14 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from system.sandbox import Access
 
 logger = logging.getLogger(__name__)
@@ -332,16 +337,10 @@ _COMMON_SCHEMA = {
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Tool object declaration
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register diff tools into the explicit runtime registry."""
-    del ui_events
-    registry.register(
-        name="DiffOriginFast",
-        toolset="extools",
-        schema={
+_DIFF_ORIGIN_FAST_SCHEMA = {
             # 比较原始源码仓库 origin_agent/ 与当前运行副本 fast_agent_space/ 之间的代码差异。
             #
             # ## 前置条件
@@ -385,14 +384,10 @@ Generates a unified diff with origin_agent as the baseline and fast_agent_space 
 - Read-only query; does not modify any files.
 - Only text files are compared; binaries and build artifacts are skipped.""",
             **_COMMON_SCHEMA,
-        },
-        handler=_handle_diff_origin_fast,
-    )
+}
 
-    registry.register(
-        name="DiffFastFork",
-        toolset="extools",
-        schema={
+
+_DIFF_FAST_FORK_SCHEMA = {
             # 比较当前运行副本 fast_agent_space/ 与 fork 目录 slow_agent_space/ 之间的代码差异。
             #
             # ## 前置条件
@@ -437,6 +432,43 @@ Generates a unified diff between fast_agent_space and fork. After writing evolve
 - Read-only query; does not modify any files.
 - Only text files are compared; binaries and build artifacts are skipped.""",
             **_COMMON_SCHEMA,
-        },
-        handler=_handle_diff_fast_fork,
-    )
+}
+
+
+class DiffOriginFastTool(BaseTool):
+    """比较 origin_agent/（基准） 与 fast_agent_space/（运行副本）的代码差异。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="DiffOriginFast",
+            toolset="extools",
+            schema=_DIFF_ORIGIN_FAST_SCHEMA,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """比较 origin_agent 与 fast_agent_space。复用模块级无状态 handler。"""
+        return ToolHandlerResult(result=_handle_diff_origin_fast(execution.arguments))
+
+
+class DiffFastForkTool(BaseTool):
+    """比较 fast_agent_space/（运行副本） 与 fork（slow 目录）的代码差异。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="DiffFastFork",
+            toolset="extools",
+            schema=_DIFF_FAST_FORK_SCHEMA,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """比较 fast_agent_space 与 fork。复用模块级无状态 handler。"""
+        return ToolHandlerResult(result=_handle_diff_fast_fork(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="extools",
+    tools=(
+        DiffOriginFastTool(),
+        DiffFastForkTool(),
+    ),
+)

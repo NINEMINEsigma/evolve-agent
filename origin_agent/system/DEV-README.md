@@ -2,7 +2,7 @@
 
 ## 迁移状态
 
-本包已按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md` 完成 framework 迁移：21 个 AsyncSystem（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem）由 `Application.start()` 按固定拓扑顺序串行注册，先用 graphlib 校验依赖图；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`Application.shutdown()` 是唯一关闭协调任务：先冻结输入并停止生成，子会话输入与反馈交接后主/多会话按 sequence 只落 History 并严格写盘，随后结束 SSE/WS 与 uvicorn，最后按装配逆序注销；必要写盘或资源释放失败合并上抛（退出码 1，绝不返回进化成功 -1）。S16/S17 的 InputDelivery、退役 Loop 与反馈交接、S21 的 Gateway 接收登记均已接入。上述均为源码实施与定向静态审阅结果，尚未运行验证。
+本包已按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md` 完成 framework 迁移：20 个 AsyncSystem（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem）由 `Application.start()` 按固定拓扑顺序串行注册，先用 graphlib 校验依赖图；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`Application.shutdown()` 是唯一关闭协调任务：先冻结输入并停止生成，子会话输入与反馈交接后主/多会话按 sequence 只落 History 并严格写盘，随后结束 SSE/WS 与 uvicorn，最后按装配逆序注销；必要写盘或资源释放失败合并上抛（退出码 1，绝不返回进化成功 -1）。S16/S17 的 InputDelivery、退役 Loop 与反馈交接、S21 的 Gateway 接收登记均已接入。上述均为源码实施与定向静态审阅结果，尚未运行验证。
 
 ## 已实现的所有权
 
@@ -19,7 +19,6 @@
 | ApprovalSystem | 审批模式、白名单、后端与模型审批请求 | RuntimeSystem、LLMProfileStore |
 | FrontendSink | 前端连接、交互及真实发送任务 | RuntimeSystem |
 | ToolRegistry | 工具表、检查缓存、异步请求与真实同步Future | RuntimeSystem |
-| UIEventRouter | 工具事件映射及完整发送请求 | RuntimeSystem |
 | LSPManager | pyright进程、读取线程、响应等待及清理任务 | RuntimeSystem、Sandbox |
 | BrowserSystem | CDP/Playwright、自有无头进程及清理任务 | RuntimeSystem |
 | ModalityCapabilitySystem | 探测锁、媒体、缓存路径、探测与转发请求 | RuntimeSystem、LLMProfileStore |
@@ -68,6 +67,8 @@ Sandbox为无参AsyncSystem，virtual_awake取得唯一RuntimeContext和Subproce
 
 先终止进程树、等待reader结束，再在原生操作锁内关闭PTY并确认线程已退出。reader或原生锁超时必须报告失败，禁止绕开锁强行并发close；native_closed只在实际close成功后设置。原有会话/角色所有权、旋转迁移和WebSocket断线不停止Shell的约定不变。
 
+已知待处理问题：2026-10-13会话终结及2026-10-16显式StopShell均观察到reader未在5秒内退出，沿既有生命周期失败策略导致应用关闭；本次工具对象化未修改该停止实现。`_stop_state_blocking()`的reader等待处已登记TODO，调查pywinpty/ConPTY读取唤醒及PTY释放顺序，根因尚未确认。当前仅记录复现，不吞清理失败、不取消真实线程退出确认、不扩大等待期限。
+
 ## AgentspaceService
 
 virtual_awake完成原构造与start：取得Sandbox，构造事件总线/文件锁/垃圾桶/watcher和visual_resources叶服务，绑定loop，恢复垃圾桶，启动watcher。已启用watcher启动失败会导致初始化失败，不降级为启动成功。
@@ -112,13 +113,13 @@ ParentAgentSink不作为System；其转发方法经`Application.current().get_sy
 
 ## ToolRegistry接入
 
-`abstract/tools/registry.py::ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，拥有工具/工具集/可用性缓存及唯一执行器。模块级单例与兼容代理均已删除，运行期使用 `get_system(ToolRegistry)`；声明期使用 S20 的显式 `register_tools(registry, ui_events)`，由 `ToolDiscoverySystem` 按依赖就绪后的固定顺序执行。
+`abstract/tools/registry.py::ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，拥有工具/工具集/可用性缓存及唯一执行器。工具表按名保存 `BaseTool` 对象，工具集元数据使用 `BaseToolSet`，运行期成员索引为 `_tool_names_by_toolset`；模块级单例与兼容代理均已删除，运行期使用 `get_system(ToolRegistry)`。注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载 `BaseToolSet` 并执行一次 `preheat()`；`register_tool(tool, replace=True)` 供 MCP 动态刷新原子替换同名工具；查询入口为 `get_tool`/`get_toolset`，不再有 `get_entry`/`get_toolset_entry` 或函数式 `register`。
 
 异步请求通过 TaskOwner.run_request 托管；同步 handler 通过 contextvars.copy_context 和 executor.submit 保留上下文及真实 Future。SyncToolCallRecord 是非持久化纯数据记录，真实线程结束且请求交接完成后才解除登记。请求取消不提前清除原生工作，迟到失败仍报告 Runtime。关闭先封闭接收、取消并等待请求，再等待真实线程；线程池 join 在线程中执行并持有关闭任务，超时/清理失败传播，不以清表或 wait=False 伪装释放完成。关闭编排由 Application 统一执行。
 
-## UIEventRouter接入
+## 工具事件路由移除
 
-UIEventRouter为依赖RuntimeSystem的AsyncSystem，映射与在途事件handler唯一归其持有，工具后处理通过get_system(UIEventRouter)查询。请求经TaskOwner.run_request等待，STOPPING保留已发生工具结果的发送，最终注销取消并等待结果交接后清表；不再宽泛吞掉内部发送错误。声明期事件与工具统一通过 `register_tools(registry, ui_events)` 的显式实例参数注册，无模块级实例或兼容代理。
+`UIEventRouter` 与 `abstract/tools/ui_event_router.py` 已删除，Application 拓扑相应由 21 个 System 减为 20 个。工具后处理不再经独立事件路由，而是在结果提交 History 后通过工具实例的 `after_handle(execution)` 直接向前端 Sink 发送事件（如任务进度、剪贴板展示）；发送与取消清理责任仍由所属 Loop 与 FrontendSink 承担。
 
 ## LSPManager接入
 
@@ -160,9 +161,9 @@ Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划�
 
 ## ToolDiscoverySystem接入
 
-`abstract/tools/discover.py::ToolDiscoverySystem` 依赖已就绪的工具注册表、事件路由及工具业务 System，按 P1 顺序在 MCPSystem 之后、Gateway 之前唤醒。模块只导出显式同步 `register_tools`，导入不创建运行实例。发现器按路径读取/解析/导入/注册，唯一已注册模块集合由该 System 持有；遇到旧协议或任何读取/语法/导入/注册错误直接失败，缺失内置目录同样失败，可选 custom_tools 不存在才跳过。
+`abstract/tools/discover.py::ToolDiscoverySystem` 依赖已就绪的工具注册表、工具业务 System 及 MCPSystem，按 P1 顺序在 MCPSystem 之后、Gateway 之前唤醒。模块只导出对象声明，导入不创建运行实例。发现器按路径读取/解析/导入，AST 只识别顶层固定名称 `TOOLSET`，唯一已注册模块集合由该 System 持有；遇到退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入、导入期注册或任何读取/语法/导入/注册错误直接失败，缺失内置目录同样失败，可选 custom_tools 不存在才跳过。
 
-复用已缓存模块仍显式调用声明入口，不重新加载或改写 sys.modules。发现后注册 MCP 管理工具和元数据，远程连接归 MCPSystem；最终注销仅释放发现记录和本次加入的宿主导入路径，注册表条目归原 ToolRegistry/UIEventRouter。Application 完整注册已由 P22 接通；构造发现器不执行扫描或调用 Application.current()。
+复用已缓存模块仍以 `register_toolset(toolset, merge=True)` 显式注册对象声明，不重新加载或改写 sys.modules。发现后注册 MCP 管理工具（`MCP_TOOL_MODULE`）和固定 `BaseToolSet` 元数据，远程连接归 MCPSystem；最终注销仅释放发现记录和本次加入的宿主导入路径，注册表条目归原 ToolRegistry。Application 完整注册已由 P22 接通；构造发现器不执行扫描或调用 Application.current()。
 
 ## 会话变量池
 

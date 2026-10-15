@@ -1,6 +1,6 @@
 """模板匹配工具 — 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``TemplateMatch``。
 
 依赖 ``opencv-python`` 和 ``numpy``。通过 ``check_fn`` 检测 cv2 可用性。
 参考 MAA 的 TemplateMatch 算法设计，支持 ROI 区域限定和多匹配结果。
@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.sandbox import SandboxError
 
 if TYPE_CHECKING:
@@ -253,16 +253,10 @@ def _nms(matches: list[dict], tw: int, th: int, overlap_thresh: float = 0.5) -> 
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register TemplateMatch into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="TemplateMatch",
-        toolset="automation",
-        schema={
+_TEMPLATE_MATCH_SCHEMA = {
         # 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
         # 前置条件：需安装 opencv-python；图片和模板须在沙箱（ws:）中。
         # 调用效果：对每张模板执行 cv2.matchTemplate，返回阈值以上的所有匹配并按分数降序排列。
@@ -361,7 +355,27 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the sou
             },
             "required": ["image", "template_paths"],
         },
-    },
-    handler=_handle_template_match,
-    check_fn=_check_cv2,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class TemplateMatchTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="TemplateMatch",
+            toolset="automation",
+            schema=_TEMPLATE_MATCH_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+            check_fn=_check_cv2,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_template_match(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(TemplateMatchTool(),))

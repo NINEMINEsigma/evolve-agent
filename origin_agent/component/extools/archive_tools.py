@@ -1,7 +1,8 @@
 """压缩/解压工具 — 支持多种格式（zip、tar、gztar、bztar、xztar）。
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。所有路径均为逻辑路径（命名空间前缀），通过沙盒解析。
+模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有 ``CompressTool`` 与
+``DecompressTool`` 实例；由 ToolDiscoverySystem 显式发现并注册。
+所有路径均为逻辑路径（命名空间前缀），通过沙盒解析。
 """
 
 from __future__ import annotations
@@ -14,8 +15,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolDangerLevel
 from system.sandbox import SandboxError
 
@@ -222,16 +229,18 @@ def _handle_decompress(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Tool object declaration
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register archive tools into the explicit runtime registry."""
-    del ui_events
-    registry.register(
-        name="Compress",
-        toolset="archive",
-        schema={
+class CompressTool(BaseTool):
+    """将文件或目录压缩为指定格式的压缩包；output 已存在时先删除重建。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="Compress",
+            toolset="archive",
+            danger_level=ToolDangerLevel.safe,
+            schema={
             # 将文件或目录压缩为指定格式的压缩包。
             # ⚠️ 如果 output 已存在，会被自动删除后重新创建。
             #
@@ -304,14 +313,22 @@ Compresses the source (file or directory) into an archive at the output path. If
                 "required": ["source", "output", "format"],
             },
         },
-        handler=_handle_compress,
-        danger_level=ToolDangerLevel.safe,
-    )
+        )
 
-    registry.register(
-        name="Decompress",
-        toolset="archive",
-        schema={
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """压缩文件或目录。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=_handle_compress(execution.arguments))
+
+
+class DecompressTool(BaseTool):
+    """将压缩包解压到指定目录；format 留空时按文件名后缀自动推断。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="Decompress",
+            toolset="archive",
+            danger_level=ToolDangerLevel.safe,
+            schema={
             # 将压缩包解压到指定目录。支持格式自动推断（根据文件名后缀）。
             # format 留空时自动从文件后缀推断：.zip → zip、.tar.gz/.tgz → gztar 等。
             #
@@ -380,6 +397,17 @@ Decompresses the archive into the target directory. The target directory is auto
                 "required": ["source", "output_dir"],
             },
         },
-        handler=_handle_decompress,
-        danger_level=ToolDangerLevel.safe,
-    )
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """解压压缩包。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=_handle_decompress(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="archive",
+    tools=(
+        CompressTool(),
+        DecompressTool(),
+    ),
+)

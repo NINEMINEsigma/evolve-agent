@@ -1,6 +1,8 @@
 """Skill 管理工具 — 让 agent 学习、列出和遗忘 skill。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``CreateSkillTool`` 与 ``RecallSkillTool`` 实例；``handle`` 复用无状态
+``_handle_learn_skill`` / ``_handle_recall_skill`` 函数。
 Skill 存储在 ``<project_root>/skills/``（Path.cwd() / "skills"）下。
 """
 
@@ -13,8 +15,7 @@ from typing import Any, Dict, List
 
 from abstract.skills.manager import create_skill, update_skill, write_skill_file
 from abstract.skills.loader import list_skills, load_skill
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 
 
 logger = logging.getLogger(__name__)
@@ -339,24 +340,44 @@ Load branch:
 }
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── 工具类与工具集 ───────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register skill management tools."""
-    del ui_events  # skill tools have no UI event handlers
-    registry.register(
-        name="CreateSkill",
-        toolset="core",
-        schema=_CREATE_SKILL_SCHEMA,
-        handler=_handle_learn_skill,
-    )
 
-    registry.register(
-        name="RecallSkill",
-        toolset="core",
-        schema=_RECALL_SKILL_SCHEMA,
-        handler=_handle_recall_skill,
-    )
+class CreateSkillTool(BaseTool):
+    """创建新 skill 或大幅更新已有 skill。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="CreateSkill",
+            toolset="core",
+            schema=_CREATE_SKILL_SCHEMA,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_learn_skill(execution.arguments))
+
+
+class RecallSkillTool(BaseTool):
+    """加载 skill 完整内容，或无参数时列举全部 skill。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RecallSkill",
+            toolset="core",
+            schema=_RECALL_SKILL_SCHEMA,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_recall_skill(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="core",
+    tools=(
+        CreateSkillTool(),
+        RecallSkillTool(),
+    ),
+)
 
 
 

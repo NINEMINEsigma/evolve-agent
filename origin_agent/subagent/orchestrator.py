@@ -46,7 +46,6 @@ from entity.puretype import (
 from framework import AsyncSystem
 from component.approval.system import ApprovalSystem
 from abstract.tools.registry import ToolRegistry
-from abstract.tools.ui_event_router import UIEventRouter
 from component.cron_router import CronRouter
 from system.agentspace import AgentspaceService
 from system.sandbox import Sandbox
@@ -895,7 +894,7 @@ class _OrchestratorContext:
         for schema in all_defs:
             func: dict = schema.get("function") or {}
             name: str = func.get("name", "")
-            entry = tool_registry.get_entry(name)
+            entry = tool_registry.get_tool(name)
             if entry is not None and entry.danger_level == ToolDangerLevel.safe:
                 result.append(schema)
         return result
@@ -992,7 +991,7 @@ class SubAgentOrchestrator(AsyncSystem):
     def __init__(self) -> None:
         super().__init__(dependencies=(
             RuntimeSystem, SessionManager, ApprovalSystem, FrontendSink,
-            ToolRegistry, UIEventRouter, CronRouter, AgentspaceService,
+            ToolRegistry, CronRouter, AgentspaceService,
             Sandbox, LLMProfileStore, ModalityCapabilitySystem,
         ))
         self._runtime: RuntimeSystem | None = None

@@ -1,30 +1,12 @@
-"""MCP management tools registered through explicit discovery."""
+"""MCP management tool objects discovered through the TOOLSET declaration."""
 
 from __future__ import annotations
 
-from typing import Any
-
-from abstract.tools.registry import ToolRegistry
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-
-async def _handle_mcp_refresh(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-    """Refresh MCP servers through the owning system."""
-    from abstract.mcp.system import MCPSystem
-    from system.application import Application
-
-    return await Application.current().get_system(MCPSystem).refresh()
-
-
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register MCP management tools into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="MCPRefresh",
-        toolset="mcp",
-        schema={
-            "description": """Hot-reload MCP server connections from the config file.
+_MCP_REFRESH_SCHEMA = {
+    "description": """Hot-reload MCP server connections from the config file.
 
 Re-reads ``mcp_config.json`` and applies a diff against the currently
 connected servers:
@@ -41,10 +23,25 @@ No parameters. Returns a JSON object with keys:
 
 Use this after editing ``mcp_config.json`` to add, remove, or re-enable
 MCP servers without restarting the agent.""",
-            "parameters": {"type": "object", "properties": {}},
-        },
-        handler=_handle_mcp_refresh,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN,
-    )
+    "parameters": {"type": "object", "properties": {}},
+}
+
+
+class MCPRefreshTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="MCPRefresh",
+            toolset="mcp",
+            schema=_MCP_REFRESH_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        from abstract.mcp.system import MCPSystem
+
+        return ToolHandlerResult(result=await execution.context.app.get_system(MCPSystem).refresh())
+
+
+TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))

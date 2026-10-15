@@ -32,9 +32,17 @@ component/
 
 ### 注册与发现
 
-ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Application.current().get_system(ToolRegistry)` 取得唯一实例，声明期使用 `register_tools` 的显式参数。模块级 registry 单例与代理已移除。
+`component/` 下全部工具来源（`tools/` 18、`extools/` 5、`multiagenttools/` 9、`browser/` 10、`automation/` 9 个模块）均已迁移为 `BaseTool` 子类与顶层 `TOOLSET = BaseToolSet(...)` 声明；每个模块导入只创建无连接工具对象，不取得 Application、不注册、不创建运行时连接。自定义工具与 MCP 来源使用同一对象契约。来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。
 
-每个工具模块导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，工具和 UI 事件均在该入口内注册；导入期只定义函数/常量/类型，不取得 Application 或创建连接。`ToolDiscoverySystem` 通过 AST 按路径顺序发现、导入并显式调用，每次装配保留模块集合避免重复。语法、读取、导入、注册错误以及旧模块级注册直接失败；原 schema、危险等级、可用范围和同步/异步 handler 约定不变。
+`ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `get_system(ToolRegistry)` 取得唯一实例；注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载并执行一次 `preheat()`。模块级 registry 单例、函数式 `register`、`ToolEntry`/`ToolsetEntry` 镜像、`HandlerToolAdapter` 与 `UIEventRouter` 均已移除；AST 发现对退役的 `register_tools`、旧全局注册表导入与导入期注册直接失败。
+
+工具四阶段（工具调用前 `before_handle`、工具主体 `handle`、工具调用后处理 `after_handle`）与工具集 `preheat()` 的完整契约见 `abstract/DEV-README.md`。专属后处理示例：
+
+- 进度/剪贴板的四个工具在主体内保留原会话资源更新逻辑，`after_handle` 直接通过当前 Sink 发送原 payload，业务 error 不发送成功 UI 更新。
+- `EvolveCode` 在保存后的 `after_handle` 唯一请求进化关闭。
+- `Enter/ExitMultiAgent` 主体只准备材料，`after_handle` 执行子Agent关闭（进入时）、目标 Loop 构造与 SessionManager 交接，完成后立即停止旧轮次。
+
+公开 schema、危险等级、可用范围和工具名称按原声明保留。
 
 工具来源包括：
 
@@ -62,17 +70,26 @@ ToolRegistry 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `Applicat
 | `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
-| `compress_history.py` | `CompressHistory` | 会话历史压缩：旧轮次替换为 Agent 撰写的会话摘要；保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`，链摘要任一失败则整体失败、历史不变） |
-| `compress_tool_chains.py` | `CompressToolChains` | 无业务参数，仅压缩全部历史中的完整工具链，不截断轮次或插入会话摘要；普通用户消息与不带工具调用的回复保留，未完成链及纯压缩占位链跳过；`core` / `MAIN` / `critical` / `no_timeout`，无符合条件链时成功返回零计数且不写历史 |
+| `compress_history.py` | `CompressHistory`（`CompressHistoryTool` + `TOOLSET`） | 会话历史压缩：`handle` 只校验参数并把 `summary`、保留轮次起点登记为调用态材料；结果提交后的 `after_handle` 重新扫描历史，把旧轮次替换为 Agent 撰写的会话摘要，并把保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`）。摘要模型调用前发「正在压缩历史...」，替换、`save_history()` 与 `reset_context_tokens()` 成功后发「压缩完成」；链摘要任一步失败直接传播、历史不变。排除当前调用所在链，故当前轮不被压缩 |
+| `compress_tool_chains.py` | `CompressToolChains`（`CompressToolChainsTool` + `TOOLSET`） | 无业务参数；`after_handle` 在自身结果提交后扫描全部历史中的完整工具链并替换为链摘要，不截断轮次或插入会话摘要；普通用户消息与不带工具调用的回复保留，未完成链及纯压缩占位链跳过；本次调用自身所在链此时已完整，可一并被压缩（D11）。`core` / `MAIN` / `critical` / `no_timeout`，无符合条件链时更新已保存结果为零计数且不写历史 |
 | `session_variables.py` | `ReadSessionVariables` | filesystem工具集的safe整池只读工具；按ToolContext.resource_session_id读取全部数字/字符串、meta和问题，写入仍使用通用文件工具 |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 压缩工具共享逻辑
 
-`tools/_history_compression.py::prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0)` 返回非持久化 `ToolChainReplacement` 列表，不修改 History。该消息后纯类型定义于 `entity/puretype_after/session.py`，通过 `entity.puretype_after` 显式导入，直接引用正式 `BaseMessage`，不由工具模块调用 `model_rebuild` 补装配；只有索引字段的 `ToolChainSpan` 仍属于消息前纯类型。`CompressHistory` 指定保留轮次起点，`CompressToolChains` 从全部历史起点扫描；链摘要统一由 `SessionMetadataService.generate_tool_chain_summary()` 生成，未设置工具链摘要 Profile 时回退目标会话活动 Profile。阈值复用 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符），不新增配置或模型用途引用。
+`tools/_history_compression.py` 是两种压缩工具共享、无 History 副作用的模块：
 
-所有摘要成功后才按逆序替换并保存；生成失败或期间取消不提交压缩，保存错误沿已有 History 生命周期传播，不声称写盘失败会自动回滚已修改的内存。`CompressToolChains` 提交前还检查协作式中断，成功保存后调用公开 `BaseAgentLoop.reset_context_tokens()`。无符合条件链时不调用模型、不保存、不重置计数。返回 `success`、`tool_chains_compressed`、`messages_removed`（消息数净减少量）、`remaining`（本工具结果追加前的 History 消息数）。链内工具调用消息的正文及媒体也会被摘要替代，只有链外消息保持原样；字符阈值不保证摘要 token 数一定更少。
+- `prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0, excluded_tool_call_ids=None)` 返回非持久化 `ToolChainReplacement` 列表，不修改 History。任一链的 tool_call_id 命中 `excluded_tool_call_ids` 时整条链跳过：`CompressHistory` 传 `{当前 tool_call_id}` 保护本轮，`CompressToolChains` 传空集合扫描全历史（含本次调用自身）。该消息后纯类型定义于 `entity/puretype_after/session.py`，通过 `entity.puretype_after` 显式导入，直接引用正式 `BaseMessage`，不由工具模块调用 `model_rebuild` 补装配；只有索引字段的 `ToolChainSpan` 仍属于消息前纯类型。
+- `collect_tool_call_ids(messages, ranges)` 收集给定半开区间 [start, end) 内的真实 tool_call_id，供 after 保留内部移除事实及 suppress 资格校验；前端由独立 history_updated 指令重载，不按该列表重构正典历史。
+
+链摘要统一由 `SessionMetadataService.generate_tool_chain_summary()` 生成，未设置工具链摘要 Profile 时回退目标会话活动 Profile。阈值复用 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符），不新增配置或模型用途引用。
+
+两个工具的 `handle` 都不修改 History：`CompressHistory.handle` 只做参数边界校验并把 `summary`、`keep_start_idx` 作为调用态材料登记到 `ToolExecution.state`（业务错误时该材料为空，after 直接返回空效果）；`CompressToolChains.handle` 不接收业务参数。摘要准备、替换、保存、计数通知全部在结果写入并保存后的 `after_handle` 中执行：按 `start_index`/`excluded_tool_call_ids` 重新检测并预生成全部链摘要，任一摘要失败或期间协作式中断都直接传播、不提交压缩；全部摘要成功后才按逆序 `History.replace_range()`（`CompressHistory` 随后 `truncate_from(keep_start_idx)` 并在头部插入摘要消息），再 `save_history()`、`reset_context_tokens()`、完成通知。保存错误沿已有 History 生命周期传播，不声称写盘失败会自动回滚已修改的内存。
+
+两者返回 `ToolPostprocessEffect`：`replacement_result` 携带 `success`、`tool_chains_compressed`、`messages_removed`（消息数净减少量）、`remaining`（压缩后的 History 消息数），由 post-commit 通道同步更新已保存的工具结果与通知（无符合条件链时为零计数，避免遗留 `_compression_pending` 占位）；`discarded_tool_call_ids` 为被替换/截断区间内的全部真实调用 ID，仅用于内部移除事实与 suppress 资格校验，不再作为丢弃批次后缀的协议发送。真实压缩保存成功后同步调用 `execution.mark_history_updated()`；ToolPostprocessor在必要结果回填保存后发送独立 `history_updated` 指令，前端完整重载骨架与按需正文。原完成系统通知通过效果的 `system_message` 延至指令后发送，取消/失败不发成功通知；保存成功后的取消仍根据调用级标记尝试发失效指令。`CompressToolChains` 仅当自身 ID 被 discard（自身链被替换）时 `suppress_tool_result_event=True`，此时不更新自身结果（该结果已随链离开 History，收尾通道会拒绝更新已移除的消息），否则正常更新并发送工具结果；`CompressHistory` 的当前调用位于保留轮次且其链被排除，因此始终不 suppress、始终更新自身结果。
+
+链内工具调用消息的正文及媒体也会被摘要替代，只有链外消息保持原样；字符阈值不保证摘要 token 数一定更少。
 
 两工具的 `critical` 在手动/脱手模式由用户审批，YOLO 模式免审批。`MAIN` 范围保留普通模式和随意聊聊会话，不向多Agent模式、子Agent或临时Agent扩展。本次没有新增 UI 事件或工具集；源码已实施，未运行构建、校验或应用验收。
 
@@ -267,7 +284,7 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 ### `component/mcp_tools.py`
 
-- 只导出 `register_tools(registry, ui_events)`，注册安全的 `MCPRefresh` 异步工具；导入模块不创建连接、不安装回调、不持有 MCP 状态。
+- 以 `MCPRefreshTool` 与顶层 `TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))` 声明安全的 `MCPRefresh` 异步工具；导入模块不创建连接、不安装回调、不持有 MCP 状态。
 - `MCPSystem` 的配置和 Core 边界已建立，远程工具沿用同一 `ToolRegistry`；运行期刷新保留新增/移除结果。OAuth、stdio 进程、连接请求和失败清理均经独立静态复核确认闭合；初始连接失败清理部分成功连接后传播。
 - MCP 连接和资源释放的目标所有者为 `MCPSystem`/`MCPCore`；本模块和 `main.py` 已删除重复清理。
 

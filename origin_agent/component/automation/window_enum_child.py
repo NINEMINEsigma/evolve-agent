@@ -1,6 +1,6 @@
 """子窗口枚举工具 — 列出指定窗口的所有子窗口。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``WindowEnumChild``。
 
 仅兼容 Windows。使用 ``ctypes`` 调用 ``user32.dll`` Win32 API，
 无第三方依赖。
@@ -17,8 +17,8 @@ import ctypes
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -180,16 +180,10 @@ def _handle_window_enum_child(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register WindowEnumChild into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="WindowEnumChild",
-        toolset="automation",
-        schema={
+_WINDOW_ENUM_CHILD_SCHEMA = {
         # 枚举指定窗口的所有子窗口，返回每个子窗口的 HWND、类名、文本、可见性等。
         # 前置条件：仅 Windows；hwnd 必须是有效的窗口句柄（来自 WindowFind）。
         # 调用效果：遍历 hwnd 的所有直接子窗口，返回详细信息列表。
@@ -252,6 +246,26 @@ Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. R
             },
             "required": ["hwnd"],
         },
-    },
-    handler=_handle_window_enum_child,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class WindowEnumChildTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="WindowEnumChild",
+            toolset="automation",
+            schema=_WINDOW_ENUM_CHILD_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_window_enum_child(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(WindowEnumChildTool(),))

@@ -1,8 +1,7 @@
 """Cron 定时任务工具 — 薄工具层。
 
-工具 handler 仅做参数解析与委托 ``CronRouter`` 实例方法；
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。
+工具 ``handle`` 仅做参数解析与委托 ``CronRouter`` 实例方法；
+模块导出顶层 ``TOOLSET``（``BaseToolSet``），由 ToolDiscoverySystem 显式发现并注册。
 ``_CronTask`` 及时间解析已迁入 ``component/cron_tasks.py``。
 持久化、恢复、Timer 调度、执行、清理/迁移、查询、触发/取消
 均由 ``CronRouter`` 实例持有。
@@ -18,8 +17,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from component.cron_router import CronRouter
 from component.cron_tasks import next_cron_time
 from entity.puretype import ToolDangerLevel
@@ -177,16 +182,19 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
     )
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── 工具对象声明 ─────────────────────────────────────────────
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register cron tools into the explicit runtime registry."""
-    del ui_events
-    registry.register(
-        name="ScheduleCron",
-        toolset="cron",
-        schema={
+class ScheduleCronTool(BaseTool):
+    """创建一次性后台定时任务。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ScheduleCron",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.dangerous,
+            schema={
             # 创建一个一次性后台定时任务。
             "description": """Schedule a one-shot background task.
 
@@ -240,15 +248,23 @@ Schedules the task to run once at a future time. After execution, a [cron-result
                 "required": ["schedule", "command", "reason"],
             },
         },
-        handler=_handle_schedule_cron,
-        is_async=True,
-        danger_level=ToolDangerLevel.dangerous,
-    )
+        )
 
-    registry.register(
-        name="ListCronJobs",
-        toolset="cron",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """创建定时任务。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_schedule_cron(execution.arguments))
+
+
+class ListCronJobsTool(BaseTool):
+    """列出当前会话的所有定时任务。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ListCronJobs",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            schema={
             "description": """List all scheduled cron jobs for the current session.
 
 ## Prerequisites
@@ -273,15 +289,23 @@ Returns metadata for all cron jobs in the current session, including schedule in
                 "properties": {},
             },
         },
-        handler=_handle_list_cron_jobs,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-    )
+        )
 
-    registry.register(
-        name="CancelCronJob",
-        toolset="cron",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """列出定时任务。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_list_cron_jobs(execution.arguments))
+
+
+class CancelCronJobTool(BaseTool):
+    """取消并移除指定定时任务。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="CancelCronJob",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            schema={
             "description": """Cancel and remove a scheduled cron job by its task_id.
 
 ## Prerequisites
@@ -313,15 +337,23 @@ Stops future scheduling for the task, removes its record, and suppresses notific
                 "required": ["task_id"],
             },
         },
-        handler=_handle_cancel_cron_job,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-    )
+        )
 
-    registry.register(
-        name="RunCronJobNow",
-        toolset="cron",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """取消定时任务。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_cancel_cron_job(execution.arguments))
+
+
+class RunCronJobNowTool(BaseTool):
+    """立即触发指定任务执行一次，不影响正常调度。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RunCronJobNow",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.dangerous,
+            schema={
             "description": """Immediately trigger a one-time execution of a scheduled cron job.
 
 ## Prerequisites
@@ -353,15 +385,23 @@ Runs the task once immediately in a new thread. The regular schedule is not affe
                 "required": ["task_id"],
             },
         },
-        handler=_handle_run_cron_job_now,
-        is_async=True,
-        danger_level=ToolDangerLevel.dangerous,
-    )
+        )
 
-    registry.register(
-        name="RescheduleCronJob",
-        toolset="cron",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """立即触发任务。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_run_cron_job_now(execution.arguments))
+
+
+class RescheduleCronJobTool(BaseTool):
+    """复制已有任务配置并重新创建调度一个新任务。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RescheduleCronJob",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.dangerous,
+            schema={
             "description": """Create a new one-shot cron job by copying an existing task's configuration.
 
 ## Prerequisites
@@ -393,15 +433,23 @@ Copies schedule, command, cwd, and other parameters from the source task, create
                 "required": ["task_id"],
             },
         },
-        handler=_handle_reschedule_cron_job,
-        is_async=True,
-        danger_level=ToolDangerLevel.dangerous,
-    )
+        )
 
-    registry.register(
-        name="WaitCron",
-        toolset="cron",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """重新调度任务。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_reschedule_cron_job(execution.arguments))
+
+
+class WaitCronTool(BaseTool):
+    """创建一个只等待、不执行脚本的精简定时提醒任务。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="WaitCron",
+            toolset="cron",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            schema={
             "description": """Schedule a lightweight wait reminder that does not execute any script.
 
 ## Prerequisites
@@ -439,7 +487,21 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
                 "required": ["duration"],
             },
         },
-        handler=_handle_wait_cron,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """创建等待提醒。复用模块级无状态 handler，显式传入调用参数。"""
+        return ToolHandlerResult(result=await _handle_wait_cron(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="cron",
+    tools=(
+        ScheduleCronTool(),
+        ListCronJobsTool(),
+        CancelCronJobTool(),
+        RunCronJobNowTool(),
+        RescheduleCronJobTool(),
+        WaitCronTool(),
+    ),
+)

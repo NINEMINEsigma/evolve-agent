@@ -5,8 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
 from subagent.profile import CharacterProfileResolver
@@ -67,10 +72,9 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register list subagents tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class ListSubAgentsTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="ListSubAgents",
         toolset="multiagent",
         schema={
@@ -135,8 +139,13 @@ The `agents` result is an array so duplicate names and their individual errors r
                 "properties": {},
             },
         },
-        handler=_handle_list_subagents,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
         availability=ToolAvailability.MAIN,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_list_subagents(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(ListSubAgentsTool(),))

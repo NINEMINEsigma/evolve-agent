@@ -1,7 +1,7 @@
 """动态端点工具 — agent 为自身注册 HTTP POST 端点，供前端按钮触发回调。
 
-属于 extools，注册入口为顶层 ``register_tools(registry, ui_events)``，由
-ToolDiscoverySystem 显式调用。注册三个工具：
+属于 extools，模块导出顶层 ``TOOLSET``（``BaseToolSet``），由
+ToolDiscoverySystem 显式发现并注册。声明三个工具：
 
   - ``RegisterDynamicEndpoint``   — 注册端点，返回 URL
   - ``UnregisterDynamicEndpoint`` — 解除注册
@@ -33,8 +33,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entry.base_agent_loop import ToolContext
 from entity.puretype import ToolAvailability, ToolDangerLevel, DynamicEndpointInfo
 from system.application import Application
@@ -197,16 +203,20 @@ async def _handle_list_dynamic_endpoints(
     return tool_result(success=True, count=len(endpoints), endpoints=endpoints)
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── 工具对象声明 ─────────────────────────────────────────────
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register dynamic endpoint tools into the explicit runtime registry."""
-    del ui_events
-    registry.register(
-        name="RegisterDynamicEndpoint",
-        toolset="dynamic",
-        schema={
+class RegisterDynamicEndpointTool(BaseTool):
+    """注册动态 HTTP POST 端点，返回 URL 供 agent 在消息中渲染按钮。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RegisterDynamicEndpoint",
+            toolset="dynamic",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+            schema={
             # 注册一个动态 HTTP POST 端点，返回 URL 供 agent 在消息中渲染可点击按钮。
             #
             # ## 前置条件
@@ -291,16 +301,26 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
                 "required": ["reason", "name"],
             },
         },
-        handler=_handle_register_dynamic_endpoint,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+        )
 
-    registry.register(
-        name="UnregisterDynamicEndpoint",
-        toolset="dynamic",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """注册动态端点。复用模块级 handler，显式传入调用参数与上下文。"""
+        return ToolHandlerResult(
+            result=await _handle_register_dynamic_endpoint(execution.arguments, execution.context)
+        )
+
+
+class UnregisterDynamicEndpointTool(BaseTool):
+    """解除注册指定动态端点。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="UnregisterDynamicEndpoint",
+            toolset="dynamic",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+            schema={
             # 解除注册指定端点，后续 POST 请求将返回 404。
             #
             # ## 前置条件
@@ -354,16 +374,26 @@ Removes the endpoint from the registry and its persisted record. Subsequent POST
                 "required": ["name"],
             },
         },
-        handler=_handle_unregister_dynamic_endpoint,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+        )
 
-    registry.register(
-        name="ListDynamicEndpoints",
-        toolset="dynamic",
-        schema={
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """解除注册动态端点。复用模块级 handler，显式传入调用参数与上下文。"""
+        return ToolHandlerResult(
+            result=await _handle_unregister_dynamic_endpoint(execution.arguments, execution.context)
+        )
+
+
+class ListDynamicEndpointsTool(BaseTool):
+    """列出当前 agent 自己注册的动态端点。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ListDynamicEndpoints",
+            toolset="dynamic",
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+            schema={
             # 列出当前 agent 自己注册的动态端点（按 agent 过滤，看不到其他 agent 的端点）。
             #
             # ## 前置条件
@@ -410,8 +440,20 @@ Returns metadata for all dynamic endpoints registered by the current agent, incl
                 "properties": {},
             },
         },
-        handler=_handle_list_dynamic_endpoints,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """列出动态端点。复用模块级 handler，显式传入调用参数与上下文。"""
+        return ToolHandlerResult(
+            result=await _handle_list_dynamic_endpoints(execution.arguments, execution.context)
+        )
+
+
+TOOLSET = BaseToolSet(
+    name="dynamic",
+    tools=(
+        RegisterDynamicEndpointTool(),
+        UnregisterDynamicEndpointTool(),
+        ListDynamicEndpointsTool(),
+    ),
+)

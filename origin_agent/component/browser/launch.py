@@ -3,7 +3,7 @@
 profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
 登录态跨会话保留；启动的是调试专用实例，与日常 Edge 并存；
 不打开任何具体页面。端口已就绪时直接返回（幂等）。
-模块导入时通过 ``registry.register()`` 注册。
+工具对象通过模块级 ``TOOLSET``（``BaseToolSet``）声明；导入期只创建无连接工具对象。
 """
 
 from __future__ import annotations
@@ -13,8 +13,7 @@ import logging
 import subprocess  # nosec
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
 from component.browser.system import BrowserSystem
 from entity.constant import CDP_ENDPOINT_DEFAULT, EDGE_CANDIDATE_PATHS
@@ -92,48 +91,42 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register BrowserLaunch into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="BrowserLaunch",
-        toolset="browser",
-        schema={
-        # 以调试参数启动 Edge（幂等：端口已就绪时直接返回）。
-        # profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
-        # 登录态、Cookie 跨会话保留；调试实例与日常 Edge 并存；
-        # 不打开任何具体页面。Chromium 136+ 必须配合非默认 user-data-dir
-        # 调试端口才会监听，本工具已自动处理。
-        # headless=true 时追加 --headless=new，浏览器窗口不可见，
-        # 适用于不需要用户参与操作和观察页面的自动化场景。
-        #
-        # ## 前置条件
-        # - 系统已安装 Microsoft Edge（自动探测两个标准安装路径）。
-        # - 端口 9222 未被其他进程占用。
-        #
-        # ## 调用效果
-        # 若 CDP 端点已可达 → 直接返回 already_running=true（不重复拉起）。
-        # 否则启动 Edge（--remote-debugging-port + --user-data-dir=ws:browser_profile
-        # 解析出的 agentspace 路径），轮询等待端口就绪（默认 20s）后返回。
-        # headless=true 时额外追加 --headless=new 启动为无头模式。
-        # 后续可调用 BrowserConnect 建立连接。
-        # 无头模式下启动的浏览器进程会被登记，应用退出时自动终止（用户无法手动关闭）。
-        #
-        # ## 返回
-        # ```json
-        # {"launched": true, "already_running": false, "endpoint": "http://localhost:9222", "user_data_dir": "ws:browser_profile", "headless": false}
-        # ```
-        #
-        # ## 何时使用
-        # - 首次使用 browser 工具组、或检测到端口不可达时，先于 BrowserConnect 调用。
-        # - 无需用户参与操作和观察页面时，设置 headless=true 以无头模式启动。
-        #
-        # ## 副作用/注意
-        # - 需用户审批（dangerous）：启动带调试端口的浏览器进程并暴露本机调试端口。
-        # - profile 数据（登录态等）持久化在 agentspace 中，删除 ws:browser_profile 即重置。
-        # - 无头模式下浏览器窗口不可见，但 CDP 调试端口照常工作。
-        # - 无头模式启动的浏览器进程在应用退出时自动终止（用户无法手动关闭无头窗口）。
-        "description": """Starts Edge with debug flags so the browser toolset can take it over (idempotent: returns immediately if the CDP endpoint is already reachable).
+_BROWSER_LAUNCH_SCHEMA = {
+    # 以调试参数启动 Edge（幂等：端口已就绪时直接返回）。
+    # profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
+    # 登录态、Cookie 跨会话保留；调试实例与日常 Edge 并存；
+    # 不打开任何具体页面。Chromium 136+ 必须配合非默认 user-data-dir
+    # 调试端口才会监听，本工具已自动处理。
+    # headless=true 时追加 --headless=new，浏览器窗口不可见，
+    # 适用于不需要用户参与操作和观察页面的自动化场景。
+    #
+    # ## 前置条件
+    # - 系统已安装 Microsoft Edge（自动探测两个标准安装路径）。
+    # - 端口 9222 未被其他进程占用。
+    #
+    # ## 调用效果
+    # 若 CDP 端点已可达 → 直接返回 already_running=true（不重复拉起）。
+    # 否则启动 Edge（--remote-debugging-port + --user-data-dir=ws:browser_profile
+    # 解析出的 agentspace 路径），轮询等待端口就绪（默认 20s）后返回。
+    # headless=true 时额外追加 --headless=new 启动为无头模式。
+    # 后续可调用 BrowserConnect 建立连接。
+    # 无头模式下启动的浏览器进程会被登记，应用退出时自动终止（用户无法手动关闭）。
+    #
+    # ## 返回
+    # ```json
+    # {"launched": true, "already_running": false, "endpoint": "http://localhost:9222", "user_data_dir": "ws:browser_profile", "headless": false}
+    # ```
+    #
+    # ## 何时使用
+    # - 首次使用 browser 工具组、或检测到端口不可达时，先于 BrowserConnect 调用。
+    # - 无需用户参与操作和观察页面时，设置 headless=true 以无头模式启动。
+    #
+    # ## 副作用/注意
+    # - 需用户审批（dangerous）：启动带调试端口的浏览器进程并暴露本机调试端口。
+    # - profile 数据（登录态等）持久化在 agentspace 中，删除 ws:browser_profile 即重置。
+    # - 无头模式下浏览器窗口不可见，但 CDP 调试端口照常工作。
+    # - 无头模式启动的浏览器进程在应用退出时自动终止（用户无法手动关闭无头窗口）。
+    "description": """Starts Edge with debug flags so the browser toolset can take it over (idempotent: returns immediately if the CDP endpoint is already reachable).
 
 ## Prerequisites
 - Microsoft Edge must be installed (two standard install paths are auto-detected).
@@ -156,40 +149,55 @@ If the CDP endpoint is already reachable, returns `already_running: true` withou
 - Profile data (login sessions, cookies) persists in the agentspace; deleting ws:browser_profile resets it.
 - In headless mode the browser window is invisible, but the CDP debug port works as usual.
 - In headless mode the browser process is automatically terminated when the application exits (users cannot manually close an invisible window).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "endpoint": {
-                    "type": "string",
-                    # CDP 端点。留空使用默认值 http://localhost:9222。
-                    "description": "CDP endpoint. Leave empty to use the default http://localhost:9222.",
-                    "default": "",
-                },
-                "timeout": {
-                    "type": "integer",
-                    # 等待端口就绪的秒数（默认 20）。
-                    "description": "Seconds to wait for the CDP port to become ready (default 20).",
-                    "default": 20,
-                },
-                "reason": {
-                    "type": "string",
-                    # 启动浏览器的原因（用于审批提示）。
-                    "description": "The reason for launching the browser (shown in the approval prompt).",
-                },
-                "headless": {
-                    "type": "boolean",
-                    # 无头模式：不显示浏览器窗口。适用于不需要用户参与操作和观察页面的自动化场景。
-                    # Chromium 112+ 使用 --headless=new（新无头模式），功能与有头模式一致但无可见窗口。
-                    # 无头模式下启动的进程在应用退出时自动终止（用户无法手动关闭无头窗口）。
-                    "description": "Run Edge in headless mode (no visible window). Use when no user interaction or page observation is needed. Uses Chromium's new headless mode (--headless=new). The headless browser process is automatically terminated when the application exits.",
-                    "default": False,
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "endpoint": {
+                "type": "string",
+                # CDP 端点。留空使用默认值 http://localhost:9222。
+                "description": "CDP endpoint. Leave empty to use the default http://localhost:9222.",
+                "default": "",
             },
-            "required": [],
+            "timeout": {
+                "type": "integer",
+                # 等待端口就绪的秒数（默认 20）。
+                "description": "Seconds to wait for the CDP port to become ready (default 20).",
+                "default": 20,
+            },
+            "reason": {
+                "type": "string",
+                # 启动浏览器的原因（用于审批提示）。
+                "description": "The reason for launching the browser (shown in the approval prompt).",
+            },
+            "headless": {
+                "type": "boolean",
+                # 无头模式：不显示浏览器窗口。适用于不需要用户参与操作和观察页面的自动化场景。
+                # Chromium 112+ 使用 --headless=new（新无头模式），功能与有头模式一致但无可见窗口。
+                # 无头模式下启动的进程在应用退出时自动终止（用户无法手动关闭无头窗口）。
+                "description": "Run Edge in headless mode (no visible window). Use when no user interaction or page observation is needed. Uses Chromium's new headless mode (--headless=new). The headless browser process is automatically terminated when the application exits.",
+                "default": False,
+            },
         },
+        "required": [],
     },
-    handler=_handle_browser_launch,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.dangerous,
-    )
+}
+
+
+class BrowserLaunchTool(BaseTool):
+    """以调试参数启动 Edge，供 browser 工具组接管。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserLaunch",
+            toolset="browser",
+            schema=_BROWSER_LAUNCH_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.dangerous,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_launch(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="browser", tools=(BrowserLaunchTool(),))

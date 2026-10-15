@@ -1,6 +1,8 @@
 import { WS_IN } from "../../constants/ws";
 import type {
+  HistoryUpdatedEvent,
   MessageMetrics,
+  NonStreamWSMessage,
   StreamDeltaEvent,
   StreamDoneEvent,
   StreamToolCall,
@@ -8,7 +10,7 @@ import type {
 } from "../../types";
 
 /**
- * 流式事件结构守卫。
+ * WebSocket 入站载荷结构守卫。
  *
  * 后端 stream_delta / stream_done 以具体 BaseModel（extra=forbid）序列化下发，
  * 进程内无 JSON 往返；前端在 WebSocket 边界以 unknown 实际校验后再判别联合收窄。
@@ -22,6 +24,9 @@ import type {
  * - tool_call.id / tool_call_delta.id 后端仅 str，允许空字符串；守卫不额外限制非空。
  * - tool_call_delta.index 仅要求整数，不额外限定非负。
  * - metrics 沿用现有 MessageMetrics（int,int,int,float），不增加正数约束。
+ *
+ * TOOL_CALLS_DISCARDED 是非流式事件，由通用 Message 模型下发（非 extra=forbid），
+ * 其守卫只校验该事件消费的 session_id / stream_id / tool_call_ids，不拒绝未知键。
  */
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -139,5 +144,29 @@ export function isStreamDoneEvent(value: unknown): value is StreamDoneEvent {
   if (typeof finish_reason !== "string") return false;
   if (!isOptionalString(content)) return false;
   if (metrics !== undefined && !isValidMetrics(metrics)) return false;
+  return true;
+}
+
+/** A committed History changed; only the session identity belongs on this event. */
+export function isHistoryUpdatedEvent(value: unknown): value is HistoryUpdatedEvent {
+  return isObject(value)
+    && hasNoExtraKeys(value, new Set(["type", "session_id"]))
+    && value.type === WS_IN.HISTORY_UPDATED
+    && isNonEmptyString(value.session_id);
+}
+
+/**
+ * 校验 TOOL_CALLS_DISCARDED 载荷：session_id 与 stream_id 必须为非空字符串，
+ * tool_call_ids 必须是字符串数组且每个元素非空（允许空数组，调用方按无操作处理）。
+ * 该事件不进入 History，只用于删除被批次声明丢弃的实时工具卡片。
+ */
+export function isToolCallsDiscardedMessage(value: unknown): value is NonStreamWSMessage {
+  if (!isObject(value)) return false;
+  if (value.type !== WS_IN.TOOL_CALLS_DISCARDED) return false;
+  const { session_id, stream_id, tool_call_ids } = value;
+  if (!isNonEmptyString(session_id)) return false;
+  if (!isNonEmptyString(stream_id)) return false;
+  if (!Array.isArray(tool_call_ids)) return false;
+  if (!tool_call_ids.every(isNonEmptyString)) return false;
   return true;
 }

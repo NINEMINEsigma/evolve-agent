@@ -25,6 +25,7 @@ from entity.constant import (
 from entity.puretype import (
     ApprovalResult,
     AskAnswerItem,
+    HistoryUpdatedEvent,
     Message,
     MessageMetrics,
     MessageType,
@@ -90,6 +91,18 @@ class AgentSink(ABC):
                                embedded_messages: list[dict] | None = None,
                                consumed_client_message_ids: list[str] | None = None) -> None:
         """推送 tool_result 事件。"""
+        ...
+
+    @abstractmethod
+    async def emit_tool_calls_discarded(
+        self, session_id: str, stream_id: str, tool_call_ids: list[str],
+    ) -> None:
+        """Remove tool calls that were rejected by the declared batch boundary."""
+        ...
+
+    @abstractmethod
+    async def emit_history_updated(self, session_id: str) -> None:
+        """Invalidate the frontend view of a committed session History."""
         ...
 
     @abstractmethod
@@ -754,6 +767,29 @@ class FrontendSink(AsyncSystem, AgentSink):
                              embedded_messages=embedded_messages,
                              consumed_client_message_ids=consumed_client_message_ids)
 
+    async def emit_history_updated(self, session_id: str) -> None:
+        event = HistoryUpdatedEvent(session_id=session_id)
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, event),
+            name="frontend-history-updated",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
+
+    async def emit_tool_calls_discarded(
+        self, session_id: str, stream_id: str, tool_call_ids: list[str],
+    ) -> None:
+        if not session_id or not stream_id or any(not tool_call_id for tool_call_id in tool_call_ids):
+            raise ValueError("Discarded tool calls require session, stream and non-empty call IDs")
+        await self._send_msg(
+            session_id,
+            "tool_calls_discarded",
+            "",
+            "",
+            stream_id=stream_id,
+            tool_call_ids=tool_call_ids,
+        )
+
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
@@ -886,7 +922,7 @@ class FrontendSink(AsyncSystem, AgentSink):
             cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
         )
 
-    async def _send_message_model(self, session_id: str, msg: Message) -> None:
+    async def _send_message_model(self, session_id: str, msg: Message | HistoryUpdatedEvent) -> None:
         """既有非流式 Message 发送边界；模型构造/序列化错误传播。"""
         ws = self.get_ws(session_id)
         if ws is None:
@@ -900,7 +936,9 @@ class FrontendSink(AsyncSystem, AgentSink):
                         character_name: str | None = None,
                         tool_call_meta: dict | None = None,
                         embedded_messages: list[dict] | None = None,
-                        consumed_client_message_ids: list[str] | None = None) -> None:
+                        consumed_client_message_ids: list[str] | None = None,
+                        stream_id: str = "",
+                        tool_call_ids: list[str] | None = None) -> None:
         """推送既有非流式事件；流式事件只走 _send_stream_event。"""
         ws = self.get_ws(session_id)
         if ws is None:
@@ -931,6 +969,13 @@ class FrontendSink(AsyncSystem, AgentSink):
         elif event_type == "subagent_update":
             msg = Message(type=MessageType.SUBAGENT_UPDATE, session_id=session_id,
                           result=payload)
+        elif event_type == "tool_calls_discarded":
+            msg = Message(
+                type=MessageType.TOOL_CALLS_DISCARDED,
+                session_id=session_id,
+                stream_id=stream_id,
+                tool_call_ids=tool_call_ids,
+            )
         else:
             return
 
@@ -1042,6 +1087,16 @@ class ParentAgentSink(AgentSink):
         # consumed_client_message_ids 仅为接口一致性；子 Agent 工具结果不消费主会话消息队列
         self._loop.emit_event("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
+
+    async def emit_history_updated(self, session_id: str) -> None:
+        # 子会话没有父主会话 History 的更新权限。
+        return
+
+    async def emit_tool_calls_discarded(
+        self, session_id: str, stream_id: str, tool_call_ids: list[str],
+    ) -> None:
+        # SubAgent tools do not own an independent frontend stream.
+        return
 
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,

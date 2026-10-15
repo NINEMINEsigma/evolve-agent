@@ -55,7 +55,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 2. 启动 `fast_agent_space/__main__.py`。
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端，随后 `asyncio.run(App(ctx).run())`；返回后由 App 解除关闭硬截止 watchdog。
 4. `main.py::App` 只负责创建唯一 `Application`、平台信号处理（统一经 `RuntimeSystem.request_shutdown`）、等待关闭事件与退出码映射；不再持有 Gateway 实例、第二份关闭事件或各子系统清理逻辑。
-5. `Application` 继承 `AsyncArchitecture`，`start()` 按固定拓扑顺序串行注册 21 个 `AsyncSystem`（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem），先用 graphlib 校验依赖图完整性，注册失败即按逆序注销已注册节点并传播；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
+5. `Application` 继承 `AsyncArchitecture`，`start()` 按固定拓扑顺序串行注册 20 个 `AsyncSystem`（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem），先用 graphlib 校验依赖图完整性，注册失败即按逆序注销已注册节点并传播；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
 6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只含静态 `APIRouter` 与 `build_router_app()` 工厂，运行实例、socket、serve 任务与 ready 事件均由 `GatewaySystem`（最后唤醒、首先注销）持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
@@ -71,6 +71,8 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 Shell会话由 `Application.current().get_system(ShellManager)` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；单条命令完成或当前回复结束不触发停止，未完成任务或后续可复用时保留 Shell会话，只有明确需要销毁整个 Shell 时才调用 `StopShell`。WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。单个 Shell会话的原生 PTY 访问通过生命周期同步边界收敛，停止流程先等待 reader 收尾再关闭原生对象，并保留超时兜底日志；该防御性处理不等同于已确认 `0xC0000005` 根因。
 
 2026-10-13 首次观察到待复现现象（来源：运行时日志）：手动终结主会话停止其遗留 Shell会话时，进程树终止后 ConPTY reader 线程持续阻塞于 `pty.read()`，未在 `SHELL_STOP_WAIT_SECONDS`（5 秒）期限内退出；`_stop_state_blocking` 按设计抛 `LifecycleFailure("Shell reader did not stop")`，经 `RuntimeSystem.record_failure` 放大为全应用 FAILURE 关闭（关闭协议 D6），fast仓库 进程以退出码 1 结束；force_init 启动时回退修复被禁用（fallback仓库 已与 origin仓库 同源），run.py 直接退出。同一失败实例在关闭日志的 ExceptionGroup 中多次嵌套出现，来源是停止任务复用、`_cleanup_failures` 聚合与 `RuntimeSystem.failures` 记录的叠加，属日志表现而非多个独立失败。该行为属停止流程超时兜底的设计内放大，reader 阻塞根因（pywinpty ConPTY 管道读行为）未确认，等待复现后再评估是否收窄此类清理失败的影响面，当前不改代码。
+
+2026-10-16 再次观察到同类 reader 退出超时（来源：用户提供的运行时日志）：主会话 `91c8567f965b` 显式调用 `StopShell` 停止 Shell `384128d6e160`，03:50:39.193 开始停止，约 5 秒后出现 `Shell reader did not stop`，按既有 `record_failure` 路径请求全应用失败关闭；force_init 禁用 fallback，最终退出 1。对照本次工具对象化改动，ShellManager、生命周期公共实现与等待常量均未改变，StopShell仍await原handler，属于迁移前已记录故障的再次出现，而非新后处理阶段触发；底层阻塞/EOF原因仍未确认。已在 `system/shell_manager.py::_stop_state_blocking()` 的 reader 等待处登记 TODO，后续调查 pywinpty/ConPTY 读取的安全唤醒及释放顺序，当前只补注释，不改失败传播或放宽超时。同一停止任务及清理失败的重复聚合解释了多层异常组，不据此判断为多次独立停止故障。
 
 主会话永久删除使用进程内删除中标记封闭并发恢复：Gateway 先使现有 WebSocket失效并停止子Agent，再回收活动回复、运行时 Loop、消息队列、客户端信息和 Cron 注册，最后删除持久化索引/目录及附带资源。已建立连接以 WebSocket 4004关闭码停止旧 ID重连；握手前拒绝通过会话状态接口二次确认。显式恢复已经删除或删除中的 ID不会创建随机新会话，当前前端固定切换到“随意聊聊”。
 
@@ -89,11 +91,11 @@ Shell会话由 `Application.current().get_system(ShellManager)` 统一持有。A
 
 | 模块 | 职责 | 详细文档 |
 |---|---|---|
-| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`LoopSessionManager`、`AgentSink`、`ToolExecutor`、`StreamConsumer`、`SessionMessageQueue`（会话级消息队列）、`tool_post_dispatch.finalize_tool_result`（工具结果统一后处理） | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
+| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`LoopSessionManager`、`AgentSink`、`ToolExecutor`、`StreamConsumer`、`SessionMessageQueue`（会话级消息队列）、`tool_execution.accept_tool_batch`（工具批次接收声明）、`tool_post_dispatch.ToolPostprocessor`（工具结果提交后统一后处理） | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
 | `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop`、`TaskAgentLoop`（临时Agent：无系统提示词、无持久化、纯文本回复即终止） | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
 | `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理 | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
 | `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由、桌面自动化（`automation/`）、浏览器控制（`browser/`） | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
-| `abstract/` | 抽象层：LLM 客户端、工具注册表（含 `ToolsetEntry` 工具集元数据与渐进式加载）、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
+| `abstract/` | 抽象层：LLM 客户端、对象工具注册表（`BaseTool`/`BaseToolSet` 工具集元数据与渐进式加载）、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
 | `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、路径工具、会话存储、模板、LSP（`lsp.py`）、转换工具 | 见下文 |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
@@ -125,10 +127,11 @@ sequenceDiagram
     LLM-->>PAL: StreamChunk (text delta / tool_calls)
     PAL-->>FS: emit_stream_delta / emit_tool_call
     FS-->>FE: typed stream_delta / tool_call JSON
-    PAL->>TR: dispatch(tool_name)
+    PAL->>TR: async_dispatch(execution)
     TR->>APP: request_approval (if needed)
     APP-->>PAL: approval decision
     PAL->>PAL: append tool result, continue loop
+    PAL->>TR: async_postprocess(execution) (after committed)
     PAL-->>FS: emit_stream_done
     FS-->>FE: typed stream_done JSON
 ```
@@ -138,7 +141,7 @@ sequenceDiagram
 - **消息接收**：`gateway/server.py` 通过 WebSocket 接收 `user_message`，`gateway/message_router.py` 在路由内同步完成目标校验并登记输入记录，再由 `GatewaySystem.spawn_work` 启动准备任务，交给 `SessionManager` 分配到对应 `ParentAgentLoop`。
 - **上下文组装**：`entry/agent_support/messages.py` 加载 `custom_hooks`、memory 上下文、system prompt，组装成 `BaseMessage` 列表。
 - **流式生成**：通过 `abstract/llm/` 抽象层的 `BaseLLMClient.chat_stream()` 调用大模型（具体后端由 `custom_llm_client/` 插件提供），`ParentAgentLoop` 实时解析 `StreamChunk` 中的文本增量与工具调用。
-- **工具执行**：通过 `abstract/tools/registry.py` 按名分发；工具集加载检查在 `dispatch`/`async_dispatch` 中统一拦截未加载工具，`ToolExecutor` 在审批前做前置快速拒绝；主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`component/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
+- **工具执行**：工具来源为 `BaseTool` 子类，各模块以顶层固定名称 `TOOLSET` 声明 `BaseToolSet`；`ToolRegistry` 直接持有 `BaseTool` 对象，模型返回的整批 tool calls 在写入 assistant 消息前经 `accept_tool_batch()` 按每个工具的 `accepts_following_calls` 声明截断，后续调用不审批、不执行、不配对并向前端发送 `tool_calls_discarded`。`ToolExecutor` 在审批前做前置快速拒绝，`async_dispatch(execution)` 执行工具调用前的 `before_handle` 与工具主体 `handle` 并写回 `body_executed`/`body_completed_normally`/`result`/`state`；工具结果写入 History 后，`ToolPostprocessor.after_committed()` 对已提交调用调用工具调用后的 `after_handle`。工具集加载检查在分发中统一拦截未加载工具（工具对象与四阶段执行已按任务文件 v8 实施并静态复核，完整任务复核与用户验收仍待完成）。主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`component/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
 - **前端推送**：实时事件（流式文本、工具调用、工具结果、任务进度、子代理更新）通过 `FrontendSink` 经 WebSocket 推回前端。正典聊天历史不再在连接时整体回放：Gateway 先发送 typed `history_sync` 元数据，前端再通过 REST 取得全历史骨架与可见范围的历史内容页；`History` / `history.es` 仍保持整体存储。工具请求和匹配结果在前端以每个 `tool_call_id` 一张工具调用卡片显示；工具结果内部 `_meta` 与 `_queued_messages` 不作为普通 JSON 正文展示，分别通过耗时元数据和 `embedded_messages` 独立渲染；孤立结果保留降级行。聊天页会话视觉所需的 Agentspace 变化也通过同一会话 WebSocket的 typed `agentspace_event`推送，页面内事件总线扇出到三个视觉 hook；独立 Agentspace 编辑器仍使用 SSE。会话状态预检、History骨架和历史内容页具有15秒硬截止；超时显示持久通知，并在 WebSocket可用时以不进入 History 的脱敏 `client_diagnostic`记录 Gateway warning。
 
 - **流式事件类型边界**：`StreamConsumer` 将 `ToolCallRequest` / `ToolCallDelta` 实例直接传入 `AgentSink`；`FrontendSink` 构造 `StreamDeltaEvent` / `StreamDoneEvent`，仅在 `_send_stream_event()` 中序列化一次。工具增量是 WebSocket顶层对象，计时元信息保持 `MessageMetrics` 类型，不再经过内部 JSON往返或前端 `JSON.parse(content)`。两种事件在前端组成按 `type` 区分的联合，并在接收边界验证结构。Gateway未使用的字符串事件回调和启动注册已移除，其他非流式协议保持不变；部署时前后端同步更新并刷新旧页面。
@@ -239,13 +242,13 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 系统提供多个热扩展点，无需修改核心源码：
 
-- **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，导出顶层同步 `register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None`，工具与事件均在入口内注册；ToolDiscoverySystem 按 AST 发现后显式调用，导入期不操作运行时实例。
+- **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，声明顶层固定名称 `TOOLSET = BaseToolSet(...)`，其中持有 `BaseTool` 子类实例；导入只创建无连接、无 Application 查询的工具对象，`ToolDiscoverySystem` 按 AST 识别 `TOOLSET` 后交给唯一 `ToolRegistry` 注册并预热，导入期不注册、不取得运行时服务。
 - **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py`、`kscc_client.py` 和 `lmstudio_client.py`。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为审批模型自动加载。
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
 - **插件**：`abstract/plugins/discover.py` 基于目录扫描插件，解析 `plugin.yaml`，启发式检测 provider 类型。
-- **MCP**：`MCPSystem` 读取并校验 `mcp_config.json`，由 `MCPCore` 连接服务器并注册远程工具；`component/mcp_tools.py` 只通过 `register_tools` 声明 `MCPRefresh`。OAuth 按 Provider 独立回调端口并显式持有 `MCPOAuthManager`，认证任务、HTTP 回调线程与 401 dedup 均有完整归属；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄和独立 cleanup task，不猜测宿主 PID。关闭时 `close_admission` 拒绝新工作，`stop_calls` 确认请求/连接任务实际退出，`shutdown` 等待 OAuth、stdio、cleanup 全部完成后才释放；资源未退出不伪装成功。`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。
+- **MCP**：`MCPSystem` 读取并校验 `mcp_config.json`，由 `MCPCore` 连接服务器并注册远程工具，远程与资源/提示词工具统一为 `MCPTool`，服务器元数据为 `MCPToolSet`；`component/mcp_tools.py` 以 `MCPRefreshTool` 与顶层 `TOOLSET` 声明 `MCPRefresh`。刷新在同名同集锁内用 `register_tool(MCPTool(...), replace=True)` 原子替换，只注销新集合中已消失的名称（含资源/提示词辅助工具）。OAuth 按 Provider 独立回调端口并显式持有 `MCPOAuthManager`，认证任务、HTTP 回调线程与 401 dedup 均有完整归属；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄和独立 cleanup task，不猜测宿主 PID。关闭时 `close_admission` 拒绝新工作，`stop_calls` 确认请求/连接任务实际退出，`shutdown` 等待 OAuth、stdio、cleanup 全部完成后才释放；资源未退出不伪装成功。`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。
 - **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于资源后，注册表共八项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。
 - **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测并订阅聊天 WebSocket扇出的 Agentspace事件，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。`resync` 和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
 - **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端提前用 HEAD 探测入口并监听聊天 WebSocket中的该目录 Agentspace事件，部署完成后启用右侧会话网页 Tab。首次点击该 Tab 后才创建 iframe、加载网页正文及引用资源，悬停/仅聚焦不触发加载；同会话切 Tab 保留网页，切会话、返回原会话或刷新页面后重新等待点击。首次激活后资源连续变化仍等待 1 秒安静窗口后热刷新 iframe，隐藏 Tab 也可刷新；入口文件或整个目录被删除/移走后禁用 Tab 并回聊天，已激活的同会话重新部署后可自动重建 iframe。未激活会话部署/更新只改变探测状态，不创建 iframe。
@@ -260,7 +263,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 ### system/
 
-- `system/application.py`：`Application` 进程级唯一单例（继承 `AsyncArchitecture`），通过 `Application.current()` 访问。`start()` 用 graphlib 校验依赖图后按固定拓扑顺序串行注册全部 21 个 System，全部唤醒后 `mark_running()` 并激活 Cron；`shutdown()` 是唯一关闭协调任务，先业务停止与 History 提交，再按逆拓扑 `unregister`（RV10 顺序），失败合并上抛并保留 RuntimeSystem 失败记录。`Application` 不保留服务镜像字段，也不暴露 `runtime_context` 属性；各业务系统经类型化 `app.get_system(RuntimeSystem).context` 取得唯一 `RuntimeContext`。
+- `system/application.py`：`Application` 进程级唯一单例（继承 `AsyncArchitecture`），通过 `Application.current()` 访问。`start()` 用 graphlib 校验依赖图后按固定拓扑顺序串行注册全部 20 个 System，全部唤醒后 `mark_running()` 并激活 Cron；`shutdown()` 是唯一关闭协调任务，先业务停止与 History 提交，再按逆拓扑 `unregister`（RV10 顺序），失败合并上抛并保留 RuntimeSystem 失败记录。`Application` 不保留服务镜像字段，也不暴露 `runtime_context` 属性；各业务系统经类型化 `app.get_system(RuntimeSystem).context` 取得唯一 `RuntimeContext`。
 - `system/runtime.py`：`RuntimeSystem`（`AsyncSystem`），持有唯一 `RuntimeContext`、应用状态、输入接收同步边界、跨线程关闭请求与失败记录；还持有进程级**主Agent角色名**（启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取，缺失回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`，运行期由 `RefreshIdentity` 工具刷新）。`context` 为只读属性；完整应用装配在 P22 完成，中间阶段代码不具备启动条件。
 - `system/character_avatars.py`：角色头像映射的纯函数组装（非 System、无缓存）。`collect_character_avatars()` 实时读 `ws:SOUL.md.meta` 与 `ws:characters/roleplay|task/*` 的 `[avatar]` 键，产出「角色名 → /files URL」条目（`CharacterAvatarsResponse`）；仅校验可读、是文件与 ≤`AVATAR_MAX_BYTES`（5 MiB），不限扩展名。Gateway `GET /api/characters/avatars`（no-store + `to_thread`）调用；声明无效仅条目级 error，不阻断。
 - `component/approval/system.py`：`ApprovalSystem` 已改为 AsyncSystem，依赖 RuntimeSystem、LLMProfileStore，持有唯一模式Store、后端管理器和白名单Store。类型化入口是 `Application.current().get_system(ApprovalSystem)`；模型审批作为请求级任务等待，生命周期及清理失败继续传播，完整应用装配尚待后续阶段。
@@ -270,8 +273,8 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/llm_profile_store.py`：`LLMProfileStore` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`），无参构造，由 `virtual_awake` 取得 `RuntimeContext` 确定 agentspace 路径并加载 v2 根对象。Store 自身创建唯一的共享 `threading.RLock`，通过 `locked()` 上下文管理器暴露同一把锁，替代原 `Application.profile_lock`；SessionMetadataService、审批后端及 Gateway Profile CRUD 经此接口进入事务边界。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工、审批 Profile、全局元数据 Profile、工具链摘要 Profile以及图片/音频/视频三条全局多模态回退引用均使用根列表中的实例引用，Gateway 通过 `get_system(LLMProfileStore)` 的单 Profile CRUD 和全局用途引用接口修改。写入先准备候选根、成功保存后提交共享内存，不再捕获任意异常做内存回滚；更新通过显式两阶段复制并重连引用图准备候选，提交保留原 Profile 实例身份和引用身份。删除可在同次根保存中清空审批/元数据/工具链摘要引用，但其他 Profile 与全局多模态引用仍阻止删除。不存在的文件允许初始化，已有文件缺 v2 key 直接失败；不启用未知存储字段跳过，缺失字段仍遵循 easysave/Pydantic 默认值语义。存储层保留外层临时文件原子替换，不做备份清理专属重试；Profile 文件与会话名称指针不构成跨文件事务。
 - 前端模型配置抽屉通过“模型配置 / 全局配置引用”分页分别管理 Profile 定义和全局用途引用。模型定义按客户端、端点纵向分组，详情单项展开、先只读后编辑；切分页保留内存草稿，离开未保存配置时明确确认。会话待用 Profile 选择只在顶部栏修改，浏览器按会话独立保存名称；无本地覆盖时通过 `GET /api/sessions/{id}/llm-profile` 读取持久化指针及既有全局最近使用回退。选择本身不写服务端，发送到主会话或重新生成才提交；`resume` 保持后端当前配置。全局配置引用页还管理工具链摘要 Profile 与图片、音频、视频三条独立回退引用，状态分别经 `/api/toolchain-summary/profile`、`/api/modality/profiles` 和 `toolchain_summary_profile_changed`、`modality_profile_changed` 同步。旧浏览器全局选择不猜测迁移到任何会话。
 - `system/session_metadata.py`：`SessionMetadataService` 已改为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`LLMProfileStore`），无参构造，由 `virtual_awake` 取得依赖并创建本服务的 `SessionStore`。不创建独立 Profile 事务锁，原 `Application.profile_lock` 语义统一经 `LLMProfileStore.locked()` 访问同一把共享 RLock。全局元数据 Profile优先；未配置时按目标会话持久化的活动 Profile回退。统一生成标题、标签和摘要，并为分支、合并与自动旋转提供摘要保障。明确配置不可用时不静默回退。工具链摘要 Profile（`LLMProfileData.toolchain_summary_profile`）为 `CompressHistory` 和独立 `CompressToolChains` 折叠工具链生成紧凑链摘要（`generate_tool_chain_summary`），未配置时回退到目标会话活动 Profile；解析/校验/客户端创建与元数据共用 `_resolve_session_profile_fallback`、`_assert_profile_usable`、`_create_client_for_profile`，模板为 `toolchain_summary.txt` / `toolchain_summary_input.txt`。五个完整异步操作通过 `TaskOwner.run_request()` 登记，包含读取、模型调用、解析与必要写盘；普通请求异常交回原业务边界，用户取消不被误报为整个应用失败。首条用户消息自动标题经同步入口 `maybe_generate_first_title`（路由层判定无标题+非空文本后调用）：同一同步代码段内检查+登记 per-session 防重集合，`task_owner.create` 派发一次性后台任务（不套 run_request）；LLM 失败回退 30 字符截取，停机竞态静默放弃，`CancelledError` 传播，finally 对称清理防重。`close_admission()` 在 STOPPING 期间仍可封闭接收，`cancel_pending()` 等待实际任务及结果交接，生命周期/清理失败继续传播。关闭消息刷新不调用生成接口。
-- `abstract/tools/registry.py`：`ToolRegistry` 已迁移为依赖 RuntimeSystem 的 AsyncSystem，模块级单例与兼容代理已移除。异步工具通过 TaskOwner.run_request 托管；同步工具由唯一执行器持有真实 Future，取消等待不删除仍在运行的线程登记。停止分发、请求取消、真实工作等待及线程池异步关闭分别核对结局，生命周期失败继续传播。工具声明/发现已在 S20 迁移为 `ToolDiscoverySystem` 的显式 `register_tools(registry, ui_events)` 协议。
-- `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 component 子包与可选 custom_tools，显式调用同步 `register_tools` 并登记唯一模块集合；最后注册 MCP 管理工具和工具集元数据，不重新建立 MCP 连接。语法/读取/导入/注册错误及旧全局声明直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
+- `abstract/tools/registry.py`：`ToolRegistry` 已迁移为依赖 RuntimeSystem 的 AsyncSystem，模块级单例与兼容代理已移除。工具表直接保存 `BaseTool` 对象，工具集元数据直接使用 `BaseToolSet`；`register_toolset(toolset, merge=True)` 装载/合并声明，`register_tool(tool, replace=True)` 供 MCP 动态刷新原子替换，查询入口为 `get_tool`/`get_toolset`。`async_dispatch(execution)` 执行 before/handle，`async_postprocess(execution)` 在结果提交后托管 after，二者复用同一 TaskOwner 与真实同步 Future。异步工具通过 TaskOwner.run_request 托管；同步工具由唯一执行器持有真实 Future，取消等待不删除仍在运行的线程登记。停止分发、请求取消、真实工作等待及线程池异步关闭分别核对结局，生命周期失败继续传播。
+- `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 component 子包与可选 custom_tools，AST 只识别顶层固定名称 `TOOLSET` 并登记唯一模块集合；最后注册 MCP 管理工具和固定 `BaseToolSet` 工具集元数据，不重新建立 MCP 连接。退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入与导入期注册直接拒绝；读取/语法/导入/注册错误直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
 - `system/lifecycle.py`：`TaskOwner.create/track` 负责后台任务，`run_request` 负责有明确结果等待方的请求。`cancel` 登记预期取消并复用固定截止；`is_idle` 同时要求任务结束和交接完成，取消后仍运行的任务不能从所有权记录中移除。原生线程/子进程仍由各 System 持有真实资源，不由异步包装任务的结束替代。
 - `system/context.py`：`RuntimeContext`（`BaseModel`，不可变运行时配置）。全局 `set_runtime_context`/`get_runtime_context` 单例入口已删除；配置唯一真相来源由 `RuntimeSystem` 持有，经 `app.get_system(RuntimeSystem).context` 取得。
 - `system/sandbox.py`：`Sandbox` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem` 与 `SubprocessRunner`），无参构造，`virtual_awake` 取得依赖并加载动态空间；由 Application 在 P22 装配后经 `app.get_system(Sandbox)` 取得。路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；`Sandbox.read()` 按 UTF-8、系统编码和 Windows 常见编码自动探测，返回准确原文，分页只按 LF 定位原文行片段，保留 CRLF、孤立 CR 与末尾换行；工具 `Read` 在其上独立应用正文单行展示截断，未截断内容保持原文。编辑和 LSP 使用的 `limit=0` 路径仍返回完整解码原文。`write()` / `append()` 禁用平台换行转换，按传入文本原样写入 UTF-8，避免 Windows 上 `PatchEdit` 写回时给已有 CRLF 增加一个 CR；`PatchEdit` 按原文匹配与替换，已有异常换行不自动修复。动态配置位于 workspace 根且由唯一 Sandbox 实例持有。动态沙盒空间 Tab 通过 Gateway REST 复用该单例。所有调用方（含 `component/tools/filesystem.py`、`custom_tools/read_forward.py`）统一经 `app.get_system(Sandbox)` 取得，不再从 `filesystem._s` 跨工具引用或 `Application.current().sandbox` 旧属性获取。
@@ -359,11 +362,15 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 
 保留目标 user 和更早历史、草稿、待发送记录、显示偏好及当前活动空占位；目标 user 的上下文扩展字段同步更新。跨截断范围或无法证明结果索引的工具调用卡片正文与已加载标记失效，后续页重取；后到旧历史请求和旧活动轮询不能重新带回被删除内容。`replaceSkeleton` 与实时关联/结束事件生命周期解耦，避免异步补取骨架清掉本代际的新流。
 
-重新生成失败或中断不恢复已删除旧回复。POST 终态只可修改仍属于同一本地请求和 WebSocket 实例的提示；截断确认后网络/HTTP 失败不能将服务端活动置空闲，未确认时也只能清理未被收编的本地乐观空占位。后端协议、持久化、文件/变量池等副作用和通用重连策略均不改变。漏通知且数量不下降的自动重连风险明确延期，不宣称本轮已解决；完整页面刷新仍沿原初始化取得权威 History。
+重新生成失败或中断不恢复已删除旧回复。POST 终态只可修改仍属于同一本地请求和 WebSocket 实例的提示；截断确认后网络/HTTP 失败不能将服务端活动置空闲，未确认时也只能清理未被收编的本地乐观空占位。后端协议、持久化、文件/变量池等副作用均不改变。该远程改动原先延期的“漏通知且数量不下降”重连风险，在本次合并中由下节历史更新链路的首次连接完整重载处理；局部截断通知与完整重载指令各自保留，不互相替换。
 
 本次只完成前端源码与开发文档实施及定向静态审阅，未运行校验、构建或应用；具体用户验收见 `.tasks/2026-10-15_3-regenerate-stale-messages.md`。
 
 ---
+
+## 历史更新指令
+
+已提交历史发生非追加变更时，后端可发送仅含 `type=history_updated` 与 `session_id` 的类型化指令；当前接入两种压缩工具。前端立即取消旧历史请求、提高请求代际，使旧骨架/正文/关联/资源缓存失效，重新取得完整骨架与按需正文；这不刷新页面，不重放工具，不依赖消息数是否减少。指令之后的新实时行和关联、输入草稿、排队消息及会话业务状态保留。重载失败保持完整重载标志，重试不会再次清掉新流；每次物理连接首次历史同步也完整读取，覆盖断线漏通知的历史缓存恢复。批次后缀仍只用 `tool_calls_discarded`，普通追加和轮次状态仍用 `history_sync`。该通知与网络发送不构成事务或可靠投递确认，源码已接入，运行验收仍待用户执行。
 
 ## 开发者阅读顺序建议
 

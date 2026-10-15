@@ -1,15 +1,21 @@
 """强制停止运行中的 taskagent。
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。父 Agent 通过此工具强制终止指定 taskagent 会话，不保存历史。
+模块声明顶层 ``TOOLSET`` 对象，由 ToolDiscoverySystem 发现并注册。
+父 Agent 通过此工具强制终止指定 taskagent 会话，不保存历史。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
@@ -40,10 +46,9 @@ async def _handle_stop_taskagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Failed to stop taskagent: {exc}")
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register stop taskagent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class StopTaskAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="StopTaskAgent",
         toolset="multiagent",
         schema={
@@ -102,8 +107,13 @@ On failure:
                 "required": ["session_id"],
             },
         },
-        handler=_handle_stop_taskagent,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
         availability=ToolAvailability.MAIN,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_stop_taskagent(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(StopTaskAgentTool(),))

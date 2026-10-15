@@ -1,10 +1,9 @@
-"""Strict AST discovery of explicit tool declarations and their lifecycle."""
+"""Strict AST discovery of object tool declarations and their lifecycle."""
 
 from __future__ import annotations
 
 import ast
 import importlib
-import inspect
 import logging
 import stat
 import sys
@@ -20,58 +19,61 @@ from entity.constant import (
     MCP_TOOL_MODULE,
     Namespace,
     TOOL_DISCOVERY_EXCLUDED_FILENAMES,
-    TOOL_REGISTRATION_ENTRYPOINT,
+    TOOLSET_DECLARATION_NAME,
 )
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from system.pathutils import find_repo_root, get_agent_dir
 from system.runtime import RuntimeSystem
 from .registry import ToolRegistry
+from .tool import BaseToolSet
 from .toolsets_meta import register_builtin_toolset_descriptions
-from .ui_event_router import UIEventRouter
 
 logger = logging.getLogger(__name__)
 
 
 class ToolModule(Protocol):
-    """Static registration contract for dynamically imported tool modules."""
+    """Fixed object declaration exposed by dynamically imported modules."""
 
-    def register_tools(self, registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-        ...
+    TOOLSET: BaseToolSet
 
 
-def _module_registers_tools(module_path: Path) -> bool:
-    """Find one synchronous entrypoint; reject legacy declarations and invalid source."""
+def _module_declares_toolset(module_path: Path) -> bool:
+    """Find TOOLSET and reject retired or import-time registration contracts."""
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-    declarations = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == TOOL_REGISTRATION_ENTRYPOINT
-    ]
-    # 声明导入及顶层执行均纳入检查；不扫描函数或类定义内部的合法注册。
+    declarations = 0
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            declarations += sum(
+                isinstance(target, ast.Name) and target.id == TOOLSET_DECLARATION_NAME
+                for target in node.targets
+            )
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            declarations += node.target.id == TOOLSET_DECLARATION_NAME
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "register_tools":
+            raise ValueError(f"Retired tool registration entrypoint in {module_path}; declare TOOLSET")
+    if declarations > 1:
+        raise ValueError(f"Multiple TOOLSET declarations in {module_path}")
+    # 不遍历工具类和函数主体；导入期的注册、全局注册表及旧 UI 路由导入直接拒绝。
     pending = list(tree.body)
     while pending:
         node = pending.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
-        if isinstance(node, ast.ImportFrom) and node.module in (
-            "abstract.tools.registry", "abstract.tools.ui_event_router",
-        ):
-            if any(alias.name in ("registry", "ui_event_router") for alias in node.names):
-                raise ValueError(f"Legacy global tool registry import in {module_path}; use register_tools")
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "abstract.tools.ui_event_router":
+                raise ValueError(f"Retired UI event router import in {module_path}; use tool after_handle")
+            if node.module == "abstract.tools.registry" and any(alias.name == "registry" for alias in node.names):
+                raise ValueError(f"Legacy global tool registry import in {module_path}; declare TOOLSET")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             receiver = node.func.value
             if (
-                node.func.attr == "register"
+                node.func.attr in ("register", "register_tool", "register_toolset")
                 and isinstance(receiver, ast.Name)
                 and receiver.id in ("registry", "ui_event_router")
             ):
-                raise ValueError(f"Import-time tool registration in {module_path}; use register_tools")
+                raise ValueError(f"Import-time tool registration in {module_path}; declare TOOLSET")
         pending.extend(ast.iter_child_nodes(node))
-    if not declarations:
-        return False
-    if len(declarations) != 1 or not isinstance(declarations[0], ast.FunctionDef):
-        raise TypeError(f"{module_path} must define one synchronous register_tools function")
-    return True
+    return declarations == 1
 
 
 def _iter_tool_paths(directory: Path) -> Iterator[Path]:
@@ -88,62 +90,40 @@ def _iter_tool_paths(directory: Path) -> Iterator[Path]:
 
 
 def _register_module(
-    module_name: str,
-    *,
-    registry: ToolRegistry,
-    ui_events: UIEventRouter,
-    loaded_modules: set[str],
+    module_name: str, *, registry: ToolRegistry, loaded_modules: set[str],
 ) -> None:
     if module_name in loaded_modules:
         raise LifecycleFailure(f"Tool module already registered in this discovery: {module_name}")
-    # 对固定声明进行AST检查，但实际模块可能被动态插件装饰器替换；
-    # 此处的签名/返回值检查仅针对外部扩展边界，不反射业务System。
+    # 动态插件边界只读取固定 TOOLSET 属性，不做签名内省或全局注册表注入。
     module = cast(ToolModule, importlib.import_module(module_name))
-    register = module.register_tools
-    if not callable(register) or inspect.iscoroutinefunction(register):
-        raise TypeError(f"{module_name}.register_tools must be a synchronous callable")
-    result = register(registry, ui_events)
-    if result is not None:
-        if inspect.iscoroutine(result):
-            result.close()
-        raise TypeError(f"{module_name}.register_tools must return None")
+    toolset = module.TOOLSET
+    if not isinstance(toolset, BaseToolSet):
+        raise TypeError(f"{module_name}.{TOOLSET_DECLARATION_NAME} must be a BaseToolSet")
+    registry.register_toolset(toolset, merge=True)
     loaded_modules.add(module_name)
     logger.info("Registered tool module %s", module_name)
 
 
 def _discover_tools(
-    tools_path: Path,
-    package_prefix: str,
-    *,
-    registry: ToolRegistry,
-    ui_events: UIEventRouter,
-    loaded_modules: set[str],
+    tools_path: Path, package_prefix: str, *, registry: ToolRegistry, loaded_modules: set[str],
 ) -> list[str]:
     registered: list[str] = []
     for path in _iter_tool_paths(tools_path):
-        if not _module_registers_tools(path):
+        if not _module_declares_toolset(path):
             continue
         parts = path.relative_to(tools_path).with_suffix("").parts
         module_name = f"{package_prefix}.{'.'.join(parts)}"
-        _register_module(
-            module_name, registry=registry, ui_events=ui_events,
-            loaded_modules=loaded_modules,
-        )
+        _register_module(module_name, registry=registry, loaded_modules=loaded_modules)
         registered.append(module_name)
     return registered
 
 
 def discover_builtin_tools(
-    tools_dir: str,
-    package_prefix: str,
-    *,
-    registry: ToolRegistry,
-    ui_events: UIEventRouter,
+    tools_dir: str, package_prefix: str, *, registry: ToolRegistry,
 ) -> list[str]:
-    """Import and register tools in path order, propagating all discovery failures."""
+    """Import and register object declarations in path order; failures propagate."""
     return _discover_tools(
-        Path(tools_dir).resolve(), package_prefix,
-        registry=registry, ui_events=ui_events, loaded_modules=set(),
+        Path(tools_dir).resolve(), package_prefix, registry=registry, loaded_modules=set(),
     )
 
 
@@ -167,7 +147,7 @@ class ToolDiscoverySystem(AsyncSystem):
         from system.shell_manager import ShellManager
 
         super().__init__(dependencies=(
-            RuntimeSystem, ToolRegistry, UIEventRouter, Sandbox, ShellManager,
+            RuntimeSystem, ToolRegistry, Sandbox, ShellManager,
             AgentspaceService, SessionMetadataService, ApprovalSystem,
             LSPManager, BrowserSystem, ModalityCapabilitySystem, CronRouter,
             SessionManager, SubAgentOrchestrator, DynamicEndpointSystem, MCPSystem,
@@ -181,7 +161,6 @@ class ToolDiscoverySystem(AsyncSystem):
         return frozenset(self._loaded_modules)
 
     async def virtual_awake(self) -> None:
-        from component import mcp_tools
         from system.sandbox import Sandbox
 
         if self._started:
@@ -189,7 +168,6 @@ class ToolDiscoverySystem(AsyncSystem):
         self._started = True
         runtime = self.get_system(RuntimeSystem)
         registry = self.get_system(ToolRegistry)
-        ui_events = self.get_system(UIEventRouter)
         sandbox = self.get_system(Sandbox)
         if runtime.state != ApplicationState.STARTING:
             raise ApplicationStoppingError("Tool discovery requires application startup")
@@ -202,8 +180,7 @@ class ToolDiscoverySystem(AsyncSystem):
             for package in BUILTIN_TOOL_PACKAGES:
                 _discover_tools(
                     agent_dir.joinpath(*package.split(".")), package,
-                    registry=registry, ui_events=ui_events,
-                    loaded_modules=self._loaded_modules,
+                    registry=registry, loaded_modules=self._loaded_modules,
                 )
             custom_dir = sandbox.get_base(Namespace.CUSTOM_TOOLS)
             # 只有明确不存在的可选扩展目录允许跳过；非目录和权限失败继续传播。
@@ -214,13 +191,9 @@ class ToolDiscoverySystem(AsyncSystem):
             else:
                 _discover_tools(
                     custom_dir, Namespace.CUSTOM_TOOLS.value,
-                    registry=registry, ui_events=ui_events,
-                    loaded_modules=self._loaded_modules,
+                    registry=registry, loaded_modules=self._loaded_modules,
                 )
-            if MCP_TOOL_MODULE in self._loaded_modules:
-                raise LifecycleFailure("MCP management tools were already registered")
-            mcp_tools.register_tools(registry, ui_events)
-            self._loaded_modules.add(MCP_TOOL_MODULE)
+            _register_module(MCP_TOOL_MODULE, registry=registry, loaded_modules=self._loaded_modules)
             register_builtin_toolset_descriptions(registry)
             if runtime.state != ApplicationState.STARTING:
                 raise ApplicationStoppingError("Application stopped during tool discovery")

@@ -364,6 +364,12 @@ class MultiAgentWorker:
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:
+                from abstract.tools.registry import ToolRegistry
+                from entry.tool_execution import accept_tool_batch
+                resp = await accept_tool_batch(
+                    resp, self._loop.loop.app.get_system(ToolRegistry), self._sink,
+                    self._loop.loop.session_id, stream_id,
+                )
                 self._loop.loop.set_main_session_activity_phase(
                     self._activity_id,
                     MainSessionActivityPhase.waiting_tool,
@@ -411,7 +417,12 @@ class MultiAgentWorker:
                     await emit_history_links(self._sink, self._loop.loop.session_id, links=tool_links)
 
                 async def emit_tool_card_result_link(tool_msg: ToolResultMessage) -> None:
-                    target = tool_card_targets.get(tool_msg.tool_call_id)
+                    target = None
+                    for current_index, message in enumerate(self._loop.loop.history.iter_messages()):
+                        if isinstance(message, CharacterConversationMessage) and message.tool_calls:
+                            for tool_index, call in enumerate(message.tool_calls):
+                                if call.id == tool_msg.tool_call_id:
+                                    target = history_row_id(current_index, SessionHistoryRowKind.tool_card, tool_index)
                     if target is None:
                         logger.warning(
                             "Missing tool card target | session=%s tool_call_id=%s",
@@ -433,6 +444,9 @@ class MultiAgentWorker:
 
                 # 3. 执行工具，写入结果到 History
                 #    tool_call/tool_result 前端事件由 ToolExecutor 内部统一发送，此处不再重复
+                postprocessing = False
+                committed_tool_ids: set[str] = set()
+                stop_current_round = False
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
@@ -442,18 +456,32 @@ class MultiAgentWorker:
                             character_name=self.character_name,
                             llm_profile=self._llm_profile,
                             activity_id=self._activity_id,
+                            stream_id=stream_id,
                         )
 
                         # 先保存共享History及预订，再发送通知。
                         tool_msg = prepared.message
                         tool_result_index = self._loop.loop.store_tool_result(prepared)
-                        from abstract.tools.ui_event_router import UIEventRouter
-                        await prepared.emit(self._sink, self._loop.loop.app.get_system(UIEventRouter))
-                        await emit_tool_card_result_link(tool_msg)
+                        committed_tool_ids.add(tc.id)
+                        postprocessing = True
+                        effect = await self._tool_executor.postprocessor.after_committed(prepared, self._sink)
+                        postprocessing = False
+                        if not effect.suppress_tool_result_event:
+                            await emit_tool_card_result_link(tool_msg)
 
-                        # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                         full_messages.append(tool_msg)
                         _executed_tool_msgs.append(tool_msg)
+                        if effect.stop_current_round or effect.loop_replaced:
+                            self._loop.loop.complete_unexecuted_tool_calls(
+                                resp.tool_calls, committed_tool_ids, self.character_name, "postprocess",
+                            )
+                            if effect.completion_message:
+                                self._loop.loop.append_assistant_text(effect.completion_message)
+                                await self._sink.emit_assistant_message(
+                                    self._loop.loop.session_id, effect.completion_message, self.character_name,
+                                )
+                            stop_current_round = True
+                            break
 
                     # 延迟注入 follow_up 消息
                     for tm in _executed_tool_msgs:
@@ -463,9 +491,9 @@ class MultiAgentWorker:
                                 self._loop.loop.save_history(self._loop.loop.session_id)
                                 full_messages.append(fu_msg)
                 except asyncio.CancelledError:
-                    # 强制取消仍需补齐共享 History 中未执行的 tool_calls。
+                    # 强制取消仍需补齐共享 History 中未执行的已接受调用。
                     _assistant_ids = {t.id for t in resp.tool_calls}
-                    _executed_ids = {
+                    _executed_ids = committed_tool_ids | {
                         m.tool_call_id
                         for m in self._loop.loop.history.iter_messages()
                         if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
@@ -481,7 +509,7 @@ class MultiAgentWorker:
                         await emit_tool_card_result_link(tool_msg)
                     raise
                 except Exception as error:
-                    if requires_lifecycle_propagation(error):
+                    if postprocessing or requires_lifecycle_propagation(error):
                         raise
                     # 普通异常补齐未执行的 tool_calls 后返回既有降级结果。
                     logger.exception(
@@ -516,7 +544,7 @@ class MultiAgentWorker:
                         last_metrics=resp.metrics,
                     )
                 # 立即停止 worker，不再进入下一轮 LLM 调用
-                if self._loop.loop.is_interrupted():
+                if stop_current_round or self._loop.loop.is_interrupted():
                     logger.info(
                         "Worker interrupted after tool execution | session=%s character=%s turn=%d",
                         self._loop.loop.session_id, self.character_name, turn,
@@ -534,6 +562,12 @@ class MultiAgentWorker:
                         last_metrics=resp.metrics,
                     )
 
+                full_messages = [
+                    CharacterSystemMessage(
+                        role=Role.SYSTEM, character_name=self.character_name, content=prompt,
+                    )
+                    for prompt in self._system_prompts
+                ] + self._loop.loop.history.get_messages(current_character_agent=self.character_name)
                 self._turn_counter.value += 1
                 continue
 

@@ -1,6 +1,9 @@
 """全局动态沙盒空间管理工具。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``AddSandboxSpaceTool`` 与 ``RemoveSandboxSpaceTool`` 实例；``handle`` 复用无状态
+``_handle_add_sandbox_space`` / ``_handle_remove_sandbox_space`` 函数，并显式传入
+``ToolExecution.context``。
 两个工具仅在 fast 模式可见，均为 critical；普通模式主Agent与多Agent模式
 主Agent可调用。随意聊聊会话不加载 ``sandbox`` 工具集。
 """
@@ -9,8 +12,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import DynamicSandboxSpace, ToolAvailability, ToolDangerLevel
 from system.application import Application
 from system.runtime import RuntimeSystem
@@ -194,27 +196,51 @@ This critical operation revokes future logical-path resolution for the named spa
 }
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── 工具类与工具集 ───────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register dynamic sandbox space management tools."""
-    del ui_events  # sandbox space tools have no UI event handlers
-    registry.register(
-        name="AddSandboxSpace",
-        toolset="sandbox",
-        schema=_ADD_SANDBOX_SPACE_SCHEMA,
-        handler=_handle_add_sandbox_space,
-        check_fn=_fast_mode_available,
-        danger_level=ToolDangerLevel.critical,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
 
-    registry.register(
-        name="RemoveSandboxSpace",
-        toolset="sandbox",
-        schema=_REMOVE_SANDBOX_SPACE_SCHEMA,
-        handler=_handle_remove_sandbox_space,
-        check_fn=_fast_mode_available,
-        danger_level=ToolDangerLevel.critical,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+class AddSandboxSpaceTool(BaseTool):
+    """新增全局动态沙盒空间。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="AddSandboxSpace",
+            toolset="sandbox",
+            schema=_ADD_SANDBOX_SPACE_SCHEMA,
+            check_fn=_fast_mode_available,
+            danger_level=ToolDangerLevel.critical,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(
+            result=_handle_add_sandbox_space(execution.arguments, execution.context)
+        )
+
+
+class RemoveSandboxSpaceTool(BaseTool):
+    """删除全局动态沙盒空间。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RemoveSandboxSpace",
+            toolset="sandbox",
+            schema=_REMOVE_SANDBOX_SPACE_SCHEMA,
+            check_fn=_fast_mode_available,
+            danger_level=ToolDangerLevel.critical,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(
+            result=_handle_remove_sandbox_space(execution.arguments, execution.context)
+        )
+
+
+TOOLSET = BaseToolSet(
+    name="sandbox",
+    tools=(
+        AddSandboxSpaceTool(),
+        RemoveSandboxSpaceTool(),
+    ),
+)

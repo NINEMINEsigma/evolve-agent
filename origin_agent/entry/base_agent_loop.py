@@ -23,6 +23,7 @@ from pydantic import BaseModel, PrivateAttr
 from entity.puretype import (
     Role,
     ToolAvailability,
+    ToolCallRequest,
     SessionMessageEntry,
     SessionHistorySkeletonResponse,
     SessionHistoryPageResponse,
@@ -206,6 +207,8 @@ class ToolContext(BaseModel):
     session_id: str = ""
     # 当前回复轮次的唯一 ID；所有明确 ws: 文件接触共用该 ID。
     round_id: str
+    # 非持久化 LLM 流标识，用于撤销当前流中未接受或被压缩的工具卡片。
+    stream_id: str = ""
     # 当前执行 agent 的角色名 — 多 agent 模式下由 ToolExecutor/Worker 注入，
     # 空 = 未指定（handler 回退到 loop.current_character_agent）
     character_name: str = ""
@@ -788,11 +791,7 @@ class BaseAgentLoop(ABC):
 
 
     def store_tool_result(self, prepared: PreparedToolResult) -> int:
-        """同步提交真实消息及其输入预订；成功保存之前不得回显。
-
-        携带调用级进化意图的结果在实际保存成功后才请求关闭（D6）；
-        保存失败或中断占位不产生进化成功退出。
-        """
+        """同步提交真实消息及输入预订；保存成功后才允许工具专属后处理。"""
         if self._history_failure is not None:
             prepared.abort()
             raise self._history_failure
@@ -807,9 +806,23 @@ class BaseAgentLoop(ABC):
         except BaseException:
             prepared.abort()
             raise
-        if prepared.evolution_requested:
-            self.app.get_system(RuntimeSystem).request_shutdown(ShutdownReason.EVOLUTION)
+        if prepared.execution is not None:
+            prepared.execution.history_index = index
+            prepared.execution.result_message = prepared.message
         return index
+
+    def complete_unexecuted_tool_calls(
+        self, accepted_tool_calls: list[ToolCallRequest], executed_tool_call_ids: set[str],
+        character_name: str, phase: str,
+    ) -> None:
+        """Pair accepted declarations only, preserving each Loop's storage policy."""
+        from entry.tool_pairing import collect_unexecuted_tool_results
+        from entry.tool_post_dispatch import PreparedToolResult
+
+        for message in collect_unexecuted_tool_results(
+            self.history, accepted_tool_calls, executed_tool_call_ids, character_name, phase,
+        ):
+            self.store_tool_result(PreparedToolResult(message=message))
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """移除 History 中最后一条 user 消息并持久化。"""
@@ -1911,7 +1924,7 @@ class IMainSessionLoop(ABC):
         """返回工具结果字段注入器。默认返回 None（无注入）。
 
         ToolExecutor.execute 在每次工具调用时查询此方法，
-        将返回的注入器传给 finalize_tool_result 的 field_injector 参数。
+        将返回的注入器传给 prepare_tool_result 的 field_injector 参数。
         SP-4 的 SessionMessageQueue 将通过重写此方法返回队列的 drain 回调，
         使队列在工具链中消费时能向工具结果 dict 注入内部 _queued_messages 字段，
         由工具结果事件和 History 投影单独传给前端渲染。

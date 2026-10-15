@@ -1,6 +1,6 @@
 """窗口截屏工具 — 通过 PrintWindow 后台截取指定窗口的屏幕内容。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具类通过模块级 ``TOOLSET`` 对象声明 ``ScreenCapture``。
 
 仅兼容 Windows。使用 ``ctypes`` 调用 Win32 API 实现后台截屏
 （窗口被遮挡时仍可截取），通过 PIL 保存图片到 agentspace。
@@ -15,8 +15,8 @@ import logging
 import time
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.sandbox import SandboxError
 
 if TYPE_CHECKING:
@@ -218,16 +218,10 @@ def _handle_screen_capture(args: dict[str, Any]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# schema 常量
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register ScreenCapture into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="ScreenCapture",
-        toolset="automation",
-        schema={
+_SCREEN_CAPTURE_SCHEMA = {
         # 通过 HWND 后台截取窗口内容并保存到 agentspace（窗口被遮挡时仍可截取）。
         # 前置条件：仅 Windows；需安装 Pillow；需先用 WindowFind 获取 HWND。
         # 调用效果：使用 PrintWindow 后台渲染窗口内容，保存为 PNG 到沙箱。
@@ -277,6 +271,26 @@ The `path` is a sandbox logical path (ws: namespace). Use it with `TemplateMatch
             },
             "required": ["hwnd"],
         },
-    },
-    handler=_handle_screen_capture,
-    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 注册
+# ---------------------------------------------------------------------------
+
+class ScreenCaptureTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="ScreenCapture",
+            toolset="automation",
+            schema=_SCREEN_CAPTURE_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_screen_capture(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="automation", tools=(ScreenCaptureTool(),))

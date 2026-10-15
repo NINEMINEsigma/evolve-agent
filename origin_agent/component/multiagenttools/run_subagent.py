@@ -5,8 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
 from subagent.profile import CharacterProfileError, CharacterProfileResolver
@@ -81,10 +87,9 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Failed to launch subagent: {exc}")
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register run subagent tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class RunSubAgentTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="RunSubAgent",
         toolset="multiagent",
         schema={
@@ -175,8 +180,13 @@ The sub-agent can use the tools available to the SUBAGENT scope. The same charac
                 "required": ["name", "initial_prompt", "user_name", "message_type"],
             },
         },
-        handler=_handle_run_subagent,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
         availability=ToolAvailability.MAIN,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_run_subagent(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="multiagent", tools=(RunSubAgentTool(),))

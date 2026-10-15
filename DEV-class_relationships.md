@@ -1,5 +1,7 @@
 # Agent Loop 类关系图
 
+> **迁移前基线说明**：本文件的继承关系图、`## 字段归属（已确认）` 表中的 `_toolsets` 行，以及 `### 工具注册表生命周期迁移（S10）`、`### 工具显式注册与发现生命周期迁移（S20）` 两节，记录的是对象工具化迁移之前的实现。自 2026-10-15 起，唯一权威的工具对象与四阶段执行契约见文末 `### 对象工具与四阶段执行迁移（2026-10-15，权威）`；`ToolEntry`/`ToolsetEntry` 元数据镜像、`register_tools(registry, ui_events)` 函数注册协议、`registry.register()` 顶层注册与 `UIEventRouter` 均已退役。本文件其余历史章节保持原文，不因本次迁移改写。
+
 ## 继承关系（mermaid）
 
 ```mermaid
@@ -1389,5 +1391,57 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 工具请求按 skeleton 行和 `tool_call_id` 定位，结果用 `toolCard.result.historyIndex` 校验范围；实时结果无索引只可引用同请求的正典结果证据，无法证明时使正文与 loaded 标记失效而非保留旧工具附件。generation 复用既有 History 请求、活动轮询和滚动取消边界，无第二份 History 或活动真相源。
 
 本次未新增 Application/AsyncSystem、Agent Loop protected 字段、跨类私有访问、后端接口、依赖或存储版本；通用自动重连策略不变，漏通知且数量未下降的恢复问题明确延期。源码已按 PLAN v2.1 实施并定向静态审阅，未运行类型检查、构建或应用，用户验收仍待完成。
+
+### 对象工具与四阶段执行迁移（2026-10-15，权威）
+
+> 本节按 `.tasks/2026-10-14_3_oop-tool-lifecycle.md` 的计划 v8 记录当前源码契约；本节与文末顺序均为追加，未改写本文件其余历史章节。前文继承关系图、字段归属表 `_toolsets` 行与 S10/S20 两节描述迁移前实现，已在该节顶部统一标注。
+
+**运行时类与四阶段**
+
+- `abstract/tools/tool.py` 新增运行时类，均为带方法/显式构造的非持久化对象，不进入 easysave，也不是 `BaseModel`：
+  - `BaseTool`（ABC）：声明 `name`、`toolset`、`schema`、`is_async`、`description`、`max_result_size_chars`、`dynamic_schema_overrides`、`danger_level`、`no_timeout`、`availability`、`resets_turn_counter`、`accepts_following_calls`、`check_fn`、`requires_env`；阶段方法为 `before_handle(execution)`（工具调用前）、抽象 `handle(execution)`（工具主体，返回 `ToolHandlerResult`）、`after_handle(execution)`（工具调用后处理，默认返回空 `ToolPostprocessEffect`），另有 `ensure_arguments()`。
+  - `BaseToolSet`：工具集对象，持有 `tools: tuple[BaseTool, ...]`、`description`、`usage_guide`、`loaded_by_default`、`check_fn`、`requires_env`；构造时校验每个工具的 `toolset` 与集合名一致；`preheat()` 在注册时对每个声明执行一次可用性检查，不启动浏览器/语言服务器等重量资源。
+  - `ToolExecution`：单次调用材料，字段为 `tool`、`arguments`、`context`、`tool_call_id`、`result`、`state`、`body_executed`、`body_completed_normally`、`history_index`、`result_message`；材料属于单次调用，禁止写入共享工具实例、Application 或持久化存储。
+  - `ToolHandlerResult(result, state)`、`ToolPostprocessEffect`（`suppress_tool_result_event`、`discarded_tool_call_ids`、`replacement_result`、`stop_current_round`、`loop_replaced`、`evolution_requested`、`completion_message`）。
+- `entity/puretype/tool.py::ToolBatchDecision`（消息前纯类型）承载 `accepted`、`discarded`、`cutoff_tool_call_id`；由 `ToolRegistry.plan_tool_batch()` 生成，声明边界在审批与执行前确定。
+
+**注册表与发现**
+
+- `abstract/tools/registry.py::ToolRegistry`（依赖 RuntimeSystem 的 AsyncSystem）：`_tools: dict[str, BaseTool]` 直接保存对象，`_toolsets: dict[str, BaseToolSet]` 直接保存工具集对象，`_tool_names_by_toolset: dict[str, set[str]]` 是运行期成员唯一索引（不从声明 `tuple` 猜测 MCP 当前成员），`_preheated_toolsets` 保证每个声明对象只预热一次。
+- 写入入口：`register_toolset(toolset: BaseToolSet, *, merge: bool = False)` 装载或合并声明（分布式声明传 `merge=True` 合并描述/usage_guide/check_fn/requires_env），`register_tool(tool: BaseTool, *, replace: bool = False)` 供 MCP 动态刷新传 `replace=True` 原子替换同名工具；跨工具集名称冲突快速失败。查询入口为 `get_tool`/`get_toolset`，不存在 `get_entry`/`get_toolset_entry` 或函数式 `register`。
+- `abstract/tools/toolsets_meta.py`：固定 `BaseToolSet` 对象元数据（`BUILTIN_TOOLSETS`），经 `register_builtin_toolset_descriptions(registry)` 以 `register_toolset(toolset, merge=True)` 合并。
+- `abstract/tools/discover.py::ToolDiscoverySystem`（依赖 Runtime、ToolRegistry、Sandbox、ShellManager、AgentspaceService、SessionMetadataService、ApprovalSystem、LSPManager、BrowserSystem、ModalityCapabilitySystem、CronRouter、SessionManager、SubAgentOrchestrator、DynamicEndpointSystem、MCPSystem）：AST 只识别顶层固定名称 `TOOLSET`（常量 `entity/constant/tools.py::TOOLSET_DECLARATION_NAME`），显式拒绝 `register_tools` 函数、`abstract.tools.ui_event_router` 导入、`registry` 全局导入与导入期 `register`/`register_tool`/`register_toolset` 调用；扫描顺序为内置五包→可选 custom_tools→MCP 管理模块→工具集元数据。
+
+**阶段执行链与跨模块访问**
+
+- `entry/tool_execution.py::accept_tool_batch(response, registry, sink, session_id, stream_id)` 在 assistant 消息提交前调用 `registry.plan_tool_batch()`，只保留接受前缀，被丢弃项经 `sink.emit_tool_calls_discarded(...)` 发送 `tool_calls_discarded`（携带 `session_id`/`stream_id`/`tool_call_ids`），返回只含 accepted 的 `LLMResponse` 副本。
+- `ToolRegistry.async_dispatch(execution)` 只执行 before/handle，写回 `body_executed`/`body_completed_normally`/`result`/`state`；主体业务异常转为 error 且保持 `body_completed_normally=False`，after 不执行；生命周期异常传播。`ToolRegistry.async_postprocess(execution)` 在结果提交后托管 after，与 dispatch 复用同一 TaskOwner、ThreadPoolExecutor 与真实同步 Future。
+- `entry/tool_post_dispatch.py`：`PreparedToolResult`（`BaseModel`）持有 `execution`、`message`、`update_result_payload()`、`mark_appended`/`mark_persisted`/`abort`/`emit(sink)`；`ToolPostprocessor.after_committed(prepared, sink)` 仅在 `execution` 非空且 `body_completed_normally=True` 时请求 `registry.async_postprocess(execution)`，校验已提交身份、要求 suppress 必须显式 discard、要求 replacement 仍在 History 中并保留耗时/输入预订元信息。主会话 `ToolExecutor` 与子会话 Loop 各持一个实例。
+- `entry/tool_pairing.py` 是共享中断配对辅助，只导入 `entity.messages`、`entity.puretype.llm.ToolCallRequest` 与 `entity.puretype.Role`，不导入 `entry.tool_executor` 或 `entry.base_agent_loop`，提供 `interrupted_tool_result()` 与 `collect_unexecuted_tool_results()`，避免 BaseAgentLoop↔ToolExecutor 循环。`tool_executor.py` 的中断结果构造改为从该模块导入。
+- Loop 写回：`store_tool_result()` 在 History add/save 成功后把返回索引写入 `execution.history_index`、把真实 `PreparedToolResult.message` 写入 `execution.result_message`；`stop_current_round=True` 的四类 Loop 使用 `ToolBatchDecision.accepted` 计算已执行 ID、写入未执行 accepted 调用的中断配对结果后保存并结束本轮；被 discarded 的 `tool_call_id` 永不补齐。
+
+**MCP 对象化**
+
+- `abstract/mcp/client.py`：`MCPToolSet(BaseToolSet)` 只声明 `mcp-{server}` 元数据、不持有连接；`MCPTool(BaseTool)` 把远端操作桥接进统一四阶段，`handle()` 调用无状态 `_make_tool_handler()` factory。参数剥离（`TOOL_INTERNAL_ARG_KEYS`）、schema 规范化、断路器、连接与原生资源仍由 `MCPCore` 持有。
+- `_register_server_tools()` 用 `registry.register_tool(MCPTool(...), replace=True)` 注册远程工具与资源/提示词辅助工具，跨 toolset 名称冲突快速失败，`mcp-{server}` 与裸 server 名别名保留。刷新在同名同集锁内替换，只注销新集合中已消失的名称（含 utility），在途 `execution` 继续持有原实例。
+- `component/mcp_tools.py::MCPRefreshTool`（`toolset="mcp"`、`is_async=True`、`safe`、`MAIN`）经 `execution.context.app.get_system(MCPSystem).refresh()` 刷新；顶层 `TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))`。对外工具名 `MCPRefresh` 不变。
+
+**System 拓扑**
+
+- `system/application.py::_build_system_manifest()` 删除 `UIEventRouter` 后为 **20 个 System**：RuntimeSystem、SubprocessRunner、Sandbox、ShellManager、AgentspaceService、LLMProfileStore、SessionMetadataService、ApprovalSystem、FrontendSink、ToolRegistry、LSPManager、BrowserSystem、ModalityCapabilitySystem、CronRouter、SessionManager、SubAgentOrchestrator、DynamicEndpointSystem、MCPSystem、ToolDiscoverySystem、GatewaySystem；除该拆除外依赖与关闭顺序不变。`abstract/tools/ui_event_router.py`、`HandlerToolAdapter`、`finalize_tool_result`、`get_toolset_entry` 均已从源码移除。
+
+**状态边界**
+
+- 上述为源码实施与定向静态复核结果；本轮未运行测试、校验、类型检查、构建、导入或应用，未读取或修改 `workspace/`，Git 仅使用 `diff`/`log`。完整任务复核与用户验收仍待完成，不得据此宣称可启动或已通过运行验证。前端压缩后的 History 结构交接存在待批准的偏差（主流程已返回 PLAN 记录），不属于本节已定契约。
+
+### 独立历史更新指令（2026-10-15，批准后的局部修订）
+
+本次合并保留远程重新生成的局部截断与请求归属，同时保留本地历史更新完整重载。前节关于“重连恢复问题延期”的描述属于远程改动当时的边界；合并后由本节记录的onOpen首次同步完整重载处理，不删除或替换局部regenerate_trim路径。以上为静态合并结果，尚未运行验证。
+
+前节“待批准”的历史状态由本节及任务文件19:42:55/19:52:42局部修订覆盖。`entity.puretype.ws.HistoryUpdatedEvent`是仅含固定`history_updated`与非空session_id的strict/frozen消息前纯类型，经puretype显式导出；`AgentSink.emit_history_updated(session_id)`由FrontendSink沿现有TaskOwner发送边界投递，ParentAgentSink不向父主会话投递子History变化。无新System、持久化字段或存储版本。
+
+`ToolExecution`新增调用级`history_updated`及同步`mark_history_updated()`；两压缩工具必要保存成功后无await登记该事实。`ToolPostprocessEffect.system_message`保存原系统完成通知，不与assistant`completion_message`混用。ToolPostprocessor在正常返回后的结果回填保存之后、普通结果/新索引关联之前发送更新指令，再发系统完成通知；取消或后续失败也根据已提交事实尝试通知并传播原异常，通知失败并组保留。内部移除ID仅校验suppress，不再由Postprocessor发tool_calls_discarded；批次后缀仍由accept_tool_batch单独发。
+
+前端Controller新增重载请求记录，Store新增historyReloadRequired、invalidateHistory及applyHistoryReload。旧请求/缓存/链接在指令边界失效，新快照原子安装不删除后到实时行/链接；草稿/排队输入/会话业务状态保留。initialize、history_sync和页/资源入口复用当前重载，失败重试不二次清新流；onOpen记录首次同步边界，使同session重连也完整加载历史。网络不承诺可靠通知，重连不恢复未提交流片段。本修订已实施源码，尚未运行校验、构建或用户验收。
 
 

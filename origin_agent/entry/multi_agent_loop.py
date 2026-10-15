@@ -781,23 +781,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 raise
             except ApplicationStoppingError:
                 return
-            except Exception as exc:
-                if requires_lifecycle_propagation(exc):
-                    raise
+            except Exception:
+                # Worker 已将正常工具业务失败转成结果；到达级联边界的错误，
+                # 包括 History 提交后处理失败，必须终止并传播。
                 logger.exception(
                     "Agent worker failed, cascade interrupted | session=%s character=%s step=%d",
                     self.session_id, char, step,
                 )
-                await self._sink.emit_system_message(
-                    self.session_id,
-                    json.dumps({
-                        "cascade_error": True,
-                        "agent": char,
-                        "step": step,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }, ensure_ascii=False),
-                )
-                return
+                raise
 
             # ── 超限检查：任一 Agent 超限则立即中断级联 ──
             if result.context_over_limit:

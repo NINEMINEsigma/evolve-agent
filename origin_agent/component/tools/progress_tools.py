@@ -1,129 +1,33 @@
 """任务进度条工具 — 在前端显示当前工作的进度。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册 2 个工具：
-  - ``SetTaskProgress``  — 创建或更新进度条
-  - ``ClearTaskProgress`` — 清除进度条
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``SetTaskProgressTool`` 与 ``ClearTaskProgressTool`` 实例。``handle`` 只更新
+会话工具资源分区并返回结果 payload；结果写入所属 History 并保存后的
+``after_handle`` 再通过 ``ToolContext.sink.emit_progress`` 把现有 JSON payload
+推送到前端。主体正常返回的业务 error 结果同样进入 ``after_handle``，但不发送
+成功 UI 更新。
 
-进度条状态由前端维护，后端工具仅负责生成携带进度元数据的结果，
-由 ``finalize_tool_result`` 检测后通过 ``task_progress`` 事件推送到前端。
+进度条状态由前端维护，后端工具仅负责生成携带进度元数据的结果。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    ToolPostprocessEffect,
+    tool_error,
+    tool_result,
+)
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
-    from entry.base_agent_loop import ToolContext
-
 logger = logging.getLogger(__name__)
-
-
-# ── emit handler ────────────────────────────────────────────────
-
-
-async def _emit_task_progress(
-    result: Any, sink: AgentSink, session_id: str, tool_name: str,
-) -> None:
-    """将 progress tool result 推送到前端。"""
-    payload = json.dumps(result, ensure_ascii=False)
-    await sink.emit_progress(session_id, tool_name, payload)
-
-
-# ── handler ─────────────────────────────────────────────────────────
-
-
-async def _handle_set_task_progress(args: dict[str, Any], context: Any = None) -> dict:
-    """创建或更新前端进度条。
-
-    参数：
-        task_id:  进度条唯一标识（同一 task_id 会覆盖更新）
-        label:    进度条标题/描述
-        current:  当前已完成的工作量（整数）
-        total:    总工作量（整数，必须 > 0）
-        status:   可选状态文本，如 "downloading"、"compiling" 等
-    """
-    task_id: str = str(args.get("task_id", "")).strip()
-    label: str = str(args.get("label", "")).strip()
-    current: int = int(args.get("current", 0))
-    total: int = int(args.get("total", 100))
-    status: str = str(args.get("status", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
-
-    if not task_id:
-        return tool_error("'task_id' is required")
-    if total <= 0:
-        return tool_error("'total' must be > 0")
-    if current < 0:
-        current = 0
-
-    percent: float = min(100.0, (current / total) * 100.0) if total else 0.0
-
-    info: dict[str, Any] = {
-        "task_id": task_id,
-        "label": label or task_id,
-        "current": current,
-        "total": total,
-        "percent": round(percent, 1),
-        "status": status or "running",
-    }
-
-    # 磁盘为唯一真相：写当前会话分区（store 为 None（子 agent / 未配置
-    # history_store_dir）或 session_id 为空时跳过落盘，照常推送增量事件）
-    store = context.loop.session_store if context else None
-    if session_id and store is not None:
-        try:
-            values = store.read_partition(session_id, "task_progress")
-            values[task_id] = info
-            store.update_tool_resources(session_id, "task_progress", values)
-        except Exception:
-            logger.warning("Failed to persist task progress | session=%s", session_id, exc_info=True)
-
-    logger.info("Task progress updated | session=%s task=%s %d/%d (%.1f%%)",
-                session_id, task_id, current, total, percent)
-
-    return tool_result(**info)
-
-
-async def _handle_clear_task_progress(args: dict[str, Any], context: ToolContext|None = None) -> dict:
-    """清除前端指定进度条。
-
-    参数：
-        task_id: 要清除的进度条标识。不提供则清除该会话所有进度条。
-    """
-    task_id: str = str(args.get("task_id", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
-
-    cleared: list[str] = []
-    # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
-    store = context.loop.session_store if context else None
-    if session_id and store is not None:
-        try:
-            values = store.read_partition(session_id, "task_progress")
-            if task_id:
-                if task_id in values:
-                    del values[task_id]
-                    cleared.append(task_id)
-            else:
-                cleared = list(values.keys())
-                values.clear()
-            store.update_tool_resources(session_id, "task_progress", values)
-        except Exception:
-            logger.warning("Failed to persist cleared task progress | session=%s", session_id, exc_info=True)
-
-    logger.info("Task progress cleared | session=%s tasks=%s", session_id, cleared)
-
-    return tool_result(
-        success=True,
-        cleared=cleared,
-        message=f"Cleared progress: {', '.join(cleared) if cleared else 'none'}"
-    )
 
 
 # ── schema 常量 ────────────────────────────────────────────────────
@@ -263,28 +167,146 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
 }
 
 
-# ── 注册 ────────────────────────────────────────────────────────────
+# ── 工具类 ─────────────────────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register task progress tools and their UI event handlers."""
-    registry.register(
-        name="SetTaskProgress",
-        toolset="progress",
-        schema=_SET_TASK_PROGRESS_SCHEMA,
-        handler=_handle_set_task_progress,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
-    ui_events.register("SetTaskProgress", _emit_task_progress)
 
-    registry.register(
-        name="ClearTaskProgress",
-        toolset="progress",
-        schema=_CLEAR_TASK_PROGRESS_SCHEMA,
-        handler=_handle_clear_task_progress,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
-    ui_events.register("ClearTaskProgress", _emit_task_progress)
+class _TaskProgressTool(BaseTool):
+    """进度条工具共享的对象契约；``after_handle`` 只推送提交后的结果 payload。"""
+
+    async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        result = execution.result
+        # 业务错误正常返回也进入 after，但不发送成功 UI 更新。
+        if result is not None and "error" in result:
+            return ToolPostprocessEffect()
+        await execution.context.sink.emit_progress(
+            execution.context.session_id,
+            self.name,
+            json.dumps(result, ensure_ascii=False),
+        )
+        return ToolPostprocessEffect()
+
+
+class SetTaskProgressTool(_TaskProgressTool):
+    """创建或更新前端进度条。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="SetTaskProgress",
+            toolset="progress",
+            schema=_SET_TASK_PROGRESS_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """创建或更新前端进度条。
+
+        参数：
+            task_id:  进度条唯一标识（同一 task_id 会覆盖更新）
+            label:    进度条标题/描述
+            current:  当前已完成的工作量（整数）
+            total:    总工作量（整数，必须 > 0）
+            status:   可选状态文本，如 "downloading"、"compiling" 等
+        """
+        args = execution.arguments
+        task_id: str = str(args.get("task_id", "")).strip()
+        label: str = str(args.get("label", "")).strip()
+        current: int = int(args.get("current", 0))
+        total: int = int(args.get("total", 100))
+        status: str = str(args.get("status", "")).strip()
+        session_id: str = execution.context.session_id
+
+        if not task_id:
+            return ToolHandlerResult(result=tool_error("'task_id' is required"))
+        if total <= 0:
+            return ToolHandlerResult(result=tool_error("'total' must be > 0"))
+        if current < 0:
+            current = 0
+
+        percent: float = min(100.0, (current / total) * 100.0) if total else 0.0
+
+        info: dict[str, Any] = {
+            "task_id": task_id,
+            "label": label or task_id,
+            "current": current,
+            "total": total,
+            "percent": round(percent, 1),
+            "status": status or "running",
+        }
+
+        # 磁盘为唯一真相：写当前会话分区（store 为 None（子 agent / 未配置
+        # history_store_dir）或 session_id 为空时跳过落盘，照常推送增量事件）
+        store = execution.context.loop.session_store
+        if session_id and store is not None:
+            try:
+                values = store.read_partition(session_id, "task_progress")
+                values[task_id] = info
+                store.update_tool_resources(session_id, "task_progress", values)
+            except Exception:
+                logger.warning("Failed to persist task progress | session=%s", session_id, exc_info=True)
+
+        logger.info("Task progress updated | session=%s task=%s %d/%d (%.1f%%)",
+                    session_id, task_id, current, total, percent)
+
+        return ToolHandlerResult(result=tool_result(**info))
+
+
+class ClearTaskProgressTool(_TaskProgressTool):
+    """清除前端指定进度条。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ClearTaskProgress",
+            toolset="progress",
+            schema=_CLEAR_TASK_PROGRESS_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        """清除前端指定进度条。
+
+        参数：
+            task_id: 要清除的进度条标识。不提供则清除该会话所有进度条。
+        """
+        args = execution.arguments
+        task_id: str = str(args.get("task_id", "")).strip()
+        session_id: str = execution.context.session_id
+
+        cleared: list[str] = []
+        # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
+        store = execution.context.loop.session_store
+        if session_id and store is not None:
+            try:
+                values = store.read_partition(session_id, "task_progress")
+                if task_id:
+                    if task_id in values:
+                        del values[task_id]
+                        cleared.append(task_id)
+                else:
+                    cleared = list(values.keys())
+                    values.clear()
+                store.update_tool_resources(session_id, "task_progress", values)
+            except Exception:
+                logger.warning("Failed to persist cleared task progress | session=%s", session_id, exc_info=True)
+
+        logger.info("Task progress cleared | session=%s tasks=%s", session_id, cleared)
+
+        return ToolHandlerResult(result=tool_result(
+            success=True,
+            cleared=cleared,
+            message=f"Cleared progress: {', '.join(cleared) if cleared else 'none'}"
+        ))
+
+
+# ── 工具集对象声明 ──────────────────────────────────────────────────
+
+TOOLSET = BaseToolSet(
+    name="progress",
+    tools=(
+        SetTaskProgressTool(),
+        ClearTaskProgressTool(),
+    ),
+)

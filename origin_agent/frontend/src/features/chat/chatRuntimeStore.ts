@@ -33,6 +33,12 @@ export interface ChatRuntimeState {
   setShowSystemUserMessages: (show: boolean) => void;
   sessionId: string;
   generation: number;
+  historyReloadRequired: boolean;
+  invalidateHistory: (sessionId: string, liveCutoffVersion?: number) => number;
+  applyHistoryReload: (
+    rows: HistorySkeletonRowDto[], historyCount: number, messages: ChatMessage[],
+    startIndex: number, endIndex: number, generation: number,
+  ) => void;
   skeleton: HistorySkeletonRowDto[];
   knownHistoryCount: number;
   lastUserHistoryIndex: number;
@@ -72,7 +78,7 @@ export interface ChatRuntimeState {
   setSkeletonError: (error: string | null) => void;
   replaceSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
   appendSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
-  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number) => void;
+  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number, immediate?: boolean) => void;
   toggleMessageCollapse: (id: string) => void;
   linkStreamHistory: (streamId: string, historyIndex: number) => void;
   linkLiveHistory: (liveId: string, historyRowId: string) => void;
@@ -83,6 +89,7 @@ export interface ChatRuntimeState {
   appendLiveMessage: (message: ChatMessage, streaming?: boolean) => number;
   upsertLiveToolCall: (toolCallId: string, toolName: string | undefined, args: Record<string, unknown> | undefined, characterName?: string) => void;
   completeLiveToolCall: (toolCallId: string, toolName: string | undefined, result: ToolCardResult, characterName?: string) => void;
+  discardLiveToolCalls: (toolCallIds: string[], sessionId: string) => void;
   applyStreamBatch: (batch: StreamBatch) => void;
   queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, finishReason?: string) => void;
   setCanonicalHandoffReady: (ready: boolean) => void;
@@ -114,6 +121,7 @@ export interface ChatRuntimeState {
 const initialState = {
   sessionId: "",
   generation: 0,
+  historyReloadRequired: false,
   skeleton: [] as HistorySkeletonRowDto[],
   knownHistoryCount: 0,
   lastUserHistoryIndex: -1,
@@ -534,6 +542,71 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     };
   }),
 
+  invalidateHistory: (sessionId, liveCutoffVersion) => {
+    const state = get();
+    if (!sessionId || state.sessionId !== sessionId) return state.generation;
+    const cutoff = liveCutoffVersion ?? state.liveVersion;
+    const liveRows = state.liveRows.filter((row) => row.version > cutoff);
+    const freshIds = new Set(liveRows.map((row) => row.id));
+    const freshRenderIds = new Set(liveRows.map((row) => row.renderId || row.id));
+    const generation = state.generation + 1;
+    const streamingRows = liveRows.filter((row) => row.streaming);
+    set({
+      generation,
+      historyReloadRequired: true,
+      skeleton: [],
+      knownHistoryCount: 0,
+      lastUserHistoryIndex: -1,
+      skeletonLoading: true,
+      skeletonError: null,
+      contentByRowId: {},
+      loadedHistoryIndices: new Set<number>(),
+      pageErrors: {},
+      pendingHistoryPages: [],
+      initialReady: false,
+      liveRows,
+      streamHistoryLinks: Object.fromEntries(
+        Object.entries(state.streamHistoryLinks).filter(([id]) => freshIds.has(id)),
+      ),
+      pendingStreamFinishes: Object.fromEntries(
+        Object.entries(state.pendingStreamFinishes).filter(([id]) => freshIds.has(id)),
+      ),
+      rowHeights: Object.fromEntries(
+        Object.entries(state.rowHeights).filter(([id]) => freshRenderIds.has(id)),
+      ),
+      currentStreamId: streamingRows.length ? streamingRows[streamingRows.length - 1].id : null,
+      canonicalHandoffReady: !liveRows.some((row) => row.streaming),
+      followMode: state.followMode === "returning" ? "detached" : state.followMode,
+      visibleRange: { startIndex: 0, endIndex: 0 },
+      scrollMetrics: { scrollTop: 0, scrollHeight: 0, viewportHeight: 0 },
+      userHeightMutation: false,
+      resources: null,
+      resourcesLoading: false,
+      resourcesError: null,
+    });
+    return generation;
+  },
+
+  applyHistoryReload: (skeleton, knownHistoryCount, messages, startIndex, endIndex, generation) => set((state) => {
+    if (state.generation !== generation) return state;
+    const contentByRowId = Object.fromEntries(messages.map((message) => [message.id, message]));
+    const loadedHistoryIndices = new Set<number>();
+    for (let index = startIndex; index < endIndex; index += 1) loadedHistoryIndices.add(index);
+    // 旧状态已在事件到达时清除；这里绝不能再次清空事件之后收到的实时行与关联。
+    return {
+      skeleton,
+      knownHistoryCount,
+      lastUserHistoryIndex: lastUserIndex(skeleton),
+      contentByRowId,
+      loadedHistoryIndices,
+      pageErrors: {},
+      initialReady: true,
+      skeletonLoading: false,
+      skeletonError: null,
+      historyReloadRequired: false,
+    };
+  }),
+
   setSkeletonLoading: (skeletonLoading) => set({ skeletonLoading }),
   setSkeletonError: (skeletonError) => set({ skeletonError }),
 
@@ -553,8 +626,8 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     lastUserHistoryIndex: lastUserIndex(rows, state.lastUserHistoryIndex),
   })),
 
-  mergeHistoryPage: (messages, startIndex, endIndex) => set((state) => {
-    if (!state.canonicalHandoffReady && state.liveRows.length > 0) {
+  mergeHistoryPage: (messages, startIndex, endIndex, immediate = false) => set((state) => {
+    if (!immediate && !state.canonicalHandoffReady && state.liveRows.length > 0) {
       return {
         pendingHistoryPages: [...state.pendingHistoryPages, { messages, startIndex, endIndex }],
       };
@@ -759,6 +832,31 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
         : { ...message, id: link };
     }
     return { liveRows, contentByRowId, liveVersion: state.liveVersion + 1 };
+  }),
+
+  discardLiveToolCalls: (toolCallIds, sessionId) => set((state) => {
+    // 丢弃事件属于单次流式调用；迟到的跨会话事件不得删除当前会话的实时卡片。
+    if (!sessionId || sessionId !== state.sessionId) return state;
+    const discarded = new Set(toolCallIds.filter(Boolean).map(toolCardLiveId));
+    if (!discarded.size) return state;
+    const removed = new Set(
+      state.liveRows.filter((row) => discarded.has(row.id)).map((row) => row.id),
+    );
+    if (!removed.size) return state;
+    const rowHeights = { ...state.rowHeights };
+    const streamHistoryLinks = { ...state.streamHistoryLinks };
+    for (const row of state.liveRows) {
+      if (!removed.has(row.id)) continue;
+      delete rowHeights[row.renderId || row.id];
+      delete streamHistoryLinks[row.id];
+    }
+    // 正典 History 内容的增删仍由 history_sync 与内容页负责：此处只清实时行及其映射/高度。
+    return {
+      liveRows: state.liveRows.filter((row) => !removed.has(row.id)),
+      rowHeights,
+      streamHistoryLinks,
+      liveVersion: state.liveVersion + 1,
+    };
   }),
 
   beginOptimisticMainSessionActivity: (localId, source) => set((state) => {

@@ -1,6 +1,8 @@
 """跨会话历史查询工具 — ReadSession + RecallSession。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册两个工具：
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``ReadSessionTool`` 与 ``RecallSessionTool`` 实例；``handle`` 复用无状态
+``_handle_read_session`` / ``_handle_recall_session`` 函数。
   - ReadSession: 精准读取指定会话的区间消息（session_id + index + length）
   - RecallSession: 混合检索全体会话（exact / substring / bm25），RRF 融合排序
 
@@ -18,8 +20,7 @@ from typing import Any
 
 from rank_bm25 import BM25Okapi
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.messages import CharacterConversationMessage, History
 from entity.puretype import ToolAvailability, ToolDangerLevel, Role, SessionStatus
 from entity.constant import (
@@ -590,27 +591,47 @@ None.
 }
 
 
-# ── 注册 ─────────────────────────────────────────────────────
+# ── 工具类与工具集 ───────────────────────────────────────────
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register session search tools."""
-    del ui_events  # session search tools have no UI event handlers
-    registry.register(
-        name="ReadSession",
-        toolset="core",
-        schema=_READ_SESSION_SCHEMA,
-        handler=_handle_read_session,
-        is_async=False,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
 
-    registry.register(
-        name="RecallSession",
-        toolset="core",
-        schema=_RECALL_SESSION_SCHEMA,
-        handler=_handle_recall_session,
-        is_async=True,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
-    )
+class ReadSessionTool(BaseTool):
+    """精准读取指定会话的区间消息。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ReadSession",
+            toolset="core",
+            schema=_READ_SESSION_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_read_session(execution.arguments))
+
+
+class RecallSessionTool(BaseTool):
+    """混合检索全体会话历史。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="RecallSession",
+            toolset="core",
+            schema=_RECALL_SESSION_SCHEMA,
+            is_async=True,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_recall_session(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="core",
+    tools=(
+        ReadSessionTool(),
+        RecallSessionTool(),
+    ),
+)

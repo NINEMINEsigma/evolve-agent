@@ -233,6 +233,7 @@ export type MessageType =
   | "assistant_message"
   | "tool_call"
   | "tool_result"
+  | "tool_calls_discarded"
   | "task_progress"
   | "clipboard_display"
   | "confirm_request"
@@ -242,6 +243,7 @@ export type MessageType =
   | "error"
   | "subagent_update"
   | "history_sync"
+  | "history_updated"
   | "llm_profile_changed"
   | "approval_profile_changed"
   | "metadata_profile_changed"
@@ -258,7 +260,12 @@ export type MessageType =
  * 流式事件由 StreamDeltaEvent / StreamDoneEvent 承载各自的 type 字面量，
  * 非流式事件类型不得再声明这两个字面量，避免宽类型漏掉流式结构约束。
  */
-export type NonStreamMessageType = Exclude<MessageType, "stream_delta" | "stream_done">;
+export type NonStreamMessageType = Exclude<MessageType, "stream_delta" | "stream_done" | "history_updated">;
+
+export interface HistoryUpdatedEvent {
+  type: "history_updated";
+  session_id: string;
+}
 
 /** stream_delta 顶层 tool_call：已确定工具调用的完整结构。 */
 export interface StreamToolCall {
@@ -329,8 +336,9 @@ export interface HistoryRowLink {
  * 非流式 WebSocket 入站消息的统一结构。
  * type 显式排除 stream_delta/stream_done —— 流式事件由
  * StreamDeltaEvent / StreamDoneEvent 承载，不再走此宽类型。
- * 流式专用字段（stream_id/delta/reasoning_delta/finish_reason/metrics）
- * 已移至流式事件类型，此接口不再声明。
+ * 流式专用字段（delta/reasoning_delta/finish_reason/metrics）
+ * 已移至流式事件类型，此接口不再声明；stream_id 因
+ * TOOL_CALLS_DISCARDED 需要标识被丢弃调用所属的流而保留在此。
  */
 export interface NonStreamWSMessage {
   type: NonStreamMessageType;
@@ -339,6 +347,8 @@ export interface NonStreamWSMessage {
   message?: string;
   tool?: string;
   tool_call_id?: string;                  // TOOL_CALL / TOOL_RESULT：工具调用 ID
+  tool_call_ids?: string[];                // TOOL_CALLS_DISCARDED：被丢弃的工具调用 ID
+  stream_id?: string;                      // TOOL_CALLS_DISCARDED：被丢弃调用所属的流标识
   args?: Record<string, unknown>;
   result?: string;
   request_id?: string;
@@ -397,7 +407,7 @@ export interface NonStreamWSMessage {
  * WebSocket 入站消息的判别联合：流式事件使用具体结构化类型，
  * 其余沿用 NonStreamWSMessage。以 message.type 字面量收窄区分。
  */
-export type WSMessage = StreamDeltaEvent | StreamDoneEvent | NonStreamWSMessage;
+export type WSMessage = StreamDeltaEvent | StreamDoneEvent | HistoryUpdatedEvent | NonStreamWSMessage;
 
 export interface ToolCallMeta {
   application_time: string;         // 人类可读的申请时间，如 "2026-07-11 14:30:25.123"

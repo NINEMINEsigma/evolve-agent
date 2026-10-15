@@ -1,6 +1,6 @@
 """代码自省和进化工具。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具类通过模块级 ``TOOLSET`` 对象声明验证和进化能力。
 所有路径均为逻辑路径（带命名空间前缀），通过共享 Sandbox 解析。
 这些工具让 agent 能够读取自身源码、写入进化代码并验证变更。
 """
@@ -13,9 +13,11 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
-from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
+from abstract.tools.tool import (
+    BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, ToolPostprocessEffect,
+    tool_error, tool_result,
+)
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT, ShutdownReason
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ def _s():
 # ---------------------------------------------------------------------------
 
 
-def _handle_validate_code(args: dict[str, Any]) -> dict:
+def _validate_code(args: dict[str, Any]) -> dict:
     """验证 Python 代码的语法错误。
 
     *file* — 要验证的裸文件名或逻辑路径。
@@ -72,34 +74,6 @@ def _handle_validate_code(args: dict[str, Any]) -> dict:
             return tool_error(str(exc))
 
     return tool_result(**summary(results))
-
-
-def _handle_evolve_code(args: dict[str, Any], context: "ToolContext | None" = None) -> dict:
-    """完成代码进化：验证 fork，通过后在本次调用上登记进化意图。
-
-    agent 通过 Write/PatchEdit 将进化代码写入 fork: 并通过 validate_code
-    检查语法后，调用此工具运行彻底验证（语法 + 编译检查）。
-    验证通过只登记调用级意图；所属 Loop 在本工具结果严格保存后
-    才向 RuntimeSystem 请求进化关闭（D6），保存失败不产生成功关闭。
-
-    仅在 'fast' 模式下工作。在 'fallback' 模式下返回错误。
-    """
-    if context is None:
-        return tool_error("EvolveCode requires a tool execution context")
-    from evolve.code import finalize_evolution
-
-    deep: bool = bool(args.get("deep", True))
-    compile_timeout: int = int(args.get("compile_timeout", SUBPROCESS_TIMEOUT_DEFAULT))
-
-    try:
-        return finalize_evolution(
-            _s(),
-            context,
-            deep=deep,
-            compile_timeout=compile_timeout,
-        )
-    except Exception as exc:
-        return tool_error(str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -226,18 +200,39 @@ On success, the current agent process exits. The success response is never seen 
 # 注册
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register code validation and evolution tools."""
-    del ui_events  # code tools have no UI event handlers
-    registry.register(
-        name="ValidateCode",
-        toolset="code",
-        schema=_VALIDATE_CODE_SCHEMA,
-        handler=_handle_validate_code,
-    )
-    registry.register(
-        name="EvolveCode",
-        toolset="code",
-        schema=_EVOLVE_CODE_SCHEMA,
-        handler=_handle_evolve_code,
-    )
+class ValidateCodeTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="ValidateCode", toolset="code", schema=_VALIDATE_CODE_SCHEMA)
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_validate_code(execution.arguments))
+
+
+class EvolveCodeTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(name="EvolveCode", toolset="code", schema=_EVOLVE_CODE_SCHEMA)
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        from evolve.code import finalize_evolution
+
+        arguments = execution.arguments
+        return ToolHandlerResult(finalize_evolution(
+            _s(), execution.context,
+            deep=bool(arguments.get("deep", True)),
+            compile_timeout=int(arguments.get("compile_timeout", SUBPROCESS_TIMEOUT_DEFAULT)),
+        ))
+
+    def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
+        from system.runtime import RuntimeSystem
+
+        if not execution.context.consume_evolution_request():
+            return ToolPostprocessEffect()
+        execution.context.app.get_system(RuntimeSystem).request_shutdown(ShutdownReason.EVOLUTION)
+        return ToolPostprocessEffect(
+            evolution_requested=True,
+            stop_current_round=True,
+            completion_message="Evolution complete, restarting to apply new code...",
+        )
+
+
+TOOLSET = BaseToolSet(name="code", tools=(ValidateCodeTool(), EvolveCodeTool()))

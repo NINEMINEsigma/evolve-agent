@@ -3,8 +3,13 @@ from __future__ import annotations
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolRegistry, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_result,
+)
 from custom_tools.memory_tools._store import (
     FALLBACK_SESSION,
     load_all_memory,
@@ -42,10 +47,9 @@ def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -
 # ── 注册 ─────────────────────────────────────────────────────
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register Remember tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class RememberTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="Remember",
         toolset="memory_tools",
         schema={
@@ -120,6 +124,11 @@ Writes to the agent's memory file on disk. Repeated calls with the same id may o
                 "required": ["id", "content"],
             },
         },
-        handler=_handle_remember,
         is_async=False,
-    )
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_remember(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(name="memory_tools", tools=(RememberTool(),))

@@ -1,6 +1,7 @@
 """获取最晚上传文件的工具 — 按真实上传时间排序，返回文件名、大小、上传时间、修改时间和路径。
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有
+``ListUploadsTool`` 实例；``handle`` 复用无状态 ``_handle_list_uploads`` 函数。
 """
 
 from __future__ import annotations
@@ -11,8 +12,7 @@ import logging
 import re
 from typing import Any, Dict, List
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN, UPLOADS_WS_PREFIX
 from system.sandbox import Sandbox, SandboxError
@@ -155,16 +155,23 @@ Read-only query. No side effects.
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 工具类与工具集
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register the ListUploads tool."""
-    del ui_events  # ListUploads has no UI event handler
-    registry.register(
-        name="ListUploads",
-        toolset="filesystem",
-        schema=_LIST_UPLOADS_SCHEMA,
-        handler=_handle_list_uploads,
-        danger_level=ToolDangerLevel.safe,
-    )
+
+class ListUploadsTool(BaseTool):
+    """列出最近上传的文件。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="ListUploads",
+            toolset="filesystem",
+            schema=_LIST_UPLOADS_SCHEMA,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_list_uploads(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="filesystem", tools=(ListUploadsTool(),))

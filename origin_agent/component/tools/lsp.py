@@ -8,7 +8,8 @@
   - ``LSPSymbols``    : 获取文件的符号列表
   - ``LSPRefresh``    : 主动刷新 LSP 索引
 
-显式注册协议：模块导出 ``register_tools(registry, ui_events)`` 注册工具。
+工具对象协议：模块导出顶层 ``TOOLSET``（``BaseToolSet``），其中持有六个
+``BaseTool`` 子类实例；``handle`` 复用无状态 ``_handle_lsp_*`` 函数。
 """
 
 from __future__ import annotations
@@ -16,8 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
 from system.lsp import LSPManager
@@ -440,57 +440,114 @@ Workspace refresh:
 
 
 # ---------------------------------------------------------------------------
-# 注册
+# 工具类与工具集
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register LSP tools."""
-    del ui_events  # LSP tools have no UI event handlers
-    registry.register(
-        name="LSPStart",
-        toolset="lsp",
-        schema=_LSP_START_SCHEMA,
-        handler=_handle_lsp_start,
-        danger_level=ToolDangerLevel.write,
-        availability=ToolAvailability.EVERY,
-    )
-    registry.register(
-        name="LSPReferences",
-        toolset="lsp",
-        schema=_LSP_REFERENCES_SCHEMA,
-        handler=_handle_lsp_references,
-        is_async=True,
-        availability=ToolAvailability.EVERY,
-    )
-    registry.register(
-        name="LSPDefinition",
-        toolset="lsp",
-        schema=_LSP_DEFINITION_SCHEMA,
-        handler=_handle_lsp_definition,
-        is_async=True,
-        availability=ToolAvailability.EVERY,
-    )
-    registry.register(
-        name="LSPDiagnostics",
-        toolset="lsp",
-        schema=_LSP_DIAGNOSTICS_SCHEMA,
-        handler=_handle_lsp_diagnostics,
-        is_async=True,
-        availability=ToolAvailability.EVERY,
-    )
-    registry.register(
-        name="LSPSymbols",
-        toolset="lsp",
-        schema=_LSP_SYMBOLS_SCHEMA,
-        handler=_handle_lsp_symbols,
-        is_async=True,
-        availability=ToolAvailability.EVERY,
-    )
-    registry.register(
-        name="LSPRefresh",
-        toolset="lsp",
-        schema=_LSP_REFRESH_SCHEMA,
-        handler=_handle_lsp_refresh,
-        is_async=True,
-        availability=ToolAvailability.EVERY,
-    )
+
+class LSPStartTool(BaseTool):
+    """启动或替换 pyright LSP server。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPStart",
+            toolset="lsp",
+            schema=_LSP_START_SCHEMA,
+            danger_level=ToolDangerLevel.write,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_lsp_start(execution.arguments))
+
+
+class LSPReferencesTool(BaseTool):
+    """查找符号的所有引用。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPReferences",
+            toolset="lsp",
+            schema=_LSP_REFERENCES_SCHEMA,
+            is_async=True,
+            availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_lsp_references(execution.arguments))
+
+
+class LSPDefinitionTool(BaseTool):
+    """跳转到符号定义。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPDefinition",
+            toolset="lsp",
+            schema=_LSP_DEFINITION_SCHEMA,
+            is_async=True,
+            availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_lsp_definition(execution.arguments))
+
+
+class LSPDiagnosticsTool(BaseTool):
+    """获取文件的语义诊断。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPDiagnostics",
+            toolset="lsp",
+            schema=_LSP_DIAGNOSTICS_SCHEMA,
+            is_async=True,
+            availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_lsp_diagnostics(execution.arguments))
+
+
+class LSPSymbolsTool(BaseTool):
+    """获取文件的符号列表。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPSymbols",
+            toolset="lsp",
+            schema=_LSP_SYMBOLS_SCHEMA,
+            is_async=True,
+            availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_lsp_symbols(execution.arguments))
+
+
+class LSPRefreshTool(BaseTool):
+    """主动刷新 LSP 索引。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="LSPRefresh",
+            toolset="lsp",
+            schema=_LSP_REFRESH_SCHEMA,
+            is_async=True,
+            availability=ToolAvailability.EVERY,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=await _handle_lsp_refresh(execution.arguments))
+
+
+TOOLSET = BaseToolSet(
+    name="lsp",
+    tools=(
+        LSPStartTool(),
+        LSPReferencesTool(),
+        LSPDefinitionTool(),
+        LSPDiagnosticsTool(),
+        LSPSymbolsTool(),
+        LSPRefreshTool(),
+    ),
+)

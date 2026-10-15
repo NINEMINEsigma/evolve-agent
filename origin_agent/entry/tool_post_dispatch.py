@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Protocol
+from collections.abc import Awaitable
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from entity.messages import ToolResultMessage
 from entity.puretype import Role, ToolCallMeta, ToolResultNotification
+from abstract.tools.tool import ToolExecution, ToolPostprocessEffect
 from entry.agent_support.multimodal import (
     tool_result_to_content, tool_result_to_follow_up, content_to_text, extract_tool_embedded_messages,
 )
-from abstract.tools.ui_event_router import UIEventRouter
-from system.application import Application
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
+    from entry.base_agent_loop import BaseAgentLoop
 
 
 class ResultFieldInjector(Protocol):
@@ -31,7 +33,7 @@ class PreparedToolResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     message: ToolResultMessage
     notification: ToolResultNotification | None = None
-    evolution_requested: bool = False
+    execution: ToolExecution | None = None
     _injector: ResultFieldInjector | None = PrivateAttr(default=None)
 
     def bind_injector(self, injector: ResultFieldInjector | None) -> None:
@@ -51,7 +53,23 @@ class PreparedToolResult(BaseModel):
         if self._injector is not None:
             self._injector.abort()
 
-    async def emit(self, sink: AgentSink, ui_events: UIEventRouter) -> None:
+    def update_result_payload(self, result: dict) -> None:
+        """Update the stored result and notification without losing input reservations."""
+        payload = dict(result)
+        notice = self.notification
+        if notice is not None:
+            payload["_meta"] = notice.tool_call_meta.model_dump()
+            if "_queued_messages" in notice.ui_result:
+                payload["_queued_messages"] = notice.ui_result["_queued_messages"]
+        content = tool_result_to_content(payload, tool_call_id=self.message.tool_call_id)
+        self.message.content = content
+        if notice is not None:
+            notice.display_content = content_to_text(content)
+            notice.ui_result = payload
+        if self.execution is not None:
+            self.execution.result = payload
+
+    async def emit(self, sink: AgentSink) -> None:
         notice = self.notification
         if notice is None:
             return
@@ -61,14 +79,90 @@ class PreparedToolResult(BaseModel):
             embedded_messages=notice.embedded_messages,
             consumed_client_message_ids=notice.consumed_client_message_ids,
         )
-        await ui_events.emit_for(notice.tool_name, notice.ui_result, sink, notice.session_id)
+
+
+class ToolPostprocessor:
+    """Invocation postprocessing shared by main, multi, sub and task Loops."""
+
+    def __init__(self, loop: BaseAgentLoop) -> None:
+        from system.runtime import RuntimeSystem
+
+        self._loop = loop
+        self._runtime = loop.app.get_system(RuntimeSystem)
+        self._cancel_cleanup_tasks: set[asyncio.Future] = set()
+
+    async def _await_phase(self, operation: Awaitable[ToolPostprocessEffect]) -> ToolPostprocessEffect:
+        # 复用有界取消交接，不把包装 await 的结束冒充真实工作完成。
+        from entry.tool_executor import cancel_tool_wait
+
+        task = asyncio.ensure_future(operation)
+        cancel_wait = asyncio.create_task(self._loop.cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait({task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED)
+            if task in done and not task.cancelled():
+                return task.result()
+            raise asyncio.CancelledError
+        except asyncio.CancelledError:
+            await cancel_tool_wait(task, self._cancel_cleanup_tasks, self._runtime.record_failure)
+            raise
+        finally:
+            cancel_wait.cancel()
+            await asyncio.gather(cancel_wait, return_exceptions=True)
+
+    async def after_committed(
+        self, prepared: PreparedToolResult, sink: AgentSink,
+    ) -> ToolPostprocessEffect:
+        from abstract.tools.registry import ToolRegistry
+
+        execution = prepared.execution
+        effect = ToolPostprocessEffect()
+        if execution is not None and execution.body_completed_normally:
+            if execution.result_message is not prepared.message or execution.history_index is None:
+                raise RuntimeError("Tool postprocessing requires a committed result")
+            registry = self._loop.app.get_system(ToolRegistry)
+            try:
+                effect = await self._await_phase(registry.async_postprocess(execution))
+                if execution.context.is_interrupted:
+                    raise asyncio.CancelledError
+                if effect.suppress_tool_result_event and (
+                    not execution.history_updated
+                    or execution.tool_call_id not in effect.discarded_tool_call_ids
+                ):
+                    raise RuntimeError("Suppressed tool results require a committed History replacement")
+                if effect.replacement_result is not None:
+                    if not any(message is prepared.message for message in self._loop.history.iter_messages()):
+                        raise RuntimeError("Cannot replace a tool result removed from History")
+                    prepared.update_result_payload(effect.replacement_result)
+                    if self._loop.session_store is not None:
+                        self._loop.save_history(execution.context.session_id)
+            except BaseException as original:
+                # 已保存的结构变更不能因取消丢失after返回效果而漏发失效通知。
+                if execution.history_updated:
+                    try:
+                        await sink.emit_history_updated(execution.context.session_id)
+                    except BaseException as notification_error:
+                        raise BaseExceptionGroup(
+                            "Tool postprocessing and History notification failed",
+                            [original, notification_error],
+                        )
+                raise
+            if execution.history_updated:
+                await sink.emit_history_updated(execution.context.session_id)
+            if effect.system_message is not None:
+                if execution.context.is_interrupted:
+                    raise asyncio.CancelledError
+                await sink.emit_system_message(execution.context.session_id, effect.system_message)
+        if not effect.suppress_tool_result_event:
+            await prepared.emit(sink)
+        return effect
 
 
 def prepare_tool_result(
     result: dict, *, tool_name: str, application_time: str, application_time_ms: int,
     approval_duration_ms: int, invocation_start_offset_ms: int, invocation_duration_ms: int,
     end_time_offset_ms: int, session_id: str, tool_call_id: str, character_name: str,
-    field_injector: ResultFieldInjector | None = None, evolution_requested: bool = False,
+    field_injector: ResultFieldInjector | None = None,
+    execution: ToolExecution | None = None,
 ) -> PreparedToolResult:
     try:
         meta = ToolCallMeta(
@@ -99,7 +193,7 @@ def prepare_tool_result(
                 tool_call_meta=meta, embedded_messages=embedded,
                 consumed_client_message_ids=consumed, ui_result=result,
             ),
-            evolution_requested=evolution_requested,
+            execution=execution,
         )
         prepared.bind_injector(field_injector)
         return prepared
@@ -107,21 +201,3 @@ def prepare_tool_result(
         if field_injector is not None:
             field_injector.abort()
         raise
-
-
-async def finalize_tool_result(
-    result: dict, *, tool_name: str, application_time: str, application_time_ms: int,
-    approval_duration_ms: int, invocation_start_offset_ms: int, invocation_duration_ms: int,
-    end_time_offset_ms: int, sink: AgentSink, session_id: str, tool_call_id: str,
-    character_name: str, field_injector: ResultFieldInjector | None = None,
-) -> ToolResultMessage:
-    """尚待S17迁移的子会话旧调用路径；主会话已使用prepare→store→emit。"""
-    prepared = prepare_tool_result(
-        result, tool_name=tool_name, application_time=application_time,
-        application_time_ms=application_time_ms, approval_duration_ms=approval_duration_ms,
-        invocation_start_offset_ms=invocation_start_offset_ms, invocation_duration_ms=invocation_duration_ms,
-        end_time_offset_ms=end_time_offset_ms, session_id=session_id,
-        tool_call_id=tool_call_id, character_name=character_name, field_injector=field_injector,
-    )
-    await prepared.emit(sink, Application.current().get_system(UIEventRouter))
-    return prepared.message

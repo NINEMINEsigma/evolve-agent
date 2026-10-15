@@ -25,12 +25,14 @@ from entity.gentype import RefWrapper
 from entity.constant import TOOL_TASK_CANCEL_CLEANUP_TIMEOUT, ApplicationState
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
-from entry.tool_post_dispatch import PreparedToolResult, prepare_tool_result
+from entry.tool_post_dispatch import PreparedToolResult, ToolPostprocessor, prepare_tool_result
+from abstract.tools.tool import ToolExecution
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, contains_lifecycle_failure,
     requires_lifecycle_propagation,
 )
 from system.runtime import RuntimeSystem
+from entry.tool_pairing import interrupted_tool_result as _interrupted_result
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
@@ -91,24 +93,6 @@ class ToolInterrupted(Exception):
         self.phase: str = phase
 
 
-def _interrupted_result(tc: ToolCallRequest, char_name: str, phase: str) -> ToolResultMessage:
-    """构造强制中断失败消息，作为未完成工具调用的占位结果。
-
-    phase 取值：pending（入口/审批前）、approval、dispatch、unexpected（异常兜底）。
-    该结果写入 History 后与 assistant 的 tool_calls 配对，保证消息序列合法。
-    """
-    return ToolResultMessage(
-        role=Role.TOOL,
-        character_name=char_name,
-        tool_call_id=tc.id,
-        content={
-            "error": "Tool call interrupted by user",
-            "_interrupted": True,
-            "_interrupted_phase": phase,
-        },
-    )
-
-
 class ToolExecutor:
     """执行单个工具调用，处理审批、分发和事件推送。
 
@@ -121,6 +105,7 @@ class ToolExecutor:
         self._turn_counter: RefWrapper[int] | None = None
         self._cancel_cleanup_tasks: set[asyncio.Future[Any]] = set()
         self._runtime = loop.loop.app.get_system(RuntimeSystem)
+        self.postprocessor = ToolPostprocessor(loop.loop)
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -179,6 +164,7 @@ class ToolExecutor:
         character_name: str | None = None,
         llm_profile: LLMProfile | None = None,
         activity_id: str | None = None,
+        stream_id: str = "",
     ) -> PreparedToolResult:
         """执行单个工具调用，只准备结果；调用方保存后再发送通知。
 
@@ -295,7 +281,7 @@ class ToolExecutor:
         )
 
         # 工具集加载检查：未加载工具在审批前拦截
-        _entry = tool_registry.get_entry(tc.name)
+        _entry = tool_registry.get_tool(tc.name)
         if _entry is not None:
             _toolset = _entry.toolset
             if not self._loop.loop.is_toolset_loaded(_toolset):
@@ -319,6 +305,15 @@ class ToolExecutor:
                 }
                 self._tool_stats[tc.name]["errors"] += 1
                 return prepare_early(_not_loaded_result)
+
+        # 参数规范化为纯操作；审批仍查看原始模型参数。
+        declared_tool = tool_registry.get_tool(tc.name)
+        normalized_args = dict(args)
+        if declared_tool is not None:
+            try:
+                normalized_args = declared_tool.ensure_arguments(args)
+            except (ValueError, TypeError) as exc:
+                return prepare_early({"error": str(exc)})
 
         # 审批流程
         _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
@@ -358,6 +353,7 @@ class ToolExecutor:
 
         _skip_dispatch = False
         ctx: ToolContext | None = None
+        execution: ToolExecution | None = None
         result: dict = {}
         if outcome.denied:
             result = outcome.deny_result or {"error": "Tool denied"}
@@ -397,16 +393,32 @@ class ToolExecutor:
                             loop=self._loop.loop,
                             session_id=session_id,
                             round_id=round_id,
+                            stream_id=stream_id,
                             character_name=char_name,
                             llm_profile=llm_profile,
                         )
                         try:
-                            result = await self._await_or_cancel(
-                                tool_registry.async_dispatch(
-                                    tc.name, args, context=ctx,
-                                ),
-                                "dispatch",
-                            )
+                            if declared_tool is not None:
+                                from entity.constant import TOOL_INTERNAL_ARG_KEYS
+                                normalized_args.update({
+                                    key: value for key, value in args.items() if key in TOOL_INTERNAL_ARG_KEYS
+                                })
+                                execution = ToolExecution(
+                                    tool=declared_tool,
+                                    arguments=normalized_args,
+                                    context=ctx,
+                                    tool_call_id=tc.id,
+                                )
+                                dispatched = await self._await_or_cancel(
+                                    tool_registry.async_dispatch(execution),
+                                    "dispatch",
+                                )
+                                if not isinstance(dispatched, ToolExecution) or dispatched.result is None:
+                                    raise LifecycleFailure("Object tool dispatch did not return an execution result")
+                                execution = dispatched
+                                result = execution.result
+                            else:
+                                raise LifecycleFailure(f"Tool {tc.name!r} disappeared before dispatch")
                         except ToolInterrupted as ti:
                             # 尽力 kill 子进程（run_command / run_python 登记的 Popen）
                             try:
@@ -451,15 +463,13 @@ class ToolExecutor:
             tool_call_id=tc.id,
             character_name=char_name,
             field_injector=self._loop.get_result_field_injector(),
-            evolution_requested=(
-                ctx.consume_evolution_request() if ctx is not None else False
-            ),
+            execution=execution,
         )
 
         # 工具成功执行后，检查是否需要重置循环计数器
         # 仅在实际分发（非审批拒绝）时触发，denied 路径不重置
         if self._turn_counter is not None and not _skip_dispatch:
-            _entry = tool_registry.get_entry(tc.name)
+            _entry = tool_registry.get_tool(tc.name)
             if _entry is not None and _entry.resets_turn_counter:
                 self._turn_counter.value = 0
 

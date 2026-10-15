@@ -3,8 +3,10 @@
 概念：
 - 工具链：历史中一段连续消息，仅由「带 tool_calls 的 assistant 消息」和
   ``ToolResultMessage`` 组成；遇到 user / 纯文本 assistant / system 消息即结束。
-- 可压缩链：链内每个 tool_call 都已有配对的 ToolResultMessage（进行中的
-  当前轮调用天然无结果，因此当前轮链被排除），且原始文本体积达到阈值。
+- 可压缩链：链内每个 tool_call 都已有配对的 ToolResultMessage，原始文本体积
+  达到阈值，且不含 ``excluded_tool_call_ids`` 中的调用（调用方据此保护当前
+  调用所在链，例如 CompressHistory；CompressToolChains 传空集合，因此可以
+  包含提交后的本次调用自身）。
 - 重打包：整链替换为恰好两条消息——带伪造 tool_call（不可调用的
   ``COMPRESSED_TOOL_CHAIN_CALL_NAME``）的 assistant 消息，以及携带链摘要的
   配对 ToolResultMessage，配对约束由构造保证。
@@ -70,6 +72,7 @@ def _message_size(message: BaseMessage) -> int:
 def detect_compressible_chains(
     messages: list[BaseMessage],
     min_chars: int = TOOL_CHAIN_COMPRESS_MIN_CHARS,
+    excluded_tool_call_ids: set[str] | None = None,
 ) -> list[ToolChainSpan]:
     """检测消息列表中所有可压缩工具链，返回半开区间列表。
 
@@ -77,11 +80,13 @@ def detect_compressible_chains(
     1. 链内每个 tool_call 的 id 都能在整条历史中找到配对 ToolResultMessage
        （进行中的调用没有结果，其所在链整体被排除）；
     2. 链的原始文本体积不低于 ``min_chars``；
-    3. 链内至少包含一次真实工具调用，纯压缩占位链不重复摘要。
+    3. 链内至少包含一次真实工具调用，纯压缩占位链不重复摘要；
+    4. 链内不含 ``excluded_tool_call_ids`` 中的任一 id（命中即整链跳过）。
     """
     result_ids: set[str] = {
         msg.tool_call_id for msg in messages if isinstance(msg, ToolResultMessage)
     }
+    excluded = excluded_tool_call_ids or set()
     spans: list[ToolChainSpan] = []
     index = 0
     total = len(messages)
@@ -107,6 +112,7 @@ def detect_compressible_chains(
             has_real_call
             and all(call_id in result_ids for call_id in call_ids)
             and size >= min_chars
+            and not any(call_id in excluded for call_id in call_ids)
         ):
             spans.append(ToolChainSpan(start=start, end=index))
     return spans

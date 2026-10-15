@@ -8,8 +8,8 @@
 工具生成的内容块 JSON 载荷不得超过 45 MiB；具体 LLM 客户端必须完整发送
 收到的多模态块，无法支持时自行抛出异常，本工具不假定客户端能力。
 
-注册入口为顶层 ``register_tools(registry, ui_events)``，由 ToolDiscoverySystem
-显式调用。路径解析通过 ``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例。
+注册入口为模块顶层 ``TOOLSET`` 对象，由 ToolDiscoverySystem 发现并注册。路径解析通过
+``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例。
 """
 
 from __future__ import annotations
@@ -43,8 +43,14 @@ from entity.messages import BaseMessage, MessageBlock, TextBlock
 from entity.puretype import Role, ToolDangerLevel
 
 # ── 工具注册 ──
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import (
+    BaseTool,
+    BaseToolSet,
+    ToolExecution,
+    ToolHandlerResult,
+    tool_error,
+    tool_result,
+)
 
 # ── 沙箱与运行时上下文 ──
 from system.sandbox import SandboxError
@@ -317,10 +323,9 @@ async def _handle_read_forward(
 # Registration
 # ---------------------------------------------------------------------------
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register ReadForward tool into the explicit runtime registry."""
-    del ui_events
-    registry.register(
+class ReadForwardTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
         name="ReadForward",
         toolset="read_forward",
         schema={
@@ -379,8 +384,15 @@ On error: `{"error": "..."}`. File-specific errors also identify the 1-based ind
                 "required": ["paths", "profile_name", "prompt"],
             },
         },
-        handler=_handle_read_forward,
         no_timeout=True,
         is_async=True,
         danger_level=ToolDangerLevel.safe,
-    )
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(
+            result=await _handle_read_forward(execution.arguments, execution.context)
+        )
+
+
+TOOLSET = BaseToolSet(name="read_forward", tools=(ReadForwardTool(),))

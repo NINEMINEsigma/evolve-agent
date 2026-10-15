@@ -1,6 +1,6 @@
 """BrowserListTabs — 枚举已接管浏览器中的全部标签页（write）。
 
-模块导入时通过 ``registry.register()`` 注册。
+工具对象通过模块级 ``TOOLSET``（``BaseToolSet``）声明；导入期只创建无连接工具对象。
 """
 
 from __future__ import annotations
@@ -8,8 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
 from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
@@ -52,34 +51,28 @@ async def _handle_browser_list_tabs(args: dict[str, Any]) -> dict:
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register BrowserListTabs into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="BrowserListTabs",
-        toolset="browser",
-        schema={
-        # 枚举已接管浏览器中的全部标签页，返回 index/title/url 列表。
-        # index 可直接作为 BrowserScreenshot / BrowserQuery / BrowserClick 等工具的 tab 参数。
-        #
-        # ## 前置条件
-        # - 已成功调用 BrowserConnect（或连接仍可自动重建）。
-        #
-        # ## 调用效果
-        # 展平所有浏览器窗口的标签页，按枚举顺序编号（0 基）。
-        #
-        # ## 返回
-        # ```json
-        # {"tabs": [{"index": 0, "title": "...", "url": "..."}], "total": 3, "endpoint": "http://localhost:9222"}
-        # ```
-        #
-        # ## 何时使用
-        # - 读取页面前先确认目标标签页是否存在及其 index。
-        # - 用户描述模糊时，用 title/url 列表定位目标页面。
-        #
-        # ## 副作用/注意
-        # - 只读操作，不修改浏览器状态。
-        "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of BrowserScreenshot / BrowserQuery / BrowserClick / BrowserType.
+_BROWSER_LIST_TABS_SCHEMA = {
+    # 枚举已接管浏览器中的全部标签页，返回 index/title/url 列表。
+    # index 可直接作为 BrowserScreenshot / BrowserQuery / BrowserClick 等工具的 tab 参数。
+    #
+    # ## 前置条件
+    # - 已成功调用 BrowserConnect（或连接仍可自动重建）。
+    #
+    # ## 调用效果
+    # 展平所有浏览器窗口的标签页，按枚举顺序编号（0 基）。
+    #
+    # ## 返回
+    # ```json
+    # {"tabs": [{"index": 0, "title": "...", "url": "..."}], "total": 3, "endpoint": "http://localhost:9222"}
+    # ```
+    #
+    # ## 何时使用
+    # - 读取页面前先确认目标标签页是否存在及其 index。
+    # - 用户描述模糊时，用 title/url 列表定位目标页面。
+    #
+    # ## 副作用/注意
+    # - 只读操作，不修改浏览器状态。
+    "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of BrowserScreenshot / BrowserQuery / BrowserClick / BrowserType.
 
 ## Prerequisites
 - BrowserConnect must have succeeded (or the connection can still be re-established automatically).
@@ -98,14 +91,29 @@ Flattens tabs across all browser windows, numbered 0-based in enumeration order.
 
 ## Side Effects / Notes
 - Read-only; does not modify browser state.""",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
     },
-    handler=_handle_browser_list_tabs,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.write,
-    )
+}
+
+
+class BrowserListTabsTool(BaseTool):
+    """枚举已接管浏览器中的全部标签页。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserListTabs",
+            toolset="browser",
+            schema=_BROWSER_LIST_TABS_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.write,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_list_tabs(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="browser", tools=(BrowserListTabsTool(),))

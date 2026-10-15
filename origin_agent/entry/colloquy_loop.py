@@ -51,7 +51,7 @@ class ColloquyLoop(ParentAgentLoop):
         for d in definitions:
             func = d.get("function") or {}
             name = func.get("name", "")
-            entry = tool_registry.get_entry(name)
+            entry = tool_registry.get_tool(name)
             if entry and entry.toolset in COLLOQUY_TOOLSET_WHITELIST:
                 filtered.append(d)
         return filtered

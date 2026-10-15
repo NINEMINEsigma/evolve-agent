@@ -18,7 +18,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolEntry
+from abstract.tools.tool import BaseTool
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
 from entity.puretype import (
@@ -47,8 +47,8 @@ from subagent.context import SubRuntimeContext
 from entry.agent_sink import AgentSink, ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
-from abstract.tools.ui_event_router import UIEventRouter
-from entry.tool_post_dispatch import PreparedToolResult, prepare_tool_result
+from abstract.tools.tool import ToolExecution
+from entry.tool_post_dispatch import PreparedToolResult, ToolPostprocessor, prepare_tool_result
 from entry.tool_executor import _interrupted_result, cancel_tool_wait
 from system.lifecycle import requires_lifecycle_propagation
 from system.runtime import RuntimeSystem
@@ -128,6 +128,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         app = Application.current()
         super().__init__(app, session_id)
         self._runtime = app.get_system(RuntimeSystem)
+        self._tool_postprocessor = ToolPostprocessor(self)
         self._cancel_cleanup_tasks: set[asyncio.Future[Any]] = set()
 
         self._name: str = name                              # 子 Agent 注册名，用于历史保存路径
@@ -372,7 +373,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         from system.application import Application
         from abstract.tools.registry import ToolRegistry
         tool_registry = Application.current().get_system(ToolRegistry)
-        entry = tool_registry.get_entry(name)
+        entry = tool_registry.get_tool(name)
         if entry is None:
             return False
         from component.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
@@ -396,6 +397,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         _cron = Application.current().get_system(CronRouter)
         _cron.register(self.session_id, self)
         active_round_id: str | None = None
+        postprocessing = False
         try:
             # 初始 prompt 也必须先登记为 Inbox 输入，避免启动 task 前丢失。
             from system.runtime import RuntimeSystem
@@ -463,6 +465,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     self._emit("assistant", content=resp.content, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
 
+                # 子会话保留原审批出口，仅先截断声明不接受的同批后续调用。
+                from abstract.tools.registry import ToolRegistry
+                batch = self.app.get_system(ToolRegistry).plan_tool_batch(resp.tool_calls)
+                resp = resp.model_copy(update={"tool_calls": batch.accepted})
+
                 # 存储带 tool_calls 的 assistant 消息
                 tool_calls_data: list[HistoryToolCall] = [
                     HistoryToolCall(
@@ -485,6 +492,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._history.add_message(assistant_msg)
 
                 # 处理工具调用 — safe 直接执行；其它工具入审批队列阻塞等待
+                committed_tool_ids: set[str] = set()
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for i, tc in enumerate(resp.tool_calls):
@@ -510,11 +518,23 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                             prepared = await self._queue_for_approval(tc)
 
                         self.store_tool_result(prepared)
-                        await prepared.emit(
-                            self.get_sink(),
-                            self.app.get_system(UIEventRouter),
-                        )
+                        committed_tool_ids.add(tc.id)
+                        postprocessing = True
+                        effect = await self._tool_postprocessor.after_committed(prepared, self.get_sink())
+                        postprocessing = False
                         tool_msg = prepared.message
+                        if effect.stop_current_round or effect.loop_replaced:
+                            self.complete_unexecuted_tool_calls(
+                                resp.tool_calls, committed_tool_ids,
+                                self.current_character_agent, "postprocess",
+                            )
+                            if effect.completion_message:
+                                self._history.add_message(CharacterConversationMessage(
+                                    role=Role.ASSISTANT, character_name=self.current_character_agent,
+                                    content=effect.completion_message,
+                                ))
+                                self.append_feedback(effect.completion_message)
+                            return
 
                         # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
                         raw_content = content_to_text(tool_msg.content)
@@ -529,7 +549,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                             for fu_msg in tm._follow_up_messages:
                                 self._history.add_message(fu_msg)
                 except BaseException as exc:
-                    must_propagate = requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
+                    must_propagate = postprocessing or requires_lifecycle_propagation(exc) or not isinstance(exc, Exception)
                     if isinstance(exc, asyncio.CancelledError):
                         # 纯取消仍需补齐配对，但不能吞生命周期失败
                         logger.warning(
@@ -541,7 +561,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         )
                     # 异常兜底：为未执行的 tool_calls 补中断结果，保证 History 配对后停止响应
                     _assistant_ids = {t.id for t in resp.tool_calls}
-                    _executed_ids = {
+                    _executed_ids = committed_tool_ids | {
                         m.tool_call_id
                         for m in self._history.iter_messages()
                         if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
@@ -561,7 +581,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._maybe_inject_inbox()
 
         except BaseException as exc:
-            if requires_lifecycle_propagation(exc):
+            if postprocessing or requires_lifecycle_propagation(exc):
                 raise
             if not isinstance(exc, Exception):
                 raise
@@ -666,6 +686,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         index = self._history.add_message(prepared.message)
         prepared.mark_appended(index)
         prepared.mark_persisted()
+        if prepared.execution is not None:
+            prepared.execution.history_index = index
+            prepared.execution.result_message = prepared.message
         return index
 
     def load_history(self, history: History) -> None:
@@ -922,16 +945,17 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         timeout: int = self._ctx.tool_timeout
         invocation_start: float = start_mono
         invocation_start_offset_ms: int = 0
+        execution: ToolExecution | None = None
         try:
             from system.application import Application
             from abstract.tools.registry import ToolRegistry
             tool_registry = Application.current().get_system(ToolRegistry)
-            entry = tool_registry.get_entry(tc.name)
+            entry = tool_registry.get_tool(tc.name)
             if entry is None:
                 return self._make_tool_msg(tc.id, {"error": f"Tool '{tc.name}' not found in registry"})
 
             # 工具集加载检查：未加载工具在执行前拦截（与执行期口径一致），
-            # 文案与 registry._resolve_call 保持逐字一致；registry 拦截仍作兜底。
+            # 文案与 Registry 的对象执行期检查保持一致；Registry 拦截仍作兜底。
             if not self.is_toolset_loaded(entry.toolset):
                 return self._make_tool_msg(
                     tc.id,
@@ -958,7 +982,14 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 character_name=self._name,
                 llm_profile=self._llm_profile,
             )
-            coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
+            tool = tool_registry.get_tool(tc.name)
+            if tool is None:
+                raise RuntimeError(f"Tool {tc.name!r} disappeared before dispatch")
+            normalized_args = tool.ensure_arguments(args)
+            execution = ToolExecution(
+                tool=tool, arguments=normalized_args, context=tool_ctx, tool_call_id=tc.id,
+            )
+            coro = tool_registry.async_dispatch(execution)
 
             invocation_start = _time_module.monotonic()
             invocation_start_offset_ms = int((invocation_start - start_mono) * 1000)
@@ -988,7 +1019,14 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     timeout_task.cancel()
             done = _done
             if dispatch_task in done and not dispatch_task.cancelled():
-                result = dispatch_task.result()
+                dispatched = dispatch_task.result()
+                if execution is not None:
+                    if not isinstance(dispatched, ToolExecution) or dispatched.result is None:
+                        raise RuntimeError("Object tool dispatch did not return an execution result")
+                    execution = dispatched
+                    result = execution.result
+                else:
+                    result = dispatched
             elif timeout_task is not None and timeout_task in done:
                 # 超时：取消 dispatch，走既有 TimeoutError 分支
                 await self._cancel_tool_wait(dispatch_task)
@@ -1020,6 +1058,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
                 field_injector=None,
+                execution=execution,
             )
         except asyncio.TimeoutError:
             invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)

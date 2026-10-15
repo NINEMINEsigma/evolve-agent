@@ -162,6 +162,9 @@ export function useWebSocket() {
     optimisticActivityId: string | null;
     trimConfirmed: boolean;
   } | null>(null);
+  const historyHandshakeRef = useRef<{
+    sessionId: string; generation: number; liveVersion: number;
+  } | null>(null);
   // 只用于阻止切会话期间提交旧身份；不承载新的会话真相源。
   const sessionTransitionRef = useRef(true);
 
@@ -290,11 +293,18 @@ export function useWebSocket() {
     if (Array.isArray(message.agents)) sessionRef.current?.setAgents(message.agents);
     else if (message.agents === null) sessionRef.current?.setAgents([]);
     const historyCount = message.history_count ?? 0;
-    if (message.processing) useChatRuntimeStore.getState().setProcessing(true);
+    if (typeof message.processing === "boolean") useChatRuntimeStore.getState().setProcessing(message.processing);
+    const handshake = historyHandshakeRef.current;
+    historyHandshakeRef.current = null;
     if (runtime.sessionId !== sid) {
       chatRuntimeController.beginSession(sid);
       useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
       void chatRuntimeController.initialize(sid, historyCount);
+    } else if (handshake?.sessionId === sid && handshake.generation === runtime.generation) {
+      // 重连也必须完整读取，恢复断线期间可能遗漏的历史更新指令。
+      void chatRuntimeController.reloadHistory(sid, handshake.liveVersion);
+    } else if (runtime.historyReloadRequired) {
+      void chatRuntimeController.syncCanonicalHistory(historyCount);
     } else if (runtime.skeleton.length === 0 && !runtime.initialReady) {
       useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
       void chatRuntimeController.initialize(sid, historyCount);
@@ -372,6 +382,17 @@ export function useWebSocket() {
       }
       if (clientId) useChatRuntimeStore.getState().removePendingMessages([clientId]);
       useChatRuntimeStore.getState().placeProvisionalActivityAfterUser();
+      return;
+    }
+    if (message.type === WS_IN.TOOL_CALLS_DISCARDED) {
+      frameBufferRef.current?.flush();
+      // session_id / stream_id / tool_call_ids 已由解码层严格校验；
+      // Store 只接受当前会话的权威丢弃事件，按 tool_call_id 删除实时卡片及映射/高度。
+      if (message.tool_call_ids?.length && message.session_id) {
+        useChatRuntimeStore.getState().discardLiveToolCalls(
+          message.tool_call_ids, message.session_id,
+        );
+      }
       return;
     }
     if (message.type === WS_IN.TOOL_CALL) {
@@ -541,6 +562,14 @@ export function useWebSocket() {
    * 此处按判别联合的 type 字面量分流：流式事件直接消费，非流事件交给 helpers。
    */
   const handleMessage = useCallback((message: WSMessage) => {
+    if (message.type === WS_IN.HISTORY_UPDATED) {
+      if (message.session_id !== useChatRuntimeStore.getState().sessionId) return;
+      frameBufferRef.current?.flush();
+      frameBufferRef.current?.cancel();
+      historyHandshakeRef.current = null;
+      void chatRuntimeController.reloadHistory(message.session_id);
+      return;
+    }
     if (message.type === WS_IN.STREAM_DELTA) {
       streamDoneSeenRef.current = false;
       frameBufferRef.current?.push(message);
@@ -583,6 +612,10 @@ export function useWebSocket() {
   const enterColloquy = useCallback(() => switchSession(COLLOQUY_SID), [switchSession]);
 
   const onOpen = useCallback(() => {
+    const runtime = useChatRuntimeStore.getState();
+    historyHandshakeRef.current = {
+      sessionId: runtime.sessionId, generation: runtime.generation, liveVersion: runtime.liveVersion,
+    };
     void llmProfilesRef.current.refreshProfiles().catch(() => {});
     void llmProfilesRef.current.refreshSessionSelection();
     sessionRef.current?.setApprovalModeSyncStatus("loading");

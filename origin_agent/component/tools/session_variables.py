@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import ToolRegistry, tool_error
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error
 from entity.constant import SESSION_VARIABLES_READ_TOOL_NAME, SESSION_VARIABLES_READ_TOOL_RESULT_MAX_CHARS
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
@@ -37,11 +36,7 @@ def _handle_read_session_variables(args: dict[str, Any], context: "ToolContext |
     return result.model_dump(mode="json")
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    registry.register(
-        name=SESSION_VARIABLES_READ_TOOL_NAME,
-        toolset="filesystem",
-        schema={
+_READ_SESSION_VARIABLES_SCHEMA = {
             "description": (
                 "Read all numeric and string variables from the current main session variable pool, "
                 "including nested groups, original values, normalized metadata, and diagnostic issues. "
@@ -53,10 +48,23 @@ def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
                 "only the main Agent should settle shared variables."
             ),
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-        handler=_handle_read_session_variables,
-        is_async=False,
-        danger_level=ToolDangerLevel.safe,
-        availability=ToolAvailability.EVERY,
-        max_result_size_chars=SESSION_VARIABLES_READ_TOOL_RESULT_MAX_CHARS,
-    )
+}
+
+
+class ReadSessionVariablesTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name=SESSION_VARIABLES_READ_TOOL_NAME,
+            toolset="filesystem",
+            schema=_READ_SESSION_VARIABLES_SCHEMA,
+            is_async=False,
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+            max_result_size_chars=SESSION_VARIABLES_READ_TOOL_RESULT_MAX_CHARS,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(_handle_read_session_variables(execution.arguments, execution.context))
+
+
+TOOLSET = BaseToolSet(name="filesystem", tools=(ReadSessionVariablesTool(),))

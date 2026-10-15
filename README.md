@@ -84,32 +84,41 @@ python run.py --load <config_key> --force_init
 
 ### custom_tools
 
-在 `custom_tools/` 目录下编写 `.py` 文件, 在模块顶层调用 `registry.register()` 注册工具, 启动时由 AST 扫描自动发现并加载（`abstract/tools/discover.py`）.
+在 `custom_tools/` 目录下编写 `.py` 文件, 声明模块顶层固定名称 `TOOLSET = BaseToolSet(...)`, 其中持有 `BaseTool` 子类实例; 启动时由 AST 扫描顶层 `TOOLSET` 自动发现并注册（`abstract/tools/discover.py`）.
 
 **发现规则**：
 
 - 递归扫描 `custom_tools/` 下所有 `.py`（支持子目录, 如 `memory_tools/remember.py`）.
-- 仅识别**模块顶层**的 `registry.register(...)` 调用, 函数体内的注册不会被检测到.
+- 仅识别**模块顶层**的 `TOOLSET` 声明, 一个模块只能声明一个; 函数体内的注册不会被识别.
+- 退役协议直接失败: 顶层 `register_tools` 函数、`registry.register()` 顶层调用、`abstract.tools.ui_event_router` 导入与导入期注册都会让发现终止.
 - 跳过文件名以 `_` 开头的文件（如 `_store.py`, 用作共享逻辑）、`__init__.py` 与 `registry.py`.
 - 沙盒命名空间 `custom_tools:` 对 agent 只读.
 
-**`registry.register()` 主要参数**：
+**`BaseTool` 主要参数**（模块级 `TOOLSET` 中的每个工具实例）:
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `name` | `str` | — | 工具唯一名称 |
-| `toolset` | `str` | — | 工具集分类（如 `custom`、`memory_tools`） |
+| `toolset` | `str` | — | 工具集分类（如 `custom`、`memory_tools`）; 必须与所属 `BaseToolSet.name` 一致 |
 | `schema` | `dict` | — | OpenAI 格式, 含 `description`（英文）与 `parameters` |
-| `handler` | `Callable` | — | `(args: dict, context=None) -> dict` |
-| `is_async` | `bool` | `False` | 为 `True` 时 handler 用 `async def`, 由事件循环 await |
+| `is_async` | `bool` | `False` | 为 `True` 时工具主体与后处理用 `async def`, 由事件循环 await |
 | `danger_level` | `ToolDangerLevel` | `safe` | `safe`/`write`/`dangerous`/`critical`; `dangerous` 及以上需审批, `critical` 只能由用户亲自批准 |
-| `availability` | `ToolAvailability` | `EVERY` | 可用范围: `MAIN`(主 agent) / `SUBAGENT`(子 agent) / `EVERY`(全部) |
+| `availability` | `ToolAvailability` | `EVERY` | 可用范围: `MAIN`(主 agent) / `SUBAGENT`(子 agent) / `MULTI_AGENT` / `TASKAGENT` / `EVERY`(全部) |
+| `accepts_following_calls` | `bool` | `True` | 同批后续调用接收声明; `False` 时同一模型响应中其后的 tool calls 在审批与执行前视为未发生 |
+| `no_timeout` | `bool` | `False` | 长阻塞工具设为 `True` |
 
-**handler 签名**：首参 `args` 为 LLM 传入的参数 dict; 若 handler 声明了 `context` 形参, 框架会注入 `ToolContext`（含 `session_id`、`runtime_context`、`loop` 等, 见 `entry/base_agent_loop.py`）. handler 抛出的异常会被捕获并转为 `{"error": "..."}`.
+**四阶段方法**（定义在工具实例上, 每次调用收到独立的 `ToolExecution`）:
 
-**结果辅助函数**（`abstract/tools/registry.py`）：
+- `before_handle(execution)` — 工具调用前, 在审批通过后、主体之前准备本次调用（默认空实现）.
+- `handle(execution) -> ToolHandlerResult` — 工具主体, 执行实际业务操作（抽象方法, 必须实现）.
+- `after_handle(execution) -> ToolPostprocessEffect` — 工具调用后处理, 仅在结果提交 History 后执行（默认空效果）.
+- `BaseToolSet.preheat()` — 工具集注册时对每个声明执行一次的可用性检查, 不启动重量资源.
 
-- `tool_result(**kwargs)` 或 `tool_result(dict)` — 返回成功结果 dict.
+工具对象在导入期只创建无连接、无 Application 查询的实例; 需要在执行时取运行时服务, 通过 `execution.context.app.get_system(...)` 取得.
+
+**结果辅助函数**（`abstract/tools/tool.py`）：
+
+- `tool_result(data=None, **kwargs)` — 返回成功结果 dict.
 - `tool_error(message, **extra)` — 返回 `{"error": message, **extra}`.
 
 **完整示例**：
@@ -117,37 +126,41 @@ python run.py --load <config_key> --force_init
 ```python
 from typing import Any
 
-from abstract.tools.registry import registry, tool_result
-from entity.puretype import ToolDangerLevel
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_result
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
 # 将给定文本翻译为目标语言
-def _handle_translate(args: dict[str, Any], context=None) -> dict:
-    text = args["text"]
-    target = args.get("target_lang", "en")
-    # ... 翻译逻辑 ...
-    return tool_result(success=True, translated=f"[{target}] {text}")
-
-
-registry.register(
-    name="translate",
-    toolset="custom",
-    schema={
-        # 将给定文本翻译为目标语言。
-        "description": "Translate the given text into the target language.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "The text to translate."},
-                "target_lang": {"type": "string", "description": "Target language code.", "default": "en"},
+class TranslateTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="translate",
+            toolset="custom",
+            schema={
+                # 将给定文本翻译为目标语言。
+                "description": "Translate the given text into the target language.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "The text to translate."},
+                        "target_lang": {"type": "string", "description": "Target language code.", "default": "en"},
+                    },
+                    "required": ["text"],
+                },
             },
-            "required": ["text"],
-        },
-    },
-    handler=_handle_translate,
-    is_async=False,
-    danger_level=ToolDangerLevel.safe,
-)
+            danger_level=ToolDangerLevel.safe,
+            availability=ToolAvailability.EVERY,
+        )
+
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        args: dict[str, Any] = execution.arguments
+        text = args["text"]
+        target = args.get("target_lang", "en")
+        # ... 翻译逻辑 ...
+        return ToolHandlerResult(tool_result(success=True, translated=f"[{target}] {text}"))
+
+
+TOOLSET = BaseToolSet(name="custom", tools=(TranslateTool(),))
 ```
 
 > 工具 schema 的 `description` 用英文, 紧邻其上的注释用中文. 仓库内置的记忆工具 `custom_tools/memory_tools/`（`remember` / `forget`）可作为参考实现.
@@ -214,4 +227,4 @@ def create_llm_client(runtime_context, profile=None):
 }
 ```
 
-每个条目以名称为键, 必须包含 `command`（stdio）或 `url`（HTTP/SSE）.可选字段：`args`、`env`（环境变量, 支持 `${VAR}` 插值）、`headers`、`timeout`（工具调用超时）、`connect_timeout`（连接超时）、`enabled`（设为 `false` 可临时禁用）.`component/mcp_tools.py` 在启动时连接所有 server 并注册其工具.配置文件不存在时自动创建空配置, agent 可通过 `ws:` 命名空间编辑后调用 `mcp_refresh` 工具热重载, 无需重启.
+每个条目以名称为键, 必须包含 `command`（stdio）或 `url`（HTTP/SSE）.可选字段：`args`、`env`（环境变量, 支持 `${VAR}` 插值）、`headers`、`timeout`（工具调用超时）、`connect_timeout`（连接超时）、`enabled`（设为 `false` 可临时禁用）.`MCPSystem` 在启动时按配置连接所有 server 并由 `MCPCore` 注册其远程工具（`component/mcp_tools.py` 只以顶层 `TOOLSET` 声明管理工具 `MCPRefresh`）.配置文件不存在时自动创建空配置, agent 可通过 `ws:` 命名空间编辑后调用 `MCPRefresh` 工具热重载, 无需重启.

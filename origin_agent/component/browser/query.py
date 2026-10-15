@@ -2,7 +2,7 @@
 
 按 CSS/XPath 选择器或子树文本定位，返回元素引用列表（含 path），
 供 BrowserClick / BrowserType / BrowserPress / BrowserScroll 等交互工具使用。
-模块导入时通过 ``registry.register()`` 注册。
+工具对象通过模块级 ``TOOLSET``（``BaseToolSet``）声明；导入期只创建无连接工具对象。
 """
 
 from __future__ import annotations
@@ -10,8 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry, tool_error, tool_result
-from abstract.tools.ui_event_router import UIEventRouter
+from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
 from component.browser.system import BrowserSystem
 from entity.constant import QUERY_MAX_RESULTS, QUERY_MAX_RESULTS_HARD
@@ -88,40 +87,34 @@ async def _handle_browser_query(args: dict[str, Any]) -> dict:
     )
 
 
-def register_tools(registry: ToolRegistry, ui_events: UIEventRouter) -> None:
-    """Register BrowserQuery into explicit runtime registries."""
-    del ui_events
-    registry.register(
-        name="BrowserQuery",
-        toolset="browser",
-        schema={
-        # 在页面中定位元素，返回元素引用列表（含 path），供 BrowserClick / BrowserType 等交互工具使用。
-        #
-        # ## 前置条件
-        # - 已成功调用 BrowserConnect；目标标签页存在。
-        #
-        # ## 调用效果
-        # - selector：CSS 选择器或 XPath（以 / 开头自动识别）。
-        # - text：按子树可见文本包含匹配（含后代，大小写不敏感），返回"最深匹配"元素
-        #   （某元素匹配时不再返回其内部的后代匹配），避免父子重复。
-        # - selector 与 text 同时提供时取交集（先定位再按文本过滤）。
-        # - max_results 默认 50，硬上限 200；超出时 truncated=true，请收窄条件。
-        #
-        # ## 返回
-        # ```json
-        # {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
-        # ```
-        # path 可直接作为 BrowserClick / BrowserType 等交互工具的 path 参数。
-        #
-        # ## 何时使用
-        # - 需要精确定位页面元素（按钮、链接、输入框、内容区块）时。
-        # - BrowserClick / BrowserType 等交互操作之前先确认目标元素存在及其 path。
-        # - 深嵌套页面优先用语义 selector（main/article/section）直达正文容器，
-        #   避免从 body 逐层下钻。
-        #
-        # ## 副作用/注意
-        # - 只读查询，不修改浏览器状态；正常模式下无需审批。
-        "description": """Locates elements in the page and returns reusable element references (including path) for BrowserClick / BrowserType / BrowserPress / BrowserScroll.
+_BROWSER_QUERY_SCHEMA = {
+    # 在页面中定位元素，返回元素引用列表（含 path），供 BrowserClick / BrowserType 等交互工具使用。
+    #
+    # ## 前置条件
+    # - 已成功调用 BrowserConnect；目标标签页存在。
+    #
+    # ## 调用效果
+    # - selector：CSS 选择器或 XPath（以 / 开头自动识别）。
+    # - text：按子树可见文本包含匹配（含后代，大小写不敏感），返回"最深匹配"元素
+    #   （某元素匹配时不再返回其内部的后代匹配），避免父子重复。
+    # - selector 与 text 同时提供时取交集（先定位再按文本过滤）。
+    # - max_results 默认 50，硬上限 200；超出时 truncated=true，请收窄条件。
+    #
+    # ## 返回
+    # ```json
+    # {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
+    # ```
+    # path 可直接作为 BrowserClick / BrowserType 等交互工具的 path 参数。
+    #
+    # ## 何时使用
+    # - 需要精确定位页面元素（按钮、链接、输入框、内容区块）时。
+    # - BrowserClick / BrowserType 等交互操作之前先确认目标元素存在及其 path。
+    # - 深嵌套页面优先用语义 selector（main/article/section）直达正文容器，
+    #   避免从 body 逐层下钻。
+    #
+    # ## 副作用/注意
+    # - 只读查询，不修改浏览器状态；正常模式下无需审批。
+    "description": """Locates elements in the page and returns reusable element references (including path) for BrowserClick / BrowserType / BrowserPress / BrowserScroll.
 
 ## Prerequisites
 - BrowserConnect must have succeeded; the target tab must exist.
@@ -145,36 +138,51 @@ The path can be passed directly as the path argument of BrowserClick / BrowserTy
 
 ## Side Effects / Notes
 - Read-only; does not modify browser state; no approval needed in normal mode.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tab": {
-                    "type": "string",
-                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
-                },
-                "selector": {
-                    "type": "string",
-                    # CSS 选择器或 XPath（以 / 开头自动识别）。
-                    "description": "CSS selector, or XPath when starting with '/'. Optional.",
-                },
-                "text": {
-                    "type": "string",
-                    # 子树可见文本包含（含后代，大小写不敏感），返回最深匹配元素。
-                    "description": "Match elements whose subtree visible text contains this (descendants included, case-insensitive); returns deepest matches. Optional.",
-                },
-                "max_results": {
-                    "type": "integer",
-                    # 最大返回数（默认 50，硬上限 200）。
-                    "description": "Maximum matches to return (default 50, hard cap 200).",
-                    "default": 50,
-                },
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tab": {
+                "type": "string",
+                # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
             },
-            "required": ["tab"],
+            "selector": {
+                "type": "string",
+                # CSS 选择器或 XPath（以 / 开头自动识别）。
+                "description": "CSS selector, or XPath when starting with '/'. Optional.",
+            },
+            "text": {
+                "type": "string",
+                # 子树可见文本包含（含后代，大小写不敏感），返回最深匹配元素。
+                "description": "Match elements whose subtree visible text contains this (descendants included, case-insensitive); returns deepest matches. Optional.",
+            },
+            "max_results": {
+                "type": "integer",
+                # 最大返回数（默认 50，硬上限 200）。
+                "description": "Maximum matches to return (default 50, hard cap 200).",
+                "default": 50,
+            },
         },
+        "required": ["tab"],
     },
-    handler=_handle_browser_query,
-    check_fn=_connection.playwright_available,
-    is_async=True,
-    danger_level=ToolDangerLevel.safe,
-    )
+}
+
+
+class BrowserQueryTool(BaseTool):
+    """在页面中定位元素并产出可复用的元素引用。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="BrowserQuery",
+            toolset="browser",
+            schema=_BROWSER_QUERY_SCHEMA,
+            is_async=True,
+            check_fn=_connection.playwright_available,
+            danger_level=ToolDangerLevel.safe,
+        )
+
+    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(await _handle_browser_query(execution.arguments))
+
+
+TOOLSET = BaseToolSet(name="browser", tools=(BrowserQueryTool(),))
