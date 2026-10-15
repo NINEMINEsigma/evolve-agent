@@ -1372,4 +1372,22 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 本次无后端类、Agent Loop protected 字段、跨类私有访问、System 拓扑、网络协议或持久化格式变化，无新增依赖。已按任务文件 v2 清单实施源码，尚未运行构建、类型检查或应用验收。
 
+### 重新生成的前端局部历史截断（2026-10-15）
+
+新增接口均属于既有前端状态/请求链路，不改变后端 Agent Loop 类关系或生命周期所有权：
+
+| 归属 | 新增/调整接口 | 责任 |
+|---|---|---|
+| `features/chat/types.ts` | `RegenerateTrimPayload` | 既有 SYSTEM JSON 截断载荷的前端静态类型，无持久化或新 wire 字段 |
+| `features/chat/regenerateTrim.ts` | `isRegenerateTrimPayload(value)` | 纯守卫，严格确认索引数量关系与 suffix 类型，无 I/O、状态或运行时查询 |
+| `ChatRuntimeController` | `applyRegenerateTrim(sessionId, trim)` | 会话先检、取消旧历史请求、同步委托 Store；缺目标 user 骨架时按新代际补取 |
+| `ChatRuntimeState` | `trimHistoryForRegeneration(trim)` | 单次状态提交截断骨架/正文/实时尾部及关联，保留前缀、草稿和当前活动；返回新 generation |
+| `ChatRuntimeState` | `cancelOptimisticMainSessionActivity(activityId)` | 只清理精确匹配、仍 provisional 且语义为空的本地活动，不清已被实际流或轮询收编的状态 |
+| `ChatRuntimeState` | `replaceSkeleton(rows, historyCount)` | 不再隐式清空同代际新到的实时映射及待结束流，历史结构边界负责旧流失效 |
+| `useWebSocket` | 截断通知路由与重新生成请求归属 ref | 严格会话双检、帧缓冲取消、同步删除；本地请求序号/socket/目标索引关联 HTTP 终态，截断确认后请求失败不清服务端活动 |
+
+工具请求按 skeleton 行和 `tool_call_id` 定位，结果用 `toolCard.result.historyIndex` 校验范围；实时结果无索引只可引用同请求的正典结果证据，无法证明时使正文与 loaded 标记失效而非保留旧工具附件。generation 复用既有 History 请求、活动轮询和滚动取消边界，无第二份 History 或活动真相源。
+
+本次未新增 Application/AsyncSystem、Agent Loop protected 字段、跨类私有访问、后端接口、依赖或存储版本；通用自动重连策略不变，漏通知且数量未下降的恢复问题明确延期。源码已按 PLAN v2.1 实施并定向静态审阅，未运行类型检查、构建或应用，用户验收仍待完成。
+
 

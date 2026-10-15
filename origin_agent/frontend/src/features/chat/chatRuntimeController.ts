@@ -4,6 +4,7 @@ import { fetchHistoryPage, fetchHistoryResources, fetchHistorySkeleton } from ".
 import { selectChatRenderRows, useChatRuntimeStore } from "./chatRuntimeStore";
 import type { ClientDiagnostic } from "../../types";
 import { RequestTimeoutError } from "../../services/fetchWithTimeout";
+import type { RegenerateTrimPayload } from "./types";
 
 class ChatRuntimeController {
   private controllers = new Set<AbortController>();
@@ -155,6 +156,19 @@ class ChatRuntimeController {
         `正典历史同步失败：${this.errorMessage(error)}`,
       );
     }
+  }
+
+  applyRegenerateTrim(sessionId: string, trim: RegenerateTrimPayload): boolean {
+    const state = useChatRuntimeStore.getState();
+    if (!sessionId || state.sessionId !== sessionId) return false;
+    this.abortAll();
+    state.trimHistoryForRegeneration(trim);
+    const current = useChatRuntimeStore.getState();
+    if (!current.skeleton.some((row) => row.history_index === trim.message_index
+      && row.row_kind === "message" && row.role === "user")) {
+      void this.initialize(sessionId, trim.keep_count);
+    }
+    return true;
   }
 
   async invalidateAfterMutation(historyCount?: number): Promise<void> {

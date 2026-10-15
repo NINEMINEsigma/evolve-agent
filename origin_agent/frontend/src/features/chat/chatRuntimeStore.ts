@@ -18,6 +18,7 @@ import type {
   LiveChatRow,
   PendingChatMessage,
   PendingStreamFinish,
+  RegenerateTrimPayload,
   StreamBatch,
 } from "./types";
 import { generateUUID } from "../../utils";
@@ -65,6 +66,8 @@ export interface ChatRuntimeState {
 
   beginSession: (sessionId: string) => number;
   resetSession: () => void;
+  trimHistoryForRegeneration: (trim: RegenerateTrimPayload) => number;
+  cancelOptimisticMainSessionActivity: (activityId: string) => void;
   setSkeletonLoading: (loading: boolean) => void;
   setSkeletonError: (error: string | null) => void;
   replaceSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
@@ -376,6 +379,161 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     set({ ...initialState, generation: nextGeneration, loadedHistoryIndices: new Set<number>() });
   },
 
+  trimHistoryForRegeneration: (trim) => {
+    const state = get();
+    const skeleton = state.skeleton.filter((row) => row.history_index < trim.keep_count);
+    const skeletonById = new Map(skeleton.map((row) => [row.row_id, row]));
+    const invalidToolRows = new Set<string>();
+    const invalidToolIndices = new Set<number>();
+    const hasRetainedResultIndex = (index: number | undefined): boolean => (
+      index !== undefined && Number.isSafeInteger(index) && index >= 0 && index < trim.keep_count
+    );
+    const withUpdatedSuffix = (message: ChatMessage, row: HistorySkeletonRowDto): ChatMessage => (
+      row.row_kind === "message" && row.role === "user" && row.history_index === trim.message_index
+        ? {
+            ...message,
+            messageSuffix: trim.message_suffix ?? undefined,
+            dynamicMessageSuffix: trim.dynamic_message_suffix ?? undefined,
+          }
+        : message
+    );
+
+    for (const row of skeleton) {
+      if (row.row_kind !== "tool_card") continue;
+      const message = state.contentByRowId[row.row_id];
+      const card = message?.toolCard;
+      if (message && (!card || card.request.toolCallId !== row.tool_call_id
+        || (card.result && !hasRetainedResultIndex(card.result.historyIndex)))) {
+        invalidToolRows.add(row.row_id);
+      }
+    }
+    for (const live of state.liveRows) {
+      const historyRowId = state.streamHistoryLinks[live.id];
+      const row = skeletonById.get(historyRowId);
+      if (!row || row.row_kind !== "tool_card") continue;
+      const card = live.message.toolCard;
+      const canonicalCard = state.contentByRowId[row.row_id]?.toolCard;
+      if (!card || !row.tool_call_id || card.request.toolCallId !== row.tool_call_id
+        || live.id !== toolCardLiveId(row.tool_call_id)) {
+        invalidToolRows.add(row.row_id);
+        continue;
+      }
+      // 实时工具结果通常没有索引，只能从同一调用的正典结果取得范围证据。
+      if (card.result) {
+        const resultIndex = card.result.historyIndex ?? (
+          canonicalCard?.request.toolCallId === card.request.toolCallId
+            ? canonicalCard.result?.historyIndex
+            : undefined
+        );
+        if (!hasRetainedResultIndex(resultIndex)) invalidToolRows.add(row.row_id);
+      }
+    }
+
+    const contentByRowId: Record<string, ChatMessage> = {};
+    for (const row of skeleton) {
+      if (invalidToolRows.has(row.row_id)) {
+        invalidToolIndices.add(row.history_index);
+        continue;
+      }
+      const message = state.contentByRowId[row.row_id];
+      if (message) contentByRowId[row.row_id] = withUpdatedSuffix(message, row);
+    }
+
+    const liveRows: LiveChatRow[] = [];
+    const streamHistoryLinks: Record<string, string> = {};
+    let keptActivityPlaceholder = false;
+    for (const live of state.liveRows) {
+      const historyRowId = state.streamHistoryLinks[live.id];
+      const row = skeletonById.get(historyRowId);
+      if (row && !invalidToolRows.has(row.row_id)) {
+        liveRows.push({ ...live, message: withUpdatedSuffix(live.message, row) });
+        streamHistoryLinks[live.id] = row.row_id;
+      } else if (!keptActivityPlaceholder && state.mainSessionActivity
+        && live.activityId === state.mainSessionActivity.activity_id
+        && live.message.role === "assistant" && isSemanticallyEmptyActivityRow(live)) {
+        liveRows.push(live);
+        keptActivityPlaceholder = true;
+      }
+    }
+    const retainedLiveIds = new Set(liveRows.map((row) => row.id));
+    const pendingStreamFinishes = Object.fromEntries(
+      Object.entries(state.pendingStreamFinishes).filter(([id]) => retainedLiveIds.has(id)),
+    );
+    const generation = state.generation + 1;
+    const nextState: ChatRuntimeState = {
+      ...state,
+      generation,
+      skeleton,
+      knownHistoryCount: trim.keep_count,
+      lastUserHistoryIndex: trim.message_index,
+      contentByRowId,
+      liveRows,
+      streamHistoryLinks,
+      pendingStreamFinishes,
+      currentStreamId: state.currentStreamId && retainedLiveIds.has(state.currentStreamId)
+        ? state.currentStreamId : null,
+      loadedHistoryIndices: new Set([...state.loadedHistoryIndices].filter(
+        (index) => index < trim.keep_count && !invalidToolIndices.has(index),
+      )),
+      pendingHistoryPages: [],
+      pageErrors: {},
+      skeletonError: null,
+      skeletonLoading: false,
+      resources: null,
+      resourcesLoading: false,
+      resourcesError: null,
+      liveVersion: state.liveVersion + 1,
+      canonicalHandoffReady: false,
+      processing: true,
+      followMode: state.followMode === "returning" ? "detached" : state.followMode,
+    };
+    const renderRows = selectChatRenderRows(nextState);
+    const retainedRenderIds = new Set(renderRows.map((row) => row.renderId));
+    nextState.rowHeights = Object.fromEntries(
+      Object.entries(state.rowHeights).filter(([id]) => retainedRenderIds.has(id)),
+    );
+    const lastRow = Math.max(0, renderRows.length - 1);
+    const startIndex = Math.max(0, Math.min(state.visibleRange.startIndex, lastRow));
+    nextState.visibleRange = {
+      startIndex,
+      endIndex: Math.max(startIndex, Math.min(state.visibleRange.endIndex, lastRow)),
+    };
+    // 只提交一次，避免旧映射、旧正文与新骨架在中间状态混用。
+    set(nextState);
+    return generation;
+  },
+
+  cancelOptimisticMainSessionActivity: (activityId) => set((state) => {
+    if (!activityId.startsWith("local:") || state.mainSessionActivity?.activity_id !== activityId) {
+      return state;
+    }
+    const activityRows = state.liveRows.filter((row) => row.activityId === activityId);
+    if (activityRows.some((row) => !row.provisional || !isSemanticallyEmptyActivityRow(row))
+      || state.liveRows.some((row) => row.streaming && row.message.role === "assistant"
+        && row.activityId !== activityId)) {
+      return state;
+    }
+    const removedIds = new Set(activityRows.map((row) => row.id));
+    const removedRenderIds = new Set(activityRows.map((row) => row.renderId || row.id));
+    return {
+      mainSessionActivity: null,
+      processing: false,
+      liveRows: state.liveRows.filter((row) => !removedIds.has(row.id)),
+      currentStreamId: state.currentStreamId && removedIds.has(state.currentStreamId)
+        ? null : state.currentStreamId,
+      rowHeights: Object.fromEntries(
+        Object.entries(state.rowHeights).filter(([id]) => !removedRenderIds.has(id)),
+      ),
+      streamHistoryLinks: Object.fromEntries(
+        Object.entries(state.streamHistoryLinks).filter(([id]) => !removedIds.has(id)),
+      ),
+      pendingStreamFinishes: Object.fromEntries(
+        Object.entries(state.pendingStreamFinishes).filter(([id]) => !removedIds.has(id)),
+      ),
+      liveVersion: state.liveVersion + (removedIds.size ? 1 : 0),
+    };
+  }),
+
   setSkeletonLoading: (skeletonLoading) => set({ skeletonLoading }),
   setSkeletonError: (skeletonError) => set({ skeletonError }),
 
@@ -384,8 +542,7 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     knownHistoryCount,
     lastUserHistoryIndex: lastUserIndex(skeleton),
     contentByRowId: {},
-    streamHistoryLinks: {},
-    pendingStreamFinishes: {},
+    // 历史结构边界负责失效旧流；异步骨架不得抹掉新代际已经收到的关联和结束事件。
     loadedHistoryIndices: new Set<number>(),
     pageErrors: {},
   }),

@@ -26,6 +26,7 @@ import { WS_CONNECTION_WELCOME_TEXT, WS_IN, WS_OUT } from "../constants/ws";
 import { generateUUID, parseToolResult } from "../utils";
 import { chatRuntimeController } from "../features/chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { isRegenerateTrimPayload } from "../features/chat/regenerateTrim";
 import { hasMountedChatList } from "../features/chat/chatViewport";
 import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
@@ -152,6 +153,15 @@ export function useWebSocket() {
   const connRef = useRef(conn);
   const subagentRef = useRef(subagent);
   const streamDoneSeenRef = useRef(false);
+  const regenerateRequestSequenceRef = useRef(0);
+  const regenerateRequestRef = useRef<{
+    sequence: number;
+    sessionId: string;
+    socket: WebSocket;
+    messageIndex: number;
+    optimisticActivityId: string | null;
+    trimConfirmed: boolean;
+  } | null>(null);
   // 只用于阻止切会话期间提交旧身份；不承载新的会话真相源。
   const sessionTransitionRef = useRef(true);
 
@@ -449,32 +459,57 @@ export function useWebSocket() {
       let isProtocolMeta = false;
       try {
         parsed = JSON.parse(message.content);
-        const streamMeta = parsed?.stream_meta;
-        if (streamMeta && typeof streamMeta === "object") {
-          isProtocolMeta = true;
-          if (typeof streamMeta.stream_id === "string" && streamMeta.stream_id
-            && Number.isSafeInteger(streamMeta.history_index) && streamMeta.history_index >= 0
-            && (!message.session_id || message.session_id === useChatRuntimeStore.getState().sessionId)) {
-            useChatRuntimeStore.getState().linkStreamHistory(
-              streamMeta.stream_id, streamMeta.history_index,
-            );
-          }
-          if (Array.isArray(streamMeta.live_history_links)) {
-            for (const link of streamMeta.live_history_links as HistoryRowLink[]) {
-              if (typeof link?.live_id !== "string" || typeof link?.history_row_id !== "string") {
-                console.error("无效的live_history_links映射", { link });
-                continue;
-              }
-              useChatRuntimeStore.getState().linkLiveHistory(link.live_id, link.history_row_id);
-            }
-            useChatRuntimeStore.getState().promoteMappedLiveRows();
-          }
-        }
-        if (parsed?.uploaded) {
-          appendLocalMessage("system", `上传成功：${parsed.filename || "文件"} → ${parsed.path}`);
-        }
       } catch {
-        // 普通文本 system 消息继续进入聊天区；协议 JSON 不作为聊天正文渲染。
+        // 普通文本 system 消息继续进入聊天区；协议处理错误不在解析边界吞掉。
+      }
+      if (parsed?.regenerate_trim === true) {
+        const sid = message.session_id;
+        if (!sid || sessionRef.current?.sessionId !== sid
+          || useChatRuntimeStore.getState().sessionId !== sid) return;
+        if (!isRegenerateTrimPayload(parsed)) {
+          console.error("Invalid regenerate trim payload");
+          sessionRef.current?.showOperationNotice({
+            kind: "error",
+            message: "\u91cd\u65b0\u751f\u6210\u7684\u5386\u53f2\u622a\u65ad\u901a\u77e5\u65e0\u6548\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540c\u6b65\u5386\u53f2\u3002",
+          });
+          return;
+        }
+        const request = regenerateRequestRef.current;
+        if (request && regenerateRequestRef.current === request
+          && request.sequence === regenerateRequestSequenceRef.current
+          && request.sessionId === sid && request.socket === connRef.current.wsRef.current
+          && request.messageIndex === parsed.message_index) {
+          request.trimConfirmed = true;
+        }
+        // 通知后的新流尚未入队；取消旧帧，不能把旧正文刷新到新历史代际。
+        frameBufferRef.current?.cancel();
+        streamDoneSeenRef.current = false;
+        chatRuntimeController.applyRegenerateTrim(sid, parsed);
+        return;
+      }
+      const streamMeta = parsed?.stream_meta;
+      if (streamMeta && typeof streamMeta === "object") {
+        isProtocolMeta = true;
+        if (typeof streamMeta.stream_id === "string" && streamMeta.stream_id
+          && Number.isSafeInteger(streamMeta.history_index) && streamMeta.history_index >= 0
+          && (!message.session_id || message.session_id === useChatRuntimeStore.getState().sessionId)) {
+          useChatRuntimeStore.getState().linkStreamHistory(
+            streamMeta.stream_id, streamMeta.history_index,
+          );
+        }
+        if (Array.isArray(streamMeta.live_history_links)) {
+          for (const link of streamMeta.live_history_links as HistoryRowLink[]) {
+            if (typeof link?.live_id !== "string" || typeof link?.history_row_id !== "string") {
+              console.error("无效的live_history_links映射", { link });
+              continue;
+            }
+            useChatRuntimeStore.getState().linkLiveHistory(link.live_id, link.history_row_id);
+          }
+          useChatRuntimeStore.getState().promoteMappedLiveRows();
+        }
+      }
+      if (parsed?.uploaded) {
+        appendLocalMessage("system", `上传成功：${parsed.filename || "文件"} → ${parsed.path}`);
       }
       const isConnectionWelcome = message.content === WS_CONNECTION_WELCOME_TEXT
         && message.index == null && message.is_system_status !== true;
@@ -807,8 +842,39 @@ export function useWebSocket() {
       sessionRef.current?.showOperationNotice({ kind: "warning", message: "请等待会话就绪，并在顶部栏选择待用模型后重新生成。" });
       return;
     }
-    useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(`regenerate-${messageIndex}-${Date.now()}`, "regenerate");
+    const socket = connRef.current.wsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      sessionRef.current?.showOperationNotice({
+        kind: "warning",
+        message: "\u8bf7\u7b49\u5f85\u8fde\u63a5\u6062\u590d\u540e\u91cd\u65b0\u751f\u6210",
+      });
+      return;
+    }
+    const sequence = ++regenerateRequestSequenceRef.current;
+    const localId = `regenerate-${sequence}-${messageIndex}-${Date.now()}`;
+    const optimisticActivityId = `local:${localId}`;
+    useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(localId, "regenerate");
     useChatRuntimeStore.getState().setProcessing(true);
+    const request = {
+      sequence,
+      sessionId: sid,
+      socket,
+      messageIndex,
+      optimisticActivityId: useChatRuntimeStore.getState().mainSessionActivity?.activity_id === optimisticActivityId
+        ? optimisticActivityId : null,
+      trimConfirmed: false,
+    };
+    regenerateRequestRef.current = request;
+    const ownsRequest = () => regenerateRequestRef.current === request
+      && regenerateRequestSequenceRef.current === sequence
+      && sessionRef.current?.sessionId === sid
+      && useChatRuntimeStore.getState().sessionId === sid
+      && connRef.current.wsRef.current === socket;
+    const cancelUnconfirmedPlaceholder = () => {
+      if (!request.trimConfirmed && request.optimisticActivityId) {
+        useChatRuntimeStore.getState().cancelOptimisticMainSessionActivity(request.optimisticActivityId);
+      }
+    };
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
         method: "POST",
@@ -816,15 +882,21 @@ export function useWebSocket() {
         body: JSON.stringify({ message_index: messageIndex, llm_profile_name: profileName }),
       });
       const data = await response.json().catch(() => ({}));
-      if (sessionRef.current?.sessionId !== sid || useChatRuntimeStore.getState().sessionId !== sid) return;
+      if (!ownsRequest()) return;
       if (!response.ok || !data.regenerate) {
-        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-        appendLocalMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+        cancelUnconfirmedPlaceholder();
+        appendLocalMessage("error", `\u91cd\u65b0\u751f\u6210\u5931\u8d25\uff1a${data.error || "unknown error"}`);
       }
     } catch (cause) {
-      if (sessionRef.current?.sessionId !== sid || useChatRuntimeStore.getState().sessionId !== sid) return;
-      useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-      sessionRef.current?.showOperationNotice({ kind: "error", message: `重新生成请求失败：${cause instanceof Error ? cause.message : "网络错误"}` });
+      if (!ownsRequest()) return;
+      cancelUnconfirmedPlaceholder();
+      sessionRef.current?.showOperationNotice({
+        kind: "error",
+        message: `\u91cd\u65b0\u751f\u6210\u8bf7\u6c42\u5931\u8d25\uff1a${cause instanceof Error ? cause.message : "\u7f51\u7edc\u9519\u8bef"}`,
+      });
+    } finally {
+      // 只释放仍由本次持有的请求记录，不改变服务端活动或新请求的状态。
+      if (regenerateRequestRef.current === request) regenerateRequestRef.current = null;
     }
   }, [appendLocalMessage]);
 

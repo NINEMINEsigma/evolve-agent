@@ -7,6 +7,14 @@ import type {
 
 export type HistoryRowKind = "message" | "tool_card";
 
+export interface RegenerateTrimPayload {
+  regenerate_trim: true;
+  keep_count: number;
+  message_index: number;
+  message_suffix?: string | null;
+  dynamic_message_suffix?: string | null;
+}
+
 export interface HistorySkeletonRowDto {
   row_id: string;
   history_index: number;

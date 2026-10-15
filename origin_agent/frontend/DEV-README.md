@@ -411,3 +411,17 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 `ChatLiveFooter`仅承载等待指示器、最新历史页错误和底部安全留白。流结束可见性判断查询统一聊天列表中的渲染行，不能依赖 Footer 是否挂载。统一行的折叠状态和高度记录都按 `renderId`保存；Virtuoso 离开可视范围的正常卸载仍然保留。
 
 历史内容页和正典关联可能乱序到达时，活动实时行通过正典交接屏障暂缓正文替换；只有后端明确的 `live_history_links`完成关联后，统一行才移动到对应 History 顺序位置。关联缺失、身份不匹配或页面失败时保留实时行，不按正文或数组顺序猜测。
+
+### 重新生成的历史截断同步
+
+`hooks/useWebSocket.ts` 消费既有 `SYSTEM.content` 中的 `regenerate_trim` 通知；先检查外层会话 ID 同时属于当前连接会话和聊天运行时，再由 `features/chat/regenerateTrim.ts::isRegenerateTrimPayload()` 校验原始类型、safe integer、`keep_count === message_index + 1` 与可空的两个 suffix。非法通知只给固定脱敏错误，不渲染为聊天正文，不按默认数量删除。JSON 解析异常边界不吞掉后续协议处理错误。
+
+清理时点为收到服务端截断确认，而不是按钮点击或 POST 完成。通知处理同步取消旧流帧缓冲并重置旧结束事件标记，经 `chatRuntimeController.applyRegenerateTrim()` 取消旧历史请求，再由 `chatRuntimeStore.trimHistoryForRegeneration()` 单次提交保留 `[0, keep_count)` 的骨架/正文及目标 user 的新上下文扩展。`generation` 递增拒绝旧骨架、内容页、资源及活动轮询的迟到结果；已删除消息的实时尾部、映射、待交接页和高度记录同步失效，保留草稿、待发送记录、显示偏好、当前活动及其语义为空的占位。正在进行的回底动作因代际变化取消，`returning` 转为 `detached`，正常追底/离底偏好保持。
+
+工具请求按骨架行及 `tool_call_id` 精确定位；结果范围来自 `toolCard.result.historyIndex`，实时结果缺索引时只可借用同一调用的正典结果索引。结果超出保留范围、身份冲突或已有结果却无可证明索引时，该锚点正文与 live 卡片失效，且删除已加载索引，后续可见页/尾页重新投影。资源索引失效后沿原懒加载重取，不回滚文件、变量池或 Shell/Cron 副作用。
+
+正常路径保留既有前缀，不额外读取全骨架；仅本地尚缺目标 user 行时在新代际调用原 `initialize()` 补取。`replaceSkeleton()` 只替换正典骨架/正文缓存，不再隐式清空本代际新到的实时关联和待结束事件；旧流由明确的历史结构变化或会话边界失效。
+
+重新生成 POST 按 hook 内的本地请求序号、对象身份、会话 ID 与 WebSocket 实例约束终态归属；本地序号不是服务端协议字段。截断确认后请求失败只报告错误，不把仍运行的活动置空闲、不恢复旧回复，实际活动由原服务端事件和状态轮询收敛。未确认的失败也只允许 `cancelOptimisticMainSessionActivity()` 清理严格属于该请求、仍 provisional 且语义为空的本地占位；已被实际流或轮询收编的气泡不清理。网络失败不代表服务端已停止。
+
+通用自动重连策略不变；断线漏掉截断通知且最终消息数未下降的历史同步风险仍延期处理，可通过完整页面刷新按原初始化恢复权威 History。本次没有新增后端字段、依赖或存储迁移。已完成源码实施与定向静态审阅，未运行类型检查、构建或应用；用户按 `.tasks/2026-10-15_3-regenerate-stale-messages.md` 中有效验收矩阵验证。
