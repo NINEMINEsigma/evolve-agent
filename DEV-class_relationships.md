@@ -25,6 +25,10 @@ classDiagram
         +get_session_history_skeleton()
         +get_session_history_page()
         +get_session_history_resources()
+        +get_session_export_guard()
+        +capture_session_export_source()
+        #_session_export_instance_id
+        #_session_export_epoch
         +edit_session_message()
         +delete_session_messages()
         +delete_single_message()
@@ -804,6 +808,7 @@ classDiagram
 
 | 字段 | 定义类 | 类型 | 说明 |
 |---|---|---|---|
+| `_session_export_instance_id` / `_session_export_epoch` | `BaseAgentLoop` | `str` / `int` | 只读导出使用的非持久化实例身份和变更代际；保存、新活动、会话切换及历史加载/重置边界更新，不改变 History 存储 |
 | `_inbox` | `BaseAgentLoop` | `Inbox` | 收件箱；子类通过 `self._inbox` 访问属合法继承 |
 | `_cancel_event` | `BaseAgentLoop` | `asyncio.Event` | 取消/中断信号；`ToolContext.is_interrupted` 读取 `loop._cancel_event` |
 | `_message_hooks_cache` | `BaseAgentLoop` | `list[dict] \| None` | hook 缓存 |
@@ -1389,5 +1394,14 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 工具请求按 skeleton 行和 `tool_call_id` 定位，结果用 `toolCard.result.historyIndex` 校验范围；实时结果无索引只可引用同请求的正典结果证据，无法证明时使正文与 loaded 标记失效而非保留旧工具附件。generation 复用既有 History 请求、活动轮询和滚动取消边界，无第二份 History 或活动真相源。
 
 本次未新增 Application/AsyncSystem、Agent Loop protected 字段、跨类私有访问、后端接口、依赖或存储版本；通用自动重连策略不变，漏通知且数量未下降的恢复问题明确延期。源码已按 PLAN v2.1 实施并定向静态审阅，未运行类型检查、构建或应用，用户验收仍待完成。
+
+### 会话离线导出基础纯类型（2026-10-15，尚未接入）
+
+`entity/puretype/session_export.py` 新增消息前的导出请求/响应、预算、视觉状态和资源校验凭据；只依赖既有消息前 `SessionHistoryContentRow`。`entity/puretype_after/session_export.py::SessionExportHistorySource` 持有 `tuple[BaseMessage, ...]`，属于消息后纯类型，由后期包单独导出，不反向导入前期包。常量集中在 `entity/constant/session_export.py`，无运行时实例、方法、持久化或 typeref 变化。
+
+当前已接入完整源码链路：`BaseAgentLoop` 的导出身份/epoch、公开只读guard和协作捕获入口；`entry/session_export.py` 的隔离复制及线程摘要/投影；`GatewaySystem` 新增 `_session_exports: SessionExportService | None` 和公开 `session_exports`，叶服务通过已注入的SessionManager/Sandbox/视觉解析器读取，不新增AsyncSystem或Application镜像。导出请求登记在Gateway的TaskOwner，HTTP断开取消等待方，实际线程结束后才释放容量；叶服务的有界线程池在Gateway退出时关闭。没有新History存储格式或恢复Loop副作用。
+
+前端 `MessageRenderEnvironment` 为默认live提供原有行为、为offline提供表内资源/隔离HTML适配；`EmbeddedToolMessages` 的显示偏好由 `MessageItem` 经工具卡片显式传入，离线默认全显示，独立阅读器不导入聊天store。`scopeSessionChatCss` 共享作用域规则；独立viewer构建和前后端接口已接通，尚未运行构建/应用/断网验收，不能以静态阅读替代用户验收。服务端保证不同工具请求 ID 绝对唯一，未增加重复ID拒绝策略。
+
 
 

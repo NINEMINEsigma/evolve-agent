@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import mermaid from "mermaid";
 import {
   TransformWrapper,
@@ -8,6 +8,12 @@ import {
 
 interface MermaidRendererProps {
   definition: string;
+  /** 渲染失败回调（离线用于记录 issue）。 */
+  onRenderError?: (message: string) => void;
+  /** 自定义失败回退；提供时替换默认的英文错误行（离线显示原定义）。 */
+  errorFallback?: (message: string, definition: string) => ReactNode;
+  /** 生成的 SVG 净化函数（离线删除动态链接/事件/脚本）；live 不传保持原样。 */
+  sanitizeSvg?: (svg: string) => string;
 }
 
 let mermaidInitialized = false;
@@ -80,7 +86,7 @@ function MermaidLightbox({ svg, onClose }: { svg: string; onClose: () => void })
   );
 }
 
-export default function MermaidRenderer({ definition }: MermaidRendererProps) {
+export default function MermaidRenderer({ definition, onRenderError, errorFallback, sanitizeSvg }: MermaidRendererProps) {
   const [svgString, setSvgString] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -96,17 +102,20 @@ export default function MermaidRenderer({ definition }: MermaidRendererProps) {
         const id = `m-${Math.random().toString(36).slice(2, 9)}`;
         const result = await mermaid.render(id, definition.trim());
         if (cancelled) return;
-        setSvgString(result.svg);
+        const svg = sanitizeSvg ? sanitizeSvg(result.svg) : result.svg;
+        setSvgString(svg);
         setError(null);
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        onRenderError?.(message);
       }
     };
 
     render();
     return () => { cancelled = true; };
-  }, [definition]);
+  }, [definition, sanitizeSvg, onRenderError]);
 
   const handleClick = useCallback(() => {
     setExpanded(true);
@@ -117,6 +126,7 @@ export default function MermaidRenderer({ definition }: MermaidRendererProps) {
   }, []);
 
   if (error) {
+    if (errorFallback) return <>{errorFallback(error, definition)}</>;
     return (
       <pre className="mermaid-error">
         Mermaid failed: {error}

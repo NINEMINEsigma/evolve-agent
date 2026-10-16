@@ -8,6 +8,7 @@ import type { LlmProfileManager } from "../hooks/useLlmProfiles";
 import type { ApprovalMode, ApprovalModeSyncStatus } from "../types";
 import TokenRing from "./TokenRing";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { exportLabels } from "../features/sessionExport/labels";
 
 interface HeaderProps {
   status: string;
@@ -38,6 +39,8 @@ interface HeaderProps {
   onToggleChatStylePaused: () => void;
   chatStyleStatusText: string;
   onOpenPerformanceTelemetry: () => void;
+  onOpenSessionExport: () => void;
+  sessionExportDisabled: boolean;
 }
 
 export default function Header({
@@ -68,6 +71,8 @@ export default function Header({
   onToggleChatStylePaused,
   chatStyleStatusText,
   onOpenPerformanceTelemetry,
+  onOpenSessionExport,
+  sessionExportDisabled,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -106,6 +111,23 @@ export default function Header({
       return true;
     });
   };
+
+  const sessionExportItem = (
+    <button
+      type="button"
+      className="context-menu-item session-export-menu-button"
+      disabled={sessionExportDisabled}
+      data-tooltip={sessionExportDisabled ? exportLabels.busy : exportLabels.offline}
+      onClick={() => {
+        setCmdMenuOpen(false);
+        setMenuPos(null);
+        cmdBtnRef.current?.focus();
+        onOpenSessionExport();
+      }}
+    >
+      {exportLabels.title}
+    </button>
+  );
 
   // 移动端折叠态：只显示精简条
   if (isMobile && collapsed) {
@@ -179,6 +201,7 @@ export default function Header({
                 className="context-menu cmd-menu-dropdown"
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
               >
+                {sessionExportItem}
                 <div
                   className="context-menu-item"
                   onClick={() => {
@@ -276,6 +299,7 @@ export default function Header({
             className="context-menu cmd-menu-dropdown"
             style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
           >
+            {sessionExportItem}
             <div
               className="context-menu-item"
               onClick={() => {

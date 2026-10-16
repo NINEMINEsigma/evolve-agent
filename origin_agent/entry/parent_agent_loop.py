@@ -1082,6 +1082,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def reset_history(self, session_id: str | None = None) -> None:
         """清空当前历史并可选持久化。"""
         self._history = History()
+        self._session_export_epoch += 1
         self._token_record = TokenUsageRecord()
         if session_id is not None:
             self.save_history(session_id)
@@ -1089,6 +1090,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def load_history(self, history: History) -> None:
         """从外部加载历史到当前 loop。"""
         self._history = history
+        self._session_export_epoch += 1
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,

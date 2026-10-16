@@ -239,7 +239,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             ),
             current_character_agent=self.current_character_agent,
         )
-        self.session_id = new_sid
+        self.set_session_id(new_sid)
         self._token_record = TokenUsageRecord()
         new_history = (
             self._session_store.read_history(new_sid)

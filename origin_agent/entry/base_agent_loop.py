@@ -91,6 +91,7 @@ from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
+    from entity.puretype_after import SessionExportHistorySource
     from abstract.llm.client import BaseLLMClient
     from system.context import RuntimeContext
     from system.application import Application
@@ -383,6 +384,9 @@ class BaseAgentLoop(ABC):
         self._disgust_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
         self._history: History = History()
+        # 导出身份与变更代际只存在于内存，不改变 History 存储格式。
+        self._session_export_instance_id = uuid.uuid4().hex
+        self._session_export_epoch = 0
         self._session_store: SessionStore | None = None
         self._history_failure: HistoryPersistenceError | None = None
         self._token_record: TokenUsageRecord = TokenUsageRecord()
@@ -698,6 +702,8 @@ class BaseAgentLoop(ABC):
 
     def set_session_id(self, session_id: str) -> None:
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
+        if self.session_id != session_id:
+            self._session_export_epoch += 1
         self.session_id = session_id
 
     def _persist_history_value(self, session_id: str, history: History) -> None:
@@ -708,10 +714,56 @@ class BaseAgentLoop(ABC):
             raise LifecycleFailure("History submission requires a session store")
         try:
             self._session_store.write_history(session_id, history)
+            self._session_export_epoch += 1
         except HistoryPersistenceError as error:
             self._history_failure = error
             self.app.get_system(RuntimeSystem).record_failure(error)
             raise
+
+    def get_session_export_guard(self) -> tuple[str, int]:
+        """导出请求只通过公开接口取得进程内身份与提交代际。"""
+        return self._session_export_instance_id, self._session_export_epoch
+
+    async def capture_session_export_source(self) -> "SessionExportHistorySource":
+        """协作复制完整 History；不写盘、不补媒体身份、不等待回复锁。"""
+        from entity.constant import SESSION_EXPORT_MAX_MESSAGES
+        from entity.puretype_after import SessionExportHistorySource
+        from entry.session_export import (
+            SessionExportBusyError, SessionExportChangedError,
+            SessionExportLimitError, capture_export_messages,
+        )
+
+        guard = self.get_session_export_guard()
+        session_id = self.session_id
+        history = self._history
+
+        def assert_unchanged() -> None:
+            if self._history_failure is not None:
+                raise self._history_failure
+            self.app.get_system(RuntimeSystem).require_running()
+            if (self.get_session_export_guard() != guard or self.session_id != session_id
+                    or self._history is not history):
+                actual_guard = self.get_session_export_guard()
+                logger.warning(
+                    "session export source changed session=%s reason=guard_or_history expected_instance=%s expected_epoch=%s actual_instance=%s actual_epoch=%s session_matches=%s history_same=%s",
+                    session_id, guard[0], guard[1], actual_guard[0], actual_guard[1],
+                    self.session_id == session_id, self._history is history,
+                )
+                raise SessionExportChangedError()
+            if self.is_active() or (
+                self._message_queue is not None and self._message_queue.pending_deliveries()
+            ):
+                raise SessionExportBusyError()
+
+        assert_unchanged()
+        if history.count > SESSION_EXPORT_MAX_MESSAGES:
+            raise SessionExportLimitError("History message limit exceeded")
+        messages = await capture_export_messages(tuple(history.iter_messages()), assert_unchanged)
+        return SessionExportHistorySource(
+            loop_instance_id=guard[0], export_epoch=guard[1],
+            history_count=len(messages), fallback_character=self.current_character_agent,
+            messages=messages,
+        )
 
     def save_history(self, session_id: str) -> None:
         """保存正式 History；子会话无存储时仍不增加持久化。"""
@@ -1321,6 +1373,7 @@ class BaseAgentLoop(ABC):
                 self._main_session_activity = current.model_copy(update=updates)
             return current.activity_id
 
+        self._session_export_epoch += 1
         self._main_session_activity_revision = 1
         activity_id = uuid.uuid4().hex
         self._main_session_activity = MainSessionActivitySnapshot(

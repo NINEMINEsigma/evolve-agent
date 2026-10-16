@@ -188,6 +188,12 @@ from .session import (
     MainSessionInterruptResult,
     ToolChainSpan,
 )
+from .session_export import (
+    SessionExportStamp, SessionExportHistorySnapshot, SessionExportVisualEntry,
+    SessionExportLimits, SessionExportSnapshotResponse, SessionExportResourceSource,
+    SessionExportResourceRequest, SessionExportResourceProof,
+    SessionExportVerifyRequest, SessionExportVerifyResponse, SessionExportResourceIssue,
+)
 from .agent import (
     AgentConfig,
     CharacterProfile,
@@ -258,6 +264,10 @@ from .agentspace import (
 )
 
 __all__ = [
+    "SessionExportStamp", "SessionExportHistorySnapshot", "SessionExportVisualEntry",
+    "SessionExportLimits", "SessionExportSnapshotResponse", "SessionExportResourceSource",
+    "SessionExportResourceRequest", "SessionExportResourceProof",
+    "SessionExportVerifyRequest", "SessionExportVerifyResponse", "SessionExportResourceIssue",
     "SessionMediaItem",
     "SessionMediaListResponse",
     "SessionMediaUpdateRequest",

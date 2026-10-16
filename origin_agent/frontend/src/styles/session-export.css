@@ -1,0 +1,8 @@
+.session-export-dialog { width: min(640px, calc(100vw - 32px)); }
+.session-export-dialog .modal-body { line-height: 1.6; overflow-wrap: anywhere; }
+.session-export-warning { color: var(--danger, #ef4444); }
+.session-export-progress { display: grid; gap: 8px; margin: 16px 0; }
+.session-export-progress progress { width: 100%; }
+.session-export-menu-button { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
+.session-export-menu-button:disabled { opacity: .45; cursor: not-allowed; }
+.session-export-notice { position: fixed; bottom: 20px; left: 20px; right: 64px; z-index: 500; }
