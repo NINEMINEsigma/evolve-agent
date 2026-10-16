@@ -76,6 +76,7 @@ from entity.puretype import (
     SessionMediaUpdateResponse,
     SessionStatus,
     SessionVariablePoolResponse,
+    SessionTabCapabilities,
     ClientInfo,
     CharacterAvatarsResponse,
     CharacterProfilesResponse,
@@ -427,6 +428,49 @@ async def get_session_tool_resources(session_id: str) -> SessionToolResources:
         update={"dynamic_endpoints": endpoints}
     )
     return resources
+
+
+@router.get("/api/sessions/{session_id}/tab-capabilities", response_model=SessionTabCapabilities)
+async def get_session_tab_capabilities(
+    session_id: str, response: Response,
+) -> SessionTabCapabilities:
+    """Return lightweight content capabilities for session-dependent tabs."""
+    from starlette.concurrency import run_in_threadpool
+    from system.application import Application
+    from system.agentspace import AgentspaceService
+    from system.session_variables import (
+        SessionVariableInputError, SessionVariableAccessError,
+        SessionVariableLimitError, SessionVariableConflictError,
+    )
+
+    loop = _require_media_loop(session_id, writable=False)
+    application = Application.current()
+    manager = application.get_system(SessionManager)
+    service = application.get_system(AgentspaceService).session_variables
+    try:
+        variables_available = await run_in_threadpool(
+            service.has_visible_content, session_id,
+        )
+    except (SessionVariableInputError, SessionVariableAccessError,
+            SessionVariableLimitError, SessionVariableConflictError) as exc:
+        status = 400
+        if isinstance(exc, SessionVariableAccessError):
+            status = 403
+        elif isinstance(exc, SessionVariableLimitError):
+            status = 413
+        elif isinstance(exc, SessionVariableConflictError):
+            status = 409
+        raise HTTPException(status_code=status, detail={
+            "code": exc.code, "message": str(exc), "path": exc.logical_path,
+        }) from exc
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    response.headers["Cache-Control"] = "no-store"
+    return SessionTabCapabilities(
+        session_id=session_id,
+        media_count=loop.loop.get_session_media_count(),
+        variables_available=variables_available,
+    )
 
 
 @router.get("/api/sessions/{session_id}/variables")

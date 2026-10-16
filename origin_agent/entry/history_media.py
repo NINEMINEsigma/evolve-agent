@@ -69,6 +69,11 @@ def iter_history_media(history: History) -> Iterator[HistoryMediaOccurrence]:
                 )
 
 
+def count_history_media(history: History) -> int:
+    """Return the number of independent media instances in a History."""
+    return sum(1 for _ in iter_history_media(history))
+
+
 def ensure_history_media_identity(history: History) -> bool:
     """先验证现有身份，再补齐空身份；旧共享引用定向拆为独立实例。"""
     occurrences = list(iter_history_media(history))

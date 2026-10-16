@@ -15,7 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与九个 tab 内容层
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与九个 tab 内容层；含会话 Tab 能力探测 API/hook
 │   ├── features/sessionMedia/ ← 中文相册、文案资源、共享预览与媒体详情窗
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
@@ -56,7 +56,8 @@ frontend/
 │   ├── services/
 │   │   ├── agentspaceApi.ts ← 独立 Agentspace 编辑器 REST/SSE 适配层
 │   │   ├── chatAgentspaceEventBus.ts ← 聊天 WebSocket Agentspace事件页面内扇出
-│   │   └── fetchWithTimeout.ts ← 关键请求可取消15秒硬截止
+│   │   ├── fetchWithTimeout.ts ← 关键请求可取消15秒硬截止
+│   │   └── fetchJsonWithTimeout.ts ← 覆盖响应体、JSON解析和解码的可取消硬截止
 │   ├── styles/              ← CSS 样式
 │   └── utils/
 │       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数
@@ -98,9 +99,11 @@ frontend/
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单任一） |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 九条目（chat/resources/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 只加注册条目 + `useTabSystem` 一行启用派生 |
-| `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 唯一 HEAD 探测源；禁用 tab 切换静默忽略 |
-| `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条，无内容 tab 禁用不可点击；对启用且非当前图标接入只读悬停/聚焦预览（`useAnchoredHoverPreview` + `useTabPreview`），窗口显示时 `aria-describedby` 指向小窗，预览与名称 tooltip 互斥 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 九条目（chat/resources/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
+| `features/tabs/sessionTabCapabilitiesApi.ts` | 会话 Tab 能力 REST DTO/严格解码器/请求适配：只返回媒体数量和变量可见内容标志，不读取完整载荷 |
+
+| `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 的会话网页 HEAD 探测与 `useSessionTabCapabilities` 的媒体/变量内容能力探测；禁用 tab 切换静默忽略 |
+| `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条；无内容或能力未确认的 Tab 使用原生 `disabled` 禁用不可点击；对启用且非当前图标接入只读悬停/聚焦预览（`useAnchoredHoverPreview` + `useTabPreview`），窗口显示时 `aria-describedby` 指向小窗，预览与名称 tooltip 互斥 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 外层，`visibility` 切换不卸载（保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活后才创建，SiteTab 仅随 sessionId key 变化或外层卸载重建；切换时对 site iframe 执行 blur 兜底 |
 | `features/tabs/TabDataContext.tsx` | 无 DOM 的唯一 Provider：持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，供正式 Tab 与只读预览共享同一快照；不随普通 Tab/会话切换重建，仅随锁定分支卸载；缺 Provider 时 `useTabData` 快速失败 |
 | `features/tabs/useDynamicSandboxSpaces.ts` | 动态沙盒空间列表唯一持有者：只读列表与手动 `refresh`，不自动读取（激活读取仍由 SandboxTab effect 驱动） |
@@ -124,7 +127,7 @@ frontend/
 
 ### 媒体输入 Tab
 
-显示标题「媒体输入」，注册id=media，位于资源Tab之后；sessionId非空即可打开，空History保留空态。相册式网格默认展示图片预览，只附名称/类型/发送状态角标，不在单元内堆元信息或开关表单；点击后在中文详情窗集中显示大预览、原信息和发送开关。单页100个实际图片/音频/视频实例，重复读取不合并，原展示资源Tab不变。
+显示标题「媒体输入」，注册id=media，位于资源Tab之后；只有会话 Tab 能力探测确认当前主会话 History 存在媒体实例时可打开，探测未知/失败或确认空 History 时禁用。探测只返回媒体数量，空 History 保留既有空态逻辑。相册式网格默认展示图片预览，只附名称/类型/发送状态角标，不在单元内堆元信息或开关表单；点击后在中文详情窗集中显示大预览、原信息和发送开关。单页100个实际图片/音频/视频实例，重复读取不合并，原展示资源Tab不变。
 
 `features/sessionMedia/`含types.ts、api.ts、useSessionMedia.ts、zh-CN.json、labels.ts、MediaPreview.tsx、MediaGalleryTile.tsx、MediaDetailsWindow.tsx；旧MediaInputCard已移除，不保留双展示路径。UI中文值放正式JSON非代码资源，用Vite `?raw`和显式字段校验加载；仅此功能采用资源文件以兼顾UI中文与源码英文，不引入全局多语言框架或新依赖。registry复用labels.title，空态/分页/错误/可访问名称均中文，服务端或协议原文仅作可展开“错误详情”，不伪造翻译。
 
@@ -138,7 +141,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ## 会话变量 Tab
 
-右侧Tab注册表共九项，会话变量位于媒体输入Tab之后，sessionId非空即可打开（没有变量仍可查看空态）。`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
+右侧Tab注册表共九项，会话变量位于媒体输入Tab之后；只有会话 Tab 能力探测确认存在变量条目或可展示问题时可打开，探测未知/失败或确认空目录且无问题时禁用。进入后才读取完整变量池；`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
 
 `features/sessionVariables/`包含types.ts、api.ts、useSessionVariables.ts、presentation.ts及VariableCard.tsx。typed GET `/api/sessions/<id>/variables`严格解码，15秒截止覆盖fetch与响应正文，解析前后检查时长（不能实时中断同步JSON.parse）；退出Tab/切会话取消请求，代际防旧响应覆盖。激活必重拉，现有chatAgentspaceEventBus文件/移动祖先路径命中后1秒去抖刷新，resync重拉，watcher_error提示降级；不新增长连接/轮询。刷新失败保留同会话旧数据并标过期，404清空旧池。
 
@@ -254,6 +257,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `features/characterAvatars/SubagentAvatar.tsx` | 子会话 Tab子级 tab 与卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
 | `useSessionSite.ts` | 会话网页状态：提前通过 HEAD 探测稳定入口并跟随服务端重定向取得最终 `index.html` URL，不获取网页正文；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时禁用 Tab；探测唯一实例由 `features/tabs/useTabSystem.ts` 持有，SiteTab 经 ctx 消费，正文只在该会话首次激活会话网页 Tab 后由 iframe 加载 |
+| `features/tabs/useSessionTabCapabilities.ts` | 会话 Tab 能力探测：请求媒体数量和变量可见内容状态，按 sessionId/generation 隔离；首次/会话切换未知时禁用，同会话后台 refreshing 保留已确认快照；监听 History 低频信号和变量 Agentspace 事件去抖刷新，不建立轮询 |
 | `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：服务端解析重定向，按最终 CSS URL 获取内容；PostCSS 作用域处理并按最终 URL重写 CSS `url()`，禁止 `@import` |
 

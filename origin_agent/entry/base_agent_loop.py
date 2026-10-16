@@ -81,6 +81,7 @@ from entry.history_media import (
     HistoryMediaConflictError,
     HistoryMediaNotFoundError,
     build_media_history_candidate,
+    count_history_media,
     ensure_history_media_identity,
     find_history_media,
     project_history_media,
@@ -731,6 +732,10 @@ class BaseAgentLoop(ABC):
             raise self._history_failure
         if ensure_history_media_identity(self._history):
             self._persist_history_value(self.session_id, self._history)
+
+    def get_session_media_count(self) -> int:
+        """Return the number of media instances without mutating History."""
+        return count_history_media(self._history)
 
     def get_session_media(
         self, *, offset: int, limit: int, editable: bool,

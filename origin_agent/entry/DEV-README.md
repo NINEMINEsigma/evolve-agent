@@ -62,7 +62,7 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
   - `ToolContext.resource_session_id`：长期资源归属的主会话 ID；主Agent/参与Agent使用当前主会话，子Agent/临时Agent使用公开 `parent_session_id`。
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`；压缩工具通过公开 `reset_context_tokens()` 将上一请求的 prompt token 计数置零，不直接访问 `_token_record`，累计 token 消耗保持不变。
-  - 前端 History 只读投影：`get_session_history_skeleton(start_index)`、`get_session_history_page(start_index, limit)`、`get_session_history_resources()`；普通模式、多Agent模式与随意聊聊会话共享实现。子Agent虽继承该能力，但 Gateway 不为子会话暴露对应 REST。
+  - 前端 History 只读投影：`get_session_history_skeleton(start_index)`、`get_session_history_page(start_index, limit)`、`get_session_history_resources()`；媒体能力探测使用无副作用的 `get_session_media_count()`，只统计当前 History 中的媒体实例，不补身份、不写盘。普通模式、多Agent模式与随意聊聊会话共享实现。子Agent虽继承该能力，但 Gateway 不为子会话暴露对应 REST。
   - 会话操作结果：`edit_session_message()`、`delete_session_messages()`、`delete_single_message()`、`regenerate_response()`、`get_tool_resources()`、`merge_sessions()` 均返回 `entity.puretype.session` 中的稳定 `BaseModel`；调用方通过属性访问；Gateway 普通 HTTP 返回值保留模型，由 FastAPI 自动序列化，显式 Response 则在发送边界编码。`LoopSessionManager._transfer_session_runtime_resources()` 同样返回 `SessionRuntimeResourceTransferResult`，不再通过字典键读取迁移状态。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
   - 工具集加载状态：`_loaded_toolsets`（会话级已加载工具集名称集合）、`get_loaded_toolsets()`、`is_toolset_loaded()`、`load_toolsets()`、`_restore_loaded_toolsets()`、`_get_effective_tool_definitions()`（按已加载工具集 × scope 动态计算工具 schema）。
@@ -306,6 +306,10 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 - `chain_to_summary_input(chain_messages) -> str`：链文本化（复用 `messages_to_text`，不设全局截断）。
 - `build_compressed_chain_messages(chain_messages, summary) -> list[BaseMessage]`：把整链重打包为「伪造的 `CompressedToolChain` 调用（不可调用，参数携带调用数与工具名清单）+ 携带链摘要的配对 ToolResultMessage」。
 - 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` / `CompressToolChains` 通过 `component/tools/_history_compression.py::prepare_tool_chain_replacements()` 共用 `SessionMetadataService.generate_tool_chain_summary()` 预生成，返回 `entity.puretype_after` 显式导出的 `ToolChainReplacement`，全部成功后调用方才通过 `History.replace_range()` 应用替换。`ToolChainSpan` 仅含索引，继续定义于消息前纯类型 `entity/puretype/session.py`；`ToolChainReplacement` 持有正式消息实例，定义于消息后纯类型 `entity/puretype_after/session.py` 并直接导入 `BaseMessage`，不再由业务模块补装配。两者因类型依赖不同分属两个时期，检测与重打包职责保持不变。
+
+### `history_media.py` 媒体能力投影
+
+`count_history_media(history)` 是无副作用的媒体实例计数入口，复用 `iter_history_media()`，与完整媒体 REST 的 `total_count` 同源但不调用身份补齐或写盘。`BaseAgentLoop.get_session_media_count()` 通过公开方法供 Gateway 的会话 Tab 能力探测调用；完整媒体清单仍由 `get_session_media()` 负责身份迁移和分页投影。
 
 ### `history_projection.py`
 

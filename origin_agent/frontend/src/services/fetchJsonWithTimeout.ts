@@ -10,6 +10,7 @@ import { RequestTimeoutError } from "./fetchWithTimeout";
 export interface FetchJsonWithTimeoutOptions {
   timeoutMs: number;
   phase: string;
+  createHttpError?: (status: number, payload: unknown | null) => Error;
 }
 
 function abortError(): DOMException {
@@ -44,10 +45,16 @@ export async function fetchJsonWithTimeout<T>(
     try {
       payload = JSON.parse(body);
     } catch {
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        throw options.createHttpError?.(response.status, null)
+          ?? new Error(`HTTP ${response.status}`);
+      }
       throw new Error("Invalid JSON response body");
     }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      throw options.createHttpError?.(response.status, payload)
+        ?? new Error(`HTTP ${response.status}`);
+    }
     return decode(payload);
   } catch (error) {
     if (timedOut) throw timeoutError();

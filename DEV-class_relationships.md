@@ -1461,4 +1461,10 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 前端Controller新增重载请求记录，Store新增historyReloadRequired、invalidateHistory及applyHistoryReload。旧请求/缓存/链接在指令边界失效，新快照原子安装不删除后到实时行/链接；草稿/排队输入/会话业务状态保留。initialize、history_sync和页/资源入口复用当前重载，失败重试不二次清新流；onOpen记录首次同步边界，使同session重连也完整加载历史。网络不承诺可靠通知，重连不恢复未提交流片段。本修订已实施源码，尚未运行校验、构建或用户验收。
 
+### 会话 Tab 能力探测（2026-10-17）
+
+`SessionTabCapabilities` 是 `entity/puretype/session.py` 中的非持久化纯响应模型，由 Gateway 返回媒体实例计数和变量 Tab 可见内容标志。`BaseAgentLoop.get_session_media_count()` 通过 `entry/history_media.py::count_history_media()` 只读遍历 History；Gateway 通过公开方法访问，不读取 protected 字段，不改变 `IMainSessionLoop` 或 Application/System 拓扑。`SessionVariableService.has_visible_content()` 是 `AgentspaceService` 持有的无缓存叶服务公开入口，复用变量扫描预算并按值文件、`.json.meta`、节点/顶层问题和 `scan_complete` 判定可见内容；Gateway 通过 `get_system(AgentspaceService).session_variables` 在线程池调用。
+
+前端 `useSessionTabCapabilities` 通过 `GET /api/sessions/{id}/tab-capabilities` 获取轻量状态，按 sessionId/generation 丢弃迟到响应，使用 History 低频信号和变量 Agentspace 事件去抖刷新。首次未知、会话切换和失败时禁用目标 Tab；同会话后台 refreshing 保留已确认快照，成功确认空内容后由 `useTabSystem` 触发现有 active-tab 回退。`fetchJsonWithTimeout` 的可选 `createHttpError` 只被新能力 API 使用，既有调用方未传该选项时保持原行为。无新增 protected 字段、持久化版本、System 或测试源。
+
 

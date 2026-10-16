@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionSite } from "../../hooks/useSessionSite";
+import { useSessionTabCapabilities } from "./useSessionTabCapabilities";
 import type { WebSocketState } from "../../hooks/useWebSocket";
 import type { TabId } from "./registry";
 
@@ -17,20 +18,28 @@ export function useTabSystem(ws: WebSocketState) {
 
   // Single site probe source for the whole tab system (survives tab switches).
   const siteStatus = useSessionSite(ws.sessionId);
+  const tabCapabilities = useSessionTabCapabilities(ws.sessionId);
+  const capabilitySnapshot = tabCapabilities.capabilities;
+  const capabilitySessionMatches = capabilitySnapshot?.session_id === ws.sessionId;
+  const capabilityConfirmed = capabilitySessionMatches
+    && (tabCapabilities.status === "ready" || tabCapabilities.status === "refreshing");
+  const mediaCount = capabilitySessionMatches ? capabilitySnapshot?.media_count ?? 0 : 0;
+  const variablesAvailable = capabilitySessionMatches && capabilitySnapshot?.variables_available === true;
 
   const enabledTabs = useMemo<Record<TabId, boolean>>(
     () => ({
       chat: true,
       resources: true,
-      media: Boolean(ws.sessionId),
-      variables: Boolean(ws.sessionId),
+      media: capabilityConfirmed && mediaCount > 0,
+      variables: capabilityConfirmed && variablesAvailable,
       subagents: Object.keys(ws.subagentSessions).length > 0,
       characters: true,
       site: siteStatus.status === "ready",
       llm: true,
       sandbox: true,
     }),
-    [ws.sessionId, ws.subagentSessions, siteStatus.status],
+    [ws.sessionId, ws.subagentSessions, siteStatus.status, tabCapabilities.status,
+      capabilitySnapshot?.session_id, capabilitySnapshot?.media_count, capabilitySnapshot?.variables_available],
   );
 
   // Session switch always returns to the chat tab.

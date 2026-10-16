@@ -249,7 +249,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
 - **插件**：`abstract/plugins/discover.py` 基于目录扫描插件，解析 `plugin.yaml`，启发式检测 provider 类型。
 - **MCP**：`MCPSystem` 读取并校验 `mcp_config.json`，由 `MCPCore` 连接服务器并注册远程工具，远程与资源/提示词工具统一为 `MCPTool`，服务器元数据为 `MCPToolSet`；`component/mcp_tools.py` 以 `MCPRefreshTool` 与顶层 `TOOLSET` 声明 `MCPRefresh`。刷新在同名同集锁内用 `register_tool(MCPTool(...), replace=True)` 原子替换，只注销新集合中已消失的名称（含资源/提示词辅助工具）。OAuth 按 Provider 独立回调端口并显式持有 `MCPOAuthManager`，认证任务、HTTP 回调线程与 401 dedup 均有完整归属；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄和独立 cleanup task，不猜测宿主 PID。关闭时 `close_admission` 拒绝新工作，`stop_calls` 确认请求/连接任务实际退出，`shutdown` 等待 OAuth、stdio、cleanup 全部完成后才释放；资源未退出不伪装成功。`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。
-- **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于资源后，注册表共八项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。
+- **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于资源后，注册表共八项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。右侧会话变量 Tab 使用同一会话 Tab 能力探测；存在变量条目或可展示问题时启用，普通空目录或无问题的普通 `.meta` 不启用，完整变量池仍在进入 Tab 后读取。
 - **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测并订阅聊天 WebSocket扇出的 Agentspace事件，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。`resync` 和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
 - **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端提前用 HEAD 探测入口并监听聊天 WebSocket中的该目录 Agentspace事件，部署完成后启用右侧会话网页 Tab。首次点击该 Tab 后才创建 iframe、加载网页正文及引用资源，悬停/仅聚焦不触发加载；同会话切 Tab 保留网页，切会话、返回原会话或刷新页面后重新等待点击。首次激活后资源连续变化仍等待 1 秒安静窗口后热刷新 iframe，隐藏 Tab 也可刷新；入口文件或整个目录被删除/移走后禁用 Tab 并回聊天，已激活的同会话重新部署后可自动重建 iframe。未激活会话部署/更新只改变探测状态，不创建 iframe。
 - **会话聊天区自定义样式**：会话级聊天区 CSS 覆盖层。Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入 CSS，前端探测并经 PostCSS 作用域处理后注入 `<style>` 标签，仅作用于 `.chat-area` 聊天区。禁止 `@import`，允许 `@font-face`（`ChatStyle-` 前缀）和 `@keyframes`。CSS 缺失、超限（256 KiB）或作用域处理失败时恢复默认样式。用户可通过顶部栏命令菜单独立暂停 Agent 舞台层和聊天区自定义样式。系统提示词通过 `build_session_chat_style_block()` 注入。
@@ -327,7 +327,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 ## 主会话媒体实例发送控制
 
-前端右侧 Tab 栏新增媒体输入 Tab（显示标题「媒体输入」），独立于原资源 Tab。界面采用中文相册式网格，图片预览默认可见，视频只在临近视口加载静帧，音频用类型图标；点击独立资源后打开中文详情窗，集中大预览、元信息和发送开关。中文文案由正式JSON数据资源加载，源码标识保持英文。清单只列当前主会话 History 的实际图片、音频、视频块，不按内容/路径/URL去重；用户附件、Read tool结果与user路径follow-up分别保留独立实例。普通模式、随意聊聊和多Agent模式共享这一控制范围，子Agent/临时Agent独立History不纳入。
+前端右侧 Tab 栏新增媒体输入 Tab（显示标题「媒体输入」），独立于原资源 Tab。界面采用中文相册式网格，图片预览默认可见，视频只在临近视口加载静帧，音频用类型图标；点击独立资源后打开中文详情窗，集中大预览、元信息和发送开关。中文文案由正式JSON数据资源加载，源码标识保持英文。清单只列当前主会话 History 的实际图片、音频、视频块，不按内容/路径/URL去重；用户附件、Read tool结果与user路径follow-up分别保留独立实例。普通模式、随意聊聊和多Agent模式共享这一控制范围，子Agent/临时Agent独立History不纳入。媒体输入 Tab 的右侧按钮由会话 Tab 能力探测提前判断：能力探测确认媒体实例数量大于零才启用，探测未知/失败或数量为零时禁用；探测只返回计数，完整媒体清单仍在进入 Tab 后读取。
 
 `entity/messages.py::MediaBlock` 持有 `media_id`、`send_multimodal`、逻辑来源、工具关联与可信描述标记；三个原媒体类保持类名、type token和wire输出。状态随History BaseModel直接交给easysave保存，旧缺字段默认开启并在首次访问/请求前补齐稳定身份；GET身份迁移也必须写盘成功。重复非空ID或损坏字段快速失败，不自动修复。
 
@@ -345,7 +345,7 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 
 ## 右侧 Tab 悬停预览
 
-右侧 Tab 栏（九个 Tab：聊天、资源/任务、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间）对「启用且非当前」的图标提供只读悬停预览小窗，形式类似 Windows 任务栏悬停窗口但内容为专门组织的摘要。预览只消费页面已加载快照，悬停/聚焦不发请求、不刷新、不切换 activeTab；未知不伪装为 0（`null` 未读取、`[]` 才计 0）。
+右侧 Tab 栏（九个 Tab：聊天、资源/任务、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间）对「启用且非当前」的图标提供只读悬停预览小窗，形式类似 Windows 任务栏悬停窗口但内容为专门组织的摘要。预览只消费页面已加载快照，悬停/聚焦不发请求、不刷新、不切换 activeTab；媒体输入和会话变量 Tab 只有能力探测确认可用后才具备悬停资格；未知不伪装为 0（`null` 未读取、`[]` 才计 0）。
 
 - 数据唯一来源：`features/tabs/TabDataContext.tsx` 的唯一 Provider 持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，正式 Tab 与预览共享同一快照。
 - 摘要纯选择器 `tabPreviewSelectors.ts` 九个选择器 + `useTabPreview.ts` 只读组装 + `TabHoverPreview.tsx`/`useAnchoredHoverPreview.ts` 悬停状态机与几何；中文文案集中在 `tabPreviewLabels.json`。

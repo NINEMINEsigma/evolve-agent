@@ -496,6 +496,33 @@ class SessionVariableService:
                                     raw_value=raw_value, raw_metadata=raw_metadata,
                                     metadata=metadata, issues=issues)
 
+    def has_visible_content(self, session_id: str) -> bool:
+        """Check whether the variable Tab has any content or visible issue."""
+        source = self.source_path(session_id)
+        budget = _new_budget()
+        try:
+            snapshot = self._scan_tree(session_id, strict_paths=False, budget=budget)
+        except SessionVariableError as exc:
+            if not exc.logical_path:
+                exc.logical_path = source
+            raise
+        if not snapshot.root_exists:
+            return False
+        if snapshot.issues or not snapshot.scan_complete:
+            return True
+        for node in snapshot.nodes:
+            relative = node.relative_path
+            if node.issues:
+                return True
+            if node.is_directory:
+                continue
+            lowered = relative.lower()
+            if lowered.endswith(constants.SESSION_VARIABLE_VALUE_SUFFIX):
+                return True
+            if lowered.endswith(constants.SESSION_VARIABLE_VALUE_SUFFIX + META_FILE_SUFFIX):
+                return True
+        return False
+
     def read_pool(
         self, session_id: str, *,
         register_access: Callable[[str], ContextManager[None]] | None = None,

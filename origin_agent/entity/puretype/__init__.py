@@ -19,7 +19,8 @@ The original puretype.py module is split by responsibility:
                   LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
                   LLMProfileDeleteResult, ModalityCapability
     skills      : SkillPayload, SkillInfo
-    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionTerminationResult,
+    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionRuntimeStatus,
+                  SessionTabCapabilities, SessionTerminationResult,
                   SessionTagsUpdateRequest, SessionTitleUpdateRequest, SessionMessageEditRequest,
                   SessionRegenerateRequest, SessionMergeRequest,
                   SessionMessageEditResult, SessionMessageDeletionResult,
@@ -160,6 +161,7 @@ from .session import (
     MainSessionActivityPhase,
     MainSessionActivitySnapshot,
     SessionRuntimeStatus,
+    SessionTabCapabilities,
     LoopMeta,
     SessionInfo,
     SessionTerminationResult,
@@ -360,6 +362,7 @@ __all__ = [
     "MainSessionActivityPhase",
     "MainSessionActivitySnapshot",
     "SessionRuntimeStatus",
+    "SessionTabCapabilities",
     "LoopMeta",
     "SessionInfo",
     "SessionTerminationResult",

@@ -102,6 +102,14 @@ class MainSessionActivitySnapshot(BaseModel):
     character_name: str | None = None
 
 
+class SessionTabCapabilities(BaseModel):
+    """Lightweight capability state for content-dependent session tabs."""
+
+    session_id: str
+    media_count: int = Field(ge=0)
+    variables_available: bool
+
+
 class SessionRuntimeStatus(BaseModel):
     """会话存在性、连接占用、视觉资源与当前运行活动的统一 REST 响应。"""
 

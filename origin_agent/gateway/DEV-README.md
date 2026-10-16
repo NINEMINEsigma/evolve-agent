@@ -203,6 +203,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 | GET | `/api/sessions/{id}/history/media?offset=0&limit=100` | 独立媒体实例轻量页，默认100、最多500；含总数/身份/开关/来源/缓存存在性，不含Base64或描述正文 |
 | PUT | `/api/sessions/{id}/history/media/{media_id}` | StrictBool的send_multimodal与expected_send_multimodal必填；候选History严格保存后返回该实例权威状态 |
 | GET | `/api/sessions/{id}/history/media/{media_id}/content` | 用户按需取得单个原媒体；inline返回二进制，HTTP(S)仅307由浏览器读取，服务器不抓取来源URL |
+| GET | `/api/sessions/{id}/tab-capabilities` | 只读返回媒体实例数量和变量 Tab 可见内容标志；不返回媒体载荷或变量正文，需要现存主会话 Loop，Loop 未就绪/旋转时返回409；变量目录扫描沿既有预算和错误映射执行 |
 
 仅查询当前注册主会话Loop，不创建Loop、不另读活动磁盘History。新操作使用RUNNING准入/no-store：会话缺失或删除中404，存在但无Loop或正在旋转409；409不等于会话删除。归档已恢复Loop可GET及补齐旧身份，用户PUT403。处理中允许修改媒体开关，从保存后的下一模型请求生效，已开始请求不撤回。无新WS通知、SSE或轮询。
 
@@ -226,7 +227,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 ### 会话变量池
 
-`GET /api/sessions/{id}/variables`返回SessionVariablePoolResponse，直接复用AgentspaceService.session_variables.read_pool，与ReadSessionVariables的值/meta/issues一致，不创建Loop。no-store、RUNNING准入、读取前后存在性/删除中复检；归档及随意聊聊可读，已删除/删除中404，即使留下变量文件也不会复活会话。
+`GET /api/sessions/{id}/variables`返回SessionVariablePoolResponse，直接复用AgentspaceService.session_variables.read_pool，与ReadSessionVariables的值/meta/issues一致，不创建Loop。`GET /api/sessions/{id}/tab-capabilities`则与媒体数量合并为右侧 Tab 的能力探测：只返回媒体数量和是否存在变量条目/可展示问题，不返回变量正文；该合并端点因媒体 History 位于现存主会话Loop中，Loop未就绪或旋转时共同返回409。变量完整REST仍可在无Loop时读取，继续使用no-store、RUNNING准入、读取前后存在性/删除中复检；归档及随意聊聊可读，已删除/删除中404，即使留下变量文件也不会复活会话。
 
 有界读取通过run_in_threadpool执行，HTTP返回BaseModel而非提前降级。已知业务错误映射400（输入/不安全根）、403（根/目录访问）、409（源变化）、413（整池预算）；detail为code/message/path。条目输入问题与constraint保留在成功诊断响应，scan_complete=false明确不完整；意外异常直接交FastAPI，不变成空池。不新增WS类型、SSE连接或独立watcher。
 

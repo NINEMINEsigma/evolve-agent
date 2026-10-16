@@ -169,7 +169,7 @@ Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划�
 
 `AgentspaceService.session_variables` 持有唯一无缓存 `SessionVariableService` 叶服务，使用已有 Sandbox，不增加 AsyncSystem、线程、watcher或后台复制任务。逻辑根为 `ws:sessions/<主会话ID>/variables/`，与聊天 History 的 workspace/sessions 根不同；普通子Agent使用父主会话目录，临时Agent不扩大现有工具授权。
 
-JSON文件保存单个数字/字符串，同级完整名称追加 `.meta`。业务键为 label、description、min、max、integer、percent、display；布尔只接受小写true/false，百分比只把显示值乘100。无效值保留原文、配置错误与constraint分别报告，不自动裁剪或改写。`read_pool` 同时供safe工具和REST使用，文件为唯一真相，scan_complete=false明确表示不受支持子树未读取。
+JSON文件保存单个数字/字符串，同级完整名称追加 `.meta`。业务键为 label、description、min、max、integer、percent、display；布尔只接受小写true/false，百分比只把显示值乘100。无效值保留原文、配置错误与constraint分别报告，不自动裁剪或改写。`read_pool` 同时供safe工具和REST使用，文件为唯一真相，scan_complete=false明确表示不受支持子树未读取。`has_visible_content(session_id)`复用同一受预算扫描但不构造完整响应，用于会话 Tab 能力探测：任何变量值文件、`.json.meta`孤立元数据、节点/顶层问题或不完整扫描均视为可展示内容；普通无问题的 `foo.meta` 和空目录不启用 Tab。扫描异常补齐变量根路径后沿既有错误边界传播，不返回默认空结果。
 
 读取预算：512变量、4096节点、16层、64KiB单文件、512KiB逻辑内容、1MiB响应与2秒软截止。继承全部来源合计逻辑512KiB，额外复核512KiB，实际读1MiB；超预算明确拒绝，不静默截断。根与子树拒绝符号链接/reparse point，Windows显式检查属性；Sandbox是应用级边界，不是OS ACL。
 
