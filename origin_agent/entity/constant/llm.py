@@ -42,6 +42,9 @@ AUDIO_FORMAT_MIME_SUBTYPE: dict[str, str] = {"mp3": "mpeg", "wav": "wav"}
 # 所有LLM解析的重试次数
 LLM_RETRY_COUNT: int = 3
 
+# 单次逻辑调用的空响应最大尝试次数，包含初次请求；不替代客户端网络重试。
+LLM_EMPTY_RESPONSE_MAX_ATTEMPTS: int = 3
+
 # LLM Profile 根对象持久化（存放于 agentspace 下，easysave 序列化）
 # v2 是唯一受支持格式，直接保存 LLMProfileData。
 LLM_PROFILES_ES_FILENAME: str = "llm_profiles.es"

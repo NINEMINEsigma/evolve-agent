@@ -10,6 +10,7 @@
 abstract/
 ├── llm/                        ← LLM 客户端抽象层
 │   ├── client.py               ← BaseLLMClient 抽象基类
+│   ├── retry.py                ← 空响应有界重试装饰器
 │   ├── loader.py               ← 动态加载器（create_llm_client 工厂）
 │   └── formats.py              ← wire format 转换器（OpenAI / Anthropic）
 ├── tools/
@@ -64,9 +65,24 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 - 通过 `_ensure_namespace_package()` 将 `custom_llm_client/` 注册为命名空间包（无需 `__init__.py`）。
 - 调用模块暴露的 `create_llm_client(runtime_context, profile)` 工厂函数构造客户端实例。
-- 校验返回值是否为 `BaseLLMClient` 子类。
+- 校验返回值是否为 `BaseLLMClient` 子类，随后统一包装为 `EmptyResponseRetryClient`，公开签名保持不变。插件工厂仍只构造Provider客户端，正式加载器只装饰一次；直接调用插件工厂不具备这层统一保证。
 - `list_llm_clients()` 返回目录下所有可选客户端模块名。
 - 内置实现：`openai_client.py`、`anthropic_client.py`、`kscc_client.py`。
+
+#### `abstract/llm/retry.py` — `EmptyResponseRetryClient`
+
+该装饰器在正式加载入口统一覆盖普通模式、多Agent模式、随意聊聊、子Agent、临时Agent，以及元数据、审批与多模态调用。`LLM_EMPTY_RESPONSE_MAX_ATTEMPTS=3` 表示初次请求加最多两次重试，复用 `BACKOFF_BASE` 等待1秒、2秒；每次仍向同一底层客户端传递原请求参数，不追加空assistant/续传提示，不执行或重放工具，不额外消耗工具循环轮数。`chat()` 仅在 `content` 长度为零且 `tool_calls` 为空时重试，思考内容不能代替有效完成；纯工具调用合法，非零长度空白正文保持原语义。耗尽抛出 `client.py::LLMEmptyResponseError(RuntimeError)`，由现有调用错误出口处理。
+
+流式事件语义在本装饰层确定，`StreamConsumer` 继续负责聚合、计时、取消及前端发送：
+
+- 正文、思考、工具调用和工具参数增量实时透传，使用上层原有流标识。各空尝试的思考在同一逻辑流中连续展示并聚合，接受这一展示权衡，但不把它们加入重试输入或单独写成assistant消息。
+- 每次尝试的 `finish_reason` 暂存至底层自然结束且关闭成功后才交付。尚无正文或完整工具调用时按原序暂存 `usage`，首次有效输出时释放；失败空尝试的用量与结束原因丢弃。成功用量沿既有统计口径，不代表所有尝试的供应商账单用量。
+- 原chunk暂存usage/finish后即使全空仍透传一次，保留真实数据到达进展，使现有空闲超时照常重置；不伪造usage或完成事件。只有工具参数片段却无完整调用且正文为空时明确抛错、不重试，避免重复可见工具卡片。
+- `StreamChunk.error` 原样透传并结束；直接异常、解析错误、取消与关闭失败均传播，不纳入空响应重试。返回的Provider迭代器必须支持 `aclose()`，装饰器以 `aclosing` 负责内层流，消费侧仍唯一负责外层流；内层关闭成功后才可重试，不创建后台清理任务。
+
+本层不替代或扩大Provider的网络错误重试。单次逻辑调用本层最多3次底层调用、3秒自身退避；与现有Provider三次尝试组合时普通路径最多9次SDK create调用及12秒本层/Provider等待，Anthropic非流式转流式回退的宽松上界为18次SDK create及21秒等待。SDK自身重试、网络耗时另计，没有新增硬总截止；常见SDK默认两次内部重试时普通路径可达约27次HTTP尝试，该默认并非本次环境实测。六路模态探测分别拥有预算，单调用上界不是整次探测上界。
+
+能力探针以前把无异常的空结果也视为支持；现在持续空时重试耗尽、六路TaskGroup收尾失败且不写支持/不支持缓存，不修改既有异常组传播政策，因此首次媒体请求可能失败。缓存命中仍不请求模型。审批持续空沿既有失败路径拒绝，不默许工具；元数据/转发维持各自原失败出口。仅完成源码与只读审阅，尚未运行校验或应用，场景验收由用户完成。
 
 #### `abstract/llm/formats.py` — wire format 转换器
 

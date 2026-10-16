@@ -566,6 +566,12 @@ classDiagram
         +chat_stream()*
     }
 
+    class EmptyResponseRetryClient {
+        #_client
+        +chat()
+        +chat_stream()
+    }
+
     class AgentProfile {
         +character_name
         +system_prompts
@@ -756,6 +762,8 @@ classDiagram
     StreamDeltaEvent --> ToolCallRequest : contains
     StreamDeltaEvent --> ToolCallDelta : contains
     StreamDoneEvent --> MessageMetrics : contains
+    BaseLLMClient <|-- EmptyResponseRetryClient
+    EmptyResponseRetryClient --> BaseLLMClient : decorates one provider client
     BaseLLMClient <|-- OpenAIClient
     BaseLLMClient <|-- AnthropicClient
     BaseLLMClient <|-- KsccClient
@@ -806,6 +814,7 @@ classDiagram
 
 | 字段 | 定义类 | 类型 | 说明 |
 |---|---|---|---|
+| `_client` | `EmptyResponseRetryClient` | `BaseLLMClient` | 正式加载器创建的底层Provider客户端；计数、流式有效输出标记、待交付usage/finish均为单次调用局部状态，不新增Loop字段或外部protected访问 |
 | `_inbox` | `BaseAgentLoop` | `Inbox` | 收件箱；子类通过 `self._inbox` 访问属合法继承 |
 | `_cancel_event` | `BaseAgentLoop` | `asyncio.Event` | 取消/中断信号；`ToolContext.is_interrupted` 读取 `loop._cancel_event` |
 | `_message_hooks_cache` | `BaseAgentLoop` | `list[dict] \| None` | hook 缓存 |
@@ -1072,6 +1081,14 @@ classDiagram
 `terminate_and_rotate_session`和BaseAgentLoop.merge_sessions调用capture_inheritance/install_inheritance，在同步初始化scope内完整复制并复查来源/目标、写History，之后归档。安装失败按独占目录二元身份回收，文件四元身份只用于读取变动检测；取消/History/必要清理失败传播，多个失败异常组保留，提交后错误不删除已提交副本。普通子Agent旧parent_session_id不自动重绑，不把独立文件继承宣称为跨文件事务。正常永久删除不清理工作空间变量文件，History重新生成不回滚变量。上述仅源码实施与静态复核，未运行验证。
 
 ## 关键设计变更记录
+
+### LLM空响应有界重试（2026-10-16）
+
+`abstract/llm/loader.py::create_llm_client` 在验证插件工厂返回类型后只包装一次 `EmptyResponseRetryClient`，其继承 `BaseLLMClient`，唯一 `_client` 字段持有原Provider对象；Application经原有Loop/System间接持有两者，不新增全局对象、连接、Loop字段或跨类protected访问。装饰器不读取底层私有状态，原公共参数和返回类型不变，插件继续只负责原Provider实现。`client.py::LLMEmptyResponseError` 是非持久化RuntimeError子类，`LLM_EMPTY_RESPONSE_MAX_ATTEMPTS`集中定义并导出。
+
+正文零长度且无工具调用的正常返回最多3次尝试；完整工具调用合法，只有工具参数增量而无正文/完整调用时失败不重播。每次使用原请求，不重跑工具/业务输入。流式reasoning保持连续展示，失败空尝试的usage/finish不作为完成；装饰层决定事件交付语义，StreamConsumer仍聚合/计时并关闭外层流，装饰器以aclosing关闭内层流，关闭失败/取消不重试。每次调用的状态局部隔离，不持久化、不修改消息类型或前端协议。
+
+正式入口覆盖辅助模型：模态探针持续空时整次TaskGroup失败且不写能力缓存，保留既有异常组传播政策；审批不放行，元数据/转发维持失败出口。新策略与Provider/SDK重试组合的请求次数/等待边界见abstract开发文档，单调用预算不代表六路探测或账单总量。已完成源码实施与只读审阅，未运行校验、构建或应用，用户人工验收待完成。
 
 ### 消息前/后纯类型划分（2026-10-14）
 

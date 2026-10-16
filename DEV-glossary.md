@@ -145,6 +145,7 @@
 | 历史更新指令 | 后端在已提交的 History 发生非追加变更后发送的 `history_updated` 下行通知（英文锚点：history updated event）；要求前端使旧历史视图/请求失效并完整重载骨架与按需正文，不刷新页面、不重放工具。普通追加仍用 `history_sync`，未接受的批次后缀仍用 `tool_calls_discarded` |
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta），LLM 客户端到流消费器的数据 |
 | 流式事件 | 前端实时输出的 `StreamDeltaEvent` / `StreamDoneEvent`；按 `type` 区分的纯数据模型，进程内保留工具载荷与计时模型，WebSocket发送边界才序列化；不同于 Provider 产生的 `StreamChunk`（英文锚点：stream event） |
+| 空响应（empty LLM response） | LLM正常返回但正文长度为零且没有工具调用的异常结果；思考内容不构成有效完成。正式客户端加载入口对这类结果最多尝试3次（初次加2次重试，等待1秒、2秒），耗尽明确失败，不写空assistant消息。纯工具调用合法，非零长度空白正文保持原语义；已有工具参数增量但没有完整工具调用且无正文时明确失败、不重试。流式重试保留同一流标识与连续思考展示，不把失败尝试加入重试输入；其usage和结束原因不作为成功终态。辅助模型调用同样适用，能力探针持续空时失败而不缓存支持/不支持。 |
 | 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
 | 记忆上下文 | memory_hook 注入的长期记忆块（`<|im_memory_context_start|>` 标记包裹，非持久化） |
 | 工具结果嵌入消息 | 工具调用期间排队、随后被下一个工具结果携带展示的用户消息；内部以 `_queued_messages` 保存，通过 `embedded_messages` 独立传输，在工具调用卡片结果区特殊渲染，不作为普通 JSON 正文显示 | embedded tool message |

@@ -12,6 +12,7 @@ import sys
 import types
 
 from abstract.llm.client import BaseLLMClient
+from abstract.llm.retry import EmptyResponseRetryClient
 from entity.puretype import LLMProfile
 from system.context import RuntimeContext
 
@@ -76,7 +77,7 @@ def create_llm_client(
             f"LLM client module '{name}' factory returned {type(client).__name__}, "
             f"not a BaseLLMClient subclass"
         )
-    return client
+    return EmptyResponseRetryClient(client)
 
 
 def list_llm_clients() -> list[str]:

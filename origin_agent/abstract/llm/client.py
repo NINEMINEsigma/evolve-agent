@@ -21,6 +21,10 @@ class UnsupportedModalityError(RuntimeError):
     """LLM 客户端无法忠实表达输入多模态内容块。"""
 
 
+class LLMEmptyResponseError(RuntimeError):
+    """LLM 空响应重试耗尽，或只有未完成工具增量而没有有效响应。"""
+
+
 class LLMAPIStatusError(RuntimeError):
     """客户端 API 状态错误的统一 abstract 层表达，携带 HTTP ``status_code``。
 
@@ -88,6 +92,8 @@ class BaseLLMClient(ABC):
 
         实现应支持 content 增量、reasoning 增量、tool_calls 累积输出，
         并在流结束时发出带 ``finish_reason`` 的 chunk。
+        返回的异步迭代器必须支持 ``aclose()``；消费侧负责关闭外层流，
+        客户端装饰器负责在退出或重试之前关闭其持有的底层流。
 
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
