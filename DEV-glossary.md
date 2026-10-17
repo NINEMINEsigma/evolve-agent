@@ -190,6 +190,7 @@
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
 | 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，声明模块级 `TOOLSET: BaseToolSet` 对象，由 ToolDiscoverySystem 发现并注册 | custom tool |
+| DeepSeek 网页工具 | 英文锚点：DeepSeek web tools。`custom_tools/deepseek_tools/deepseek_tools.py` 声明非默认加载的 `deepseek` 工具集，包含 `DeepSeekSearch` 和 `DeepSeekFetch`；显式参数 `profile_name` 仅按现有模型配置名选择 `base_url` / `api_key`，直接访问网页搜索/抓取 API，不调用聊天模型、不改变会话活动配置。Fetch对服务响应只做标准JSON解码与结构校验，标题和正文原样交付，不提供本地反转义；Markdown转义、抽取格式及目标可访问性依赖DeepSeek服务。专属常量定义在 `custom_tools/deepseek_tools/_deepseek_constants.py`；custom专属常量与类型留在所属custom目录，origin只提供既有通用接口 |
 | 工具集对象声明 | 模块级固定名称 `TOOLSET` 的 `BaseToolSet` 实例；导入期只创建无连接工具对象，注册期由 ToolRegistry 执行预热 | TOOLSET object declaration |
 | 工具调用前 | 工具实例 `before_handle(execution)` 阶段；发生在审批通过后、工具主体之前，只处理当前调用准备 | before handle |
 | 工具主体 | 工具实例 `handle(execution)` 阶段，执行实际业务操作 | handle |

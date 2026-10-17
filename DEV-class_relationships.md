@@ -1467,4 +1467,19 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 前端 `useSessionTabCapabilities` 通过 `GET /api/sessions/{id}/tab-capabilities` 获取轻量状态，按 sessionId/generation 丢弃迟到响应，使用 History 低频信号和变量 Agentspace 事件去抖刷新。首次未知、会话切换和失败时禁用目标 Tab；同会话后台 refreshing 保留已确认快照，成功确认空内容后由 `useTabSystem` 触发现有 active-tab 回退。`fetchJsonWithTimeout` 的可选 `createHttpError` 只被新能力 API 使用，既有调用方未传该选项时保持原行为。无新增 protected 字段、持久化版本、System 或测试源。
 
+### DeepSeek 网页工具（2026-10-17）
+
+`custom_tools/deepseek_tools/deepseek_tools.py` 新增 `DeepSeekSearchTool` / `DeepSeekFetchTool` 两个 `BaseTool` 子类，顶层唯一 `TOOLSET` 声明非默认加载的 `deepseek` 工具集。导入期仅创建无连接工具对象；调用期由现有 `ToolRegistry` 持有完整异步执行，不新增 System、全局连接、后台 Owner、Loop 字段或持久化类型。两工具 safe/EVERY/no_timeout=True，仍使用既有加载和 Agent scope 交集；随意聊聊 schema 可见性白名单不扩展，不新增执行期独立白名单校验。
+
+公开访问链为 `handle(execution)` → `execution.context.app.get_system(LLMProfileStore)` → `store.locked()` / `store.get_profile(profile_name)` → `profile.base_url` / `profile.api_key`。共享锁内只读取两条不可变连接字符串作为单次调用局部值，随后 Profile 编辑或删除不改写在途请求；不对共享 Profile 写字段，不切换会话配置，不跨类访问 protected 字段，不复制 Profile 引用图。
+
+`ensure_arguments` 由主/子/临时Agent已有执行入口调用一次，`handle` 信任规范化材料并显式组装 API 字段，框架内部键和 `profile_name` 不进入远端 JSON。两工具共用纯 URL/参数校验、`/v1` 与代理路径拼接、连接读取、最小响应结构校验及 `_post_json`。专属协议上限/路径/超时在 `custom_tools/deepseek_tools/_deepseek_constants.py` 集中定义，仅由自定义工具导入，origin不定义或重新导出这些名称。custom专属常量与类型留在所属custom目录，本任务没有新增纯类型或存储定义；既有工具基类、权限枚举、Profile Store和内部参数键继续复用origin通用接口，没有新增 puretype、easysave key 或 type token。
+
+每次 `_post_json` 独立持有 `httpx.AsyncClient`，由 `async with` 释放；自有60秒异步等待预算替代通用工具计时器，不关闭用户中断或应用停止。`trust_env=False`、默认TLS校验、不跟随重定向、不重试，非2xx由HTTPX状态检查拒绝，网络/解析/配置错误由现有执行边界处理，取消和生命周期失败继续传播。API响应不额外截断或落盘，Fetch仅作标准JSON解码与结构校验后原样交付标题、正文和未知字段，不进行本地反转义；Markdown转义、抽取格式和目标可访问性依赖DeepSeek服务；有意接受大响应的内存/History/上下文占用及同步JSON解码暂时阻塞事件循环；异步截止不保证抢占同步解码。仅已完成源码与只读差异对照，未运行导入、测试、校验、构建或应用验收；基于现有兼容工具接口，仅须发布自定义工具及私有协议常量模块，无需修改origin源码；应用仍需按既有启动流程重新发现，部署和重启由用户处理。
+
+#### Fetch本地正文修饰已取消（2026-10-17，退役记录）
+
+此前新增的 `unescape_content` 本地开关已按用户要求移除：schema、参数白名单、类型检查及handle修饰分支均删除，旧参数按未知键明确拒绝。专用正文处理模块与标点白名单也已删除，不保留关闭状态兼容入口。历史设计和实施记录仅保留在任务文件，不代表现行能力。
+
+现行 `DeepSeekFetchTool.ensure_arguments` 仅规范化profile_name/url；handle的API JSON始终只有url，直接返回_post_json结果。标准JSON解码之外不做Markdown、Unicode或HTML去转义，不推测上游转义层数，不识别代码区域，也不承诺服务结果适合直接渲染。Search、HTTP失败传播、超时/取消、Profile连接读取与现有持久化约定不变。仅完成源码移除和只读对照，未运行验证。
 

@@ -243,6 +243,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 系统提供多个热扩展点，无需修改核心源码：
 
 - **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，声明顶层固定名称 `TOOLSET = BaseToolSet(...)`，其中持有 `BaseTool` 子类实例；导入只创建无连接、无 Application 查询的工具对象，`ToolDiscoverySystem` 按 AST 识别 `TOOLSET` 后交给唯一 `ToolRegistry` 注册并预热，导入期不注册、不取得运行时服务。
+- **DeepSeek 网页工具**：`custom_tools/deepseek_tools/deepseek_tools.py` 声明非默认加载的 `deepseek` 工具集，包含 `DeepSeekSearch`（`query` 及搜索可选参数）与 `DeepSeekFetch`（`url`）。两者必填 `profile_name`，仅按现有模型配置名在共享 Store 锁内取得 `base_url` / `api_key` 两条连接字符串，直接调用 `/v1/tools/search` / `/v1/tools/fetch`；不调用聊天模型、不切换会话活动 Profile。统一处理已有 `/v1` 与代理路径，调用期持有异步客户端，使用自有60秒异步等待预算，不重试、不跟随重定向、不采用环境代理/证书变量；API响应只做标准JSON解码与最小结构检查，标题和正文原样交付，不额外截断或本地反转义；Markdown转义、抽取格式和目标可访问性由DeepSeek服务决定，工具不承诺正文已清洗或可直接渲染。超大响应的同步解码可能暂时阻塞事件循环。专属协议常量位于 `custom_tools/deepseek_tools/_deepseek_constants.py`；custom专属常量和类型留在custom目录，不在origin定义或导出，工具继续复用origin既有通用接口。使用、费用、可见性及人工验收见 [custom_tools/README.md](custom_tools/README.md)。仅已实施源码，未运行校验或应用验收。
 - **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py`、`kscc_client.py` 和 `lmstudio_client.py`。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为审批模型自动加载。
