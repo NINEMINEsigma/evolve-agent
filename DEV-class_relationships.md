@@ -764,9 +764,6 @@ classDiagram
     StreamDoneEvent --> MessageMetrics : contains
     BaseLLMClient <|-- EmptyResponseRetryClient
     EmptyResponseRetryClient --> BaseLLMClient : decorates one provider client
-    BaseLLMClient <|-- OpenAIClient
-    BaseLLMClient <|-- AnthropicClient
-    BaseLLMClient <|-- KsccClient
     MultiAgentLoop --> MultiAgentWorker : creates
     MultiAgentLoop --> AgentProfile : holds
     MultiAgentWorker --> WorkerResult : returns
@@ -1017,7 +1014,7 @@ classDiagram
 
 ### 会话视觉资源服务
 
-`Application` 持有 `SessionVisualResourceService`，Gateway 的视觉入口、会话 status REST、`component/tools/filesystem.py` 的视觉源 `Read` 错误转换以及根目录 `custom_hooks/session_meta_hook.py` 均通过其公开接口读取状态。该服务只解析源目录 `.meta` 一次，不持久化视觉状态，不访问目标目录 `.meta`；新增纯数据模型位于 `entity/puretype/session_visual.py`。
+`Application` 持有 `SessionVisualResourceService`；Gateway 的视觉入口、会话 status REST、`component/tools/filesystem.py` 的视觉源 `Read` 错误转换及扩展调用方通过其公开接口读取状态。该服务只解析源目录 `.meta` 一次，不持久化视觉状态，不访问目标目录 `.meta`；新增纯数据模型位于 `entity/puretype/session_visual.py`。
 
 
 
@@ -1181,11 +1178,11 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 ### Memory 系统移除
 
-`ParentAgentLoop` 中原有的 `_memory`（`MemoryManager`）和 `_memory_initialized_ids`（`set[int]`）字段已移除。`add_memory_provider()` 方法也已完全移除（不再保留空实现）。`LoopSessionManager` 中涉及 memory 的迁移逻辑已移除。记忆功能现由运行时扩展实现：`custom_tools/memory_tools/`（remember/forget 工具）+ `custom_hooks/memory_hook.py`（每轮注入上下文）。
+`ParentAgentLoop` 中原有的 `_memory`（`MemoryManager`）和 `_memory_initialized_ids`（`set[int]`）字段已移除。`add_memory_provider()` 方法也已完全移除（不再保留空实现）。`LoopSessionManager` 中涉及 memory 的迁移逻辑已移除。记忆能力不再由核心管理；扩展可通过通用工具接口与上下文钩子接入。
 
 ### LLM 抽象层引入
 
-`ParentAgentLoop._llm` 类型从具体的 `LLMClient` 变为 `BaseLLMClient`（抽象基类）。实际客户端通过 `abstract/llm/loader.py::create_llm_client()` 工厂从 `custom_llm_client/` 动态加载。内置实现：`openai_client.py`、`anthropic_client.py`。
+`ParentAgentLoop._llm` 类型从具体的 `LLMClient` 变为 `BaseLLMClient`（抽象基类）。实际客户端通过 `abstract/llm/loader.py::create_llm_client()` 工厂从 `custom_llm_client/` 动态加载。
 
 `abstract/llm/formats.py` 提供 `to_openai_message()` 和 `messages_to_anthropic_list()` 两种 wire format 转换器，供 LLM 客户端复用。
 
@@ -1251,8 +1248,8 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 2026-10-10 事故：glm-5.3（Anthropic 协议）图片探测收到 HTTP 400「Model only supports text input」，异常经客户端流式回退路径降级为裸 `RuntimeError`（状态码语义丢失），探针 except 链只识别 openai 族 400 而误判为致命错误上抛，从无保护的预检调用点穿透炸掉轮次并在 shutdown 时层层重抛（`Application shutdown failed`）。修复分四层：
 
 1. `StreamChunk` 新增 `error_code: int | None`（`entity/puretype/llm.py`），客户端流式 400 在 error chunk 附带 HTTP 状态码；
-2. `abstract/llm/client.py` 新增 `LLMAPIStatusError(RuntimeError)`（携带 `status_code`，继承 RuntimeError 保证既有 `except RuntimeError` 捕获点行为不变），作为客户端 API 状态错误的统一 abstract 层表达：openai/anthropic 客户端在非流式路径经各自模块级 `_convert_status_error` 把本 SDK `APIStatusError` 转换抛出（`raise ... from` 保留异常链），anthropic 客户端流式回退收集路径在错误块携带 `error_code` 时重建同一类型，其余错误块维持裸 `RuntimeError`；
-3. `system/modality_capability.py` 新增模块级 `_is_modality_rejection`，只识别 abstract 层 `LLMAPIStatusError(400)` 单一来源，system 核心不 import 任何具体 SDK（消除原探针对 openai 族异常的内联依赖与「openai 协议 = openai 库」假设，原 TODO 完成）；两个探针函数与 `_forward_modality_to_ref_profile` 的 400 判断全部收敛到该 helper（`kscc_client`/`lmstudio_client` 因继承自动获益）；
+2. `abstract/llm/client.py` 新增 `LLMAPIStatusError(RuntimeError)`（携带 `status_code`，继承 RuntimeError 保证既有 `except RuntimeError` 捕获点行为不变），作为客户端 API 状态错误的统一 abstract 层表达：客户端 API 状态错误须转换为统一的 `LLMAPIStatusError`（`raise ... from` 保留异常链）；流式错误块通过 `error_code` 保留 HTTP 状态码，回退收集路径据此重建同一类型，其余错误块维持原错误语义；
+3. `system/modality_capability.py` 新增模块级 `_is_modality_rejection`，只识别 abstract 层 `LLMAPIStatusError(400)` 单一来源，system 核心不 import 任何具体 SDK（消除原探针对 openai 族异常的内联依赖与「openai 协议 = openai 库」假设，原 TODO 完成）；两个探针函数与 `_forward_modality_to_ref_profile` 的 400 判断全部收敛到该 helper；
 4. `entry/agent_support/multimodal.py` 新增 `ModalityForwardUnavailableError(ValueError)`（无引用 Profile 时抛出，含配置指引文本）；`ParentAgentLoop._run_tool_loop`（`stream_id` 提前生成）与 `MultiAgentWorker` 的预检调用纳入与模型错误路径同构的边界转换——无法转发终止本轮并把指引持久化展示给前端，provider 错误降级为用户可见错误，生命周期异常照常放行。
 
 修复合并了探针日志笔误（tool 路径 400 日志补 `single_probe(tool)` 后缀）。
@@ -1467,19 +1464,4 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 前端 `useSessionTabCapabilities` 通过 `GET /api/sessions/{id}/tab-capabilities` 获取轻量状态，按 sessionId/generation 丢弃迟到响应，使用 History 低频信号和变量 Agentspace 事件去抖刷新。首次未知、会话切换和失败时禁用目标 Tab；同会话后台 refreshing 保留已确认快照，成功确认空内容后由 `useTabSystem` 触发现有 active-tab 回退。`fetchJsonWithTimeout` 的可选 `createHttpError` 只被新能力 API 使用，既有调用方未传该选项时保持原行为。无新增 protected 字段、持久化版本、System 或测试源。
 
-### DeepSeek 网页工具（2026-10-17）
-
-`custom_tools/deepseek_tools/deepseek_tools.py` 新增 `DeepSeekSearchTool` / `DeepSeekFetchTool` 两个 `BaseTool` 子类，顶层唯一 `TOOLSET` 声明非默认加载的 `deepseek` 工具集。导入期仅创建无连接工具对象；调用期由现有 `ToolRegistry` 持有完整异步执行，不新增 System、全局连接、后台 Owner、Loop 字段或持久化类型。两工具 safe/EVERY/no_timeout=True，仍使用既有加载和 Agent scope 交集；随意聊聊 schema 可见性白名单不扩展，不新增执行期独立白名单校验。
-
-公开访问链为 `handle(execution)` → `execution.context.app.get_system(LLMProfileStore)` → `store.locked()` / `store.get_profile(profile_name)` → `profile.base_url` / `profile.api_key`。共享锁内只读取两条不可变连接字符串作为单次调用局部值，随后 Profile 编辑或删除不改写在途请求；不对共享 Profile 写字段，不切换会话配置，不跨类访问 protected 字段，不复制 Profile 引用图。
-
-`ensure_arguments` 由主/子/临时Agent已有执行入口调用一次，`handle` 信任规范化材料并显式组装 API 字段，框架内部键和 `profile_name` 不进入远端 JSON。两工具共用纯 URL/参数校验、`/v1` 与代理路径拼接、连接读取、最小响应结构校验及 `_post_json`。专属协议上限/路径/超时在 `custom_tools/deepseek_tools/_deepseek_constants.py` 集中定义，仅由自定义工具导入，origin不定义或重新导出这些名称。custom专属常量与类型留在所属custom目录，本任务没有新增纯类型或存储定义；既有工具基类、权限枚举、Profile Store和内部参数键继续复用origin通用接口，没有新增 puretype、easysave key 或 type token。
-
-每次 `_post_json` 独立持有 `httpx.AsyncClient`，由 `async with` 释放；自有60秒异步等待预算替代通用工具计时器，不关闭用户中断或应用停止。`trust_env=False`、默认TLS校验、不跟随重定向、不重试，非2xx由HTTPX状态检查拒绝，网络/解析/配置错误由现有执行边界处理，取消和生命周期失败继续传播。API响应不额外截断或落盘，Fetch仅作标准JSON解码与结构校验后原样交付标题、正文和未知字段，不进行本地反转义；Markdown转义、抽取格式和目标可访问性依赖DeepSeek服务；有意接受大响应的内存/History/上下文占用及同步JSON解码暂时阻塞事件循环；异步截止不保证抢占同步解码。仅已完成源码与只读差异对照，未运行导入、测试、校验、构建或应用验收；基于现有兼容工具接口，仅须发布自定义工具及私有协议常量模块，无需修改origin源码；应用仍需按既有启动流程重新发现，部署和重启由用户处理。
-
-#### Fetch本地正文修饰已取消（2026-10-17，退役记录）
-
-此前新增的 `unescape_content` 本地开关已按用户要求移除：schema、参数白名单、类型检查及handle修饰分支均删除，旧参数按未知键明确拒绝。专用正文处理模块与标点白名单也已删除，不保留关闭状态兼容入口。历史设计和实施记录仅保留在任务文件，不代表现行能力。
-
-现行 `DeepSeekFetchTool.ensure_arguments` 仅规范化profile_name/url；handle的API JSON始终只有url，直接返回_post_json结果。标准JSON解码之外不做Markdown、Unicode或HTML去转义，不推测上游转义层数，不识别代码区域，也不承诺服务结果适合直接渲染。Search、HTTP失败传播、超时/取消、Profile连接读取与现有持久化约定不变。仅完成源码移除和只读对照，未运行验证。
 

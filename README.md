@@ -82,16 +82,18 @@ python run.py --load <config_key> --force_init
 
 ## 扩展机制
 
+DEV 文档和 README（包括 `custom_*` 目录自身的 README）只说明扩展机制、公共接口与通用约定，不登记这些目录当前提供的具体工具、客户端、钩子或模型，也不记录其专属参数、协议、行为与验收信息。下列示例仅用于说明接口，不代表实际扩展清单。
+
 ### custom_tools
 
 在 `custom_tools/` 目录下编写 `.py` 文件, 声明模块顶层固定名称 `TOOLSET = BaseToolSet(...)`, 其中持有 `BaseTool` 子类实例; 启动时由 AST 扫描顶层 `TOOLSET` 自动发现并注册（`abstract/tools/discover.py`）.
 
 **发现规则**：
 
-- 递归扫描 `custom_tools/` 下所有 `.py`（支持子目录, 如 `memory_tools/remember.py`）.
+- 递归扫描 `custom_tools/` 下所有 `.py`（支持子目录, 如教学路径 `<package>/<module>.py`）.
 - 仅识别**模块顶层**的 `TOOLSET` 声明, 一个模块只能声明一个; 函数体内的注册不会被识别.
 - 退役协议直接失败: 顶层 `register_tools` 函数、`registry.register()` 顶层调用、`abstract.tools.ui_event_router` 导入与导入期注册都会让发现终止.
-- 跳过文件名以 `_` 开头的文件（如 `_store.py`, 用作共享逻辑）、`__init__.py` 与 `registry.py`.
+- 跳过文件名以 `_` 开头的文件（如教学文件名 `_shared.py`, 用作共享逻辑）、`__init__.py` 与 `registry.py`.
 - 沙盒命名空间 `custom_tools:` 对 agent 只读.
 
 **`BaseTool` 主要参数**（模块级 `TOOLSET` 中的每个工具实例）:
@@ -99,7 +101,7 @@ python run.py --load <config_key> --force_init
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `name` | `str` | — | 工具唯一名称 |
-| `toolset` | `str` | — | 工具集分类（如 `custom`、`memory_tools`）; 必须与所属 `BaseToolSet.name` 一致 |
+| `toolset` | `str` | — | 工具集分类，由扩展自行命名; 必须与所属 `BaseToolSet.name` 一致 |
 | `schema` | `dict` | — | OpenAI 格式, 含 `description`（英文）与 `parameters` |
 | `is_async` | `bool` | `False` | 为 `True` 时工具主体与后处理用 `async def`, 由事件循环 await |
 | `danger_level` | `ToolDangerLevel` | `safe` | `safe`/`write`/`dangerous`/`critical`; `dangerous` 及以上需审批, `critical` 只能由用户亲自批准 |
@@ -163,11 +165,11 @@ class TranslateTool(BaseTool):
 TOOLSET = BaseToolSet(name="custom", tools=(TranslateTool(),))
 ```
 
-> 工具 schema 的 `description` 用英文, 紧邻其上的注释用中文. 仓库内置的记忆工具 `custom_tools/memory_tools/`（`remember` / `forget`）可作为参考实现.
+> 工具 schema 的 `description` 用英文, 紧邻其上的注释用中文. 上面的工具仅为接口教学示例, 不代表当前已安装扩展.
 
 ### custom_llm_client
 
-在 `custom_llm_client/` 目录下编写 `.py` 文件, 暴露 `create_llm_client(runtime_context, profile)` 工厂函数, 返回 `BaseLLMClient` 子类实例.启动时由 `abstract/llm/loader.py` 动态加载.内置 `openai_client.py`、`anthropic_client.py` 和 `kscc_client.py`.
+在 `custom_llm_client/` 目录下编写 `.py` 文件, 暴露 `create_llm_client(runtime_context, profile)` 工厂函数, 返回 `BaseLLMClient` 子类实例.启动时由 `abstract/llm/loader.py` 动态加载.
 
 ```python
 from abstract.llm.client import BaseLLMClient

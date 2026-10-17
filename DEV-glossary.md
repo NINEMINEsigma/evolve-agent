@@ -146,8 +146,7 @@
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta），LLM 客户端到流消费器的数据 |
 | 流式事件 | 前端实时输出的 `StreamDeltaEvent` / `StreamDoneEvent`；按 `type` 区分的纯数据模型，进程内保留工具载荷与计时模型，WebSocket发送边界才序列化；不同于 Provider 产生的 `StreamChunk`（英文锚点：stream event） |
 | 空响应（empty LLM response） | LLM正常返回但正文长度为零且没有工具调用的异常结果；思考内容不构成有效完成。正式客户端加载入口对这类结果最多尝试3次（初次加2次重试，等待1秒、2秒），耗尽明确失败，不写空assistant消息。纯工具调用合法，非零长度空白正文保持原语义；已有工具参数增量但没有完整工具调用且无正文时明确失败、不重试。流式重试保留同一流标识与连续思考展示，不把失败尝试加入重试输入；其usage和结束原因不作为成功终态。辅助模型调用同样适用，能力探针持续空时失败而不缓存支持/不支持。 |
-| 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
-| 记忆上下文 | memory_hook 注入的长期记忆块（`<|im_memory_context_start|>` 标记包裹，非持久化） |
+| 思考内容 | reasoning_content / reasoning_delta，模型响应中的思考正文或流式思考增量 |
 | 工具结果嵌入消息 | 工具调用期间排队、随后被下一个工具结果携带展示的用户消息；内部以 `_queued_messages` 保存，通过 `embedded_messages` 独立传输，在工具调用卡片结果区特殊渲染，不作为普通 JSON 正文显示 | embedded tool message |
 
 ---
@@ -190,7 +189,6 @@
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
 | 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，声明模块级 `TOOLSET: BaseToolSet` 对象，由 ToolDiscoverySystem 发现并注册 | custom tool |
-| DeepSeek 网页工具 | 英文锚点：DeepSeek web tools。`custom_tools/deepseek_tools/deepseek_tools.py` 声明非默认加载的 `deepseek` 工具集，包含 `DeepSeekSearch` 和 `DeepSeekFetch`；显式参数 `profile_name` 仅按现有模型配置名选择 `base_url` / `api_key`，直接访问网页搜索/抓取 API，不调用聊天模型、不改变会话活动配置。Fetch对服务响应只做标准JSON解码与结构校验，标题和正文原样交付，不提供本地反转义；Markdown转义、抽取格式及目标可访问性依赖DeepSeek服务。专属常量定义在 `custom_tools/deepseek_tools/_deepseek_constants.py`；custom专属常量与类型留在所属custom目录，origin只提供既有通用接口 |
 | 工具集对象声明 | 模块级固定名称 `TOOLSET` 的 `BaseToolSet` 实例；导入期只创建无连接工具对象，注册期由 ToolRegistry 执行预热 | TOOLSET object declaration |
 | 工具调用前 | 工具实例 `before_handle(execution)` 阶段；发生在审批通过后、工具主体之前，只处理当前调用准备 | before handle |
 | 工具主体 | 工具实例 `handle(execution)` 阶段，执行实际业务操作 | handle |

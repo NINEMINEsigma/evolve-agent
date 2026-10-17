@@ -122,7 +122,7 @@ sequenceDiagram
     GW->>MR: MessageRouter.route()
     MR->>SM: route to ParentAgentLoop
     SM->>PAL: process_message()
-    PAL->>PAL: append_user_message, build system prompt + hooks + memory
+    PAL->>PAL: append_user_message, build system prompt + hooks
     PAL->>LLM: chat_stream(BaseMessage[])
     LLM-->>PAL: StreamChunk (text delta / tool_calls)
     PAL-->>FS: emit_stream_delta / emit_tool_call
@@ -139,7 +139,7 @@ sequenceDiagram
 主要阶段说明：
 
 - **消息接收**：`gateway/server.py` 通过 WebSocket 接收 `user_message`，`gateway/message_router.py` 在路由内同步完成目标校验并登记输入记录，再由 `GatewaySystem.spawn_work` 启动准备任务，交给 `SessionManager` 分配到对应 `ParentAgentLoop`。
-- **上下文组装**：`entry/agent_support/messages.py` 加载 `custom_hooks`、memory 上下文、system prompt，组装成 `BaseMessage` 列表。
+- **上下文组装**：`entry/agent_support/messages.py` 加载钩子与 system prompt，将钩子返回的上下文扩展块和历史消息组装成 `BaseMessage` 列表。
 - **流式生成**：通过 `abstract/llm/` 抽象层的 `BaseLLMClient.chat_stream()` 调用大模型（具体后端由 `custom_llm_client/` 插件提供），`ParentAgentLoop` 实时解析 `StreamChunk` 中的文本增量与工具调用。正式 `create_llm_client()` 统一返回 `EmptyResponseRetryClient` 装饰器：正文零长度且无工具调用的正常返回最多尝试3次（初次+2次，等待1秒/2秒），耗尽通过现有错误出口结束，不写空assistant；纯工具调用合法，网络/认证/解析错误、取消和关闭失败不由这层重试。流式正文/思考/工具增量实时透传，失败空尝试的usage与结束原因不作为完成；各尝试的思考在同一流中连续展示但不加入重试输入。已有工具参数片段而无完整调用且无正文时明确失败、不重播。子Agent、临时Agent的非流式调用与辅助模型同样适用；模态探针持续空会整体失败且不写能力缓存，审批持续空不放行。该预算独立于Provider/SDK已有网络重试，实际HTTP次数和耗时可能更多，详细边界见 `abstract/DEV-README.md`。仅完成源码与只读审阅，未运行校验或启动应用，等待用户人工验收。
 - **工具执行**：工具来源为 `BaseTool` 子类，各模块以顶层固定名称 `TOOLSET` 声明 `BaseToolSet`；`ToolRegistry` 直接持有 `BaseTool` 对象，模型返回的整批 tool calls 在写入 assistant 消息前经 `accept_tool_batch()` 按每个工具的 `accepts_following_calls` 声明截断，后续调用不审批、不执行、不配对并向前端发送 `tool_calls_discarded`。`ToolExecutor` 在审批前做前置快速拒绝，`async_dispatch(execution)` 执行工具调用前的 `before_handle` 与工具主体 `handle` 并写回 `body_executed`/`body_completed_normally`/`result`/`state`；工具结果写入 History 后，`ToolPostprocessor.after_committed()` 对已提交调用调用工具调用后的 `after_handle`。工具集加载检查在分发中统一拦截未加载工具（工具对象与四阶段执行已按任务文件 v8 实施并静态复核，完整任务复核与用户验收仍待完成）。主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`component/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
 - **前端推送**：实时事件（流式文本、工具调用、工具结果、任务进度、子代理更新）通过 `FrontendSink` 经 WebSocket 推回前端。正典聊天历史不再在连接时整体回放：Gateway 先发送 typed `history_sync` 元数据，前端再通过 REST 取得全历史骨架与可见范围的历史内容页；`History` / `history.es` 仍保持整体存储。工具请求和匹配结果在前端以每个 `tool_call_id` 一张工具调用卡片显示；工具结果内部 `_meta` 与 `_queued_messages` 不作为普通 JSON 正文展示，分别通过耗时元数据和 `embedded_messages` 独立渲染；孤立结果保留降级行。聊天页会话视觉所需的 Agentspace 变化也通过同一会话 WebSocket的 typed `agentspace_event`推送，页面内事件总线扇出到三个视觉 hook；独立 Agentspace 编辑器仍使用 SSE。会话状态预检、History骨架和历史内容页具有15秒硬截止；超时显示持久通知，并在 WebSocket可用时以不进入 History 的脱敏 `client_diagnostic`记录 Gateway warning。
@@ -242,9 +242,10 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 系统提供多个热扩展点，无需修改核心源码：
 
+**文档边界**：DEV 文档和 README（包括 `custom_*` 目录自身的 README）只描述扩展机制、公共接口、加载流程和通用约定，不登记 `custom_*` 目录中的具体工具、客户端、钩子、模型或其专属参数、协议、行为及验收记录。教学示例须独立于当前扩展内容，不作为实际扩展清单。扩展专属常量和类型留在所属 custom 目录，origin仓库只提供通用接口。
+
 - **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，声明顶层固定名称 `TOOLSET = BaseToolSet(...)`，其中持有 `BaseTool` 子类实例；导入只创建无连接、无 Application 查询的工具对象，`ToolDiscoverySystem` 按 AST 识别 `TOOLSET` 后交给唯一 `ToolRegistry` 注册并预热，导入期不注册、不取得运行时服务。
-- **DeepSeek 网页工具**：`custom_tools/deepseek_tools/deepseek_tools.py` 声明非默认加载的 `deepseek` 工具集，包含 `DeepSeekSearch`（`query` 及搜索可选参数）与 `DeepSeekFetch`（`url`）。两者必填 `profile_name`，仅按现有模型配置名在共享 Store 锁内取得 `base_url` / `api_key` 两条连接字符串，直接调用 `/v1/tools/search` / `/v1/tools/fetch`；不调用聊天模型、不切换会话活动 Profile。统一处理已有 `/v1` 与代理路径，调用期持有异步客户端，使用自有60秒异步等待预算，不重试、不跟随重定向、不采用环境代理/证书变量；API响应只做标准JSON解码与最小结构检查，标题和正文原样交付，不额外截断或本地反转义；Markdown转义、抽取格式和目标可访问性由DeepSeek服务决定，工具不承诺正文已清洗或可直接渲染。超大响应的同步解码可能暂时阻塞事件循环。专属协议常量位于 `custom_tools/deepseek_tools/_deepseek_constants.py`；custom专属常量和类型留在custom目录，不在origin定义或导出，工具继续复用origin既有通用接口。使用、费用、可见性及人工验收见 [custom_tools/README.md](custom_tools/README.md)。仅已实施源码，未运行校验或应用验收。
-- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py`、`kscc_client.py` 和 `lmstudio_client.py`。
+- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为审批模型自动加载。
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
@@ -260,7 +261,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 ## 基础设施与未拆分模块
 
 - **会话视觉资源重定向**：`stage.meta`、`site.meta`、`chat-style.meta` 的 `[redirect]` 由 Gateway 服务端单层解析，稳定入口用 HTTP 307 指向有效逻辑目录；非法配置静默回退，前端 Hook 只消费最终 URL并自动刷新。
-- **会话视觉资源状态**：会话 status REST 和 `session_meta_hook` 读取的非持久化 `visual_resources`，包含 stage/site/chat_style 的状态、源目录、有效目录、重定向标志和错误原因，不写入 History 或会话索引。
+- **会话视觉资源状态**：会话 status REST 经公开服务接口读取的非持久化 `visual_resources`，包含 stage/site/chat_style 的状态、源目录、有效目录、重定向标志和错误原因，不写入 History 或会话索引。
 
 ### system/
 
@@ -278,7 +279,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 component 子包与可选 custom_tools，AST 只识别顶层固定名称 `TOOLSET` 并登记唯一模块集合；最后注册 MCP 管理工具和固定 `BaseToolSet` 工具集元数据，不重新建立 MCP 连接。退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入与导入期注册直接拒绝；读取/语法/导入/注册错误直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
 - `system/lifecycle.py`：`TaskOwner.create/track` 负责后台任务，`run_request` 负责有明确结果等待方的请求。`cancel` 登记预期取消并复用固定截止；`is_idle` 同时要求任务结束和交接完成，取消后仍运行的任务不能从所有权记录中移除。原生线程/子进程仍由各 System 持有真实资源，不由异步包装任务的结束替代。
 - `system/context.py`：`RuntimeContext`（`BaseModel`，不可变运行时配置）。全局 `set_runtime_context`/`get_runtime_context` 单例入口已删除；配置唯一真相来源由 `RuntimeSystem` 持有，经 `app.get_system(RuntimeSystem).context` 取得。
-- `system/sandbox.py`：`Sandbox` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem` 与 `SubprocessRunner`），无参构造，`virtual_awake` 取得依赖并加载动态空间；由 Application 在 P22 装配后经 `app.get_system(Sandbox)` 取得。路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；`Sandbox.read()` 按 UTF-8、系统编码和 Windows 常见编码自动探测，返回准确原文，分页只按 LF 定位原文行片段，保留 CRLF、孤立 CR 与末尾换行；工具 `Read` 在其上独立应用正文单行展示截断，未截断内容保持原文。编辑和 LSP 使用的 `limit=0` 路径仍返回完整解码原文。`write()` / `append()` 禁用平台换行转换，按传入文本原样写入 UTF-8，避免 Windows 上 `PatchEdit` 写回时给已有 CRLF 增加一个 CR；`PatchEdit` 按原文匹配与替换，已有异常换行不自动修复。动态配置位于 workspace 根且由唯一 Sandbox 实例持有。动态沙盒空间 Tab 通过 Gateway REST 复用该单例。所有调用方（含 `component/tools/filesystem.py`、`custom_tools/read_forward.py`）统一经 `app.get_system(Sandbox)` 取得，不再从 `filesystem._s` 跨工具引用或 `Application.current().sandbox` 旧属性获取。
+- `system/sandbox.py`：`Sandbox` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem` 与 `SubprocessRunner`），无参构造，`virtual_awake` 取得依赖并加载动态空间；由 Application 在 P22 装配后经 `app.get_system(Sandbox)` 取得。路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；`Sandbox.read()` 按 UTF-8、系统编码和 Windows 常见编码自动探测，返回准确原文，分页只按 LF 定位原文行片段，保留 CRLF、孤立 CR 与末尾换行；工具 `Read` 在其上独立应用正文单行展示截断，未截断内容保持原文。编辑和 LSP 使用的 `limit=0` 路径仍返回完整解码原文。`write()` / `append()` 禁用平台换行转换，按传入文本原样写入 UTF-8，避免 Windows 上 `PatchEdit` 写回时给已有 CRLF 增加一个 CR；`PatchEdit` 按原文匹配与替换，已有异常换行不自动修复。动态配置位于 workspace 根且由唯一 Sandbox 实例持有。动态沙盒空间 Tab 通过 Gateway REST 复用该单例。所有调用方（包括内置文件工具与自定义扩展）统一经 `app.get_system(Sandbox)` 取得，不再从 `filesystem._s` 跨工具引用或 `Application.current().sandbox` 旧属性获取。
 - `system/text_preview.py`：无 I/O 的 `truncate_lf_lines` 纯函数，由 Read 在原文分页统计后调用。Read 新参数 `max_line_chars` 默认 1000，仅允许正整数且可显式提高、不能关闭；按 Unicode 码点保留每行前 N 个正文字符，超限附加 ` ... [truncated]`（含前导空格），标识及 LF/CRLF 行尾不占额度，孤立 CR 仍按正文计数。成功文本结果附带 `max_line_chars`、`truncated`、`truncated_lines`（原文件绝对 0-indexed 行索引）；原行数和分页不变，`remaining=0` 仍可有截断。标识不是原文，PatchEdit 使用前需检查截断状态，必要时提高有限上限重读。自动附带 meta、目录和媒体不应用此展示策略，内部完整读取不变；这不是总输出预算或全文件解码内存限制。
 - `system/file_metadata.py`：Read 的元数据文件纯文本解析器，`parse_meta_content(content)` 按独立的 `[key]` 行解析一层字符串字典，保留值的原始空白和换行；非法/重复键及前导非空文字抛带行号的 `MetaFormatError`。`component/tools/filesystem.py` 负责通过 Sandbox 读取目标完整名称追加 `.meta` 的同级文件，目录也使用同级 `目录名.meta`；命名空间根目录不附带，显式 `.meta` 不继续嵌套。成功时结果附加 `meta` 字典，缺失省略，元数据访问/解析失败附加错误字符串而保留原结果。会话视觉源目录的 `redirect` 由 `system/session_visual_resources.py` 单层消费，Read 只在 `meta.redirect` 中报告错误，不跟随目标。目录列表隐藏 `.meta` 文件（后缀不区分大小写，保留同后缀目录），其他文件工具与前端文件树不变。自动附带的元数据完整读取不受正文分页或单行字符限制影响；显式 Read `.meta` 目标则按文本正文分页及截断，但不继续查找 `.meta.meta`。ws: 元数据文件沿用回复轮次文件接触登记；当前不自动维护文件。
 - `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等）；活动 LLM Profile 仅以 `{"profile_name": ...}` 名称指针保存。旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到会话 v1 格式。`history.es` 通过 easysave 的安全写入事务保存：同目录临时文件、刷新/同步、原子替换和前置备份；残留 `.bak` 会阻断后续保存并要求人工处理，读取侧不自动恢复损坏文件。
@@ -295,7 +296,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `component/cron_router.py`：CronRouter已迁移为依赖RuntimeSystem/Sandbox/SubprocessRunner的AsyncSystem，持久任务严格加载但不启动Timer，RUNNING后由Application统一activate。工具和API只经公开实例方法操作；冻结保留持久任务，命令使用独立进程会话键，先终止命令再确认Timer退出。快照与原子写串行，失败传播，关闭后不再投递新模型工作。
 - `component/browser/system.py`：`BrowserSystem` 已迁移为依赖RuntimeSystem的AsyncSystem，持有唯一Playwright/CDP连接、端点和全部自有无头进程；可选浏览器仍按需启动。请求与清理分别持有，原生进程确认退出后才回收句柄，用户自有浏览器不被终止。`_connection.py`只保留无状态函数，main.py重复清理已移除。
 - `system/lsp.py`：`LSPManager` 已迁移为依赖 RuntimeSystem/Sandbox 的 AsyncSystem，工具和文件诊断附加通过 `get_system(LSPManager)` 取得实例。唤醒不启动 pyright，按需 start 保持；启动握手与正常响应共用唯一 reader，复用 Runtime 主 loop。最终关闭在线程中等待进程和 reader/stderr 退出，失败保留资源并传播；旧模块 getter/cleanup 与 main.py 重复清理已移除。
-- `system/modality_capability.py`：`ModalityCapabilitySystem` 已迁移为依赖 RuntimeSystem/LLMProfileStore 的 AsyncSystem，独占探测锁、媒体及缓存路径。探测与转发请求由 TaskOwner 管理，六路子探针使用 TaskGroup 完整收尾；HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式由客户端转换、流式回退经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/网络/超时不写入不支持缓存。有状态调用经 get_system，纯媒体构造和显式引用解析保持函数。多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`resolve_modality_reference_profile()` 按活动 Profile 对应引用优先、全局图片/音频/视频回退引用次之解析目标；`forward_modality_to_ref_profile()` 只将明确的模态/Provider 请求失败转换为转发错误，其他异常继续抛出）。`build_media_content_block()` 提供不附加 prompt 的共享单媒体块构造入口。自定义工具 `ReadForward` 使用该入口按 `paths` 顺序构造“文件标签 + 媒体块”，末尾只附加一次 prompt，并通过单条 user 消息和一次 LLM 调用转发混合模态；工具生成的紧凑 JSON 内容块载荷上限为 45 MiB，任意文件无效时整体失败。多模态预检调用（`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker`）纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`）时终止本轮并把配置指引持久化展示给前端，provider 错误降级为用户可见错误。
+- `system/modality_capability.py`：`ModalityCapabilitySystem` 已迁移为依赖 RuntimeSystem/LLMProfileStore 的 AsyncSystem，独占探测锁、媒体及缓存路径。探测与转发请求由 TaskOwner 管理，六路子探针使用 TaskGroup 完整收尾；HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式由客户端转换、流式回退经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/网络/超时不写入不支持缓存。有状态调用经 get_system，纯媒体构造和显式引用解析保持函数。多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`resolve_modality_reference_profile()` 按活动 Profile 对应引用优先、全局图片/音频/视频回退引用次之解析目标；`forward_modality_to_ref_profile()` 只将明确的模态/Provider 请求失败转换为转发错误，其他异常继续抛出）。`build_media_content_block()` 提供不附加 prompt 的共享单媒体块构造入口。多模态预检调用（`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker`）纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`）时终止本轮并把配置指引持久化展示给前端，provider 错误降级为用户可见错误。
 
 ### `evolve/`
 
@@ -334,7 +335,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体块，保持既有消息引用。`prepare_main_multimodal_request` 每次请求在首个await前固定媒体开关/消息视图；开启沿能力路由直传或转发，关闭优先可信描述/单跳转发，只有无可用配置或明确模态不支持才占位。网络、认证、超时、未知400和空描述继续错误。迟到描述只改缓存，不覆盖最新开关；重新开启可从未被文字替换的原历史视图恢复媒体。
 
-普通模式准备视图精确重连最后用户消息引用，保留原动态后缀；多Agent仍使用原 `last_user_message=None`，不新增后缀注入。客户端忠实发送收到的内容，上层发送控制不改变LLM客户端或原ReadForward显式转发用途。
+普通模式准备视图精确重连最后用户消息引用，保留原动态后缀；多Agent仍使用原 `last_user_message=None`，不新增后缀注入。客户端忠实发送收到的内容，上层发送控制不改变 LLM 客户端公共接口。
 
 新增typed REST：分页 `GET /api/sessions/{id}/history/media`、单实例 `PUT .../media/{media_id}`、按需单媒体 `GET .../media/{media_id}/content`。处理中可改，保存后的下一请求生效；已开始请求不撤回。归档用户写403，未恢复Loop409，实例不存在404，应用停止503；不创建Loop或独立读取活动History。清单不含Base64/描述正文；图片网格使用单块端点懒加载原媒体，视频临近视口才挂载metadata请求，详情窗按点击加载播放器。预览不调用模型，退出Tab或关闭详情停止播放；不是新增后端缩略缓存，原文件可能较大。
 

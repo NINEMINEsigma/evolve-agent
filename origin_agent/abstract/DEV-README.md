@@ -67,7 +67,6 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - 调用模块暴露的 `create_llm_client(runtime_context, profile)` 工厂函数构造客户端实例。
 - 校验返回值是否为 `BaseLLMClient` 子类，随后统一包装为 `EmptyResponseRetryClient`，公开签名保持不变。插件工厂仍只构造Provider客户端，正式加载器只装饰一次；直接调用插件工厂不具备这层统一保证。
 - `list_llm_clients()` 返回目录下所有可选客户端模块名。
-- 内置实现：`openai_client.py`、`anthropic_client.py`、`kscc_client.py`。
 
 #### `abstract/llm/retry.py` — `EmptyResponseRetryClient`
 
@@ -80,7 +79,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - 原chunk暂存usage/finish后即使全空仍透传一次，保留真实数据到达进展，使现有空闲超时照常重置；不伪造usage或完成事件。只有工具参数片段却无完整调用且正文为空时明确抛错、不重试，避免重复可见工具卡片。
 - `StreamChunk.error` 原样透传并结束；直接异常、解析错误、取消与关闭失败均传播，不纳入空响应重试。返回的Provider迭代器必须支持 `aclose()`，装饰器以 `aclosing` 负责内层流，消费侧仍唯一负责外层流；内层关闭成功后才可重试，不创建后台清理任务。
 
-本层不替代或扩大Provider的网络错误重试。单次逻辑调用本层最多3次底层调用、3秒自身退避；与现有Provider三次尝试组合时普通路径最多9次SDK create调用及12秒本层/Provider等待，Anthropic非流式转流式回退的宽松上界为18次SDK create及21秒等待。SDK自身重试、网络耗时另计，没有新增硬总截止；常见SDK默认两次内部重试时普通路径可达约27次HTTP尝试，该默认并非本次环境实测。六路模态探测分别拥有预算，单调用上界不是整次探测上界。
+本层不替代或扩大 Provider 的网络错误重试。单次逻辑调用本层最多3次底层调用、3秒自身退避；底层客户端和 SDK 若另有重试或调用回退，其请求次数、等待与网络耗时会叠加，不能由本层预算推导固定 HTTP 次数或总耗时。本层没有新增硬总截止。六路模态探测分别拥有预算，单调用上界不是整次探测上界。
 
 能力探针以前把无异常的空结果也视为支持；现在持续空时重试耗尽、六路TaskGroup收尾失败且不写支持/不支持缓存，不修改既有异常组传播政策，因此首次媒体请求可能失败。缓存命中仍不请求模型。审批持续空沿既有失败路径拒绝，不默许工具；元数据/转发维持各自原失败出口。仅完成源码与只读审阅，尚未运行校验或应用，场景验收由用户完成。
 
@@ -107,7 +106,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 主会话每请求由 `entry.agent_support.multimodal.prepare_main_multimodal_request`固定独立媒体实例开关，发送原块、已验证描述或明确未提供内容的TextBlock；原History媒体始终保留。客户端收到的MediaBlock.as_object仍为原图片/音频/视频wire结构，不携带media_id、开关或内部来源字段，不在格式转换器静默删媒体。
 
-关闭时的描述经ModalityCapabilitySystem.describe_media_block单跳取得，成功与明确不可用分开；网络/认证/超时/未知400/空描述继续失败。活动Profile的对应引用优先，全局仅补空引用；明确活动引用不可用不改全局目标。URL直接由目标客户端协议处理，服务器不额外抓取。旧ReadForward显式转发与工具原str返回契约保持。
+关闭时的描述经ModalityCapabilitySystem.describe_media_block单跳取得，成功与明确不可用分开；网络/认证/超时/未知400/空描述继续失败。活动Profile的对应引用优先，全局仅补空引用；明确活动引用不可用不改全局目标。URL直接由目标客户端协议处理，服务器不额外抓取。
 
 普通主会话准备副本后将last_user_message精确重连，保持当前后缀；多Agent继续None，不附带改变后缀注入。子Agent/临时Agent独立调用未接入主会话控制。以上为源码实施约定，未运行验证。
 
@@ -232,7 +231,7 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 | abstract | 具体实现 |
 |---|---|
-| `BaseLLMClient` | `custom_llm_client/openai_client.py`、`custom_llm_client/anthropic_client.py`、`custom_llm_client/kscc_client.py` |
+| `BaseLLMClient` | `custom_llm_client/<name>.py` 暴露的工厂返回符合公共接口的客户端实例 |
 | `to_openai_message()` / `messages_to_anthropic_list()` | 被 `custom_llm_client/` 中的客户端调用 |
 | `ToolRegistry` | `component/extools/`、`component/multiagenttools/`、`custom_tools/` |
 | `SkillManager` | `component/extools/` 中的 `load_skill` / `list_skills` 工具 |

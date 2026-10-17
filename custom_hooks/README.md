@@ -1,6 +1,8 @@
 # Custom Hooks — 上下文扩展
 
-`custom_hooks/` 是 Evolve Agent 的上下文扩展点。放在这里的 Python 脚本会在启动时被自动加载，并在每一轮最新 `UserMessage` 的末尾动态附加一段上下文，供 LLM 感知当前时间、最近上传、会话间隔等实时信息。
+`custom_hooks/` 是 Evolve Agent 的上下文扩展点。放在这里的 Python 脚本会在启动时被自动加载，并在每一轮最新 `UserMessage` 的末尾附加上下文扩展块。
+
+本文只描述钩子接口、调用机制与通用约定，不登记当前目录中的具体钩子或其专属内容。下列文件名和内容均为独立教学示例，不代表已安装扩展。
 
 ---
 
@@ -11,7 +13,7 @@
 3. 启动或重启 `python run.py --load <config_key>`。
 4. 发送一条消息，观察 LLM 是否收到了你附加的上下文。
 
-最小示例 `custom_hooks/my_first_hook.py`：
+最小教学示例（假设文件名为 `custom_hooks/my_first_hook.py`）：
 
 ```python
 from datetime import datetime
@@ -85,7 +87,7 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
 
 ## 完整示例
 
-`custom_hooks/time_gap_hook.py`：在每轮对话中提示与上一条消息的间隔，并把首次启动标记持久化到历史。
+以下为独立教学示例（假设文件名为 `custom_hooks/time_gap_hook.py`），演示非持久化上下文与固着器的区别，不代表目录中存在该扩展。
 
 ```python
 import json
@@ -108,7 +110,7 @@ def hook_fixator(session_id: str = "", workspace: str = "", **kwargs) -> str:
 
 
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
-    cache_path = Path(workspace) / "session_cache" / session_id / "time_hook.json"
+    cache_path = Path(workspace) / "session_cache" / session_id / "turn_cache.json"
     now = datetime.now()
 
     if not cache_path.exists():
@@ -152,8 +154,6 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     agentspace = runtime_ctx.agentspace
     ...
 ```
-
-`recent_uploads_hook.py` 中展示了实际用法：通过 `runtime_ctx.agentspace` 定位 `uploads/` 目录。
 
 ### 导入内部模块
 
