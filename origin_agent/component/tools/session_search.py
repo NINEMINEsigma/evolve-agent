@@ -207,8 +207,13 @@ def _handle_read_session(args: dict[str, Any]) -> dict:
 # ── RecallSession handler ─────────────────────────────────
 
 
-async def _handle_recall_session(args: dict[str, Any]) -> dict:
-    """混合检索全体会话：三通道召回 + RRF 融合排序。"""
+def _handle_recall_session(args: dict[str, Any]) -> dict:
+    """Search all session histories with three channels and RRF fusion.
+
+    This function performs synchronous history I/O and search computation.
+    ToolRegistry runs it through its dedicated synchronous worker path so a
+    large scan cannot occupy the event-loop thread.
+    """
     query: str = str(args.get("query", "")).strip()
     raw_methods = args.get("match_methods", ["exact", "substring", "bm25"])
     max_message_results: int = int(args.get("max_message_results", SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT))
@@ -619,13 +624,13 @@ class RecallSessionTool(BaseTool):
             name="RecallSession",
             toolset="core",
             schema=_RECALL_SESSION_SCHEMA,
-            is_async=True,
+            is_async=False,
             danger_level=ToolDangerLevel.safe,
             availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
         )
 
-    async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(result=await _handle_recall_session(execution.arguments))
+    def handle(self, execution: ToolExecution) -> ToolHandlerResult:
+        return ToolHandlerResult(result=_handle_recall_session(execution.arguments))
 
 
 TOOLSET = BaseToolSet(

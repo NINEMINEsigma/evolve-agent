@@ -178,7 +178,7 @@ Gateway在创建后台任务前的多目标接收与ready准备已由 S21 完成
 - `execute(tc, session_id, *, round_id, ...) -> ToolResultMessage`：执行单个工具调用；`round_id` 传入每个 `ToolContext`。
 - `get_tool_stats()`：返回工具调用统计。
 - 审批或 dispatch 等待与主会话取消事件竞速；handler task 取消只等待正式清理窗口，超时 task 由 `_cancel_cleanup_tasks` 强引用并在最终结束时观察异常，禁止无限阻塞主轮次。
-- 工具 handler 的真实执行归 `get_system(ToolRegistry)`：异步请求由注册表的 TaskOwner.run_request 持有，同步线程由注册表登记原生 Future。ToolExecutor 只持有本次审批/分发等待包装及中断清理；取消包装不表示底层线程已经退出。`cancel_tool_wait` 由主/子Agent共用，一秒窗口仅用于及时结束调用方等待，超出后保留包装 Future，真实取消期限由所属 System 的 TaskOwner 管理；不能在内层十秒清理期限尚未到达时误报失败。取消请求只发一次，迟到回调使用预先取得的 Runtime 引用；停止拒绝及预期取消不报告失败。停止、生命周期与 History 持久化失败（包括异常组）继续传播，取消收尾失败报告 Runtime；普通工具错误保持既有结果协议。
+- 工具 handler 的真实执行归 `get_system(ToolRegistry)`：异步请求由注册表的 TaskOwner.run_request 持有；异步 handler 内的同步历史扫描、磁盘读取或 CPU 密集计算必须改为同步 handler 并交给 ToolRegistry 的专用线程池，不能仅因声明为 async 就在事件循环线程执行阻塞逻辑。同步线程由注册表登记原生 Future。ToolExecutor 只持有本次审批/分发等待包装及中断清理；取消包装不表示底层线程已经退出。`cancel_tool_wait` 由主/子Agent共用，一秒窗口仅用于及时结束调用方等待，超出后保留包装 Future，真实取消期限由所属 System 的 TaskOwner 管理；不能在内层十秒清理期限尚未到达时误报失败。取消请求只发一次，迟到回调使用预先取得的 Runtime 引用；停止拒绝及预期取消不报告失败。停止、生命周期与 History 持久化失败（包括异常组）继续传播，取消收尾失败报告 Runtime；普通工具错误保持既有结果协议。
 - 通过 `IMainSessionLoop.loop` 访问 loop 内部字段（`cancel_event`、`get_sink()`、`get_hooks_context()` 等）。
 
 > 由 `ParentAgentLoop` 和 `MultiAgentWorker` 分别持有独立实例。

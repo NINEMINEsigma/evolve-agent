@@ -73,6 +73,8 @@ Sandbox为无参AsyncSystem，virtual_awake取得唯一RuntimeContext和Subproce
 
 virtual_awake完成原构造与start：取得Sandbox，构造事件总线/文件锁/垃圾桶/watcher和visual_resources叶服务，绑定loop，恢复垃圾桶，启动watcher。已启用watcher启动失败会导致初始化失败，不降级为启动成功。
 
+Agentspace 逻辑路径由 `AgentspaceService._normalize()` 统一规范化：命名空间前缀后只能是相对路径，路径段之间使用 `/`，不能以 `/` 或 `\` 开始或结束，也不能包含 `\`、空路径段、`.` 或 `..`。目录路径不使用末尾斜杠；文档中目录示例的末尾 `/` 只是说明性记号，不能原样传给文件工具。路径不自动删除末尾斜杠或把反斜杠转换成正斜杠。Agent 文件工具会在实际读写前登记 `ws:` 路径锁，路径不符合规范时先报 `Agentspace access lock failed`，不会继续执行文件操作。统一规范化保证路径锁、父子路径匹配、文件变化事件和文件修改记录使用同一个逻辑路径身份。
+
 初始化失败时也等待正在恢复垃圾桶的线程结束并释放已取得资源；Observer在start前即记录，部分启动可以找到资源并停止。最终virtual_shotdown在后续应用编排完成History提交及Gateway事件流关闭后执行。
 
 watcher停止时封闭新的debounce安排，取消并join已持有Timer及Observer，检查实际存活状态；超时是资源清理失败。SessionVisualResourceService仍为独立可复用业务类，由`get_system(AgentspaceService).visual_resources`暴露，不自行创建另一份Sandbox。

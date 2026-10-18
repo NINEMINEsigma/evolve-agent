@@ -73,7 +73,7 @@ component/
 | `compress_history.py` | `CompressHistory`（`CompressHistoryTool` + `TOOLSET`） | 会话历史压缩：`handle` 只校验参数并把 `summary`、保留轮次起点登记为调用态材料；结果提交后的 `after_handle` 重新扫描历史，把旧轮次替换为 Agent 撰写的会话摘要，并把保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`）。摘要模型调用前发「正在压缩历史...」，替换、`save_history()` 与 `reset_context_tokens()` 成功后发「压缩完成」；链摘要任一步失败直接传播、历史不变。排除当前调用所在链，故当前轮不被压缩 |
 | `compress_tool_chains.py` | `CompressToolChains`（`CompressToolChainsTool` + `TOOLSET`） | 无业务参数；`after_handle` 在自身结果提交后扫描全部历史中的完整工具链并替换为链摘要，不截断轮次或插入会话摘要；普通用户消息与不带工具调用的回复保留，未完成链及纯压缩占位链跳过；本次调用自身所在链此时已完整，可一并被压缩（D11）。`core` / `MAIN` / `critical` / `no_timeout`，无符合条件链时更新已保存结果为零计数且不写历史 |
 | `session_variables.py` | `ReadSessionVariables` | filesystem工具集的safe整池只读工具；按ToolContext.resource_session_id读取全部数字/字符串、meta和问题，写入仍使用通用文件工具 |
-| `session_search.py` | `SessionSearch` | 会话内容搜索 |
+| `session_search.py` | `SessionSearch` | 会话内容搜索；`RecallSession` 通过 `ToolRegistry` 的同步工具线程池执行全会话 History 读取与 BM25/RRF 计算，避免长时间检索占用事件循环，结果协议不变 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 压缩工具共享逻辑
@@ -133,7 +133,7 @@ LSP工具与文件修改后的诊断附加统一通过 `Application.current().ge
 
 ### Read 元数据文件
 
-仅 `Read` 支持自动附带元数据文件：目标完整名称追加 `.meta`，例如 `ws:a.md` 对应 `ws:a.md.meta`，`ws:docs/` 对应同级 `ws:docs.meta`，不是目录内部的 `.meta`。命名空间根目录（含等价当前目录写法或指向根目录的别名）不附带元数据；显式读取后缀为 `.meta` 的目标不继续嵌套。后缀识别不区分大小写，自动查找统一追加小写 `.meta`。
+仅 `Read` 支持自动附带元数据文件：目标完整名称追加 `.meta`，例如 `ws:a.md` 对应 `ws:a.md.meta`，`ws:docs` 对应同级 `ws:docs.meta`，不是目录内部的 `.meta`。命名空间根目录（含等价当前目录写法或指向根目录的别名）不附带元数据；显式读取后缀为 `.meta` 的目标不继续嵌套。后缀识别不区分大小写，自动查找统一追加小写 `.meta`。
 
 - 目录列表隐藏后缀匹配且为文件的条目，保留同后缀目录；`count` 为过滤后数量。`Sandbox.list_dir`、SearchFiles、Grep、Agentspace 文件树和写入/移动/删除工具不变。
 - `system/file_metadata.py::parse_meta_content(content)` 是不执行 I/O 的共享解析入口。独立成行的 `[key]` 开始字段，键名不 trim、区分大小写，不允许空/纯空白键或键内方括号、CR、LF。标记行外侧没有空白；LF/CRLF 为行界，孤立 CR 仍是内容。
@@ -214,7 +214,11 @@ Delete逐paths目标记录，失败项继续原错误结果，成功项在catch�
 
 ## Agentspace 文件接触登记
 
-内置工具通过 `ToolContext.agentspace_access()` 把明确的 `ws:` 路径登记到当前 Agent 回复轮次：
+内置工具通过 `ToolContext.agentspace_access()` 把明确的 `ws:` 路径登记到当前 Agent 回复轮次。
+
+`ws:` 路径必须使用规范的逻辑路径格式：路径段之间使用 `/`，但不能以 `/` 或 `\` 开始或结束，也不能包含 `\`。例如目录应写成 `ws:reports/2026`，不能写成 `ws:reports/2026/` 或 `ws:reports\2026`。文档中用于表示目录的末尾 `/` 只是说明性记号，不是文件工具参数的一部分。不自动删除末尾斜杠或把反斜杠转换成正斜杠；不符合格式时，路径锁登记会先失败，工具返回 `Agentspace access lock failed`，不会继续执行读写或创建目录。
+
+限制末尾斜杠是为了让 `ws:reports` 与 `ws:reports/` 不产生两个逻辑身份；限制反斜杠是为了不让 Windows 物理路径分隔符混入逻辑路径。唯一的逻辑表示可以保证路径锁、父子路径匹配、文件变化事件和文件修改记录使用同一身份。
 
 - `Read` 与单文件 `Grep` 登记精确文件；目录读取/搜索不锁整树。
 - `Write`、`PatchEdit` 登记目标；`Copy`、`Move` 同时登记源和目标；目录 `Move/Delete` 使用递归锁。
