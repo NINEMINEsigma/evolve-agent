@@ -78,8 +78,9 @@ WS /ws/chat?resume=<sid>
 - 不带 `resume`：创建新会话。
 - 带 `resume`：只恢复已有会话，重放历史。这里的 `resume` 是 WebSocket 连接恢复参数，不等同于下方 REST `/api/sessions/{id}/resume` 的“恢复工具链执行”操作；两者都不会因为前端当前选择了新的 Profile 而自动更新会话配置。显式目标处于删除中或从内存、磁盘均不存在时，Gateway 拒绝握手，不再创建随机替代会话。
 
-永久删除已建立连接时，Gateway 使用关闭码 `WEBSOCKET_CLOSE_SESSION_DELETED`（4004）使连接失效；前端收到后停止按旧会话 ID自动重连并切换到“随意聊聊”。握手前的拒绝可能被浏览器报告为 1006，前端因此通过 `/api/sessions/{id}/status` 的 `exists`再次确认；删除中的会话也按 `exists=false`返回。
+### 文件修改 Tab 的可见投影修订
 
+文件修改REST仍从`file_changes.es`读取，摘要和分页返回当前可见文件与目录条目：会话新增目标删除后隐藏，已有路径删除显示为红色deleted条目；删除后重建同路径显示黄色modified。合成父目录只在前端存在，不计入摘要。`operation_count`包含所有成功目标操作，包括隐藏删除。
 连接建立后，服务端发送：
 
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
@@ -358,3 +359,13 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 归档保留 `approval_mode.es`；永久删除会话目录时一并删除，随后清理 Store缓存。自动延续、单源分支和多父合并不会复制该文件，新会话统一写入手动模式。
 
 全局会话索引：`workspace/sessions/_index.json`。
+
+## 文件修改记录 REST 与永久删除
+
+新增只读`GET /api/sessions/{session_id}/file-changes/summary`及`GET /api/sessions/{session_id}/file-changes?offset=0&limit=100`。通过`Application.current().get_system(AgentspaceService).file_changes`读取唯一Store，使用线程池，不创建Loop、不读History；已归档或尚未恢复Loop的已知会话都可读。摘要只含会话、revision、文件/目录路径条目数、全局操作次数和最近UTC时间；分页附同次摘要与最多200行条目，默认100。未知/删除中404，参数越界422，停机503；返回前二次确认会话，Cache-Control=no-store。读取损坏不伪空，普通返回值保留BaseModel。
+
+独立持久文件为会话目录内`file_changes.es`，不在ws:工作空间的sessions资源目录。新会话缺文件返回空，不回填；已有文件缺key/损坏/残留备份直接失败。
+
+永久删除现在由既有GatewaySystem.task_owner.run_request管理完整REQUEST。原业务主体移入`_delete_session_impl`，在begin_session_delete后的try内先进入`_file_changes_delete_scope`，成功封闭统计后才按原顺序关闭连接、停止子Agent/主Loop、sm.remove、清理资源，最外层finally仍清deleting标记。block_session在线程中有界等待5秒，超时只返回409且不提前拆除连接/Loop。scope以shield等待真实封闭/收尾线程，调用方取消不放弃真实工作；会话尚在则解封，已删则forget并保留封闭标记。必要清理失败保留异常并传播，不把取消外层等待当作线程已经结束。
+
+统计保存前验证会话目录已存在，easysave内部可建父目录但删除封闭防止迟到写入重建会话目录。封闭后的旧GET不再打开待删除统计文件，已知删除竞态映射404，其他读取异常继续传播。统计文件随会话目录删除，不删除原业务文件。仅源码实施与只读审阅，尚未运行验证。

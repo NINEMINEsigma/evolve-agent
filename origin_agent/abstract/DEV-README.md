@@ -177,6 +177,14 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ---
 
+## 调用级取消事实与文件目标统计
+
+`ToolExecution`新增私有`threading.Event`取消事实，通过`mark_cancelled()`和只读`cancel_requested`公开。状态只属于单次非持久化调用，不写入共享工具、Application、History或统计根。ToolRegistry在原生同步等待的CancelledError出口、及async_dispatch包装出口幂等登记，再沿原流程传播取消并交接请求；不清除仍运行的真实Future，不更改既有Owner清理截止。
+
+文件工具的记录器结合该事实与`ToolContext.is_interrupted`，在必要统计保存前采样；已经成功保存的目标保留，取消登记后迟到的目标不再提交。该事实不表示原生线程已经结束，也不把统计转移到History提交后的after_handle：文件操作可以早于History落盘，统计独立保留实际成功目标。
+
+统计保存的`SessionFileChangesPersistenceFailure`继承LifecycleFailure，按既有注册表/Runtime路径使应用失败关闭；一般GET读取失败仍由FastAPI请求边界处理。四阶段执行顺序、工具发现、审批和权限均不变。本次未运行校验或应用。
+
 ## 技能系统
 
 ### `abstract/skills/`

@@ -177,6 +177,24 @@ JSON文件保存单个数字/字符串，同级完整名称追加 `.meta`。业�
 
 直接Write不是原子覆盖，读整池不是跨文件事务，文件锁不互斥多个Agent。主Agent统一结算，重新生成/删除消息不回滚；旧子Agent旋转后仍写旧父目录，捕获后的变化不自动同步；正常永久删除会话不清理变量文件。
 
+## 会话文件操作聚合叶服务
+
+`system/session_file_changes.py::SessionFileChangeStore`由AgentspaceService.virtual_awake构造，经只读file_changes属性取得；没有额外AsyncSystem、后台Owner、watcher、原生资源或模块级单例，20个System的装配与关闭拓扑不变。ToolRegistry在逆拓扑中早于AgentspaceService释放，调用级记录器持有必要Store引用，迟到收尾不重查已经注销的System。
+
+每会话RLock保护严格惰性加载、候选聚合、easysave必要保存与缓存发布。根位于RuntimeContext.workspace/sessions/<主会话ID>/file_changes.es，v1 key，Data/Entry/Actor使用typeref稳定映射，直接保存BaseModel；UTC时间只存毫秒精度+00:00字符串。根revision等于成功目标全局次数；Move两行各加路径次数但只加一次revision，后续操作可分别更新时间/序号。所有计数、键、作者和源/目的关系在业务层显式校验，不使用反射或model_dump降级。
+
+目录仅记显式目标、逻辑路径聚合不读文件正文。无记录GET不创建文件，已有根缺key、损坏、孤立备份拒绝，不自动恢复。缓存根不暴露可变引用给HTTP调用者，分页只限制传输行数，底层仍整体快照保存。必要记录保存失败使应用失败关闭；HTTP只读错误不主动报告全应用失败，文件与记录/History不构成跨文件事务。
+
+block_session与相同会话锁同步，在拆除运行时前封闭记录，锁争用5秒为删除业务409；unblock/forget是有界必要收尾。forget清缓存但保留进程内锁与封闭标记，避免旧线程获得另一把锁或重建会话目录；内存随访问/删除会话数增长，不扫描会话目录。归档保留，分支/合并/旋转不继承；旧子Agent按原父会话归属。
+
+Sandbox.copy/copy_folder/move新增真实目的ResolvedPath返回，消费shutil返回值并沿本次逻辑目的拼接子路径；不重新解析后来变化的动态映射，不改变原磁盘语义或权限。`ensure_parent_directories(logical)`在Write/Copy/Move需要时创建缺失父目录并返回本次新建的逻辑目录，文件工具在目标成功后逐条记录，已存在父目录不重复计数。ToolExecution只新增调用级取消事实，不以外层等待结束冒充线程退出。
+
+## 文件修改聚合状态
+
+`SessionFileChangeEntry.display_state`与`created_by_session`保存当前逻辑路径生命周期：首次成功创建/复制目的/移动目的为`created`；对created路径的修改保持created；删除已有路径为`deleted`且可见为红色，删除会话新增路径为deleted但由当前Tab隐藏；删除后同路径再次创建、复制目的或移动目的为`modified`。Store的分页和摘要只投影可见条目（文件或目录），合成父目录由前端树构造，不写入目录条目。`operation_count`仍来自全部成功目标操作，隐藏删除不丢失。
+
+Move在一次revision中更新源和目的两行，源为deleted、目的按历史决定created/modified；Copy只更新目的。加载校验允许deleted条目存在，删除后重建不能把历史路径误判为首次新增。前端完整树只在同一revision的全部可见分页取得后替换，半页结果不渲染。
+
 ## 验证约束
 
 本次迁移未由开发助手AI运行测试、类型检查、Lint、构建或应用。只做源文件读取和定向差异审阅；正式运行验证由用户在完整迁移完成后执行。

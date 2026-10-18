@@ -15,7 +15,7 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与九个 tab 内容层；含会话 Tab 能力探测 API/hook
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与十个 tab 内容层；含会话 Tab 能力探测 API/hook
 │   ├── features/sessionMedia/ ← 中文相册、文案资源、共享预览与媒体详情窗
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
@@ -99,7 +99,7 @@ frontend/
 | `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单任一） |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 九条目（chat/resources/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 十条目（chat/resources/changes/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
 | `features/tabs/sessionTabCapabilitiesApi.ts` | 会话 Tab 能力 REST DTO/严格解码器/请求适配：只返回媒体数量和变量可见内容标志，不读取完整载荷 |
 
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 的会话网页 HEAD 探测与 `useSessionTabCapabilities` 的媒体/变量内容能力探测；禁用 tab 切换静默忽略 |
@@ -109,7 +109,7 @@ frontend/
 | `features/tabs/useDynamicSandboxSpaces.ts` | 动态沙盒空间列表唯一持有者：只读列表与手动 `refresh`，不自动读取（激活读取仍由 SandboxTab effect 驱动） |
 | `features/tabs/useTabPreview.ts` | 只读摘要数据组装：把 TabDataProvider / chatRuntimeStore / WebSocket 快照投影为纯 `TabPreviewInput` 并运行选择器；不发请求，仅资源预览且有下一项时运行本地 1 秒 tick |
 | `features/tabs/TabHoverPreview.tsx` | 只读摘要卡片：复用 `PopupLayer`（外部点击/ESC 关闭显式 false），内层 `role=tooltip`，无按钮/输入/焦点陷阱/aria-live |
-| `features/tabs/tabPreviewSelectors.ts` | 九个纯选择器 + `selectNextCronEvent`/`formatPreviewCountdown`/`truncatePreviewText`/`formatPreviewPayloadChars`/`formatPreviewRatio`；媒体双进度条与变量概要均在此组装 |
+| `features/tabs/tabPreviewSelectors.ts` | 十个纯选择器 + `selectNextCronEvent`/`formatPreviewCountdown`/`truncatePreviewText`/`formatPreviewPayloadChars`/`formatPreviewRatio`；媒体双进度条与变量概要均在此组装 |
 | `features/tabs/ChatTab.tsx` | 聊天 Tab 内容层：ChatArea + ClipboardPanel + 双倒计时条 + InputBar |
 | `features/tabs/ResourcesTab.tsx` | 资源 Tab：四折叠区块（资源/Shell/Cron/动态端点），资源按 tab 激活懒加载 |
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
@@ -124,6 +124,26 @@ frontend/
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
+
+### 文件修改 Tab
+
+`changes`位于资源/任务之后、媒体输入之前，是第十项注册后的只读目录树Tab。标题/状态/树节点/徽章中文来自`features/sessionFileChanges/zh-CN.json`，`labels.ts`显式校验；只显示实际文件，父目录仅为合成结构，目录目标不形成可见条目。文件颜色由`display_state`决定：created绿色、modified黄色、deleted隐藏；每个可见文件附最后一次操作徽章。无diff、正文、编辑、下载、撤销或统计起点说明。
+
+`useTabSystem`持有唯一`useSessionFileChanges(sessionId, active, enabled)`，通过`TabRenderContext.fileChanges`给页面和预览；不在TabDataProvider重复实例化。`api.ts`严格解码六字段摘要和分页，使用现有`fetchJsonWithTimeout`的15秒截止；UTC字段为毫秒精度`+00:00`字符串，计数必须safe integer，Move允许路径条目数最多为revision的两倍。
+
+解锁且`ws.isReady`的当前会话在页面可见时串行探测摘要，每请求结算后等3秒；归档也可查询，不依赖主History或ws:监听。Tab按钮始终可进入；摘要和完整树分别显示加载中、读取失败、当前没有可显示文件或过期状态。分页默认100行，仅激活时读取，切回Tab必重拉；摘要revision不变不重复拉正文。页面隐藏取消请求并暂停计时，恢复后刷新。主会话ID、请求代际、offset和单调revision共同阻止迟到覆盖；同类刷新最多合并一个pending请求。404使两链失效并清空，保留摘要再探测以覆盖删除取消；其他错误保留明确过期的同会话快照，不返回假零。
+
+`FileChangesTab.tsx`沿用56px安全区和常驻挂载规则；共享CSS位于`session-file-changes.css`并由main.tsx导入，窄屏折行。当前页失败不撤销可用摘要，切页时旧offset正文不冒充新页。摘要selector只消费已有快照，即使未加载完整页也能显示真实总数；悬停/聚焦不发请求或建立计时器。
+
+该功能仅做源码与定向只读审阅，未执行类型检查、构建或应用；中文、翻页、首个Move、多Agent独立写入、切会话、隐藏恢复及StrictMode生命周期需用户人工验收。
+
+### 文件修改 Tab（目录树修订 2026-10-18）
+
+`FileChangesTab`位于资源/任务之后，使用`useSessionFileChanges`唯一Hook提供的完整可见条目构造只读目录树。摘要的`file_count`只统计可见文件，`directory_count`统计可见目录；`operation_count`包含隐藏删除。命名空间、子目录、文件和实际目录条目按目录优先自然排序，合成父目录仅为结构节点，默认展开且只允许折叠/展开，不提供打开、编辑、删除、重命名或上下文菜单。
+
+持久条目增加`display_state`：`created`绿色、`modified`黄色、已存在文件删除时`deleted`红色可见，会话新增文件删除后隐藏。首次Write/Copy目的/Move目的为绿色；新增后修改仍绿色；删除后重建或再次成为Copy/Move目的为黄色；Move源按其历史状态显示或隐藏，目的按路径历史决定绿色或黄色。文件和实际目录条目都带最后操作徽章；合成父目录没有徽章。树只读颜色由`data-file-change-state`与`session-file-changes.css`控制。
+
+Hook在激活后顺序取得全部可见分页，必须拥有同一revision的完整树才替换旧树；切会话、摘要revision变化、页面隐藏和404继续由请求代际控制。摘要预览不读取树，只显示已有摘要。目录操作保留为目录条目但不展开内部文件，只有合成父目录不计入统计。
 
 ### 媒体输入 Tab
 
@@ -141,7 +161,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ## 会话变量 Tab
 
-右侧Tab注册表共九项，会话变量位于媒体输入Tab之后；只有会话 Tab 能力探测确认存在变量条目或可展示问题时可打开，探测未知/失败或确认空目录且无问题时禁用。进入后才读取完整变量池；`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
+右侧Tab注册表共十项，会话变量位于媒体输入Tab之后；只有会话 Tab 能力探测确认存在变量条目或可展示问题时可打开，探测未知/失败或确认空目录且无问题时禁用。进入后才读取完整变量池；`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
 
 `features/sessionVariables/`包含types.ts、api.ts、useSessionVariables.ts、presentation.ts及VariableCard.tsx。typed GET `/api/sessions/<id>/variables`严格解码，15秒截止覆盖fetch与响应正文，解析前后检查时长（不能实时中断同步JSON.parse）；退出Tab/切会话取消请求，代际防旧响应覆盖。激活必重拉，现有chatAgentspaceEventBus文件/移动祖先路径命中后1秒去抖刷新，resync重拉，watcher_error提示降级；不新增长连接/轮询。刷新失败保留同会话旧数据并标过期，404清空旧池。
 
@@ -153,7 +173,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ## 右侧 Tab 悬停预览
 
-九个 Tab（chat/resources/media/variables/subagents/characters/site/llm/sandbox）均登记只读摘要选择器（`TabDefinition.preview`，可选；缺失时该 Tab 摘要不可用但不影响编译）。悬停/聚焦「启用且非当前」的图标时在图标左侧显示只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 activeTab、不新增轮询。悬停/焦点/几何逻辑在 `useAnchoredHoverPreview.ts`（泛型，尺寸等由 Options 注入，含 pending 250ms 开启、离开 120ms 关闭、Escape 抑制同次重开、模态/页面隐藏关闭、ResizeObserver 与 visualViewport 夹逼、全部 timer/rAF/observer 成对清理）；卡片在 `TabHoverPreview.tsx`（复用 `PopupLayer`，外部点击/ESC 关闭显式 false，内层 `role=tooltip`，无按钮/输入/焦点陷阱）。文案集中在 `features/tabs/tabPreviewLabels.json`，经 `constants/tabPreview.ts` 的 `TAB_PREVIEW_LABELS` 显式字段读取；`tsconfig.app.json` 仅启用 `resolveJsonModule` 支持正式 JSON 资源。
+十个 Tab（chat/resources/changes/media/variables/subagents/characters/site/llm/sandbox）均登记只读摘要选择器（`TabDefinition.preview`，可选；缺失时该 Tab 摘要不可用但不影响编译）。悬停/聚焦「启用且非当前」的图标时在图标左侧显示只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 activeTab、不新增轮询。悬停/焦点/几何逻辑在 `useAnchoredHoverPreview.ts`（泛型，尺寸等由 Options 注入，含 pending 250ms 开启、离开 120ms 关闭、Escape 抑制同次重开、模态/页面隐藏关闭、ResizeObserver 与 visualViewport 夹逼、全部 timer/rAF/observer 成对清理）；卡片在 `TabHoverPreview.tsx`（复用 `PopupLayer`，外部点击/ESC 关闭显式 false，内层 `role=tooltip`，无按钮/输入/焦点陷阱）。文案集中在 `features/tabs/tabPreviewLabels.json`，经 `constants/tabPreview.ts` 的 `TAB_PREVIEW_LABELS` 显式字段读取；`tsconfig.app.json` 仅启用 `resolveJsonModule` 支持正式 JSON 资源。
 
 数据唯一来源是 Provider `TabDataContext.tsx`：`characters`/`sandbox` 为全局列表，`media`/`variables` 为会话级快照；四个 hook 各一份，正式 Tab（`CharactersTab`/`SandboxTab`/`MediaInputTab`/`VariablesTab`）与预览共享同一快照。会话资源（Shell/Cron/动态端点）改由 `useSessionStore` 的 Scope 快照（sid+generation）承载，`useWebSocket` 原 3 秒轮询经 `useSessionResourceSnapshot` 的 Token 与 Scope 校验提交，迟到响应不污染新会话；`useSessionMedia` 的 `aggregate` 独立于当前分页（翻页保留旧聚合，切会话/404 清空）。
 

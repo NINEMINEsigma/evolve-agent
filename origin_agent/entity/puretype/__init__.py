@@ -47,6 +47,10 @@ Retained public pre-message types are explicitly re-exported here, preserving
 not re-exported here; import them from entity.puretype_after.
 """
 
+from .session_file_changes import (
+    SessionFileChangeActor, SessionFileChangeOperation, SessionFileChangeEntry,
+    SessionFileChangesData, SessionFileChangesSummary, SessionFileChangesPage,
+)
 from .session_media import (
     SessionMediaItem,
     SessionMediaListResponse,
@@ -263,6 +267,8 @@ from .agentspace import (
 )
 
 __all__ = [
+    "SessionFileChangeActor", "SessionFileChangeOperation", "SessionFileChangeEntry",
+    "SessionFileChangesData", "SessionFileChangesSummary", "SessionFileChangesPage",
     "SessionMediaItem",
     "SessionMediaListResponse",
     "SessionMediaUpdateRequest",

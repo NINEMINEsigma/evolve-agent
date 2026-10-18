@@ -251,7 +251,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
 - **插件**：`abstract/plugins/discover.py` 基于目录扫描插件，解析 `plugin.yaml`，启发式检测 provider 类型。
 - **MCP**：`MCPSystem` 读取并校验 `mcp_config.json`，由 `MCPCore` 连接服务器并注册远程工具，远程与资源/提示词工具统一为 `MCPTool`，服务器元数据为 `MCPToolSet`；`component/mcp_tools.py` 以 `MCPRefreshTool` 与顶层 `TOOLSET` 声明 `MCPRefresh`。刷新在同名同集锁内用 `register_tool(MCPTool(...), replace=True)` 原子替换，只注销新集合中已消失的名称（含资源/提示词辅助工具）。OAuth 按 Provider 独立回调端口并显式持有 `MCPOAuthManager`，认证任务、HTTP 回调线程与 401 dedup 均有完整归属；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄和独立 cleanup task，不猜测宿主 PID。关闭时 `close_admission` 拒绝新工作，`stop_calls` 确认请求/连接任务实际退出，`shutdown` 等待 OAuth、stdio、cleanup 全部完成后才释放；资源未退出不伪装成功。`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。
-- **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于资源后，注册表共八项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。右侧会话变量 Tab 使用同一会话 Tab 能力探测；存在变量条目或可展示问题时启用，普通空目录或无问题的普通 `.meta` 不启用，完整变量池仍在进入 Tab 后读取。
+- **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于媒体输入后，注册表共十项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。右侧会话变量 Tab 使用同一会话 Tab 能力探测；存在变量条目或可展示问题时启用，普通空目录或无问题的普通 `.meta` 不启用，完整变量池仍在进入 Tab 后读取。
 - **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测并订阅聊天 WebSocket扇出的 Agentspace事件，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。`resync` 和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
 - **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端提前用 HEAD 探测入口并监听聊天 WebSocket中的该目录 Agentspace事件，部署完成后启用右侧会话网页 Tab。首次点击该 Tab 后才创建 iframe、加载网页正文及引用资源，悬停/仅聚焦不触发加载；同会话切 Tab 保留网页，切会话、返回原会话或刷新页面后重新等待点击。首次激活后资源连续变化仍等待 1 秒安静窗口后热刷新 iframe，隐藏 Tab 也可刷新；入口文件或整个目录被删除/移走后禁用 Tab 并回聊天，已激活的同会话重新部署后可自动重建 iframe。未激活会话部署/更新只改变探测状态，不创建 iframe。
 - **会话聊天区自定义样式**：会话级聊天区 CSS 覆盖层。Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入 CSS，前端探测并经 PostCSS 作用域处理后注入 `<style>` 标签，仅作用于 `.chat-area` 聊天区。禁止 `@import`，允许 `@font-face`（`ChatStyle-` 前缀）和 `@keyframes`。CSS 缺失、超限（256 KiB）或作用域处理失败时恢复默认样式。用户可通过顶部栏命令菜单独立暂停 Agent 舞台层和聊天区自定义样式。系统提示词通过 `build_session_chat_style_block()` 注入。
@@ -347,10 +347,10 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 
 ## 右侧 Tab 悬停预览
 
-右侧 Tab 栏（九个 Tab：聊天、资源/任务、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间）对「启用且非当前」的图标提供只读悬停预览小窗，形式类似 Windows 任务栏悬停窗口但内容为专门组织的摘要。预览只消费页面已加载快照，悬停/聚焦不发请求、不刷新、不切换 activeTab；媒体输入和会话变量 Tab 只有能力探测确认可用后才具备悬停资格；未知不伪装为 0（`null` 未读取、`[]` 才计 0）。
+右侧 Tab 栏（十个 Tab：聊天、资源/任务、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间）对「启用且非当前」的图标提供只读悬停预览小窗，形式类似 Windows 任务栏悬停窗口但内容为专门组织的摘要。预览只消费页面已加载快照，悬停/聚焦不发请求、不刷新、不切换 activeTab；媒体输入和会话变量 Tab 只有能力探测确认可用后才具备悬停资格；未知不伪装为 0（`null` 未读取、`[]` 才计 0）。
 
 - 数据唯一来源：`features/tabs/TabDataContext.tsx` 的唯一 Provider 持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，正式 Tab 与预览共享同一快照。
-- 摘要纯选择器 `tabPreviewSelectors.ts` 九个选择器 + `useTabPreview.ts` 只读组装 + `TabHoverPreview.tsx`/`useAnchoredHoverPreview.ts` 悬停状态机与几何；中文文案集中在 `tabPreviewLabels.json`。
+- 摘要纯选择器 `tabPreviewSelectors.ts` 十个选择器 + `useTabPreview.ts` 只读组装 + `TabHoverPreview.tsx`/`useAnchoredHoverPreview.ts` 悬停状态机与几何；中文文案集中在 `tabPreviewLabels.json`。
 - 媒体摘要使用两根独立只读进度条（开启/关闭占比 = 状态数量/总数），展示内联载荷字符与未统计数量；聚合独立于当前分页（`useSessionMedia` 的 `aggregate`），翻页不改变全局统计，切会话/404 才清空。
 - 变量摘要显示总数/数字/字符串/无效/问题数与扫描完整性，严格区分读取中、尚未读取、空池、错误四态。
 - 资源摘要追加最近一项普通 Cron / WaitCron（`is_wait` 只读身份），共同按 `next_run` 升序、`task_id` 字典序打破并列；本地倒计时仅在预览显示时运行。
@@ -373,6 +373,26 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 ## 历史更新指令
 
 已提交历史发生非追加变更时，后端可发送仅含 `type=history_updated` 与 `session_id` 的类型化指令；当前接入两种压缩工具。前端立即取消旧历史请求、提高请求代际，使旧骨架/正文/关联/资源缓存失效，重新取得完整骨架与按需正文；这不刷新页面，不重放工具，不依赖消息数是否减少。指令之后的新实时行和关联、输入草稿、排队消息及会话业务状态保留。重载失败保持完整重载标志，重试不会再次清掉新流；每次物理连接首次历史同步也完整读取，覆盖断线漏通知的历史缓存恢复。批次后缀仍只用 `tool_calls_discarded`，普通追加和轮次状态仍用 `history_sync`。该通知与网络发送不构成事务或可靠投递确认，源码已接入，运行验收仍待用户执行。
+
+## 会话文件修改记录与文件修改 Tab
+
+文件修改 Tab 位于资源/任务之后，按逻辑路径显示五种内置文件工具 `Write`、`PatchEdit`、`Delete`、`Copy`、`Move` 成功目标的操作类型、次数、修改者和最近时间。主会话汇总所属子Agent及多Agent模式参与Agent，Shell、脚本、自定义工具等来源不纳入。目录目标不形成可见文件条目，不展开内部文件；成功但内容未变也计操作次数。Copy仅记目的，Move同时更新源/实际目的两行但全局只加一次，因此行次数不能求和当全局次数。
+
+唯一 `SessionFileChangeStore` 由 `AgentspaceService.file_changes` 暴露，缓存、逐会话锁和删除封闭标记均为实例字段；Application仍注册20个System。五工具在实际文件目标成功后、宽泛文件错误转换之外同步保存，`FileChangeRecorder` 固定主会话和角色归属；调用级 `ToolExecution.cancel_requested` 与轮次中断共同阻止未进入保存的迟到目标记账，不负责终止原生线程。
+
+持久路径为 `RuntimeContext.workspace/sessions/<主会话ID>/file_changes.es`，与History同级、使用独立easysave `v1` key。聚合根与条目/作者保持BaseModel类型，通过stable type token重建；时间保存为带 `+00:00` 的毫秒精度UTC字符串，不保存datetime对象、文件正文、diff或逐次日志。候选先保存后提交缓存；必要保存失败沿现有LifecycleFailure路径使应用失败关闭，GET读取损坏仅交回请求边界。无记录查询不创建文件，无旧数据回填。
+
+压缩、消息删除、重新生成与归档不改记录；分支、合并、自动旋转的新主会话从空清单开始，旧子Agent继续归原主会话。永久删除先有界等待并封闭统计，再关闭连接/运行时，统计文件随会话目录删除；锁争用5秒返回409且不提前拆除原会话，迟到线程不能重建目录。统计与业务文件/History没有跨文件事务，失败目录操作的部分副作用不追踪。
+
+只读REST为 `GET /api/sessions/{id}/file-changes/summary` 和分页 `GET /api/sessions/{id}/file-changes`（默认100、上限200）；不创建Loop，归档可读。前端唯一 `useSessionFileChanges` 由 `useTabSystem` 持有，经 `TabRenderContext.fileChanges` 共享给页面和纯预览，而不是在TabDataProvider再创建一份。文件修改 Tab按钮始终可进入；页面可见、会话ready且未锁定时，摘要请求结束后间隔3秒串行刷新；完整页仅在激活时按需读，同会话切回重拉。摘要和树分别显示加载中、读取失败、当前没有可显示文件或过期状态；旧响应用会话/请求代际与单调revision拒绝。悬停不请求、不增加轮询，不展示统计起点说明。
+
+本功能仅完成正式源码与只读审阅，未运行校验、构建或应用验收。
+
+### 目录树展示修订（2026-10-18）
+
+文件修改 Tab 现在只显示实际文件和实际目录条目的只读目录树，父目录仅为结构节点，不计入文件/目录数且没有操作徽章。持久化条目增加 `display_state` 与 `created_by_session`：首次创建以绿色显示，已有路径修改以黄色显示，已有路径删除以红色显示，会话新增路径删除后隐藏；删除后同路径重建为黄色。新增后修改继续保持绿色；新增后删除从树中隐藏；删除后同路径再次创建或成为复制/移动目的地时显示黄色，表示该路径已有历史而非首次新增。每个可见文件徽章仍显示该路径最后一次操作。删除事实和操作次数继续持久化，摘要的文件数只统计当前可见文件，操作次数仍包含隐藏的删除操作。目录目标仍可形成可见目录条目；目录内部文件不展开，父目录仅为合成结构节点。
+
+前端激活 Tab 后顺序读取全部可见分页，构造完整树；切换会话、摘要revision变化、页面隐藏和删除竞态继续由请求代际控制。树加载失败保留旧树并显示过期状态，不展示半页数据；悬停预览只读取摘要，不加载目录树。
 
 ## 开发者阅读顺序建议
 

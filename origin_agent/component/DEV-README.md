@@ -196,6 +196,22 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 - 普通模式与多Agent模式主Agent可修改；非主参与Agent不接收工具定义且 handler 二次拒绝。随意聊聊会话的工具集白名单有意不包含 `sandbox`。
 - 已配置空间由 fast 模式所有 Agent 共享。动态只读与内置只读空间一致，只限制标准 Sandbox 文件 API，不是 Shell/Python/后台进程的 OS 级 ACL。
 
+## 成功文件目标操作记录
+
+`tools/filesystem.py`的五种写工具私有handler统一接收`ToolExecution`；`tools/_file_changes.py::FileChangeRecorder`在本次调用开始时固定`resource_session_id`、实际会话ID与角色，取得唯一`AgentspaceService.file_changes`。模块导入不访问Application，也不新增TOOLSET。
+
+每个显式目标的文件操作成功后，同步把`SessionFileChangeOperation`纯元数据交Store保存；必要保存放在原SandboxError/Exception转换范围之外，失败沿LifecycleFailure触发应用级失败关闭，不包装为普通工具error继续批次。Write和PatchEdit先登记成功，再执行原有可选LSP诊断；公开schema、结果payload、审批与工具权限不变。
+
+Delete逐paths目标记录，失败项继续原错误结果，成功项在catch之外保存，目录只记一条。Copy只记实际目的，Move源与实际目的两行共享一次全局操作。`Sandbox.copy/copy_folder/move`现在返回真实目的`ResolvedPath`，可继续忽略返回值；文件复制/移动到已有目录时用shutil真实返回的子路径，不猜测请求destination。
+
+取消同时检查`ToolExecution.cancel_requested`和会话轮次中断。必要保存前最后采样已取消则不记账，保存开始后不因后来中断回滚此前成功目标；原生线程的停止/等待仍由原ToolRegistry负责。成功同内容覆盖、已存在目录创建或删除不存在文件也计操作次数。父目录自动创建与目录内部文件不展开；Shell、脚本和自定义工具不纳入此来源范围。仅完成源码与只读审阅，未运行验证。
+
+## 文件修改目录树的记录口径
+
+五种文件工具仍只在真实目标成功后调用`FileChangeRecorder`。目录目标也保留为目录条目显示，但不递归展开目录内部文件；父目录结构节点由前端合成且不计数。Write/Copy/Move在目标操作前由Sandbox返回本次实际递归创建的父目录，目标成功后逐条记录这些目录；已存在目录不重复记录。
+
+`SessionFileChangeStore`为每个逻辑路径持久化`display_state`和`created_by_session`。首次创建/复制目的/移动目的为created，已有路径后续修改保持created；删除已有路径显示deleted，删除会话新增路径则隐藏；删除后再次创建/复制目的/移动目的进入modified。Move源按路径历史决定红色可见或隐藏，Move目的按历史决定created/modified。全局成功操作次数和隐藏删除次数仍保留，失败/取消边界不变。
+
 ## Agentspace 文件接触登记
 
 内置工具通过 `ToolContext.agentspace_access()` 把明确的 `ws:` 路径登记到当前 Agent 回复轮次：

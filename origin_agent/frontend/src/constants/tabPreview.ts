@@ -66,6 +66,14 @@ export interface TabPreviewLabels {
   variablesLoading: string;
   scanIncomplete: string;
   variablesEmpty: string;
+  fileChangesFiles: string;
+  fileChangesDirectories: string;
+  fileChangesOperations: string;
+  fileChangesLastOperatedAt: string;
+  fileChangesNone: string;
+  fileChangesListNotLoaded: string;
+  fileChangesPageFailed: string;
+  fileChangesReadFailed: string;
 }
 
 function text(value: unknown): string {
@@ -100,6 +108,14 @@ export const TAB_PREVIEW_LABELS: TabPreviewLabels = {
   variableIssues: text(data.variableIssues), variablesNotLoaded: text(data.variablesNotLoaded),
   variablesLoading: text(data.variablesLoading), scanIncomplete: text(data.scanIncomplete),
   variablesEmpty: text(data.variablesEmpty),
+  fileChangesFiles: text(data.fileChangesFiles),
+  fileChangesDirectories: text(data.fileChangesDirectories),
+  fileChangesOperations: text(data.fileChangesOperations),
+  fileChangesLastOperatedAt: text(data.fileChangesLastOperatedAt),
+  fileChangesNone: text(data.fileChangesNone),
+  fileChangesListNotLoaded: text(data.fileChangesListNotLoaded),
+  fileChangesPageFailed: text(data.fileChangesPageFailed),
+  fileChangesReadFailed: text(data.fileChangesReadFailed),
 };
 
 export const TAB_PREVIEW = {

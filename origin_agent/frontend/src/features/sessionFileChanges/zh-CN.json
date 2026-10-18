@@ -1,0 +1,52 @@
+{
+  "title": "文件修改",
+  "summaryFiles": "可见文件",
+  "summaryDirectories": "目录",
+  "summaryOperations": "操作次数",
+  "summaryOperationsTooltip": "按成功完成的目标操作计数；删除后的文件隐藏但删除操作仍计入总次数。",
+  "refresh": "刷新",
+  "refreshing": "正在刷新…",
+  "loading": "正在读取文件修改记录…",
+  "empty": "当前没有可显示的文件修改记录。",
+  "treeLoading": "正在展开文件目录树…",
+  "treeReadFailed": "读取文件目录树失败。",
+  "treeLabel": "文件修改目录树",
+  "summaryReadFailed": "读取文件修改摘要失败。",
+  "pageReadFailed": "读取文件修改清单失败。",
+  "requestFailed": "请求失败（HTTP {{status}}）。",
+  "requestTimeout": "请求超时，请稍后重试。",
+  "protocolError": "服务端返回的文件修改数据格式无效。",
+  "stale": "当前显示的是较早快照，可能不是最新记录。",
+  "archived": "当前会话已归档，文件修改记录仍可只读查看。",
+  "previous": "上一页",
+  "next": "下一页",
+  "pagination": "文件修改分页",
+  "range": "第 {{from}}–{{to}} 项，共 {{total}} 项",
+  "path": "路径",
+  "kind": "类型",
+  "lastOperation": "最后操作",
+  "operationCount": "路径操作次数",
+  "actors": "修改者",
+  "lastOperatedAt": "最近操作时间",
+  "moveTooltip": "一次移动同时产生源路径与目标路径两条记录，两端各计一次路径操作，全局操作次数只加一。",
+  "transferSource": "源路径",
+  "transferDestination": "目标路径",
+  "actorSeparator": "、",
+  "actorDisambiguated": "{{name}}（会话 {{session}}）",
+  "operations": {
+    "create": "新增",
+    "modify": "修改",
+    "delete": "删除",
+    "copy": "复制",
+    "move": "移动"
+  },
+  "states": {
+    "created": "会话新增",
+    "modified": "会话修改",
+    "deleted": "已删除"
+  },
+  "kinds": {
+    "file": "文件",
+    "directory": "目录"
+  }
+}

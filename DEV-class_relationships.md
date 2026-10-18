@@ -1464,4 +1464,27 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 前端 `useSessionTabCapabilities` 通过 `GET /api/sessions/{id}/tab-capabilities` 获取轻量状态，按 sessionId/generation 丢弃迟到响应，使用 History 低频信号和变量 Agentspace 事件去抖刷新。首次未知、会话切换和失败时禁用目标 Tab；同会话后台 refreshing 保留已确认快照，成功确认空内容后由 `useTabSystem` 触发现有 active-tab 回退。`fetchJsonWithTimeout` 的可选 `createHttpError` 只被新能力 API 使用，既有调用方未传该选项时保持原行为。无新增 protected 字段、持久化版本、System 或测试源。
 
+### 会话文件修改记录（2026-10-17）
+
+本节记录文件修改 Tab 的当前所有权；对象工具迁移章节删除UIEventRouter后的20个System仍为权威拓扑，早期章节的21个System仅属历史阶段，本次不改写那些历史段落。
+
+| 归属 | 新字段/公开接口 | 生命周期与外部访问 |
+|---|---|---|
+| AgentspaceService | `_file_changes: SessionFileChangeStore`、只读 `file_changes` | virtual_awake只构造一个无后台任务的Store；工具与Gateway通过公开属性取得 |
+| SessionFileChangeStore | `_cache`、`_locks`、`_registry_lock`、`_closed_sessions`；record_success/get_summary/get_page/block_session/unblock_session/forget_session | 每主会话RLock保护候选保存与缓存发布；删除封闭与缓存/锁不通过外部protected访问修改 |
+| ToolExecution | `_cancel_requested: threading.Event`；mark_cancelled/cancel_requested | 单次非持久化取消事实；ToolRegistry取消出口登记，记录器只读公开属性，不改变真实Future所有权 |
+| FileChangeRecorder | 固定工具调用的主会话、修改者与Store引用 | 只通过ToolContext.resource_session_id/session_id/character_name及公开Loop角色接口，迟到工作不重查旋转后的ID |
+| Sandbox | copy/copy_folder/move返回ResolvedPath | 文件工具消费真实shutil返回目的，调用者可忽略新增返回值；权限和命名空间装配不变 |
+| Gateway | 两条文件修改只读GET、受现有TaskOwner管理的删除REQUEST与删除scope | GET不创建Loop；删除先封闭再拆除，取消仍观察真实线程并按会话是否已删解封/保留封闭 |
+
+六个纯模型位于 `entity/puretype/session_file_changes.py`，不依赖正式消息类；仅Data/Entry/Actor进入typeref稳定映射，独立 `file_changes.es` 保存BaseModel根，UTC时间为字符串。非持久化Operation不加入History。必要记录失败沿LifecycleFailure触发应用级失败关闭；GET错误不主动上报应用失败。不增加Loop字段、跨类protected访问、AsyncSystem、watcher或WebSocket类型。
+
+前端新状态唯一持有者为 `useTabSystem` 内的 `useSessionFileChanges`，正式Tab与预览经同一渲染上下文读取；既有TabDataProvider四类Hook仍各自唯一。注册表十项，摘要串行轮询与分页分别维护请求代际，切会话同步隐藏旧快照。当前只完成源码和定向只读复核，尚无运行验收结论。
+
+### 文件修改目录树状态修订（2026-10-18）
+
+`SessionFileChangeEntry.display_state`是持久化当前生命周期状态：`created`、`modified`或`deleted`。Store保留deleted条目但摘要/分页只投影可见文件，父目录由前端纯函数合成。首次创建/复制目的/移动目的为created；created文件继续修改保持created；删除隐藏；删除后同路径再次创建/复制目的/移动目的为modified。Move源隐藏、目的按是否有历史决定颜色状态。最后操作仍单独由`last_operation`徽章显示，不能用它替代display_state。
+
+一次激活的文件修改Tab在完整可见分页全部到达且revision一致后才替换目录树；目录节点只读可折叠，文件节点按display_state使用绿色/黄色/隐藏规则。目录目标不产生可见条目，操作总数仍包括隐藏删除；无可见文件时Tab禁用或显示空态。
+
 

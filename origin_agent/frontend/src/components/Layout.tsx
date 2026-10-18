@@ -174,6 +174,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     ws,
     activeTab: tabSystem.activeTab,
     siteStatus: tabSystem.siteStatus,
+    fileChanges: tabSystem.fileChanges,
     sessionId: ws.sessionId,
     targetSessions,
     setTargetSessions,

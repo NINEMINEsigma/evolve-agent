@@ -248,15 +248,18 @@
 
 ### Tab 导航体系
 
-文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `sessionTabCapabilitiesApi.ts` · `useSessionTabCapabilities.ts` · `TabRail.tsx` · `TabStage.tsx` · `TabDataContext.tsx` · `useTabPreview.ts` · `TabHoverPreview.tsx` · `tabPreviewTypes.ts` · `tabPreviewSelectors.ts` · `tabPreviewLabels.json` · `useDynamicSandboxSpaces.ts` · `ChatTab.tsx` · `ResourcesTab.tsx` · `SubagentsTab.tsx` · `CharactersTab.tsx` · `useCharacterProfiles.ts` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
+文件：`origin_agent/frontend/src/features/tabs/`（`registry.tsx` · `useTabSystem.ts` · `sessionTabCapabilitiesApi.ts` · `useSessionTabCapabilities.ts` · `TabRail.tsx` · `TabStage.tsx` · `TabDataContext.tsx` · `useTabPreview.ts` · `TabHoverPreview.tsx` · `tabPreviewTypes.ts` · `tabPreviewSelectors.ts` · `tabPreviewLabels.json` · `useDynamicSandboxSpaces.ts` · `ChatTab.tsx` · `ResourcesTab.tsx` · `FileChangesTab.tsx` · `SubagentsTab.tsx` · `CharactersTab.tsx` · `useCharacterProfiles.ts` · `SiteTab.tsx` · `LlmTab.tsx` · `SandboxTab.tsx`）· `styles/tabs.css`
 
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
 | 会话 Tab 能力探测 | `useSessionTabCapabilities` / `GET /api/sessions/{id}/tab-capabilities` | 不读取完整媒体载荷或变量正文的只读能力链路；返回当前 History 媒体实例数量和变量 Tab 是否有可展示内容。首次未知、会话切换或失败时目标 Tab 禁用；同一会话后台 refreshing 保留已确认快照，成功确认空内容后禁用 | session tab capability probe |
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容或能力未确认的 tab 为禁用态不可点击 | tab rail |
-| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共九个 Tab，顺序为聊天、资源、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
+| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十个 Tab，顺序为聊天、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
+| 文件修改 Tab | `FileChangesTab` / `[data-tab-panel="changes"]` | 按主会话汇总内置五种文件工具成功目标操作的只读目录树；显示当前可见文件和目录条目，父目录仅为结构节点；首次创建绿色、已有路径修改黄色、已有路径删除红色，会话新增路径删除后隐藏；每个可见条目附最后操作徽章 | session file changes tab |
+| 操作次数 | `SessionFileChangesSummary.operation_count` | 所有成功目标操作总数；隐藏的删除操作仍计入，一次移动全局只计一次，不等于树中路径行次数之和 | successful target operation count |
+| 逻辑路径条目数 | `file_count` / `directory_count` | 当前可见文件/目录条目数；删除条目不计入，目录树父节点是合成结构不计入；不表示磁盘存量或跨重命名物理文件数 | logical path entry count |
 | 资源 Tab | `ResourcesTab` / `[data-tab-panel="resources"]` | 会话资源、Shell 会话、定时任务与动态端点；资源按 tab 激活懒加载 | resources tab |
 | 媒体输入 Tab | `MediaInputTab` / `[data-tab-panel="media"]` | 显示标题「媒体输入」；仅当会话 Tab 能力探测确认当前主会话 History 存在媒体实例时右侧图标可用；进入后以中文相册式网格展示独立媒体实例，默认可见图片预览，点击再显示详情和发送开关。关闭时优先转发描述，无可用转发时占位；下一模型请求生效，原媒体展示保留，子会话不纳入 | media input tab |
 | 会话变量池 | `SessionVariableService` / `ws:sessions/<session_id>/variables/` | 会话归属的数字/字符串 JSON 标量文件集合，同级 `.meta` 配置显示与约束；文件为唯一真相，通用文件工具写入、`ReadSessionVariables` 全量读取；单父继承复制，多父按来源分组，非事务且不随聊天重新生成回滚 | session variable pool |

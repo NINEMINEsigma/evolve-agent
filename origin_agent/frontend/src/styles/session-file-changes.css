@@ -1,0 +1,48 @@
+/* 文件修改 Tab 的独立样式，不改变聊天区或其他 Tab。 */
+.file-changes-tab { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.file-changes-content { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 32px; }
+.file-changes-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.file-changes-heading { min-width: 0; }
+.file-changes-heading h2 { margin: 0 0 8px; font-size: 20px; }
+.file-changes-stats { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.file-changes-stat { display: flex; align-items: baseline; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+.file-changes-stat strong { font-size: 16px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.file-changes-stat[data-tooltip] { cursor: help; }
+.file-changes-refresh { flex-shrink: 0; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-elevated); cursor: pointer; }
+.file-changes-refresh:disabled { opacity: .55; cursor: default; }
+.file-changes-note { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); }
+.file-changes-warning { padding: 12px; margin: 12px 0; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; color: var(--text-primary); background: var(--bg-elevated); overflow-wrap: anywhere; }
+.file-changes-state { padding: 32px 12px; color: var(--text-secondary); text-align: center; }
+.file-changes-state.is-error { color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); overflow-wrap: anywhere; }
+.file-changes-tree { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-secondary); }
+.file-changes-folder { display: flex; align-items: center; width: 100%; min-height: 34px; gap: 7px; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); text-align: left; cursor: pointer; }
+.file-changes-folder:hover { background: var(--bg-tertiary, var(--bg-secondary)); }
+.file-changes-folder-chevron { width: 14px; color: var(--text-secondary); }
+.file-changes-folder-icon { color: var(--text-secondary); font-size: 12px; }
+.file-changes-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.file-changes-file:hover { background: var(--bg-elevated); }
+.file-changes-file-icon { color: var(--text-secondary); }
+.file-changes-path { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.file-changes-file-meta, .file-changes-entry-meta { min-width: 0; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.file-changes-entry-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; text-align: right; }
+.file-changes-folder-name { min-width: 0; overflow-wrap: anywhere; }
+.file-changes-folder .file-changes-operation, .file-changes-folder .file-changes-state-badge { color: currentColor; }
+.file-changes-operation, .file-changes-state-badge { flex-shrink: 0; padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; cursor: help; }
+.file-changes-file-created { color: #67d391; }
+.file-changes-file-modified { color: #e8c45a; }
+.file-changes-file-deleted { color: #e87575; }
+.file-changes-file-created .file-changes-operation,
+.file-changes-file-created .file-changes-state-badge { color: #67d391; }
+.file-changes-file-modified .file-changes-operation,
+.file-changes-file-modified .file-changes-state-badge { color: #e8c45a; }
+.file-changes-file-deleted .file-changes-operation,
+.file-changes-file-deleted .file-changes-state-badge { color: #e87575; }
+@media (max-width: 900px) {
+  .file-changes-file { grid-template-columns: 14px minmax(0, 1fr) auto auto; }
+  .file-changes-file-meta { grid-column: 2 / -1; }
+}
+@media (max-width: 768px) {
+  .file-changes-content { padding: 12px 12px 24px; }
+  .file-changes-toolbar { flex-direction: column; }
+  .file-changes-file { padding: 8px 10px; }
+}

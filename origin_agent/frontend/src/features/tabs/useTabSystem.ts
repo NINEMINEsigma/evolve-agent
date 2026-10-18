@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionSite } from "../../hooks/useSessionSite";
+import { useSessionFileChanges } from "../sessionFileChanges/useSessionFileChanges";
 import { useSessionTabCapabilities } from "./useSessionTabCapabilities";
 import type { WebSocketState } from "../../hooks/useWebSocket";
 import type { TabId } from "./registry";
@@ -18,6 +19,12 @@ export function useTabSystem(ws: WebSocketState) {
 
   // Single site probe source for the whole tab system (survives tab switches).
   const siteStatus = useSessionSite(ws.sessionId);
+  // Single file changes source: the summary enables the tab and previews use the
+  // same snapshot; no second hook instance is created by Layout, Tab or preview.
+  const fileChangesRequestEnabled = ws.sessionId !== "" && ws.isReady && !ws.sessionLocked;
+  const fileChanges = useSessionFileChanges(
+    ws.sessionId, activeTab === "changes", fileChangesRequestEnabled,
+  );
   const tabCapabilities = useSessionTabCapabilities(ws.sessionId);
   const capabilitySnapshot = tabCapabilities.capabilities;
   const capabilitySessionMatches = capabilitySnapshot?.session_id === ws.sessionId;
@@ -30,6 +37,7 @@ export function useTabSystem(ws: WebSocketState) {
     () => ({
       chat: true,
       resources: true,
+      changes: true,
       media: capabilityConfirmed && mediaCount > 0,
       variables: capabilityConfirmed && variablesAvailable,
       subagents: Object.keys(ws.subagentSessions).length > 0,
@@ -62,5 +70,5 @@ export function useTabSystem(ws: WebSocketState) {
     [enabledTabs, ws.sessionId],
   );
 
-  return { activeTab, enabledTabs, switchTab, siteStatus };
+  return { activeTab, enabledTabs, switchTab, siteStatus, fileChanges };
 }

@@ -25,10 +25,14 @@ from typing import * # type: ignore
 from urllib.parse import parse_qs, quote, urlsplit
 
 from pydantic import BaseModel, ValidationError
-from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
+from system.session_file_changes import SessionFileChangeStore, SessionFileChangesBusyError
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
@@ -58,6 +62,8 @@ from entity.constant import (
     LOCAL_FONT_MIME_TYPES,
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
     SESSION_HISTORY_PAGE_MAX_LIMIT,
+    SESSION_FILE_CHANGES_DEFAULT_LIMIT,
+    SESSION_FILE_CHANGES_MAX_LIMIT,
     SESSION_MEDIA_DEFAULT_OFFSET,
     SESSION_MEDIA_DEFAULT_LIMIT,
     SESSION_MEDIA_MAX_LIMIT,
@@ -77,6 +83,8 @@ from entity.puretype import (
     SessionStatus,
     SessionVariablePoolResponse,
     SessionTabCapabilities,
+    SessionFileChangesSummary,
+    SessionFileChangesPage,
     ClientInfo,
     CharacterAvatarsResponse,
     CharacterProfilesResponse,
@@ -430,6 +438,56 @@ async def get_session_tool_resources(session_id: str) -> SessionToolResources:
     return resources
 
 
+@router.get("/api/sessions/{session_id}/file-changes/summary", response_model=SessionFileChangesSummary)
+async def get_session_file_changes_summary(session_id: str, response: Response) -> SessionFileChangesSummary:
+    from starlette.concurrency import run_in_threadpool
+    from system.application import Application
+    from system.agentspace import AgentspaceService
+
+    _admit_business_http()
+    manager = _get_sm()
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    store = Application.current().get_system(AgentspaceService).file_changes
+    try:
+        result = await run_in_threadpool(store.get_summary, session_id)
+    except FileNotFoundError as exc:
+        if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        raise
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.get("/api/sessions/{session_id}/file-changes", response_model=SessionFileChangesPage)
+async def get_session_file_changes(
+    session_id: str, response: Response,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=SESSION_FILE_CHANGES_DEFAULT_LIMIT, ge=1, le=SESSION_FILE_CHANGES_MAX_LIMIT),
+) -> SessionFileChangesPage:
+    from starlette.concurrency import run_in_threadpool
+    from system.application import Application
+    from system.agentspace import AgentspaceService
+
+    _admit_business_http()
+    manager = _get_sm()
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    store = Application.current().get_system(AgentspaceService).file_changes
+    try:
+        result = await run_in_threadpool(store.get_page, session_id, offset=offset, limit=limit)
+    except FileNotFoundError as exc:
+        if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        raise
+    if not manager.exists(session_id) or manager.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
 @router.get("/api/sessions/{session_id}/tab-capabilities", response_model=SessionTabCapabilities)
 async def get_session_tab_capabilities(
     session_id: str, response: Response,
@@ -714,10 +772,63 @@ async def http_disgust(session_id: str):
     return {"disgusted": True, "session_id": session_id}
 
 
+@asynccontextmanager
+async def _file_changes_delete_scope(
+    session_id: str, manager: SessionManager, store: SessionFileChangeStore,
+) -> AsyncIterator[None]:
+    # REQUEST 的 Owner 持有本作用域，取消后仍观察真实线程结果。
+    block = asyncio.create_task(asyncio.to_thread(store.block_session, session_id))
+    original: BaseException | None = None
+    try:
+        await asyncio.shield(block)
+        yield
+    except BaseException as exc:
+        original = exc
+        raise
+    finally:
+        errors: list[BaseException] = []
+        try:
+            await asyncio.shield(block)
+        except BaseException as exc:
+            if exc is not original:
+                errors.append(exc)
+        else:
+            action = store.unblock_session if manager.exists(session_id) else store.forget_session
+            cleanup = asyncio.create_task(asyncio.to_thread(action, session_id))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                # 外层请求再次取消不会取消 Owner 持有的必要收尾。
+                await asyncio.shield(cleanup)
+                raise
+            except Exception as exc:
+                failure = LifecycleFailure("Session file changes deletion cleanup failed")
+                failure.__cause__ = exc
+                errors.append(failure)
+        if errors:
+            if original is not None:
+                errors.insert(0, original)
+            raise BaseExceptionGroup("Session deletion and file changes cleanup failed", errors)
+
+
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """永久删除 session、运行时对象及附带资源。colloquy session 不可删除。"""
+    """永久删除由 Gateway 请求 Owner 保持完整收尾所有权。"""
     _admit_business_http()
+    gateway = _gateway()
+    try:
+        return await gateway.task_owner.run_request(
+            lambda: _delete_session_impl(session_id),
+            name=f"delete-session-{session_id}", admission=gateway.admission.admit_business,
+        )
+    except ApplicationStoppingError as exc:
+        raise HTTPException(status_code=503, detail="Application is shutting down") from exc
+    except SessionFileChangesBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _delete_session_impl(session_id: str):
+    """保留原删除步骤，先封闭统计再拆除连接和运行时。"""
     from entity.puretype import Loop
     from system.application import Application
 
@@ -746,26 +857,28 @@ async def delete_session(session_id: str):
         )
 
     logger.info("Delete session | session=%s", session_id)
+    from system.agentspace import AgentspaceService
     try:
-        sink = Application.current().get_system(FrontendSink)
-        await sink.close_session(
-            session_id,
-            code=WEBSOCKET_CLOSE_SESSION_DELETED,
-            reason="session_deleted",
-        )
+        store = Application.current().get_system(AgentspaceService).file_changes
+        async with _file_changes_delete_scope(session_id, sm, store):
+            sink = Application.current().get_system(FrontendSink)
+            await sink.close_session(
+                session_id,
+                code=WEBSOCKET_CLOSE_SESSION_DELETED,
+                reason="session_deleted",
+            )
 
-        # 停止子Agent失败时直接终止删除，不能继续移除仍在使用的会话。
-        from system.application import Application
-        from subagent.orchestrator import SubAgentOrchestrator
-        orch = Application.current().get_system(SubAgentOrchestrator)
-        await orch.shutdown(session_id)
+            # 停止子Agent失败时直接终止删除，不能继续移除仍在使用的会话。
+            from subagent.orchestrator import SubAgentOrchestrator
+            orch = Application.current().get_system(SubAgentOrchestrator)
+            await orch.shutdown(session_id)
 
-        await sm.delete_session_runtime(session_id)
-        sm.remove(session_id)
+            await sm.delete_session_runtime(session_id)
+            sm.remove(session_id)
 
-        # 删除已提交；清理失败直接报告，不伪装成完整成功。
-        from gateway.session_cleanup import cleanup_session_resources
-        await cleanup_session_resources(session_id)
+            # 删除已提交；清理失败直接报告，不伪装成完整成功。
+            from gateway.session_cleanup import cleanup_session_resources
+            await cleanup_session_resources(session_id)
     finally:
         sm.end_session_delete(session_id)
 

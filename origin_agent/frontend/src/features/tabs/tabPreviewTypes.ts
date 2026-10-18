@@ -16,6 +16,9 @@ import type { SessionResourceSnapshot } from "../../types/sessionResources";
 import type { SiteStatus } from "../../hooks/useSessionSite";
 import type { SessionVariablePoolResponseDto } from "../sessionVariables/types";
 import type { SessionMediaAggregateDto } from "../sessionMedia/types";
+import type {
+  SessionFileChangesStatus, SessionFileChangesSummaryDto,
+} from "../sessionFileChanges/types";
 
 export type TabPreviewTone = "normal" | "muted" | "warning";
 
@@ -63,6 +66,16 @@ export interface TabPreviewVariableStats {
   pool: SessionVariablePoolResponseDto | null;
   loading: boolean;
   error: string | null;
+}
+
+/** 文件修改预览只读快照：只消费唯一 Hook 已加载的摘要与页面状态。 */
+export interface TabPreviewFileChangesInput {
+  summary: SessionFileChangesSummaryDto | null;
+  summaryStatus: SessionFileChangesStatus;
+  summaryError: string | null;
+  pageLoaded: boolean;
+  pageStale: boolean;
+  pageError: string | null;
 }
 
 export interface TabPreviewResourcesInput {
@@ -125,6 +138,7 @@ export interface TabPreviewInput {
   llm: TabPreviewLlmInput;
   media: TabPreviewMediaStats;
   variables: TabPreviewVariableStats;
+  fileChanges: TabPreviewFileChangesInput;
   now: number;
 }
 

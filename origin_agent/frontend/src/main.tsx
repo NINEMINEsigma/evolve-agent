@@ -22,6 +22,7 @@ import "./styles/drawer.css";
 import "./styles/tabs.css";
 import "./styles/session-variables.css";
 import "./styles/session-media.css";
+import "./styles/session-file-changes.css";
 import "./styles/input.css";
 import "./styles/morph.css";
 import "./styles/tooltip.css";

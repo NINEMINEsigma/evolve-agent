@@ -12,3 +12,4 @@ History_Type_Version = "v1"
 LLMProfileData_Type_Version = "v2"
 AgentConfig_Type_Version = "v1"
 SessionApprovalModeState_Type_Version = "v1"
+SessionFileChanges_Type_Version = "v1"  # 会话文件操作聚合根、条目和作者的稳定类型版本。

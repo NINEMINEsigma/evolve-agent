@@ -29,7 +29,8 @@ from typing import Any, Dict, TYPE_CHECKING
 from abstract.tools.tool import (
     BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result,
 )
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolDangerLevel, SessionFileChangeOperation
+from ._file_changes import FileChangeRecorder
 from entity.constant import (
     EDIT_FILE_MAX_CHARS,
     META_FILE_SUFFIX,
@@ -141,6 +142,15 @@ def _track_agentspace_access(
         return
     with context.agentspace_access(paths):
         pass
+
+
+def _record_created_directories(
+    recorder: FileChangeRecorder, tool_name: str, paths: list[str],
+) -> None:
+    for path in paths:
+        recorder.record(SessionFileChangeOperation(
+            tool_name=tool_name, operation="create", path=path, kind="directory",
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -819,10 +829,10 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
     return tool_error("Unsupported path type — must be a file or directory", path=path)
 
 
-def _handle_write(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
+def _handle_write(execution: ToolExecution) -> dict:
+    args = execution.arguments
+    context = execution.context
+    recorder = FileChangeRecorder(execution)
     path: str = str(args.get("path", "")).strip()
     has_content = "content" in args and args["content"] is not None
     content: str = str(args["content"]) if has_content else ""
@@ -834,7 +844,7 @@ def _handle_write(
     except Exception as exc:
         return tool_error(f"Agentspace access lock failed: {exc}", path=path)
 
-    # -- 目录创建分支：content 缺失或为 None --
+    # 仅登记显式目录目标，成功的 already_exists 也计操作次数。
     if not has_content:
         try:
             already_exists = _s().is_dir(path)
@@ -842,21 +852,18 @@ def _handle_write(
                 if _s().exists(path):
                     return tool_error(f"Path already exists as a file: {path}", path=path)
                 _s().create_folder(path, parents=True)
-            return tool_result(
-                success=True, path=path,
-                type="directory", already_exists=already_exists,
-            )
         except SandboxError as exc:
             return tool_error(str(exc), path=path)
+        recorder.record(SessionFileChangeOperation(
+            tool_name="Write", operation="create", path=path, kind="directory",
+        ))
+        return tool_result(success=True, path=path, type="directory", already_exists=already_exists)
 
-    # -- 文件写入分支 --
     if mode not in ("overwrite", "append"):
-        return tool_error(
-            f"Invalid mode '{mode}'. Valid values: overwrite, append.",
-            path=path,
-        )
+        return tool_error(f"Invalid mode '{mode}'. Valid values: overwrite, append.", path=path)
     truncated: bool = False
     tail: str = ""
+    created_parent_directories: list[str] = []
     if len(content) > WRITE_FILE_MAX_CHARS:
         tail = content[WRITE_FILE_MAX_CHARS:WRITE_FILE_MAX_CHARS + WRITE_FILE_TRUNCATION_TAIL]
         content = content[:WRITE_FILE_MAX_CHARS]
@@ -866,38 +873,36 @@ def _handle_write(
             len(args.get("content", "")), WRITE_FILE_MAX_CHARS, path, repr(tail),
         )
     try:
+        existed = _s().exists(path)
         if mode == "append":
-            if not _s().exists(path):
+            if not existed:
                 return tool_error("File not found — use Write with mode='overwrite' to create it first", path=path)
             _s().append(path, content)
         else:
+            created_parent_directories = _s().ensure_parent_directories(path)
             _s().write(path, content)
-        _lsp_diags = _try_attach_lsp_diagnostics(path, content)
-        if truncated:
-            result = tool_result(
-                success=True, path=path,
-                bytes=len(content.encode("utf-8")),
-                truncated=True,
-                tail=tail,
-                type="file",
-            )
-        else:
-            result = tool_result(
-                success=True, path=path,
-                bytes=len(content.encode("utf-8")),
-                type="file",
-            )
-        if _lsp_diags is not None:
-            result["diagnostics"] = _lsp_diags
-        return result
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
+    # 必要持久化必须在文件错误转换范围之外，不能伪装成普通工具失败。
+    _record_created_directories(recorder, "Write", created_parent_directories)
+    recorder.record(SessionFileChangeOperation(
+        tool_name="Write", operation="modify" if existed else "create", path=path, kind="file",
+    ))
+    _lsp_diags = _try_attach_lsp_diagnostics(path, content)
+    if truncated:
+        result = tool_result(success=True, path=path, bytes=len(content.encode("utf-8")),
+                             truncated=True, tail=tail, type="file")
+    else:
+        result = tool_result(success=True, path=path, bytes=len(content.encode("utf-8")), type="file")
+    if _lsp_diags is not None:
+        result["diagnostics"] = _lsp_diags
+    return result
 
 
-def _handle_delete(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
+def _handle_delete(execution: ToolExecution) -> dict:
+    args = execution.arguments
+    context = execution.context
+    recorder = FileChangeRecorder(execution)
     paths_raw = args.get("paths", [])
     if not isinstance(paths_raw, list) or not paths_raw:
         return tool_error("paths is required as a non-empty array of strings")
@@ -917,11 +922,16 @@ def _handle_delete(
                 _s().delete_folder(path)
             else:
                 _s().delete(path)
-            results.append({"path": path, "success": True, "deleted": True})
-            succeeded += 1
         except Exception as exc:
             results.append({"path": path, "success": False, "error": str(exc)})
             failed += 1
+            continue
+        recorder.record(SessionFileChangeOperation(
+            tool_name="Delete", operation="delete", path=path,
+            kind="directory" if is_directory else "file",
+        ))
+        results.append({"path": path, "success": True, "deleted": True})
+        succeeded += 1
     return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
@@ -955,11 +965,11 @@ def _find_ranges(
     return ranges
 
 
-def _handle_edit(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
+def _handle_edit(execution: ToolExecution) -> dict:
     """文本替换 — 支持 exact / regex / range 三种匹配模式。"""
+    args = execution.arguments
+    context = execution.context
+    recorder = FileChangeRecorder(execution)
     path: str = str(args.get("path", "")).strip()
     old_string: str = str(args.get("old_string", ""))
     new_string: str = str(args.get("new_string", ""))
@@ -1100,6 +1110,9 @@ def _handle_edit(
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
+    recorder.record(SessionFileChangeOperation(
+        tool_name="PatchEdit", operation="modify", path=path, kind="file",
+    ))
     _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
     result = tool_result(success=True, path=path, replaced=True, diffs=diffs)
     if _lsp_diags is not None:
@@ -1107,16 +1120,17 @@ def _handle_edit(
     return result
 
 
-def _handle_copy(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
+def _handle_copy(execution: ToolExecution) -> dict:
+    args = execution.arguments
+    context = execution.context
+    recorder = FileChangeRecorder(execution)
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
         return tool_error("source is required")
     if not destination:
         return tool_error("destination is required")
+    created_parent_directories: list[str] = []
     try:
         resolved = _s().resolve_read(source)
         if not resolved.real.exists():
@@ -1127,26 +1141,34 @@ def _handle_copy(
             [(source, is_directory), (destination, is_directory)],
         )
         if resolved.real.is_file():
-            _s().copy(source, destination)
+            created_parent_directories = _s().ensure_parent_directories(destination)
+            actual = _s().copy(source, destination)
         elif resolved.real.is_dir():
-            _s().copy_folder(source, destination)
+            created_parent_directories = _s().ensure_parent_directories(destination)
+            actual = _s().copy_folder(source, destination)
         else:
             return tool_error("Source must be a file or directory", source=source)
-        return tool_result(success=True, source=source, destination=destination)
     except Exception as exc:
         return tool_error(str(exc), source=source, destination=destination)
+    _record_created_directories(recorder, "Copy", created_parent_directories)
+    recorder.record(SessionFileChangeOperation(
+        tool_name="Copy", operation="copy", path=actual.logical,
+        kind="directory" if is_directory else "file", source_path=source, destination_path=actual.logical,
+    ))
+    return tool_result(success=True, source=source, destination=destination)
 
 
-def _handle_move(
-    args: dict[str, Any],
-    context: ToolContext | None = None,
-) -> dict:
+def _handle_move(execution: ToolExecution) -> dict:
+    args = execution.arguments
+    context = execution.context
+    recorder = FileChangeRecorder(execution)
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
         return tool_error("source is required")
     if not destination:
         return tool_error("destination is required")
+    created_parent_directories: list[str] = []
     try:
         resolved = _s().resolve_read(source)
         if not resolved.real.exists():
@@ -1156,10 +1178,16 @@ def _handle_move(
             context,
             [(source, is_directory), (destination, is_directory)],
         )
-        _s().move(source, destination)
-        return tool_result(success=True, source=source, destination=destination)
+        created_parent_directories = _s().ensure_parent_directories(destination)
+        actual = _s().move(source, destination)
     except Exception as exc:
         return tool_error(str(exc), source=source, destination=destination)
+    _record_created_directories(recorder, "Move", created_parent_directories)
+    recorder.record(SessionFileChangeOperation(
+        tool_name="Move", operation="move", path=actual.logical,
+        kind="directory" if is_directory else "file", source_path=source, destination_path=actual.logical,
+    ))
+    return tool_result(success=True, source=source, destination=destination)
 
 
 async def _handle_search_files(
@@ -1955,7 +1983,7 @@ class WriteTool(BaseTool):
         super().__init__(name="Write", toolset="filesystem", schema=_WRITE_SCHEMA, danger_level=ToolDangerLevel.write)
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(_handle_write(execution.arguments, execution.context))
+        return ToolHandlerResult(_handle_write(execution))
 
 
 class DeleteTool(BaseTool):
@@ -1963,7 +1991,7 @@ class DeleteTool(BaseTool):
         super().__init__(name="Delete", toolset="filesystem", schema=_DELETE_SCHEMA, danger_level=ToolDangerLevel.write)
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(_handle_delete(execution.arguments, execution.context))
+        return ToolHandlerResult(_handle_delete(execution))
 
 
 class PatchEditTool(BaseTool):
@@ -1971,7 +1999,7 @@ class PatchEditTool(BaseTool):
         super().__init__(name="PatchEdit", toolset="filesystem", schema=_PATCHEDIT_SCHEMA, danger_level=ToolDangerLevel.write)
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(_handle_edit(execution.arguments, execution.context))
+        return ToolHandlerResult(_handle_edit(execution))
 
 
 class CopyTool(BaseTool):
@@ -1979,7 +2007,7 @@ class CopyTool(BaseTool):
         super().__init__(name="Copy", toolset="filesystem", schema=_COPY_SCHEMA, danger_level=ToolDangerLevel.write)
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(_handle_copy(execution.arguments, execution.context))
+        return ToolHandlerResult(_handle_copy(execution))
 
 
 class MoveTool(BaseTool):
@@ -1987,7 +2015,7 @@ class MoveTool(BaseTool):
         super().__init__(name="Move", toolset="filesystem", schema=_MOVE_SCHEMA, danger_level=ToolDangerLevel.write)
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        return ToolHandlerResult(_handle_move(execution.arguments, execution.context))
+        return ToolHandlerResult(_handle_move(execution))
 
 
 class SearchFilesTool(BaseTool):

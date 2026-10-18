@@ -274,3 +274,32 @@ export function selectVariablesPreview(input: TabPreviewInput): TabPreviewModel 
   else if (entries.length === 0) notice = L.variablesEmpty;
   return { sections: [section("variables", rows, null, notice)], nextEvent: null, footnote: L.openTabHint };
 }
+
+export function selectFileChangesPreview(input: TabPreviewInput): TabPreviewModel {
+  const fileChanges = input.fileChanges;
+  const summary = fileChanges.summary;
+  if (summary === null) {
+    const notice = fileChanges.summaryStatus === "error"
+      ? L.fileChangesReadFailed
+      : fileChanges.summaryStatus === "loading" || fileChanges.summaryStatus === "refreshing"
+        ? L.loading
+        : L.notLoaded;
+    return { sections: [noticeSection("file-changes", notice)], nextEvent: null, footnote: L.openTabHint };
+  }
+  const rows: TabPreviewRow[] = [
+    row("files", L.fileChangesFiles, String(summary.file_count)),
+    row("directories", L.fileChangesDirectories, String(summary.directory_count)),
+    row("operations", L.fileChangesOperations, String(summary.operation_count)),
+    row(
+      "last-operated",
+      L.fileChangesLastOperatedAt,
+      summary.last_operated_at === null ? L.fileChangesNone : new Date(summary.last_operated_at).toLocaleString(),
+    ),
+  ];
+  let notice: string | null = null;
+  if (fileChanges.summaryStatus === "error") notice = L.fileChangesReadFailed;
+  else if (fileChanges.pageError !== null) notice = L.fileChangesPageFailed;
+  else if (fileChanges.pageStale) notice = L.cachedSnapshot;
+  else if (!fileChanges.pageLoaded) notice = L.fileChangesListNotLoaded;
+  return { sections: [section("file-changes", rows, null, notice)], nextEvent: null, footnote: L.openTabHint };
+}

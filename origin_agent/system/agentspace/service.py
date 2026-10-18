@@ -22,6 +22,7 @@ from entity.constant import (
     AGENTSPACE_TRASH_DIR_NAME,
     AGENTSPACE_WATCH_DEBOUNCE_MS,
     FILE_SNIFF_BYTES,
+    SESSIONS_DIR_NAME,
 )
 from entity.puretype import (
     AgentspaceEntry,
@@ -47,6 +48,7 @@ from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox, SandboxError
 from system.session_visual_resources import SessionVisualResourceService
 from system.session_variables import SessionVariableService
+from system.session_file_changes import SessionFileChangeStore
 from .errors import (
     AgentspaceAlreadyExistsError,
     AgentspaceInvalidPathError,
@@ -87,6 +89,7 @@ class AgentspaceService(AsyncSystem):
         self._watcher: AgentspaceWatcher | None = None
         self._visual_resources: SessionVisualResourceService | None = None
         self._session_variables: SessionVariableService | None = None
+        self._file_changes: SessionFileChangeStore | None = None
         self._pending_changes: dict[str, str] = {}
         self._pending_lock = threading.Lock()
         self._started = False
@@ -116,6 +119,7 @@ class AgentspaceService(AsyncSystem):
         )
         self._visual_resources = SessionVisualResourceService(sandbox)
         self._session_variables = SessionVariableService(sandbox)
+        self._file_changes = SessionFileChangeStore(ctx.workspace / SESSIONS_DIR_NAME)
         # 初始化失败也必须收尾已经取得的资源；取消不能遗留恢复线程。
         loop = asyncio.get_running_loop()
         self._event_hub.bind_loop(loop)
@@ -201,6 +205,12 @@ class AgentspaceService(AsyncSystem):
         if self._session_variables is None:
             raise LifecycleFailure("AgentspaceService has not been awakened")
         return self._session_variables
+
+    @property
+    def file_changes(self) -> SessionFileChangeStore:
+        if self._file_changes is None:
+            raise LifecycleFailure("AgentspaceService has not been awakened")
+        return self._file_changes
 
     @property
     def watcher_available(self) -> bool:

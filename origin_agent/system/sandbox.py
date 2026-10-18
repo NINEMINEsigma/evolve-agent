@@ -812,6 +812,25 @@ class Sandbox(AsyncSystem):
                 f"File is not valid UTF-8 and cannot be edited: {logical}"
             ) from exc
 
+    def ensure_parent_directories(self, logical: str) -> list[str]:
+        """Create missing parent directories and return their logical paths."""
+        resolved = self.resolve_write(logical)
+        relative = logical.split(":", 1)[1].replace("\\", "/").strip("/")
+        parent_segments = [segment for segment in relative.split("/")[:-1] if segment]
+        parent = resolved.real.parent
+        missing: list[Path] = []
+        while not parent.exists():
+            missing.append(parent)
+            parent = parent.parent
+        if missing:
+            resolved.real.parent.mkdir(parents=True, exist_ok=True)
+        missing_count = len(missing)
+        first_missing = len(parent_segments) - missing_count
+        return [
+            f"{resolved.namespace}:{'/'.join(parent_segments[:first_missing + index])}"
+            for index in range(1, missing_count + 1)
+        ]
+
     def write(self, logical: str, content: str) -> None:
         """通过沙盒写入文件内容，保留传入文本的原始换行序列。"""
         r: ResolvedPath = self.resolve_write(logical)
@@ -846,7 +865,16 @@ class Sandbox(AsyncSystem):
             p.name for p in r.real.iterdir()
         )
 
-    def copy(self, logical_src: str, logical_dst: str) -> None:
+    @staticmethod
+    def _transfer_destination(destination: ResolvedPath, actual_path: str | Path) -> ResolvedPath:
+        actual = Path(actual_path)
+        suffix = actual.relative_to(destination.real)
+        logical = destination.logical
+        if suffix != Path("."):
+            logical = f"{logical.rstrip('/' + chr(92))}/{suffix.as_posix()}"
+        return ResolvedPath(logical=logical, real=actual, namespace=destination.namespace)
+
+    def copy(self, logical_src: str, logical_dst: str) -> ResolvedPath:
         """复制文件（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -854,9 +882,10 @@ class Sandbox(AsyncSystem):
             raise SandboxError(f"Source is not a file: {logical_src}")
         dst.real.parent.mkdir(parents=True, exist_ok=True)
         import shutil
-        shutil.copy2(src.real, dst.real)
+        actual = shutil.copy2(src.real, dst.real)
+        return self._transfer_destination(dst, actual)
 
-    def copy_folder(self, logical_src: str, logical_dst: str) -> None:
+    def copy_folder(self, logical_src: str, logical_dst: str) -> ResolvedPath:
         """递归复制目录（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -867,8 +896,9 @@ class Sandbox(AsyncSystem):
         dst.real.parent.mkdir(parents=True, exist_ok=True)
         import shutil
         shutil.copytree(src.real, dst.real)
+        return dst
 
-    def move(self, logical_src: str, logical_dst: str) -> None:
+    def move(self, logical_src: str, logical_dst: str) -> ResolvedPath:
         """移动或重命名文件/目录（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -876,7 +906,8 @@ class Sandbox(AsyncSystem):
             raise SandboxError(f"Source does not exist: {logical_src}")
         dst.real.parent.mkdir(parents=True, exist_ok=True)
         import shutil
-        shutil.move(str(src.real), str(dst.real))
+        actual = shutil.move(str(src.real), str(dst.real))
+        return self._transfer_destination(dst, actual)
 
     def delete(self, logical: str) -> None:
         """删除文件或空目录（写入检查）。"""

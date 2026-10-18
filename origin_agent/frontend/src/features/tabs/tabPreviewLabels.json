@@ -58,5 +58,13 @@
   "variablesNotLoaded": "尚未读取会话变量",
   "variablesLoading": "正在读取会话变量",
   "scanIncomplete": "扫描未完整",
-  "variablesEmpty": "已读取，当前会话无变量"
+  "variablesEmpty": "已读取，当前会话无变量",
+  "fileChangesFiles": "文件路径",
+  "fileChangesDirectories": "目录路径",
+  "fileChangesOperations": "操作次数",
+  "fileChangesLastOperatedAt": "最近操作",
+  "fileChangesNone": "无",
+  "fileChangesListNotLoaded": "清单尚未读取",
+  "fileChangesPageFailed": "清单读取失败，摘要仍可用",
+  "fileChangesReadFailed": "读取失败，摘要不可用"
 }

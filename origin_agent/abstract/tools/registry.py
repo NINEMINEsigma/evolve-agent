@@ -734,6 +734,7 @@ class ToolRegistry(AsyncSystem):
             adapter.add_done_callback(self._observe_sync_adapter)
             return await asyncio.shield(adapter)
         except asyncio.CancelledError:
+            execution.mark_cancelled()
             cancelled = True
             raise
         finally:
@@ -749,6 +750,9 @@ class ToolRegistry(AsyncSystem):
                 name=f"tool-handler-{execution.tool.name}",
                 admission=self._admit_dispatch,
             )
+        except asyncio.CancelledError:
+            execution.mark_cancelled()
+            raise
         except ApplicationStoppingError:
             raise
         except Exception as error:

@@ -19,14 +19,21 @@ from entity.constant import (
     LLMProfileData_Type_Version,
     AgentConfig_Type_Version,
     SessionApprovalModeState_Type_Version,
+    SessionFileChanges_Type_Version,
 )
 from entity.messages import History
 from entity.puretype.llm import LLMProfileData
 from entity.puretype.agent import AgentConfig
 from entity.puretype.approval import SessionApprovalModeState
+from entity.puretype.session_file_changes import (
+    SessionFileChangesData, SessionFileChangeEntry, SessionFileChangeActor,
+)
 
 # Type → 稳定名（保存时使用）
 typespace: dict[Type, str] = {
+    SessionFileChangesData: f"{SessionFileChanges_Type_Version}::SessionFileChangesData",
+    SessionFileChangeEntry: f"{SessionFileChanges_Type_Version}::SessionFileChangeEntry",
+    SessionFileChangeActor: f"{SessionFileChanges_Type_Version}::SessionFileChangeActor",
     History: f"{History_Type_Version}::{History.__name__}",
     LLMProfileData: f"{LLMProfileData_Type_Version}::{LLMProfileData.__name__}",
     AgentConfig: f"{AgentConfig_Type_Version}::{AgentConfig.__name__}",
@@ -37,6 +44,9 @@ typespace: dict[Type, str] = {
 
 # 稳定名 → Type（加载时使用）
 namespace: dict[str, Type] = {
+    f"{SessionFileChanges_Type_Version}::SessionFileChangesData": SessionFileChangesData,
+    f"{SessionFileChanges_Type_Version}::SessionFileChangeEntry": SessionFileChangeEntry,
+    f"{SessionFileChanges_Type_Version}::SessionFileChangeActor": SessionFileChangeActor,
     f"{History_Type_Version}::{History.__name__}": History,
     f"{LLMProfileData_Type_Version}::{LLMProfileData.__name__}": LLMProfileData,
     f"{AgentConfig_Type_Version}::{AgentConfig.__name__}": AgentConfig,

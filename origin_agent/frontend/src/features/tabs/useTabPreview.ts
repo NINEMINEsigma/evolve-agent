@@ -112,6 +112,14 @@ export function useTabPreview(tab: TabDefinition | null, ctx: TabRenderContext):
       loading: tabData.variables.loading,
       error: tabData.variables.error,
     },
+    fileChanges: {
+      summary: ctx.fileChanges.summary,
+      summaryStatus: ctx.fileChanges.summaryStatus,
+      summaryError: ctx.fileChanges.summaryError,
+      pageLoaded: ctx.fileChanges.treeEntries !== null,
+      pageStale: ctx.fileChanges.pageStale,
+      pageError: ctx.fileChanges.pageError,
+    },
     now,
   };
 

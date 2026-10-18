@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import threading
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from entity.messages import ToolResultMessage
@@ -67,6 +68,14 @@ class ToolExecution:
         self.history_index: int | None = None
         self.result_message: ToolResultMessage | None = None
         self.history_updated = False
+        self._cancel_requested = threading.Event()
+
+    def mark_cancelled(self) -> None:
+        self._cancel_requested.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_requested.is_set()
 
     def mark_history_updated(self) -> None:
         """Record a structural History change only after its required save succeeds."""
