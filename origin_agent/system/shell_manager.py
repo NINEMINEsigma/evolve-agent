@@ -256,8 +256,8 @@ class ShellManager(AsyncSystem):
     注册为 framework AsyncSystem，依赖 RuntimeSystem 与 Sandbox；由 Application
     在 P22 装配后经 ``app.get_system(ShellManager)`` 取得。virtual_awake 只取得
     Sandbox 依赖，不强制创建 Shell 或导入不可用平台的 PTY。关闭接收后不再允
-    许新建 Shell 会话；应用关闭时停止每个 Shell 仍在 finally 执行 reader 回
-    收和 PTY 释放，失败聚合上抛，不记录假成功。
+    许新建 Shell 会话；应用关闭时停止每个 Shell，尽力回收 reader 和 PTY，
+    资源释放失败作为 Shell 操作/清理错误返回或记录，不升级为进程级失败。
     """
 
     def __init__(self) -> None:
@@ -284,7 +284,12 @@ class ShellManager(AsyncSystem):
             raise LifecycleFailure("ShellManager has not been awakened")
         return self._runtime
 
-    async def _native_call(self, fn: Callable[..., ShellResult], *args: Any) -> ShellResult:
+    async def _native_call(
+        self,
+        fn: Callable[..., ShellResult],
+        *args: Any,
+        report_failure: bool = True,
+    ) -> ShellResult:
         task = asyncio.create_task(asyncio.to_thread(fn, *args), name="shell-native-call")
         self._native_tasks.add(task)
         try:
@@ -293,16 +298,24 @@ class ShellManager(AsyncSystem):
             if task.done():
                 self._native_tasks.discard(task)
             else:
-                task.add_done_callback(self._native_finished)
+                task.add_done_callback(
+                    lambda done: self._native_finished(done, report_failure=report_failure)
+                )
 
-    def _native_finished(self, task: asyncio.Task[Any]) -> None:
+    def _native_finished(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        report_failure: bool = True,
+    ) -> None:
         self._native_tasks.discard(task)
         if task.cancelled():
-            self.runtime.record_failure(LifecycleFailure("Shell native operation was cancelled"))
-        else:
-            error = task.exception()
-            if error is not None and not isinstance(error, (EOFError, ApplicationStoppingError)):
-                self.runtime.record_failure(error)
+            if report_failure:
+                self.runtime.record_failure(LifecycleFailure("Shell native operation was cancelled"))
+            return
+        error = task.exception()
+        if report_failure and error is not None and not isinstance(error, (EOFError, ApplicationStoppingError)):
+            self.runtime.record_failure(error)
 
     @property
     def sandbox(self) -> Sandbox:
@@ -606,10 +619,11 @@ class ShellManager(AsyncSystem):
                 await self._remove_and_stop(state)
                 stopped += 1
             except Exception:
-                logger.exception(
+                logger.warning(
                     "Failed to stop Shell during session cleanup | shell=%s session=%s",
                     state.shell_id,
                     session_id,
+                    exc_info=True,
                 )
         return stopped
 
@@ -660,17 +674,25 @@ class ShellManager(AsyncSystem):
         for state in states:
             try:
                 await self._remove_and_stop(state)
-            except BaseException as exc:
-                failures.append(exc)
-        failures.extend(self._cleanup_failures)
+            except BaseException:
+                # Shell 资源释放属于可选会话资源；失败记录诊断，但不能把
+                # 应用已经开始的关闭升级为进程失败。
+                logger.warning(
+                    "Failed to stop Shell during application cleanup | shell=%s",
+                    state.shell_id,
+                    exc_info=True,
+                )
+        for error in self._cleanup_failures:
+            logger.warning(
+                "Shell cleanup failure was contained | error=%s",
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
         if failures:
             raise BaseExceptionGroup("ShellManager shutdown failed", failures)
 
     async def virtual_shotdown(self) -> None:
-        """关闭：禁止新 Shell，停止所有操作任务并等待真正退出。
-
-        错误直接上抛；不吞掉清理失败或覆盖为成功。
-        """
+        """关闭：禁止新 Shell，等待操作退出并尽力释放全部 PTY。"""
         await self.stop_operations()
 
     def _reader_loop(self, state: _ShellSession) -> None:
@@ -816,12 +838,15 @@ class ShellManager(AsyncSystem):
             async def finish() -> None:
                 try:
                     async with state.operation_lock:
-                        await self._native_call(self._stop_state_blocking, state)
+                        await self._native_call(
+                            self._stop_state_blocking,
+                            state,
+                            report_failure=False,
+                        )
                         with self._registry_lock:
                             self._shells.pop(state.shell_id, None)
                 except BaseException as exc:
                     self._cleanup_failures.append(exc)
-                    self.runtime.record_failure(exc)
                     raise
 
             task = asyncio.create_task(finish(), name=f"shell-stop-{state.shell_id}")
@@ -857,36 +882,33 @@ class ShellManager(AsyncSystem):
         reader = state.reader_thread
         if reader is None or reader.ident is None:
             state.reader_exited.set()
-        # TODO：调查终止进程树后 pywinpty/ConPTY reader 仍未退出的既存故障。
-        # 2026-10-13 会话终结时首次记录，2026-10-16 03:50:39 显式 StopShell 再现
-        # （session=91c8567f965b，shell=384128d6e160）；非本次工具对象化新增的停止逻辑。
-        # 需确认阻塞 read 的安全唤醒/退出机制及 PTY 关闭顺序，保留原生访问串行化
-        # 和真实线程退出确认；根因未定，不以吞异常或单纯延长超时替代修复。
-        if not state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS):
-            failures.append(LifecycleFailure(f"Shell reader did not stop: {state.shell_id}"))
-            raise BaseExceptionGroup("Shell reader cleanup failed", failures)
 
+        # pywinpty 的 ConPTY reader 可能在 pty.read() 中阻塞；仅终止子进程
+        # 不保证唤醒该读取。必须先在原生访问边界内关闭 PTY，再等待 reader
+        # 收尾，否则“先等 reader、后 close”会把唤醒条件放在永远不会执行的后面。
         acquired = state.native_lock.acquire(timeout=SHELL_STOP_WAIT_SECONDS)
         if not acquired:
             failures.append(LifecycleFailure(f"Shell native lock did not become available: {state.shell_id}"))
-            raise BaseExceptionGroup("Shell PTY cleanup failed", failures)
-        try:
-            if not state.native_closed.is_set():
-                try:
-                    exit_code = state.pty.exitstatus
-                    with state.lock:
-                        if exit_code is not None or state.exit_code is None:
-                            state.exit_code = exit_code
-                except BaseException as exc:
-                    failures.append(exc)
-                try:
-                    state.pty.close(force=True)
-                    state.native_closed.set()
-                except BaseException as exc:
-                    failures.append(exc)
-        finally:
-            state.native_lock.release()
+        else:
+            try:
+                if not state.native_closed.is_set():
+                    try:
+                        exit_code = state.pty.exitstatus
+                        with state.lock:
+                            if exit_code is not None or state.exit_code is None:
+                                state.exit_code = exit_code
+                    except BaseException as exc:
+                        failures.append(exc)
+                    try:
+                        state.pty.close(force=True)
+                        state.native_closed.set()
+                    except BaseException as exc:
+                        failures.append(exc)
+            finally:
+                state.native_lock.release()
 
+        if not state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS):
+            failures.append(LifecycleFailure(f"Shell reader did not stop: {state.shell_id}"))
         if reader is not None and reader.ident is not None:
             reader.join(timeout=SHELL_STOP_WAIT_SECONDS)
             if reader.is_alive():
