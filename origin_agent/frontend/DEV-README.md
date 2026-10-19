@@ -139,7 +139,7 @@ frontend/
 
 ### 文件修改 Tab（目录树修订 2026-10-18）
 
-`FileChangesTab`位于资源/任务之后，使用`useSessionFileChanges`唯一Hook提供的完整可见条目构造只读目录树。摘要的`file_count`只统计可见文件，`directory_count`统计可见目录；`operation_count`包含隐藏删除。命名空间、子目录、文件和实际目录条目按目录优先自然排序，合成父目录仅为结构节点，默认展开且只允许折叠/展开，不提供打开、编辑、删除、重命名或上下文菜单。
+`FileChangesTab`位于资源/任务之后，使用`useSessionFileChanges`唯一Hook提供的完整可见条目构造只读目录树。摘要的`file_count`只统计可见文件，`directory_count`统计可见目录；`operation_count`包含隐藏删除。命名空间、子目录、文件和实际目录条目按目录优先自然排序，合成父目录仅为结构节点，默认展开且只允许折叠/展开，不提供打开、编辑、删除、重命名或上下文菜单。实际文件节点只显示文件名，完整逻辑路径由目录层级表达，并保留在条目的悬停提示中。
 
 持久条目增加`display_state`：`created`绿色、`modified`黄色、已存在文件删除时`deleted`红色可见，会话新增文件删除后隐藏。首次Write/Copy目的/Move目的为绿色；新增后修改仍绿色；删除后重建或再次成为Copy/Move目的为黄色；Move源按其历史状态显示或隐藏，目的按路径历史决定绿色或黄色。文件和实际目录条目都带最后操作徽章；合成父目录没有徽章。树只读颜色由`data-file-change-state`与`session-file-changes.css`控制。
 

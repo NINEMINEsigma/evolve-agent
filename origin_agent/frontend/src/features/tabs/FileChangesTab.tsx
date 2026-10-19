@@ -29,7 +29,7 @@ function EntryMeta({ entry }: { entry: SessionFileChangeEntryDto }): ReactElemen
   </span>;
 }
 
-function FileNode({ entry }: { entry: SessionFileChangeEntryDto }): ReactElement {
+function FileNode({ entry, name }: { entry: SessionFileChangeEntryDto; name: string }): ReactElement {
   return <div
     className={`file-changes-file file-changes-file-${entry.display_state}`}
     data-file-change-state={entry.display_state}
@@ -38,7 +38,7 @@ function FileNode({ entry }: { entry: SessionFileChangeEntryDto }): ReactElement
     title={entry.path}
   >
     <span className="file-changes-file-icon" aria-hidden="true">•</span>
-    <code className="file-changes-path">{entry.path}</code>
+    <code className="file-changes-path">{name}</code>
     <span className="file-changes-operation" data-tooltip={entry.last_operation === "move" ? L.moveTooltip : undefined}>
       {L.operations[entry.last_operation]}
     </span>
@@ -51,7 +51,7 @@ function TreeNode({ node, depth }: { node: FileChangeTreeNode; depth: number }):
   const [expanded, setExpanded] = useState(true);
   const entry = node.entry;
   if (!node.directory && entry !== null) {
-    return <div style={{ paddingLeft: depth * 18 }}><FileNode entry={entry} /></div>;
+    return <div style={{ paddingLeft: depth * 18 }}><FileNode entry={entry} name={node.name} /></div>;
   }
   return <div className="file-changes-tree-node">
     <button
