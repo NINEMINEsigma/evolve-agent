@@ -14,6 +14,6 @@ SESSION_FILE_CHANGE_TOOL_OPERATIONS = {
     "Write": frozenset({"create", "modify"}),
     "PatchEdit": frozenset({"modify"}),
     "Delete": frozenset({"delete"}),
-    "Copy": frozenset({"copy"}),
-    "Move": frozenset({"move"}),
+    "Copy": frozenset({"create", "copy"}),
+    "Move": frozenset({"create", "move"}),
 }
