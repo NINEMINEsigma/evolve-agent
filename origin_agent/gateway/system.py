@@ -31,6 +31,7 @@ from system.lifecycle import LifecycleFailure, TaskOwner, close_resources
 from system.llm_profile_store import LLMProfileStore
 from system.runtime import RuntimeSystem
 from system.sandbox import Sandbox
+from system.session_export import SessionExportService
 from system.session_metadata import SessionMetadataService
 from system.shell_manager import ShellManager
 
@@ -88,8 +89,15 @@ class GatewaySystem(AsyncSystem):
         self._server: _GatewayUvicornServer | None = None
         self._serve_task: asyncio.Task[None] | None = None
         self._socket: socket.socket | None = None
+        self._session_exports: SessionExportService | None = None
 
     # -- 唤醒期入口（P22 装配前由 virtual_awake 使用）--
+
+    @property
+    def session_exports(self) -> SessionExportService:
+        if self._session_exports is None:
+            raise LifecycleFailure("Session export service has not been awakened")
+        return self._session_exports
 
     @property
     def fastapi_app(self) -> FastAPI:
@@ -121,6 +129,10 @@ class GatewaySystem(AsyncSystem):
         self._runtime = self.get_system(RuntimeSystem)
         self._admission = GatewayAdmission(self._runtime)
         self._owner = TaskOwner("gateway", self._runtime.record_failure)
+        self._session_exports = SessionExportService(
+            self._runtime, self.get_system(SessionManager), self.get_system(Sandbox),
+            self.get_system(AgentspaceService).visual_resources,
+        )
         await self._start()
 
     async def _start(self) -> None:
@@ -216,6 +228,9 @@ class GatewaySystem(AsyncSystem):
                 await self._owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
         await close_resources((stop_serve, close_socket, close_owner))
+        if self._session_exports is not None:
+            await self._session_exports.close()
+            self._session_exports = None
 
     # -- P3 关闭阶段接口 --
 
@@ -263,3 +278,6 @@ class GatewaySystem(AsyncSystem):
     async def virtual_shotdown(self) -> None:
         self.stop_accepting()
         await self.stop_server()
+        if self.task_owner.is_idle and self._session_exports is not None:
+            await self._session_exports.close()
+            self._session_exports = None

@@ -285,6 +285,13 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 读改写非原子，主Agent统一共享结算；旧子Agent在旋转后保留旧parent_session_id，晚到写入不自动同步。重新生成/删除History消息不回滚变量，永久删除会话保留工作空间变量文件，与stage清理规则一致。
 
+## 会话离线导出：History 捕获基础
+
+`BaseAgentLoop` 持有非持久化 `_session_export_instance_id` 与 `_session_export_epoch`。保存成功、新活动、会话 ID 变更，以及普通模式的历史加载/重置更新代际；多Agent旋转复用公开 `set_session_id`。公开 `get_session_export_guard()` 与异步 `capture_session_export_source()` 只读取当前已恢复且空闲的 History，不补媒体身份、不写盘、不调用模型，不等待整轮回复锁。
+
+`entry/session_export.py` 通过显式迭代栈按节点/时间软预算让出主事件循环，隔离消息正文、角色列表和工具请求可变结构；不可变大媒体字符串保留引用。消息后 `SessionExportHistorySource` 供线程侧 `export_history_digest` / `project_export_history` 计算摘要和既有完整投影，未知模型/超预算明确拒绝，错误通过业务边界处理。不同工具请求 ID 的唯一性由服务端保证，导出不另建重复 ID 策略，不改变在线配对口径。该节描述已实施基础；完整服务/前端接入与运行验收状态见任务文件，未运行校验。
+
+
 ## `agent_support/` 子模块
 
 ### `messages.py`

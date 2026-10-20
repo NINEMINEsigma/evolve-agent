@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import DiffBlock from "./DiffBlock";
+import type { MessageResourceResolver } from "./primitives/MessageRenderEnvironment";
 
 // 逻辑路径 "ws:uploads/test.png" → "/files/ws/uploads/test.png"
 function toFileUrl(logicalPath: string): string | null {
@@ -7,7 +8,7 @@ function toFileUrl(logicalPath: string): string | null {
   if (colonIdx < 0) return null;
   const ns = logicalPath.slice(0, colonIdx);
   const rest = logicalPath.slice(colonIdx + 1).replace(/^\/+/, "");
-  return `/files/${ns}/${rest}`;
+  return `/files/${encodeURIComponent(ns)}/${rest.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 // 去除行号前缀: "1: hello\n2: world" → "hello\nworld"
@@ -18,10 +19,30 @@ function stripLineNumbers(content: string): string {
 type RenderFn = (
   parsed: Record<string, unknown>,
   onImageClick: (src: string) => void,
+  resolveResource?: MessageResourceResolver,
+  unavailableLabel?: string,
 ) => JSX.Element | null;
 
+// 按需把逻辑资源路径解析为当前渲染环境的可加载引用；离线环境解析失败返回 null。
+function resolveUrl(url: string, kind: "image" | "video", resolveResource?: MessageResourceResolver): string | null {
+  if (resolveResource) {
+    const resolved = resolveResource(url, kind);
+    if (resolved != null) return resolved;
+    return null;
+  }
+  return url;
+}
+
+function resourcePlaceholder(kind: "image" | "video", label = "resource unavailable offline"): JSX.Element {
+  return (
+    <span className="offline-resource-placeholder" data-offline-resource={kind}>
+      {label}
+    </span>
+  );
+}
+
 // Read 工具特化渲染：用 DiffBlock plain 模式（无颜色、无前缀，仅行号+内容）
-const renderRead: RenderFn = (parsed, onImageClick) => {
+const renderRead: RenderFn = (parsed, onImageClick, resolveResource, unavailableLabel) => {
   if (parsed.type === "file" && typeof parsed.content === "string") {
     const code = stripLineNumbers(parsed.content);
     const offset = typeof parsed.offset === "number" ? parsed.offset : 0;
@@ -30,9 +51,11 @@ const renderRead: RenderFn = (parsed, onImageClick) => {
   if (parsed.type === "image" && typeof parsed.path === "string") {
     const url = toFileUrl(parsed.path);
     if (url) {
+      const src = resolveUrl(url, "image", resolveResource);
+      if (!src) return resourcePlaceholder("image", unavailableLabel);
       return (
-        <a href="#" onClick={(e) => { e.preventDefault(); onImageClick(url); }} className="message-img-link">
-          <img src={url} alt={String(parsed.path ?? "")} className="message-img-thumb" />
+        <a href="#" onClick={(e) => { e.preventDefault(); onImageClick(src); }} className="message-img-link">
+          <img src={src} alt={String(parsed.path ?? "")} className="message-img-thumb" />
         </a>
       );
     }
@@ -40,9 +63,11 @@ const renderRead: RenderFn = (parsed, onImageClick) => {
   if (parsed.type === "video" && typeof parsed.path === "string") {
     const url = toFileUrl(parsed.path);
     if (url) {
+      const src = resolveUrl(url, "video", resolveResource);
+      if (!src) return resourcePlaceholder("video", unavailableLabel);
       return (
         <div className="message-video">
-          <video src={url} controls className="message-video-player" />
+          <video src={src} controls className="message-video-player" />
         </div>
       );
     }
@@ -86,18 +111,20 @@ export function renderToolResult(
   toolName: string | undefined,
   parsed: Record<string, unknown>,
   onImageClick: (src: string) => void,
+  resolveResource?: MessageResourceResolver,
+  unavailableLabel?: string,
 ): JSX.Element | null {
   // 优先按 toolName 精确匹配
   if (toolName) {
     const renderer = registry[toolName];
     if (renderer) {
-      const result = renderer(parsed, onImageClick);
+      const result = renderer(parsed, onImageClick, resolveResource, unavailableLabel);
       if (result) return result;
     }
   }
   // toolName 缺失或未命中注册表：按结构特征逐个尝试
   for (const renderer of allRenderers) {
-    const result = renderer(parsed, onImageClick);
+    const result = renderer(parsed, onImageClick, resolveResource, unavailableLabel);
     if (result) return result;
   }
   return null;

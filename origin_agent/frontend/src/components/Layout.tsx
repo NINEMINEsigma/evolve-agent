@@ -5,6 +5,9 @@ import Lightbox from "./Lightbox";
 import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
 import PerformanceTelemetryDialog from "./PerformanceTelemetryDialog";
+import NoticeBanner from "./primitives/NoticeBanner";
+import SessionExportDialog from "../features/sessionExport/SessionExportDialog";
+import { useSessionExport } from "../features/sessionExport/useSessionExport";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -49,6 +52,14 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     STORAGE_KEYS.CHAT_STYLE_PAUSED, ws.sessionId, false);
 
   // Layout 层直接调用 hook，避免 Header 和 ChatArea 重复探测
+  const exportProcessing = useChatRuntimeStore((state) => state.processing);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  useEffect(() => setExportNotice(null), [ws.sessionId]);
+  const exportDisabled = !ws.sessionId || !ws.isReady || ws.sessionLocked;
+  const sessionExport = useSessionExport({
+    sessionId: ws.sessionId, processing: exportProcessing, disabled: exportDisabled,
+    stagePaused, chatStylePaused, onNotice: setExportNotice,
+  });
   const stageState = useSessionStage(ws.sessionId, stagePaused);
   const chatStyleState = useSessionChatStyle(ws.sessionId, chatStylePaused);
 
@@ -258,7 +269,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
-          modelMenuBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
+          modelMenuBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || sessionExport.isOpen}
           forcePin={pinHeader}
           stagePaused={stagePaused}
           onToggleStagePaused={() => setStagePaused((v) => !v)}
@@ -267,6 +278,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
           chatStyleStatusText={chatStyleStatusText}
           onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
+          onOpenSessionExport={sessionExport.open}
+          sessionExportDisabled={exportDisabled || exportProcessing || sessionExport.busy}
         />
 
         <div className="tab-body">
@@ -289,7 +302,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
                 enabledTabs={tabSystem.enabledTabs}
                 onSwitch={tabSystem.switchTab}
                 renderContext={tabRenderContext}
-                previewBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || contextMenuOpen}
+                previewBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || contextMenuOpen || sessionExport.isOpen}
               />
             </TabDataProvider>
           )}
@@ -302,6 +315,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
       {performanceTelemetryOpen && (
         <PerformanceTelemetryDialog onClose={() => setPerformanceTelemetryOpen(false)} />
+      )}
+
+      {sessionExport.isOpen && !ws.sessionLocked && <SessionExportDialog controller={sessionExport} />}
+      {exportNotice && !sessionExport.isOpen && (
+        <div className="session-export-notice">
+          <NoticeBanner notice={{ kind: "error", message: exportNotice }} onDismiss={() => setExportNotice(null)} />
+        </div>
       )}
 
       <OnboardingTour

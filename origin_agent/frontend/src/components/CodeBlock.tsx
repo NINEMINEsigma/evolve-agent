@@ -3,10 +3,12 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { TIMING } from "../constants/timing";
 
-export default function CodeBlock({ language, code, startingLineNumber }: {
+export default function CodeBlock({ language, code, startingLineNumber, onCopyFailure }: {
   language: string;
   code: string;
   startingLineNumber?: number;
+  /** 复制不可用（如 file:// 无剪贴板权限）时的回调；live 不传时静默忽略。 */
+  onCopyFailure?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -15,7 +17,8 @@ export default function CodeBlock({ language, code, startingLineNumber }: {
       setCopied(true);
       setTimeout(() => setCopied(false), TIMING.COPY_RESET_DELAY);
     } catch {
-      // ignore clipboard errors
+      // 剪贴板不可用：代码文本保持可选择，报告离线复制失败（若有回调）
+      onCopyFailure?.();
     }
   };
   return (

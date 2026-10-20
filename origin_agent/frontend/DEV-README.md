@@ -334,7 +334,22 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 - `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供轮次导航条跳转使用；当前轮由 `ChatArea` 按 DOM 参考线判定——已渲染行（`data-render-row-id`）中最后一个顶部位于「视口顶 + `ROUND_NAV_JUMP_OFFSET_RATIO` 视口高度」参考线以上的行所归属的条目，与跳转落点同一条参考线，索引变化才更新高亮。
 - 轮次导航条跳转复用「远距离先加载内容页再定位」模式：`jumpToRound` 在目标行未加载时先 `jumpToLogicalRow` 取页并核对加载结果，再以 `scrollToIndex`（align start + 补偿偏移）把目标消息顶部定位到视口中部略偏上；Virtuoso 条目偏移不含列表顶部安全区 spacer，`useChatScrollController` 的 `topSafeSpacePx` 参数将其补偿进 offset，使落点与 `ChatArea` 当前轮判定的 DOM 参考线严格为同一条线；近距离平滑、远距离瞬时。
 - 资源 Tab使用完整 History 资源索引，不依赖前端已加载正文页。
-- 原“导出会话为 HTML”已移除；虚拟列表不保证浏览器原生查找命中离屏历史。
+- 会话离线导出使用独立完整History捕获与离线阅读器，不依赖当前可见DOM；虚拟列表仍不保证浏览器原生查找命中在线页面的离屏历史。导出接入及验收状态见下节和任务文件。
+
+## 会话离线导出
+
+顶部栏命令菜单的“导出离线网页”面向当前已恢复且空闲的主会话。流程为捕获完整现存 History、收集有界资源、准备 ZIP、服务端最终复核后才下载。展示不受在线分页、滚动、折叠或 system 消息隐藏偏好影响；包含思考、上下文扩展、工具请求/结果及嵌入消息，分享前明确提示敏感内容风险。子会话、会话变量、会话网页和普通非媒体下载附件不打包，原 History 不修改，也不调用模型。
+
+`features/sessionExport/` 包含严格协议适配、有界依赖扫描/资源队列、离线打包和单次导出controller；`SessionExportDialog`提供确认、进度、缺失数量、失败和取消。切会话、锁定或开始处理会取消导出；全部异步终态按sessionId/generation核对，只有ZIP准备后verify成功才触发下载。资源明确不可用时占位并列清单，未知协议/服务故障和整体预算超限则整体失败，不截断历史冒充成功。
+
+资源只读内联媒体及允许的同源文件/字体；跨源URL不代理抓取、不保留自动回源。CSS/HTML/经典脚本依赖只在明确支持范围内收集，不执行用户脚本发现依赖。chat style即使在线暂停也收集，离线初始开关继承导出偏好；stage重新运行，不承诺恢复内存状态，模块、Worker、远程API和未知动态加载明确提示。
+
+`offline/` 是独立阅读器入口，复用消息内容组件和公开样式选择器契约，不导入App/Router/聊天运行时store/Monaco。独立Vite构建输出固定viewer.js/css，由专用只读路由提供，构建时把依赖中的 Node 风格 `process.env` 访问固定为浏览器可用的生产环境；归档页另提供最小兼容对象，保证 `file://` 双击时阅读器不会停留在初始占位文字。打包为自包含index.html、manifest.json和README.txt。解压后双击打开，不依赖本地HTTP服务、CDN或原Gateway。普通历史逐批挂载至全量，工具/思考/扩展可展开，原HTML保留纯源码查看；受支持舞台脚本仅在不给allow-same-origin的隔离frame执行。CSP与能力限制阻断正常网络加载，不宣称任意恶意代码的完整安全沙盒。
+
+整体预算包括64MiB原History、96MiB捕获响应、20,000消息/40,000行、32MiB单资源、128MiB资源总计、1,024资源/16层依赖、192MiB归档输入；资源级超限明确占位，整体超限拒绝。单请求30秒、全导出180秒；客户端取消覆盖资源请求、队列、ZIP worker与Blob URL。源码已完成接入与定向静态审阅，尚未由开发助手AI运行构建、类型检查或离线验收。
+
+全局tooltip的document捕获监听器必须先用`instanceof Element`校验event.target；mouseleave同时校验relatedTarget为Node或按离开视口隐藏，禁止用TypeScript断言把Document当HTMLElement再调用closest。该修复覆盖导出Portal窗口及既有tooltip，不改变视觉资源404探测语义。
+
 
 ## 历史更新指令与完整重载（2026-10-15）
 

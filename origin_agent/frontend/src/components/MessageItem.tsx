@@ -6,6 +6,8 @@ import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
 import ToolCallCard from "./ToolCallCard";
 import { useCharacterAvatarUrl } from "../features/characterAvatars/characterAvatarStore";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { useMessageRenderEnvironment } from "./primitives/MessageRenderEnvironment";
 import { hueFromString } from "../utils/color";
 
 const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
@@ -64,6 +66,10 @@ const MessageItem = memo(function MessageItem({
   const m = message;
   const [editing, setEditing] = useState(false);
   const [avatarImgFailed, setAvatarImgFailed] = useState(false);
+
+  const environment = useMessageRenderEnvironment();
+  // 离线 bundle 不引入 chatRuntimeStore；live 下显式订阅并传入嵌入消息组件。
+  const showSystemUserMessages = useChatRuntimeStore((state) => state.showSystemUserMessages);
 
   const textContent = contentToText(m.content);
   const toolSummary = toolCallSummary(m);
@@ -145,6 +151,7 @@ const MessageItem = memo(function MessageItem({
             onImageClick={onImageClick}
             onToggleCollapse={onToggleCollapse}
             onUserHeightMutation={onUserHeightMutation}
+            showSystemUserMessages={showSystemUserMessages}
           />
         ) : isTool && !editing ? (
           <div className="tool-call-block" data-chat-scope="tool-call">
@@ -162,7 +169,7 @@ const MessageItem = memo(function MessageItem({
             {!toolCollapsed && (
               <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} data-chat-scope="tool-detail" onWheel={handoffWheelAtBoundary}>
                 <MessageBody message={m} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
-                <MessageAttachments message={m} onImageClick={onImageClick} />
+                <MessageAttachments message={m} onImageClick={onImageClick} resolveResource={environment.resolveResource} />
                 {m.toolCallMeta && (
                   <div className="tool-call-meta">
                     申请 {m.toolCallMeta.application_time}
@@ -191,7 +198,7 @@ const MessageItem = memo(function MessageItem({
             ) : (
               <MessageBody message={m} streaming={streaming} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
             )}
-            <MessageAttachments message={m} onImageClick={onImageClick} />
+            <MessageAttachments message={m} onImageClick={onImageClick} resolveResource={environment.resolveResource} />
           </div>
         )}
 

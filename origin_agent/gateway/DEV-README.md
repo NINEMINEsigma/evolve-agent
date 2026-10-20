@@ -38,6 +38,16 @@ gateway/
 
 主队列先同步登记InputDelivery再安排消费者，Parent/Multi逐项APPENDED/PERSISTED后回显；Loop替换保留旧回复与工具结果提交，记录原sequence转交新队列。`SubAgentOrchestrator` 已作为 framework `AsyncSystem` 迁移，Gateway及工具调用统一经 `Application.current().get_system(SubAgentOrchestrator)` 取得；它不再由 `main.py` 注入启动用 Loop。子会话输入登记、反馈关闭交接和普通子Agent最终保存由该System持有；Gateway USER_MESSAGE 在后台任务之前的多目标接收/ready准备已由 S21 完成，Application 最终装配由 P22 完成。
 
+## 会话离线导出
+
+`GatewaySystem.session_exports`持有无History缓存的`SessionExportService`叶服务，不新增AsyncSystem。它只读当前已恢复且空闲的主会话，包括已打开归档会话；使用公开隔离捕获/guard、线程侧正式History投影及确定性摘要，精确读取Sandbox文件和严格字体路径，不读取活动history.es、不补媒体身份、不写会话、不调用模型。
+
+三个typed POST接口为`/api/sessions/{id}/export/snapshot`、`/export/resource`、`/export/verify`。资源成功为二进制+Content-Length/X-Export-Digest/X-Export-Identity；明确缺失/拒绝/单文件超限返回detail.code/source/proof并与会话404区分。快照按96MiB上限在线程侧增量编码；资源/复核请求主体在解析前有界读取。无效400、会话缺失404、忙碌/变化409、全局超限413、容量429、停止503；未知错误直接传播，不返回空History。HTTP断开取消等待方，TaskOwner继续持有实际线程收尾，容量不提前释放。
+
+`GET /api/session-export/viewer/{asset_name}`仅接受viewer.js/viewer.css两个构建产物，缺失503、未知404、no-store/nosniff，不依赖SPA兜底。三个导出路由必须与新前端同步；旧后端没有这些POST路由时可能由GET兜底产生405，刷新前端不能补齐后端。视觉HEAD 404仍表示未部署资源，不把它转换成导出失败。
+
+`system/local_fonts.py`抽取既有字体路径/MIME校验供在线路由和导出复用；在线行为保留，导出额外拒绝reparse。用户已有审批/History/WS协议及System拓扑保持不变。当前仅完成源码/差异审阅，未运行校验、构建或应用，人工验收见任务文件。
+
 ## MessageRouter
 
 ### `gateway/message_router.py`

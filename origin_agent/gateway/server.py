@@ -57,8 +57,6 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
     AGENTSPACE_SSE_HEARTBEAT_SECONDS,
     LOCAL_FONT_HTTP_PREFIX,
-    LOCAL_FONT_MAX_BYTES,
-    LOCAL_FONT_ALLOWED_EXTENSIONS,
     LOCAL_FONT_MIME_TYPES,
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
     SESSION_HISTORY_PAGE_MAX_LIMIT,
@@ -884,6 +882,156 @@ async def _delete_session_impl(session_id: str):
 
     logger.info("Delete session ok | session=%s", session_id)
     return {"deleted": True, "session_id": session_id}
+
+
+ExportHTTPResultT = TypeVar("ExportHTTPResultT")
+
+
+async def _run_export_http(req: Request, factory: Callable[[], Coroutine[Any, Any, ExportHTTPResultT]], name: str) -> ExportHTTPResultT:
+    """HTTP 断开取消等待方，实际业务和线程收尾继续由 Gateway Owner 持有。"""
+    from entity.constant import SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
+    gateway = _gateway()
+    work = asyncio.create_task(gateway.task_owner.run_request(
+        factory, name=name, admission=gateway.admission.admit_business,
+        cancel_timeout=SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS,
+    ))
+    async def watch_disconnect() -> None:
+        while not await req.is_disconnected():
+            await asyncio.sleep(0.25)
+    disconnected = asyncio.create_task(watch_disconnect())
+    try:
+        done, _ = await asyncio.wait({work, disconnected}, return_when=asyncio.FIRST_COMPLETED)
+        if work in done:
+            return await work
+        await disconnected
+        work.cancel()
+        try:
+            await work
+        except asyncio.CancelledError:
+            pass
+        raise HTTPException(status_code=499, detail={"code": "export_cancelled", "message": "Export client disconnected"})
+    finally:
+        if not disconnected.done():
+            disconnected.cancel()
+        try:
+            await disconnected
+        except asyncio.CancelledError:
+            pass
+        if not work.done():
+            work.cancel()
+            try:
+                await work
+            except asyncio.CancelledError:
+                pass
+
+
+@router.post("/api/sessions/{session_id}/export/snapshot")
+async def capture_session_export(session_id: str, req: Request):
+    """一次性只读捕获完整主会话，避免复用前端已加载页。"""
+    from entry.session_export import SessionExportError
+    from system.lifecycle import ApplicationStoppingError
+    from entity.constant import SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
+    gateway = _gateway()
+
+    async def capture_response() -> Response:
+        snapshot = await gateway.session_exports.capture(session_id)
+        content = await gateway.session_exports.encode_snapshot(snapshot)
+        return Response(content, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+    try:
+        return await _run_export_http(req, capture_response, f"session-export-snapshot:{session_id}")
+    except SessionExportError as error:
+        raise HTTPException(status_code=error.status, detail={"code": error.code, "message": str(error)}) from error
+    except ApplicationStoppingError as error:
+        raise HTTPException(status_code=503, detail={"code": "application_stopping", "message": "Application is stopping"}) from error
+
+
+async def _read_export_body(request: Request, maximum: int) -> bytes:
+    from entity.constant import SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
+    _admit_business_http()
+    pieces: list[bytes] = []
+    size = 0
+    try:
+        async with asyncio.timeout(SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS):
+            async for piece in request.stream():
+                size += len(piece)
+                if size > maximum:
+                    raise HTTPException(status_code=413, detail={"code": "export_limit", "message": "Export request body is too large"})
+                pieces.append(piece)
+    except TimeoutError as error:
+        raise HTTPException(status_code=408, detail={"code": "export_timeout", "message": "Export request body timed out"}) from error
+    return b"".join(pieces)
+
+
+@router.post("/api/sessions/{session_id}/export/resource")
+async def read_session_export_resource(session_id: str, req: Request):
+    from entity.puretype import SessionExportResourceRequest, SessionExportResourceIssue
+    from entity.constant import (
+        SESSION_EXPORT_RESOURCE_BODY_MAX_BYTES, SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS,
+        SESSION_EXPORT_DIGEST_HEADER, SESSION_EXPORT_IDENTITY_HEADER,
+    )
+    from entry.session_export import SessionExportError
+    from system.lifecycle import ApplicationStoppingError
+    body = await _read_export_body(req, SESSION_EXPORT_RESOURCE_BODY_MAX_BYTES)
+    try:
+        payload = SessionExportResourceRequest.model_validate_json(body)
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail={"code": "invalid_export_request", "message": "Invalid export resource request"}) from error
+    gateway = _gateway()
+    try:
+        result = await _run_export_http(req, lambda: gateway.session_exports.read_resource(session_id, payload), f"session-export-resource:{session_id}")
+    except SessionExportError as error:
+        raise HTTPException(status_code=error.status, detail={"code": error.code, "message": str(error)}) from error
+    except ApplicationStoppingError as error:
+        raise HTTPException(status_code=503, detail={"code": "application_stopping", "message": "Application is stopping"}) from error
+    if result.status != "saved":
+        status_code = {"missing": 404, "denied": 403, "too_large": 413}[result.status]
+        issue = SessionExportResourceIssue(
+            code=result.code, source=result.proof.source, proof=result.proof,
+        )
+        return JSONResponse({"detail": issue.model_dump(mode="json")}, status_code=status_code, headers={"Cache-Control": "no-store"})
+    return Response(result.content, media_type=result.mime_type, headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        SESSION_EXPORT_DIGEST_HEADER: result.proof.digest,
+        SESSION_EXPORT_IDENTITY_HEADER: result.proof.identity,
+    })
+
+
+@router.post("/api/sessions/{session_id}/export/verify")
+async def verify_session_export(session_id: str, req: Request):
+    from entity.puretype import SessionExportVerifyRequest
+    from entity.constant import SESSION_EXPORT_VERIFY_BODY_MAX_BYTES, SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
+    from entry.session_export import SessionExportError
+    from system.lifecycle import ApplicationStoppingError
+    body = await _read_export_body(req, SESSION_EXPORT_VERIFY_BODY_MAX_BYTES)
+    try:
+        payload = SessionExportVerifyRequest.model_validate_json(body)
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail={"code": "invalid_export_request", "message": "Invalid export verification request"}) from error
+    gateway = _gateway()
+    try:
+        result = await _run_export_http(req, lambda: gateway.session_exports.verify(session_id, payload), f"session-export-verify:{session_id}")
+        return JSONResponse(result.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
+    except SessionExportError as error:
+        raise HTTPException(status_code=error.status, detail={"code": error.code, "message": str(error)}) from error
+    except ApplicationStoppingError as error:
+        raise HTTPException(status_code=503, detail={"code": "application_stopping", "message": "Application is stopping"}) from error
+
+
+@router.get("/api/session-export/viewer/{asset_name}")
+async def get_session_export_viewer(asset_name: str):
+    from entity.constant import SESSION_EXPORT_VIEWER_ASSETS, SESSION_EXPORT_VIEWER_MAX_BYTES
+    _admit_business_http()
+    if asset_name not in SESSION_EXPORT_VIEWER_ASSETS:
+        raise HTTPException(status_code=404, detail="Unknown offline viewer asset")
+    path = _FRONTEND_DIST / "export" / asset_name
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Offline viewer is not built")
+    if path.stat().st_size > SESSION_EXPORT_VIEWER_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Offline viewer exceeds byte budget")
+    return FileResponse(str(path), media_type="text/javascript" if asset_name.endswith(".js") else "text/css", headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.get("/api/sessions/{session_id}/history/skeleton")
@@ -1922,35 +2070,13 @@ async def serve_local_font(font_path: str):
     - 拒绝 .. 路径遍历
     - 响应头：Cache-Control: no-cache + Access-Control-Allow-Origin: *
     """
-    from pathlib import Path
+    from system.local_fonts import resolve_local_font, LocalFontAccessError
 
-    # 路径遍历防护
-    raw_path = font_path
-    if ".." in raw_path:
-        return HTMLResponse("Path traversal not allowed", status_code=403)
-
-    font_file = Path(raw_path).resolve()
-
-    # 扩展名白名单检查
+    try:
+        font_file = resolve_local_font(font_path)
+    except LocalFontAccessError as error:
+        return HTMLResponse(str(error), status_code=error.status)
     ext = font_file.suffix.lower()
-    if ext not in LOCAL_FONT_ALLOWED_EXTENSIONS:
-        return HTMLResponse(
-            f"Font type '{ext}' not allowed. Allowed: {', '.join(LOCAL_FONT_ALLOWED_EXTENSIONS)}",
-            status_code=404,
-        )
-
-    # 存在性与普通文件检查
-    if not font_file.exists() or not font_file.is_file():
-        return HTMLResponse("Font file not found", status_code=404)
-
-    # 大小限制
-    file_size = font_file.stat().st_size
-    if file_size > LOCAL_FONT_MAX_BYTES:
-        return HTMLResponse(
-            f"Font file exceeds {LOCAL_FONT_MAX_BYTES} byte limit",
-            status_code=403,
-        )
-
     media_type = LOCAL_FONT_MIME_TYPES.get(ext, "application/octet-stream")
     font_headers = {
         **_NO_CACHE,
