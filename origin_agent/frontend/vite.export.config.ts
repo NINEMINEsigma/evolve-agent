@@ -14,6 +14,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  // 依赖中仍可能存在 Node 风格的 process.env 访问；离线 viewer 运行在浏览器中，
+  // 构建时将其固定为生产环境，避免生成的 IIFE 依赖 Node 全局对象。
+  define: {
+    process: JSON.stringify({ env: { NODE_ENV: "production" } }),
+  },
   build: {
     outDir: "dist/export",
     emptyOutDir: false,

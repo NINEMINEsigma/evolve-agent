@@ -319,7 +319,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 资源只读内联媒体及允许的同源文件/字体；跨源URL不代理抓取、不保留自动回源。CSS/HTML/经典脚本依赖只在明确支持范围内收集，不执行用户脚本发现依赖。chat style即使在线暂停也收集，离线初始开关继承导出偏好；stage重新运行，不承诺恢复内存状态，模块、Worker、远程API和未知动态加载明确提示。
 
-`offline/` 是独立阅读器入口，复用消息内容组件和公开样式选择器契约，不导入App/Router/聊天运行时store/Monaco。独立Vite构建输出固定viewer.js/css，由专用只读路由提供，打包为自包含index.html、manifest.json和README.txt。解压后双击打开，不依赖本地HTTP服务、CDN或原Gateway。普通历史逐批挂载至全量，工具/思考/扩展可展开，原HTML保留纯源码查看；受支持舞台脚本仅在不给allow-same-origin的隔离frame执行。CSP与能力限制阻断正常网络加载，不宣称任意恶意代码的完整安全沙盒。
+`offline/` 是独立阅读器入口，复用消息内容组件和公开样式选择器契约，不导入App/Router/聊天运行时store/Monaco。独立Vite构建输出固定viewer.js/css，由专用只读路由提供，构建时把依赖中的 Node 风格 `process.env` 访问固定为浏览器可用的生产环境；归档页另提供最小兼容对象，保证 `file://` 双击时阅读器不会停留在初始占位文字。打包为自包含index.html、manifest.json和README.txt。解压后双击打开，不依赖本地HTTP服务、CDN或原Gateway。普通历史逐批挂载至全量，工具/思考/扩展可展开，原HTML保留纯源码查看；受支持舞台脚本仅在不给allow-same-origin的隔离frame执行。CSP与能力限制阻断正常网络加载，不宣称任意恶意代码的完整安全沙盒。
 
 整体预算包括64MiB原History、96MiB捕获响应、20,000消息/40,000行、32MiB单资源、128MiB资源总计、1,024资源/16层依赖、192MiB归档输入；资源级超限明确占位，整体超限拒绝。单请求30秒、全导出180秒；客户端取消覆盖资源请求、队列、ZIP worker与Blob URL。源码已完成接入与定向静态审阅，尚未由开发助手AI运行构建、类型检查或离线验收。
 

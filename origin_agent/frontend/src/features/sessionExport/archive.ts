@@ -53,9 +53,12 @@ export async function buildOfflineDocument({ data, signal }: OfflineDocumentInpu
   if (!js.response.ok || !css.response.ok) throw new Error("Offline viewer build is unavailable");
   if (js.bytes.byteLength + css.bytes.byteLength > EXPORT_LIMITS.viewerBytes) throw new Error("Viewer byte limit exceeded");
   const stylesheet = new TextDecoder("utf-8", { fatal: true }).decode(css.bytes).replace(/<\/style/gi, "<\\/style");
-  const bundle = bytesToBase64(js.bytes);
-  const bootstrap = `(function(){var raw=atob(${JSON.stringify(bundle)}),bytes=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);var url=URL.createObjectURL(new Blob([bytes],{type:'text/javascript'}));var script=document.createElement('script');script.src=url;script.onload=function(){URL.revokeObjectURL(url)};script.onerror=function(){URL.revokeObjectURL(url);document.getElementById('root').textContent='Offline viewer failed to load'};document.body.appendChild(script)})();`;
-  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeText(EXPORT_CSP)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeText(data.snapshot.title || data.snapshot.session_id)}</title><style>${stylesheet}</style></head><body><div id="root">${escapeText(exportLabels.offline)}</div><script type="application/json" id="${EXPORT_DATA_ID}">${serializeExportData(data)}</script><script>${bootstrap}</script></body></html>`;
+  // 直接内嵌 IIFE，避免 file:// 页面加载 Blob URL 时被浏览器/CSP 拦截。
+  // 部分离线阅读器依赖仍读取 Node 风格的 process.env.NODE_ENV；导出页提供最小浏览器兼容对象，
+  // 避免运行到该依赖时因 process 未定义而停留在初始占位文字。
+  // 仅转义结束标签，不改动 JavaScript 源码本身；数据仍通过独立 JSON script 节点读取。
+  const viewerScript = `var process={env:{NODE_ENV:"production"}};\n${new TextDecoder("utf-8", { fatal: true }).decode(js.bytes).replace(/<\/script/gi, "<\\/script")}`;
+  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeText(EXPORT_CSP)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeText(data.snapshot.title || data.snapshot.session_id)}</title><style>${stylesheet}</style></head><body><div id="root">${escapeText(exportLabels.offline)}</div><script type="application/json" id="${EXPORT_DATA_ID}">${serializeExportData(data)}</script><script>${viewerScript}</script></body></html>`;
   if (signal.aborted) throw signal.reason;
   const max = Math.min(EXPORT_LIMITS.archiveInputBytes, data.snapshot.limits.max_archive_input_bytes);
   if (new TextEncoder().encode(html).byteLength > max) throw new Error("Offline HTML byte limit exceeded");
