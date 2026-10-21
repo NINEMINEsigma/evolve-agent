@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+from interface.tool_registry import IToolRegistry
+
 import importlib.util
 import logging
 import sys
@@ -164,9 +167,8 @@ def collect_skill_prompts(skills_dir: Path | None = None) -> list[str]:
 
         if skills_dir is None:
             from system.application import Application
-            from system.sandbox import Sandbox
             from entity.constant import Namespace
-            skills_dir = Application.current().get_system(Sandbox).get_base(Namespace.SKILLS)
+            skills_dir = Application.current().get_system(ISandbox).get_base(Namespace.SKILLS)
 
         skills: list[dict] = list_skills(skills_dir=Path(skills_dir))
         if skills:
@@ -218,9 +220,8 @@ def build_toolset_catalog_block(
     只包含当前 Loop 至少有一个可见且可用成员的工具集。
     每个工具集一行：名称 [loaded/not loaded]、工具名列表、简短描述。
     """
-    from abstract.tools.registry import ToolRegistry
     from system.application import Application
-    tool_registry = Application.current().get_system(ToolRegistry)
+    tool_registry = Application.current().get_system(IToolRegistry)
     catalog = tool_registry.get_toolset_catalog(scope, loaded_toolsets)
     if not catalog:
         return ""

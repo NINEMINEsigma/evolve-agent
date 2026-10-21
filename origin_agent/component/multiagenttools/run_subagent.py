@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from interface.llm_profile_store import ILLMProfileStore
+from interface.sandbox import ISandbox
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+
 from pathlib import Path
 from typing import Any
 
@@ -49,9 +53,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error("'message_type' must be 'direct' or 'overheard'")
 
     app = Application.current()
-    from system.sandbox import Sandbox
-    from system.llm_profile_store import LLMProfileStore
-    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
+    resolver = CharacterProfileResolver(app.get_system(ISandbox), app.get_system(ILLMProfileStore))
     try:
         profile = resolver.require(name)
     except CharacterProfileError as exc:
@@ -62,7 +64,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         if Path(history_path.split(":", 1)[-1]).suffix.lower() != ".es":
             return tool_error("history_path must point to an easysave .es history file")
         try:
-            resolved = app.get_system(Sandbox).resolve_read(history_path)
+            resolved = app.get_system(ISandbox).resolve_read(history_path)
         except Exception as exc:
             return tool_error(f"Invalid history_path: {exc}")
         if not resolved.real.exists() or not resolved.real.is_file():
@@ -70,8 +72,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         resolved_history_path = str(resolved.real)
 
     try:
-        from subagent.orchestrator import SubAgentOrchestrator
-        orch = app.get_system(SubAgentOrchestrator)
+        orch = app.get_system(ISubAgentOrchestrator)
         result = await orch.launch(
             parent_session_id=parent_session_id,
             name=name,

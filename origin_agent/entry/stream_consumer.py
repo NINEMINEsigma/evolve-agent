@@ -23,7 +23,7 @@ from entity.constant import (
 )
 
 if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class StreamConsumer:
     def __init__(
         self,
         llm: BaseLLMClient | None,
-        sink: AgentSink,
+        sink: IAgentSink,
         character_name: str,
         cancel_event: asyncio.Event,
     ) -> None:

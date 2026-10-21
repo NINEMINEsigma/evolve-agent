@@ -2,7 +2,7 @@
 
 from abstract.tools.tool import ToolExecution
 from entity.puretype import SessionFileChangeActor, SessionFileChangeOperation
-from system.agentspace import AgentspaceService
+from interface.agentspace_service import IAgentspaceService
 
 
 class FileChangeRecorder:
@@ -14,7 +14,7 @@ class FileChangeRecorder:
             session_id=context.session_id,
             character_name=context.character_name or context.loop.current_character_agent,
         )
-        self._store = context.app.get_system(AgentspaceService).file_changes
+        self._store = context.app.get_system(IAgentspaceService).file_changes
 
     def is_cancelled(self) -> bool:
         return self._execution.cancel_requested or self._execution.context.is_interrupted

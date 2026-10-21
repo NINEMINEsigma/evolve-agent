@@ -11,6 +11,15 @@
 # TODO: 大量在Messages格式化解构中没有对齐类型的问题
 from __future__ import annotations
 
+from interface.agentspace_service import IAgentspaceService
+from interface.llm_profile_store import ILLMProfileStore
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+from interface.tool_registry import IToolRegistry
+
 import asyncio
 import json
 import logging
@@ -47,7 +56,7 @@ from entity.messages import (
     ToolCall as HistoryToolCall,
 )
 from entry.base_agent_loop import BasePrivateChatAgentLoop, IMainSessionLoop, ToolContext
-from entry.agent_sink import AgentSink, FrontendSink
+from interface.agent_sink import IAgentSink
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
@@ -76,7 +85,6 @@ from entry.stream_history_link import emit_history_links, emit_stream_history_li
 from entry.session_message_queue import SessionMessageQueue, activity_source_for_items
 
 if TYPE_CHECKING:
-    from gateway.session_manager import SessionManager
     from system.application import Application
     from system.context import RuntimeContext
     from entry.tool_post_dispatch import ResultFieldInjector
@@ -109,11 +117,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self,
         app: Application,
         session_id: str,
-        frontend_sink: FrontendSink,
+        frontend_sink: IAgentSink,
         history_store_dir: Path | None = None,
     ) -> None:
         super().__init__(app, session_id)
-        self._frontend_sink: FrontendSink = frontend_sink
+        self._frontend_sink: IAgentSink = frontend_sink
 
         self._session_store = (
             SessionStore(history_store_dir)
@@ -125,13 +133,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if self._session_store is not None:
             restored_name = self._session_store.read_active_profile_name(session_id)
             if restored_name is not None:
-                from system.llm_profile_store import LLMProfileStore
-                restored_profile = app.get_system(LLMProfileStore).resolve_profile_name(restored_name)
+                restored_profile = app.get_system(ILLMProfileStore).resolve_profile_name(restored_name)
                 if restored_profile is not None:
-                    from system.runtime import RuntimeSystem
                     self._llm = create_llm_client(
                         restored_profile.llm_client_name,
-                        self.app.get_system(RuntimeSystem).context,
+                        self.app.get_system(IRuntimeSystem).context,
                         restored_profile,
                     )
                     self._active_llm_profile = restored_profile
@@ -174,8 +180,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     @property
     def current_character_agent(self) -> str:
-        from system.runtime import RuntimeSystem
-        return self.app.get_system(RuntimeSystem).main_agent_character_name
+        return self.app.get_system(IRuntimeSystem).main_agent_character_name
 
     @property
     def user_character_name(self) -> str:
@@ -185,10 +190,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._llm
 
     def _get_context(self) -> RuntimeContext:
-        from system.runtime import RuntimeSystem
-        return self.app.get_system(RuntimeSystem).context
+        return self.app.get_system(IRuntimeSystem).context
 
-    def get_sink(self) -> AgentSink:
+    def get_sink(self) -> IAgentSink:
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
@@ -215,16 +219,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
-        from system.runtime import RuntimeSystem
-        from system.sandbox import Sandbox
         prompts = build_agent_system_prompt(
-            self.app.get_system(RuntimeSystem).context,
+            self.app.get_system(IRuntimeSystem).context,
             self._collect_skill_prompts(),
             profile=self._active_llm_profile,
             session_id=self.session_id,
             loaded_toolsets=self._loaded_toolsets,
         )
-        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             prompts.append(dynamic_spaces_block)
         site_block = build_session_site_block(self.session_id, owner="self")
@@ -450,8 +452,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
         try:
             while turn.value < _MAX_TOOL_TURNS:
-                from system.runtime import RuntimeSystem
-                if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                if self.app.get_system(IRuntimeSystem).state is not ApplicationState.RUNNING:
                     return ""
                 if self._cancel_event.is_set():
                     # 取消事件检查点：只写一次系统状态并结束当前工具循环。
@@ -603,10 +604,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 )
 
                 # 在 assistant History 提交前截断批次；丢弃项不进入审批或配对。
-                from abstract.tools.registry import ToolRegistry
                 from entry.tool_execution import accept_tool_batch
                 resp = await accept_tool_batch(
-                    resp, self.app.get_system(ToolRegistry), self._frontend_sink, sid, stream_id,
+                    resp, self.app.get_system(IToolRegistry), self._frontend_sink, sid, stream_id,
                 )
 
                 # 存储 assistant 消息（含已接受 tool_calls）
@@ -871,8 +871,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 )
                 self._event_loop = asyncio.get_running_loop()
                 try:
-                    from system.runtime import RuntimeSystem
-                    if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                    if self.app.get_system(IRuntimeSystem).state is not ApplicationState.RUNNING:
                         return None
                     sid = self.session_id
                     queue = self._message_queue
@@ -900,10 +899,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     self._cancel_event.clear()
                     self._disgust_event.clear()
                     await self._commit_input_deliveries(items)
-                    from system.runtime import RuntimeSystem
                     should_run = (
                         not rotated and not interrupted
-                        and self.app.get_system(RuntimeSystem).state is ApplicationState.RUNNING
+                        and self.app.get_system(IRuntimeSystem).state is ApplicationState.RUNNING
                     )
                     # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置。
                     selected_name = next(
@@ -918,8 +916,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         should_run = False
                     if should_run and selected_name is not None:
                         try:
-                            from system.llm_profile_store import LLMProfileStore
-                            profile = self.app.get_system(LLMProfileStore).resolve_profile_name(
+                            profile = self.app.get_system(ILLMProfileStore).resolve_profile_name(
                                 selected_name,
                             )
                             self.set_profile(profile)
@@ -1041,10 +1038,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if profile is None:
             client = None
         else:
-            from system.runtime import RuntimeSystem
             client = create_llm_client(
                 profile.llm_client_name,
-                self.app.get_system(RuntimeSystem).context,
+                self.app.get_system(IRuntimeSystem).context,
                 profile,
             )
         self._llm = client

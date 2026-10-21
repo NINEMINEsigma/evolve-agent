@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from interface.agentspace_service import IAgentspaceService
+from interface.session_manager import ISessionManager
+
 from typing import TYPE_CHECKING, Any
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error
@@ -14,17 +17,15 @@ if TYPE_CHECKING:
 
 
 def _handle_read_session_variables(args: dict[str, Any], context: "ToolContext | None" = None) -> dict[str, Any]:
-    from gateway.session_manager import SessionManager
-    from system.agentspace import AgentspaceService
     from system.session_variables import SessionVariableError
 
     if context is None or not context.resource_session_id:
         return tool_error("A current main session context is required", code="invalid_context")
     session_id = context.resource_session_id
-    manager = context.app.get_system(SessionManager)
+    manager = context.app.get_system(ISessionManager)
     if not manager.exists(session_id) or manager.is_session_deleting(session_id):
         return tool_error("Session not found", code="session_not_found")
-    service = context.app.get_system(AgentspaceService).session_variables
+    service = context.app.get_system(IAgentspaceService).session_variables
     try:
         result = service.read_pool(
             session_id, register_access=lambda path: context.agentspace_access([(path, False)])

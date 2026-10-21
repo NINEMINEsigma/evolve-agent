@@ -16,6 +16,10 @@
 
 from __future__ import annotations
 
+from interface.llm_profile_store import ILLMProfileStore
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.sandbox import ISandbox
+
 import json
 import logging
 import sys
@@ -150,11 +154,9 @@ def build_subagent_catalog_block() -> str:
 
     try:
         from system.application import Application
-        from system.sandbox import Sandbox
-        from system.llm_profile_store import LLMProfileStore
 
         app = Application.current()
-        resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
+        resolver = CharacterProfileResolver(app.get_system(ISandbox), app.get_system(ILLMProfileStore))
         profiles = resolver.discover()
     except Exception:
         logger.warning("Failed to build sub-agent catalog prompt", exc_info=True)
@@ -305,10 +307,9 @@ def build_system_prompt(
     # 3b. 多模态能力与转发配置 — 有活跃 profile 时注入（只读探测缓存，不触发探测）
     if profile is not None:
         from system.application import Application
-        from system.modality_capability import ModalityCapabilitySystem
         modality_block: str = (
             Application.current()
-            .get_system(ModalityCapabilitySystem)
+            .get_system(IModalityCapabilitySystem)
             .build_modality_prompt_block(
                 profile,
                 Path(agentspace) if agentspace else None,

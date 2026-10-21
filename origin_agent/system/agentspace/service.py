@@ -44,8 +44,10 @@ from system.atomic_io import (
     replace_atomic,
 )
 from system.lifecycle import LifecycleFailure
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox, SandboxError
+from interface.agentspace_service import IAgentspaceService
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from system.sandbox import SandboxError
 from system.session_visual_resources import SessionVisualResourceService
 from system.session_variables import SessionVariableService
 from system.session_file_changes import SessionFileChangeStore
@@ -67,11 +69,11 @@ logger = logging.getLogger(__name__)
 _NATURAL_PART = re.compile(r"(\d+)")
 
 
-class AgentspaceService(AsyncSystem):
+class AgentspaceService(IAgentspaceService):
     """Agentspace 编辑器的文件、锁、垃圾桶与实时事件业务服务。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem 与 Sandbox；由 Application
-    在 P22 装配后经 ``app.get_system(AgentspaceService)`` 取得。virtual_awake 取
+    在 P22 装配后经 ``app.get_system(IAgentspaceService)`` 取得。virtual_awake 取
     得 Sandbox/ctx，构造锁、垃圾桶、EventHub、Watcher 及 visual_resources 叶
     服务，然后完成原 start 的绑定/恢复/watcher 启动。watcher 启动失败不再降
     级为成功状态，直接传播（D2）。关闭时 watcher 停止确认退出、EventHub 最终
@@ -79,8 +81,8 @@ class AgentspaceService(AsyncSystem):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, Sandbox))
-        self._sandbox: Sandbox | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
+        self._sandbox: ISandbox | None = None
         self._root: Path | None = None
         self._event_hub: AgentspaceEventHub | None = None
         self._lock_registry: AgentspaceLockRegistry | None = None
@@ -96,8 +98,8 @@ class AgentspaceService(AsyncSystem):
         self._watcher_available = False
 
     async def virtual_awake(self) -> None:
-        runtime = self.get_system(RuntimeSystem)
-        sandbox = self.get_system(Sandbox)
+        runtime = self.get_system(IRuntimeSystem)
+        sandbox = self.get_system(ISandbox)
         ctx = runtime.context
         self._sandbox = sandbox
         self._root = ctx.agentspace.resolve()
@@ -153,7 +155,7 @@ class AgentspaceService(AsyncSystem):
         self._started = True
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> ISandbox:
         if self._sandbox is None:
             raise LifecycleFailure("AgentspaceService has not been awakened")
         return self._sandbox
@@ -703,7 +705,7 @@ class AgentspaceService(AsyncSystem):
     def locks_snapshot(self) -> list[AgentspaceLockInfo]:
         return self.lock_registry.snapshot()
 
-    def subscribe_events(self):
+    def subscribe_events(self) -> tuple[str, asyncio.Queue[AgentspaceEvent]]:
         return self.event_hub.subscribe()
 
     def unsubscribe_events(self, subscription_id: str) -> None:

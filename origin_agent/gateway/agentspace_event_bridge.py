@@ -17,7 +17,8 @@ from entity.puretype import (
     AgentspaceEventKind,
     AgentspaceEventSource,
 )
-from system.agentspace import AgentspaceService
+from interface.agentspace_service import IAgentspaceService
+from interface.gateway_system import IGatewaySystem
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class AgentspaceSendTimeout(TimeoutError):
 
 
 def build_initial_agentspace_events(
-    service: AgentspaceService,
+    service: IAgentspaceService,
 ) -> list[AgentspaceEvent]:
     """构造 SSE 与聊天 WebSocket 共用的 Agentspace 初始状态。"""
     now = datetime.now(timezone.utc).isoformat()
@@ -88,7 +89,7 @@ def coalesce_agentspace_event(
 
 
 async def attach_agentspace_events(
-    service: AgentspaceService,
+    service: IAgentspaceService,
     send_event: Callable[[AgentspaceEvent], Awaitable[None]],
     *,
     connection_label: str,
@@ -113,7 +114,7 @@ async def attach_agentspace_events(
 
 
 async def detach_agentspace_events(
-    service: AgentspaceService,
+    service: IAgentspaceService,
     subscription_id: str | None,
     task: asyncio.Task[None] | None,
 ) -> None:
@@ -124,12 +125,11 @@ async def detach_agentspace_events(
     应用关闭阶段 Owner 已在收尾时，任务由 cancel_and_wait 统一处理。
     """
     if task is not None:
-        from gateway.system import GatewaySystem
         from system.application import Application
         from system.lifecycle import LifecycleFailure
 
         try:
-            owner = Application.current().get_system(GatewaySystem).task_owner
+            owner = Application.current().get_system(IGatewaySystem).task_owner
         except Exception:
             owner = None
 

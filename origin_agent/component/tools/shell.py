@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from interface.shell_manager import IShellManager
+
 from typing import TYPE_CHECKING, Any
 
 from abstract.tools.tool import (
@@ -45,7 +47,7 @@ async def _handle_start_shell(
         if context is not None and cwd.startswith("ws:"):
             with context.agentspace_access([(cwd, True)]):
                 pass
-        info, output, namespace_env = await context.app.get_system(ShellManager).start_shell(
+        info, output, namespace_env = await context.app.get_system(IShellManager).start_shell(
             owner_session_id,
             character_name,
             shell_type,
@@ -85,7 +87,7 @@ async def _handle_read_shell(
         return tool_error("offset, limit, and timeout must be numeric", shell_id=shell_id)
     try:
         owner_session_id, character_name = _context_identity(context)
-        output = await context.app.get_system(ShellManager).read_shell(
+        output = await context.app.get_system(IShellManager).read_shell(
             owner_session_id,
             character_name,
             shell_id,
@@ -113,7 +115,7 @@ async def _handle_write_shell(
         return tool_error("text must be a string", shell_id=shell_id)
     try:
         owner_session_id, character_name = _context_identity(context)
-        output = await context.app.get_system(ShellManager).write_shell(
+        output = await context.app.get_system(IShellManager).write_shell(
             owner_session_id,
             character_name,
             shell_id,
@@ -136,7 +138,7 @@ async def _handle_interrupt_shell(
     shell_id = str(args.get("shell_id", "")).strip()
     try:
         owner_session_id, character_name = _context_identity(context)
-        output = await context.app.get_system(ShellManager).interrupt_shell(
+        output = await context.app.get_system(IShellManager).interrupt_shell(
             owner_session_id,
             character_name,
             shell_id,
@@ -158,7 +160,7 @@ async def _handle_stop_shell(
     shell_id = str(args.get("shell_id", "")).strip()
     try:
         owner_session_id, character_name = _context_identity(context)
-        info = await context.app.get_system(ShellManager).stop_shell(
+        info = await context.app.get_system(IShellManager).stop_shell(
             owner_session_id,
             character_name,
             shell_id,

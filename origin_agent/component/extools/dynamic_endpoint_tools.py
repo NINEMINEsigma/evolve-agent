@@ -30,6 +30,9 @@ block 数组严格校验，任一 block 不合法返回 400 并指明 block 索�
 
 from __future__ import annotations
 
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.runtime_system import IRuntimeSystem
+
 import logging
 from typing import Any
 
@@ -54,7 +57,7 @@ logger = logging.getLogger(__name__)
 # ── System适配入口 ─────────────────────────────────────────
 
 def _endpoint_system() -> DynamicEndpointSystem:
-    return Application.current().get_system(DynamicEndpointSystem)
+    return Application.current().get_system(IDynamicEndpointSystem)
 
 
 def lookup_endpoint(endpoint_name: str) -> DynamicEndpointInfo | None:
@@ -128,8 +131,7 @@ async def _handle_register_dynamic_endpoint(
     url: str = f"/dynamic/{session_id}/{agent_name}/{info.name}"
 
     from system.application import Application
-    from system.runtime import RuntimeSystem
-    ctx = Application.current().get_system(RuntimeSystem).context
+    ctx = Application.current().get_system(IRuntimeSystem).context
     absolute_url: str = f"http://{ctx.gateway_host}:{ctx.gateway_port}{url}"
 
     logger.info(

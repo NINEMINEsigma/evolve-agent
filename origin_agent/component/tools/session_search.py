@@ -14,9 +14,15 @@
 
 from __future__ import annotations
 
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from system.session_store import SessionStore
 
 from rank_bm25 import BM25Okapi
 
@@ -127,22 +133,15 @@ def _extract_content_with_suffix(msg: CharacterConversationMessage) -> str:
     return text
 
 
-def _get_session_store():
+def _get_session_store() -> SessionStore:
     """通过 Application 单例获取 SessionStore 实例。
 
-    返回 SessionStore 或 None（store_path 未配置时）。
+    SessionStore 由 SessionMetadataService 按接口契约持有并暴露，调用方
+    不重复推导会话存储目录。
     """
     from system.application import Application
-    from system.session_store import SessionStore
 
-    from gateway.session_manager import SessionManager
-    sm = Application.current().get_system(SessionManager)
-    if sm is None:
-        return None
-    store_path = sm._store_path
-    if not store_path:
-        return None
-    return SessionStore(store_path)
+    return Application.current().get_system(ISessionMetadataService).session_store
 
 
 def _extract_preview(text: str, max_len: int = SESSION_SEARCH_PREVIEW_LENGTH) -> str:
@@ -169,8 +168,6 @@ def _handle_read_session(args: dict[str, Any]) -> dict:
         length = SESSION_SEARCH_READ_LENGTH_LIMIT
 
     session_store = _get_session_store()
-    if session_store is None:
-        return tool_error("SessionStore not available")
 
     try:
         history = session_store.read_history(session_id)
@@ -242,11 +239,7 @@ def _handle_recall_session(args: dict[str, Any]) -> dict:
 
     from system.application import Application
 
-    from gateway.session_manager import SessionManager
-    sm = Application.current().get_system(SessionManager)
-    if sm is None:
-        return tool_error("SessionManager not available")
-
+    sm = Application.current().get_system(ISessionManager)
     session_store = _get_session_store()
     all_sessions = sm.get_all()
 
@@ -260,7 +253,7 @@ def _handle_recall_session(args: dict[str, Any]) -> dict:
         sid = info.id
 
         summary_text: str | None = None
-        if include_history and session_store is not None:
+        if include_history:
             try:
                 summary_text = session_store.read_summary(sid)
             except Exception:
@@ -281,8 +274,6 @@ def _handle_recall_session(args: dict[str, Any]) -> dict:
                 "text": hist_text,
             })
 
-        if session_store is None:
-            continue
         try:
             history = session_store.read_history(sid)
         except Exception:

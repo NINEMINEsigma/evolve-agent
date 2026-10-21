@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+
 from typing import Any
 
 from abstract.tools.tool import (
@@ -49,9 +51,7 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
 
     try:
         from system.application import Application
-        from system.application import Application
-        from subagent.orchestrator import SubAgentOrchestrator
-        orch = Application.current().get_system(SubAgentOrchestrator)
+        orch = Application.current().get_system(ISubAgentOrchestrator)
         result = await orch.chat(parent_session_id=parent_session_id, session_id=session_id, message=message, user_name=user_name, message_type=message_type)
         return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:

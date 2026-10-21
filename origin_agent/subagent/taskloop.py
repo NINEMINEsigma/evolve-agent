@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
+from interface.cron_router import ICronRouter
+from interface.runtime_system import IRuntimeSystem
+from interface.tool_registry import IToolRegistry
+
 import json
 import logging
 from typing import * # type: ignore
 
-from abstract.tools.registry import ToolRegistry
 from entity.puretype import LLMResponse, ToolAvailability, ToolDangerLevel
 from entity.constant import USER_CHARACTER_NAME
 from entity.messages import (
@@ -54,7 +57,7 @@ class TaskAgentLoop(SubAgentLoop):
         if name not in self._allowed_tool_names:
             return False
         from system.application import Application
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
         entry = tool_registry.get_tool(name)
         if entry is None:
             return False
@@ -78,15 +81,13 @@ class TaskAgentLoop(SubAgentLoop):
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """taskagent 主循环 — 纯文本回复即终止。"""
         from system.application import Application
-        from component.cron_router import CronRouter
-        _cron = Application.current().get_system(CronRouter)
+        _cron = Application.current().get_system(ICronRouter)
         _cron.register(self.session_id, self)
         active_round_id = self.begin_agentspace_round(self.current_character_agent)
         postprocessing = False
         try:
             # 初始 prompt 也先进入可追踪 Inbox；临时Agent关闭时只做内存交接。
-            from system.runtime import RuntimeSystem
-            _main_name = Application.current().get_system(RuntimeSystem).main_agent_character_name
+            _main_name = Application.current().get_system(IRuntimeSystem).main_agent_character_name
             initial_character_name = (
                 USER_CHARACTER_NAME if message_type == "user_direct"
                 else (self._parent_character_agent or _main_name)
@@ -138,8 +139,7 @@ class TaskAgentLoop(SubAgentLoop):
                     self._emit("assistant", content=resp.content, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
 
-                from abstract.tools.registry import ToolRegistry
-                batch = self.app.get_system(ToolRegistry).plan_tool_batch(resp.tool_calls)
+                batch = self.app.get_system(IToolRegistry).plan_tool_batch(resp.tool_calls)
                 resp = resp.model_copy(update={"tool_calls": batch.accepted})
 
                 # 存储带 tool_calls 的 assistant 消息

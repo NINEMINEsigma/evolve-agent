@@ -25,22 +25,23 @@ from entity.constant import (
 from entity.puretype import CronTaskInfo
 from system.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox
-from system.subprocess_utils import SubprocessRunner
+from interface.cron_router import ICronRouter
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.subprocess_runner import ISubprocessRunner
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import BaseAgentLoop
 
 
-class CronRouter(AsyncSystem):
+class CronRouter(ICronRouter):
     """加载不调度；关闭只冻结运行资源，不删除持久任务。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, Sandbox, SubprocessRunner))
-        self._runtime: RuntimeSystem | None = None
-        self._sandbox: Sandbox | None = None
-        self._runner: SubprocessRunner | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ISandbox, ISubprocessRunner))
+        self._runtime: IRuntimeSystem | None = None
+        self._sandbox: ISandbox | None = None
+        self._runner: ISubprocessRunner | None = None
         self._routes: dict[str, BaseAgentLoop] = {}
         self._tasks: dict[str, dict[str, _CronTask]] = {}
         self._lock = threading.RLock()
@@ -53,25 +54,25 @@ class CronRouter(AsyncSystem):
         self._stop_task: asyncio.Task[None] | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._sandbox = self.get_system(Sandbox)
-        self._runner = self.get_system(SubprocessRunner)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._sandbox = self.get_system(ISandbox)
+        self._runner = self.get_system(ISubprocessRunner)
         self._load_all_tasks()
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("CronRouter has not been awakened")
         return self._runtime
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> ISandbox:
         if self._sandbox is None:
             raise LifecycleFailure("CronRouter has not been awakened")
         return self._sandbox
 
     @property
-    def runner(self) -> SubprocessRunner:
+    def runner(self) -> ISubprocessRunner:
         if self._runner is None:
             raise LifecycleFailure("CronRouter has not been awakened")
         return self._runner

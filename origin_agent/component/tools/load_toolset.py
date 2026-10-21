@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from interface.tool_registry import IToolRegistry
+
 from typing import TYPE_CHECKING, Any
 
 from abstract.tools.registry import ToolRegistry
@@ -20,7 +22,7 @@ def _get_registry():
     """运行期取得唯一 ToolRegistry System 实例。"""
     from system.application import Application
     from abstract.tools.registry import ToolRegistry
-    return Application.current().get_system(ToolRegistry)
+    return Application.current().get_system(IToolRegistry)
 
 
 def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = None) -> dict:

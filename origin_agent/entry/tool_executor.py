@@ -8,6 +8,10 @@ registry 分发、异常转换、前端事件推送和 UI 事件路由。
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.tool_registry import IToolRegistry
+
 import asyncio
 import logging
 import time
@@ -31,7 +35,6 @@ from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, contains_lifecycle_failure,
     requires_lifecycle_propagation,
 )
-from system.runtime import RuntimeSystem
 from entry.tool_pairing import interrupted_tool_result as _interrupted_result
 from collections.abc import Callable
 
@@ -104,7 +107,7 @@ class ToolExecutor:
         self._tool_stats: dict[str, dict[str, int]] = {}
         self._turn_counter: RefWrapper[int] | None = None
         self._cancel_cleanup_tasks: set[asyncio.Future[Any]] = set()
-        self._runtime = loop.loop.app.get_system(RuntimeSystem)
+        self._runtime = loop.loop.app.get_system(IRuntimeSystem)
         self.postprocessor = ToolPostprocessor(loop.loop)
 
     # -- 公开 API ----------------------------------------------------------
@@ -181,10 +184,9 @@ class ToolExecutor:
         from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_LOG_ARGUMENT_CHARS
         from component.approval import execute_with_approval
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
 
         char_name = character_name or self._loop.current_character_agent
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -423,8 +425,7 @@ class ToolExecutor:
                             # 尽力 kill 子进程（run_command / run_python 登记的 Popen）
                             try:
                                 from system.application import Application
-                                from system.sandbox import Sandbox
-                                Application.current().get_system(Sandbox).kill_active(session_id)
+                                Application.current().get_system(ISandbox).kill_active(session_id)
                             except Exception:
                                 logger.warning(
                                     "kill_active failed for session=%s", session_id, exc_info=True,

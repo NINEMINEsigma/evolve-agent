@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from abstract.tools.registry import ToolRegistry
 from entity.puretype import LLMResponse
-from entry.agent_sink import AgentSink
+from interface.agent_sink import IAgentSink
 
 
 async def accept_tool_batch(
     response: LLMResponse,
     registry: ToolRegistry,
-    sink: AgentSink,
+    sink: IAgentSink,
     session_id: str,
     stream_id: str,
 ) -> LLMResponse:

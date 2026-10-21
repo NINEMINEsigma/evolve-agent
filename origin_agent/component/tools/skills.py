@@ -8,6 +8,8 @@ Skill 存储在 ``<project_root>/skills/``（Path.cwd() / "skills"）下。
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import json
 import logging
 from pathlib import Path
@@ -27,9 +29,8 @@ logger = logging.getLogger(__name__)
 def _skills_dir() -> Path:
     """返回规范的 skill 目录（通过 Sandbox 获取）。"""
     from system.application import Application
-    from system.sandbox import Sandbox
     from entity.constant import Namespace
-    return Application.current().get_system(Sandbox).get_base(Namespace.SKILLS)
+    return Application.current().get_system(ISandbox).get_base(Namespace.SKILLS)
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> dict:

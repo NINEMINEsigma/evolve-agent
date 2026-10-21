@@ -9,12 +9,13 @@ CDP 连接断开后浏览器照常运行，下次调用 browser 工具时会自�
 
 from __future__ import annotations
 
+from interface.browser_system import IBrowserSystem
+
 import logging
 from typing import Any
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_result
 from component.browser import _connection
-from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
 from system.application import Application
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _handle_browser_close(args: dict[str, Any]) -> dict:
-    bs = Application.current().get_system(BrowserSystem)
+    bs = Application.current().get_system(IBrowserSystem)
     endpoint: str = bs.current_endpoint()
 
     # 1. 断开 CDP 连接（不关闭有头浏览器），释放 playwright

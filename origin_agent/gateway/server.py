@@ -14,6 +14,20 @@
 
 from __future__ import annotations
 
+from interface.approval_system import IApprovalSystem
+from interface.agentspace_service import IAgentspaceService
+from interface.cron_router import ICronRouter
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.frontend_sink import IFrontendSink
+from interface.gateway_system import IGatewaySystem
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+
 import hashlib
 import json
 import logging
@@ -137,8 +151,6 @@ from entry.history_media import (
     HistoryMediaPreviewError,
     decode_media_preview,
 )
-from component.approval.system import ApprovalSystem
-from entry.agent_sink import FrontendSink
 from system.llm_profile_store import ProfileConflictError, ProfileNotFoundError
 from system.session_metadata import MetadataGenerationError, MetadataProfileUnavailableError
 from system.agentspace import AgentspaceError
@@ -153,17 +165,14 @@ if TYPE_CHECKING:
     from system.application import Application
     from entry.parent_agent_loop import ParentAgentLoop
     from entry.base_agent_loop import IMainSessionLoop
-    from gateway.session_manager import SessionManager
-
-from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_sm() -> SessionManager|None:
+def _get_sm() -> ISessionManager|None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
-    return Application.current().get_system(SessionManager)
+    return Application.current().get_system(ISessionManager)
 
 
 def _get_loop(session_id: str):
@@ -175,22 +184,20 @@ def _get_loop(session_id: str):
 def _get_ws(session_id: str):
     """返回指定 session 的 WebSocket sink。"""
     from system.application import Application
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     return sink.get_ws(session_id)
 
 
 def _agentspace_root() -> Path:
     """文件上传目标目录（ws: 命名空间根）的唯一来源。"""
     from system.application import Application
-    from system.runtime import RuntimeSystem
-    return Application.current().get_system(RuntimeSystem).context.agentspace
+    return Application.current().get_system(IRuntimeSystem).context.agentspace
 
 
 def _gateway():
     """当前唯一 GatewaySystem；路由仅在装配完成后可达。"""
     from system.application import Application
-    from gateway.system import GatewaySystem
-    return Application.current().get_system(GatewaySystem)
+    return Application.current().get_system(IGatewaySystem)
 
 
 def _admit_business_http() -> None:
@@ -295,8 +302,7 @@ def build_router_app() -> FastAPI:
 def _flush_pending_changes() -> str | None:
     """供现有 agentspace_changes_hook 调用，委托给唯一业务服务。"""
     from system.application import Application
-    from system.agentspace import AgentspaceService
-    return Application.current().get_system(AgentspaceService).flush_pending_changes()
+    return Application.current().get_system(IAgentspaceService).flush_pending_changes()
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +430,7 @@ async def update_session_tags(session_id: str, req: Request):
 async def get_session_tool_resources(session_id: str) -> SessionToolResources:
     """返回 session 的可恢复工具副作用资源快照。"""
     from system.application import Application
-    from component.dynamic_endpoints import DynamicEndpointSystem
-    endpoints = Application.current().get_system(DynamicEndpointSystem).list_session_endpoints(session_id)
+    endpoints = Application.current().get_system(IDynamicEndpointSystem).list_session_endpoints(session_id)
     loop = _get_loop(session_id)
     if loop is None:
         return SessionToolResources(
@@ -442,13 +447,12 @@ async def get_session_tool_resources(session_id: str) -> SessionToolResources:
 async def get_session_file_changes_summary(session_id: str, response: Response) -> SessionFileChangesSummary:
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.agentspace import AgentspaceService
 
     _admit_business_http()
     manager = _get_sm()
     if not manager.exists(session_id) or manager.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    store = Application.current().get_system(AgentspaceService).file_changes
+    store = Application.current().get_system(IAgentspaceService).file_changes
     try:
         result = await run_in_threadpool(store.get_summary, session_id)
     except FileNotFoundError as exc:
@@ -469,13 +473,12 @@ async def get_session_file_changes(
 ) -> SessionFileChangesPage:
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.agentspace import AgentspaceService
 
     _admit_business_http()
     manager = _get_sm()
     if not manager.exists(session_id) or manager.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    store = Application.current().get_system(AgentspaceService).file_changes
+    store = Application.current().get_system(IAgentspaceService).file_changes
     try:
         result = await run_in_threadpool(store.get_page, session_id, offset=offset, limit=limit)
     except FileNotFoundError as exc:
@@ -495,7 +498,6 @@ async def get_session_tab_capabilities(
     """Return lightweight content capabilities for session-dependent tabs."""
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.agentspace import AgentspaceService
     from system.session_variables import (
         SessionVariableInputError, SessionVariableAccessError,
         SessionVariableLimitError, SessionVariableConflictError,
@@ -503,8 +505,8 @@ async def get_session_tab_capabilities(
 
     loop = _require_media_loop(session_id, writable=False)
     application = Application.current()
-    manager = application.get_system(SessionManager)
-    service = application.get_system(AgentspaceService).session_variables
+    manager = application.get_system(ISessionManager)
+    service = application.get_system(IAgentspaceService).session_variables
     try:
         variables_available = await run_in_threadpool(
             service.has_visible_content, session_id,
@@ -536,7 +538,6 @@ async def get_session_variables(session_id: str, response: Response) -> SessionV
     """只读会话变量池，不创建 Loop；与 Agent 全量读取复用同一解析服务。"""
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.agentspace import AgentspaceService
     from system.session_variables import (
         SessionVariableInputError, SessionVariableAccessError,
         SessionVariableLimitError, SessionVariableConflictError,
@@ -547,7 +548,7 @@ async def get_session_variables(session_id: str, response: Response) -> SessionV
     if not manager.exists(session_id) or manager.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     response.headers["Cache-Control"] = "no-store"
-    service = Application.current().get_system(AgentspaceService).session_variables
+    service = Application.current().get_system(IAgentspaceService).session_variables
     try:
         result = await run_in_threadpool(service.read_pool, session_id)
     except (SessionVariableInputError, SessionVariableAccessError,
@@ -577,7 +578,7 @@ async def get_session_status(session_id: str, conn_token: str | None = None):
         and sm.exists(session_id)
         and not sm.is_session_deleting(session_id)
     )
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     occupied: bool = bool(
         exists and sink.is_session_occupied(session_id, conn_token)
     )
@@ -591,10 +592,9 @@ async def get_session_status(session_id: str, conn_token: str | None = None):
         managed_loop is not None and managed_loop.loop.is_active()
     )
     from starlette.concurrency import run_in_threadpool
-    from system.agentspace import AgentspaceService
     visual_resources = (
         await run_in_threadpool(
-            Application.current().get_system(AgentspaceService).visual_resources.get_all_states, session_id,
+            Application.current().get_system(IAgentspaceService).visual_resources.get_all_states, session_id,
         ) if exists else None
     )
     return SessionRuntimeStatus(
@@ -612,19 +612,17 @@ async def get_session_llm_profile(session_id: str, response: Response) -> Sessio
     """只读恢复会话保存的名称；不创建 Loop，也不提交浏览器待用选择。"""
     from entity.constant import SESSIONS_DIR_NAME
     from system.application import Application
-    from system.runtime import RuntimeSystem
     from system.session_store import SessionStore
 
     application = Application.current()
-    from system.llm_profile_store import LLMProfileStore
-    profile_store = application.get_system(LLMProfileStore)
-    sm = application.get_system(SessionManager)
+    profile_store = application.get_system(ILLMProfileStore)
+    sm = application.get_system(ISessionManager)
     if sm is None or not sm.exists(session_id) or sm.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     with profile_store.locked():
         if not sm.exists(session_id) or sm.is_session_deleting(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
-        store = SessionStore(application.get_system(RuntimeSystem).context.workspace / SESSIONS_DIR_NAME)
+        store = SessionStore(application.get_system(IRuntimeSystem).context.workspace / SESSIONS_DIR_NAME)
         name = store.read_active_profile_name(session_id)
         available = False
         if name:
@@ -644,12 +642,10 @@ async def get_character_avatars(response: Response) -> CharacterAvatarsResponse:
     """实时组装主Agent与全部子Agent角色的头像映射；不创建 Loop、不依赖会话。"""
     from system.application import Application
     from system.character_avatars import collect_character_avatars
-    from system.runtime import RuntimeSystem
-    from system.sandbox import Sandbox
 
     application = Application.current()
-    sandbox = application.get_system(Sandbox)
-    runtime = application.get_system(RuntimeSystem)
+    sandbox = application.get_system(ISandbox)
+    runtime = application.get_system(IRuntimeSystem)
     response.headers["Cache-Control"] = "no-store"
     return await asyncio.to_thread(collect_character_avatars, sandbox, runtime)
 
@@ -659,12 +655,10 @@ async def get_character_profiles(response: Response) -> CharacterProfilesRespons
     """实时扫描全部子Agent角色档案（含提示词全文与错误），密钥不出模块。"""
     from system.application import Application
     from system.character_profiles import collect_character_profiles
-    from system.llm_profile_store import LLMProfileStore
-    from system.sandbox import Sandbox
 
     application = Application.current()
-    sandbox = application.get_system(Sandbox)
-    profile_store = application.get_system(LLMProfileStore)
+    sandbox = application.get_system(ISandbox)
+    profile_store = application.get_system(ILLMProfileStore)
     response.headers["Cache-Control"] = "no-store"
     return await asyncio.to_thread(collect_character_profiles, sandbox, profile_store)
 
@@ -673,8 +667,7 @@ async def get_character_profiles(response: Response) -> CharacterProfilesRespons
 async def get_session_subagents(session_id: str):
     """返回当前活跃子会话的快照。"""
     from system.application import Application
-    from subagent.orchestrator import SubAgentOrchestrator
-    snapshot = Application.current().get_system(SubAgentOrchestrator).get_snapshot(
+    snapshot = Application.current().get_system(ISubAgentOrchestrator).get_snapshot(
         parent_session_id=session_id,
     )
     return SubAgentSnapshotResponse(
@@ -699,7 +692,7 @@ async def http_confirm(request_id: str, req: Request):
     if action != "deny":
         deny_reason = None
     from system.application import Application
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     sink.resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
     logger.info("HTTP confirm | request_id=%s action=%s denied_by=%s", request_id, action, denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
@@ -714,7 +707,7 @@ async def http_ask(request_id: str, req: Request):
         AskResponseRequest,
     )
     from system.application import Application
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     sink.resolve_ask(request_id, answers=request.answers)
     logger.info("HTTP ask response | request_id=%s answers=%d", request_id, len(request.answers or []))
     return {
@@ -774,7 +767,7 @@ async def http_disgust(session_id: str):
 
 @asynccontextmanager
 async def _file_changes_delete_scope(
-    session_id: str, manager: SessionManager, store: SessionFileChangeStore,
+    session_id: str, manager: ISessionManager, store: SessionFileChangeStore,
 ) -> AsyncIterator[None]:
     # REQUEST 的 Owner 持有本作用域，取消后仍观察真实线程结果。
     block = asyncio.create_task(asyncio.to_thread(store.block_session, session_id))
@@ -857,11 +850,10 @@ async def _delete_session_impl(session_id: str):
         )
 
     logger.info("Delete session | session=%s", session_id)
-    from system.agentspace import AgentspaceService
     try:
-        store = Application.current().get_system(AgentspaceService).file_changes
+        store = Application.current().get_system(IAgentspaceService).file_changes
         async with _file_changes_delete_scope(session_id, sm, store):
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.close_session(
                 session_id,
                 code=WEBSOCKET_CLOSE_SESSION_DELETED,
@@ -869,8 +861,7 @@ async def _delete_session_impl(session_id: str):
             )
 
             # 停止子Agent失败时直接终止删除，不能继续移除仍在使用的会话。
-            from subagent.orchestrator import SubAgentOrchestrator
-            orch = Application.current().get_system(SubAgentOrchestrator)
+            orch = Application.current().get_system(ISubAgentOrchestrator)
             await orch.shutdown(session_id)
 
             await sm.delete_session_runtime(session_id)
@@ -930,7 +921,7 @@ def _require_media_loop(session_id: str, *, writable: bool) -> IMainSessionLoop:
     """控制只访问现存主会话 Loop，绝不恢复空会话或另读活动磁盘副本。"""
     from system.application import Application
     _admit_business_http()
-    manager = Application.current().get_system(SessionManager)
+    manager = Application.current().get_system(ISessionManager)
     if not manager.exists(session_id) or manager.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     info = manager.get(session_id)
@@ -961,7 +952,7 @@ async def get_session_media(
     loop = _require_media_loop(session_id, writable=False)
     response.headers["Cache-Control"] = "no-store"
     from system.application import Application
-    info = Application.current().get_system(SessionManager).get(session_id)
+    info = Application.current().get_system(ISessionManager).get(session_id)
     if info is None:
         raise RuntimeError("Existing session has no metadata")
     return loop.loop.get_session_media(
@@ -1237,9 +1228,8 @@ async def regenerate_response(session_id: str, req: Request):
     message_index = request.message_index
     profile_name = request.llm_profile_name
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
     application = Application.current()
-    profile_store = application.get_system(LLMProfileStore)
+    profile_store = application.get_system(ILLMProfileStore)
     with profile_store.locked():
         try:
             profile = profile_store.resolve_profile_name(profile_name)
@@ -1293,7 +1283,7 @@ async def regenerate_response(session_id: str, req: Request):
         # 释放本次登记，包含取消和通知编码失败，不吞掉原异常。
         loop.loop.finish_main_session_activity(activity_id)
     from system.application import Application
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     if reply:
         await sink.emit_assistant_message(
             session_id, reply, loop.current_character_agent,
@@ -1393,13 +1383,12 @@ async def auto_title_session(session_id: str):
     """使用全局元数据服务生成并保存会话标题。"""
     _admit_business_http()
     from system.application import Application
-    from system.session_metadata import SessionMetadataService
 
     sm = _get_sm()
     if sm is None or not sm.exists(session_id):
         raise HTTPException(status_code=404, detail="session not found")
     try:
-        title = await Application.current().get_system(SessionMetadataService).generate_title(
+        title = await Application.current().get_system(ISessionMetadataService).generate_title(
             session_id
         )
     except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
@@ -1414,13 +1403,12 @@ async def auto_tags_session(session_id: str):
     """使用全局元数据服务生成并保存会话标签。"""
     _admit_business_http()
     from system.application import Application
-    from system.session_metadata import SessionMetadataService
 
     sm = _get_sm()
     if sm is None or not sm.exists(session_id):
         raise HTTPException(status_code=404, detail="session not found")
     try:
-        tags = await Application.current().get_system(SessionMetadataService).generate_tags(
+        tags = await Application.current().get_system(ISessionMetadataService).generate_tags(
             session_id,
             sm.get_all_tags(),
         )
@@ -1437,7 +1425,6 @@ async def regenerate_summary_endpoint(session_id: str):
     _admit_business_http()
     from entity.puretype import Loop
     from system.application import Application
-    from system.session_metadata import SessionMetadataService
 
     sm = _get_sm()
     info = sm.get(session_id) if sm is not None else None
@@ -1451,7 +1438,7 @@ async def regenerate_summary_endpoint(session_id: str):
         )
     logger.info("Regenerate summary | session=%s", session_id)
     try:
-        summary = await Application.current().get_system(SessionMetadataService).regenerate_summary(
+        summary = await Application.current().get_system(ISessionMetadataService).regenerate_summary(
             session_id
         )
     except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
@@ -1475,8 +1462,7 @@ async def terminate_session_endpoint(session_id: str):
     logger.info("Terminate session | session=%s", session_id)
     # 先停止该父会话的所有子 Agent 会话
     from system.application import Application
-    from subagent.orchestrator import SubAgentOrchestrator
-    orch = Application.current().get_system(SubAgentOrchestrator)
+    orch = Application.current().get_system(ISubAgentOrchestrator)
     await orch.shutdown(session_id)
     loop = _get_loop(session_id)
     if loop is not None:
@@ -1545,9 +1531,8 @@ async def branch_session_endpoint(session_id: str):
 async def list_shells_endpoint(session_id: str):
     """列出指定主会话的全部 Shell会话元数据。"""
     from system.application import Application
-    from system.shell_manager import ShellManager
 
-    shells = Application.current().get_system(ShellManager).list_shells(session_id)
+    shells = Application.current().get_system(IShellManager).list_shells(session_id)
     return {"shells": shells}
 
 
@@ -1556,11 +1541,11 @@ async def stop_shell_endpoint(session_id: str, shell_id: str):
     """由前端用户停止指定主会话中的 Shell会话。"""
     _admit_business_http()
     from system.application import Application
-    from system.shell_manager import ShellAccessError, ShellManager
+    from system.shell_manager import ShellAccessError
 
     logger.info("Stop Shell from frontend | session=%s shell=%s", session_id, shell_id)
     try:
-        info = await Application.current().get_system(ShellManager).stop_shell_for_user(
+        info = await Application.current().get_system(IShellManager).stop_shell_for_user(
             session_id, shell_id,
         )
     except ShellAccessError as exc:
@@ -1571,9 +1556,8 @@ async def stop_shell_endpoint(session_id: str, shell_id: str):
 @router.get("/api/sessions/{session_id}/cron-tasks")
 async def list_cron_tasks_endpoint(session_id: str):
     """列出指定会话的所有定时任务。"""
-    from component.cron_router import CronRouter
     from system.application import Application
-    tasks = Application.current().get_system(CronRouter).list_cron_tasks_for_session(session_id)
+    tasks = Application.current().get_system(ICronRouter).list_cron_tasks_for_session(session_id)
     return {"tasks": tasks}
 
 
@@ -1582,9 +1566,8 @@ async def trigger_cron_task_endpoint(session_id: str, task_id: str):
     """立即触发指定的定时任务执行一次。"""
     _admit_business_http()
     logger.info("Trigger cron task | session=%s task_id=%s", session_id, task_id)
-    from component.cron_router import CronRouter
     from system.application import Application
-    result = Application.current().get_system(CronRouter).trigger_cron_task(session_id, task_id)
+    result = Application.current().get_system(ICronRouter).trigger_cron_task(session_id, task_id)
     return result
 
 
@@ -1592,9 +1575,8 @@ async def trigger_cron_task_endpoint(session_id: str, task_id: str):
 async def cancel_cron_task_endpoint(session_id: str, task_id: str):
     """取消指定的定时任务。"""
     logger.info("Cancel cron task | session=%s task_id=%s", session_id, task_id)
-    from component.cron_router import CronRouter
     from system.application import Application
-    result = Application.current().get_system(CronRouter).cancel_cron_task(session_id, task_id)
+    result = Application.current().get_system(ICronRouter).cancel_cron_task(session_id, task_id)
     return result
 
 
@@ -1627,9 +1609,8 @@ async def dynamic_endpoint_handler(
     使用 ``content`` block 数组时，前缀作为独立的首个 text block 注入。
     """
     from system.application import Application
-    from component.dynamic_endpoints import DynamicEndpointSystem
 
-    info = Application.current().get_system(DynamicEndpointSystem).lookup_endpoint(endpoint_name)
+    info = Application.current().get_system(IDynamicEndpointSystem).lookup_endpoint(endpoint_name)
     if info is None:
         return HTMLResponse(
             json.dumps({"error": "endpoint not found", "endpoint_name": endpoint_name}),
@@ -1836,13 +1817,12 @@ async def file_picker():
 def serve_workspace_file(namespace: str, file_path: str, request: Request):
     """在线程池解析视觉入口；最终 HEAD 响应独立校验来源并返回版本。"""
     from system.application import Application
-    from system.agentspace import AgentspaceService
-    from system.sandbox import SandboxError, Sandbox
+    from system.sandbox import SandboxError
     from system.session_visual_resources import SessionVisualResourceError, SessionVisualVersionUnavailable
     from entity.puretype import SessionVisualKind, SessionVisualSource, SessionVisualStatus
 
-    sandbox = Application.current().get_system(Sandbox)
-    service = Application.current().get_system(AgentspaceService).visual_resources
+    sandbox = Application.current().get_system(ISandbox)
+    service = Application.current().get_system(IAgentspaceService).visual_resources
     logical = f"{namespace}:{file_path}"
     raw = request.query_params.get(VISUAL_RAW_PARAM) == VISUAL_QUERY_ENABLED
     probe = request.query_params.get(VISUAL_PROBE_PARAM) == VISUAL_QUERY_ENABLED
@@ -1963,11 +1943,11 @@ async def serve_local_font(font_path: str):
 async def download_workspace_file(namespace: str, file_path: str):
     """提供沙盒命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
     from system.application import Application
-    from system.sandbox import SandboxError, Sandbox
+    from system.sandbox import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
-        sandbox = Application.current().get_system(Sandbox)
+        sandbox = Application.current().get_system(ISandbox)
         resolved = sandbox.resolve_read(logical)
     except SandboxError as exc:
         return HTMLResponse(str(exc), status_code=403)
@@ -2002,15 +1982,14 @@ def download_dir_zip(namespace: str, file_path: str, request: Request):
     import zipfile
 
     from system.application import Application
-    from system.agentspace import AgentspaceService
-    from system.sandbox import SandboxError, Sandbox
+    from system.sandbox import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
-        sandbox = Application.current().get_system(Sandbox)
+        sandbox = Application.current().get_system(ISandbox)
         resolved = sandbox.resolve_read(logical)
         if request.query_params.get(VISUAL_RAW_PARAM) != VISUAL_QUERY_ENABLED:
-            service = Application.current().get_system(AgentspaceService).visual_resources
+            service = Application.current().get_system(IAgentspaceService).visual_resources
             source = service.match_source_directory(logical)
             if source is not None and source.kind == SessionVisualKind.site:
                 state = service.get_state(source.session_id, source.kind)
@@ -2112,19 +2091,17 @@ def _raise_sandbox_space_http(
 @router.get("/api/sandbox-spaces")
 async def list_sandbox_spaces():
     from system.application import Application
-    from system.sandbox import Sandbox
 
-    entries = Application.current().get_system(Sandbox).list_dynamic_spaces_with_availability()
+    entries = Application.current().get_system(ISandbox).list_dynamic_spaces_with_availability()
     return {"spaces": [_sandbox_space_payload(space, available) for space, available in entries]}
 
 
 @router.post("/api/sandbox-spaces")
 async def create_sandbox_space(request: DynamicSandboxSpaceCreateRequest):
     from system.application import Application
-    from system.sandbox import Sandbox
 
     try:
-        space, created = Application.current().get_system(Sandbox).add_dynamic_space(
+        space, created = Application.current().get_system(ISandbox).add_dynamic_space(
             name=request.name,
             path=request.path,
             description=request.description,
@@ -2138,12 +2115,11 @@ async def create_sandbox_space(request: DynamicSandboxSpaceCreateRequest):
 @router.put("/api/sandbox-spaces/{name}")
 async def update_sandbox_space(name: str, request: DynamicSandboxSpaceUpdateRequest):
     from system.application import Application
-    from system.sandbox import Sandbox
 
     if name != request.name:
         raise HTTPException(status_code=400, detail="动态沙盒空间名称不可修改，且必须与路径参数一致")
     try:
-        space = Application.current().get_system(Sandbox).update_dynamic_space(
+        space = Application.current().get_system(ISandbox).update_dynamic_space(
             name,
             path=request.path,
             description=request.description,
@@ -2157,10 +2133,9 @@ async def update_sandbox_space(name: str, request: DynamicSandboxSpaceUpdateRequ
 @router.delete("/api/sandbox-spaces/{name}")
 async def delete_sandbox_space(name: str):
     from system.application import Application
-    from system.sandbox import Sandbox
 
     try:
-        removed = Application.current().get_system(Sandbox).remove_dynamic_space(name)
+        removed = Application.current().get_system(ISandbox).remove_dynamic_space(name)
         return {"removed": removed, "name": name}
     except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
         _raise_sandbox_space_http(exc)
@@ -2224,7 +2199,7 @@ def _missing_profile_connection_fields(profile: LLMProfile) -> list[str]:
 async def get_approval_profile():
     """返回项目级审批 Profile 的权威状态。"""
     from system.application import Application
-    return Application.current().get_system(ApprovalSystem).backend_manager.get_state()
+    return Application.current().get_system(IApprovalSystem).backend_manager.get_state()
 
 
 @router.put("/api/approval/profile")
@@ -2239,9 +2214,8 @@ async def put_approval_profile(request: Request):
     update = await _parse_request_model(req=request, model_type=ApprovalProfileUpdateRequest)
 
     app = Application.current()
-    from system.llm_profile_store import LLMProfileStore
-    store = app.get_system(LLMProfileStore)
-    mgr = app.get_system(ApprovalSystem).backend_manager
+    store = app.get_system(ILLMProfileStore)
+    mgr = app.get_system(IApprovalSystem).backend_manager
 
     with store.locked():
         if update.profile_name is None:
@@ -2273,7 +2247,7 @@ async def put_approval_profile(request: Request):
         mgr.invalidate()
 
     state = mgr.get_state()
-    failures = await app.get_system(FrontendSink).broadcast_approval_profile_change(state)
+    failures = await app.get_system(IFrontendSink).broadcast_approval_profile_change(state)
     return ApprovalProfileMutationResponse(
         state=state,
         notification_failures=failures,
@@ -2298,8 +2272,7 @@ def _modality_profile_state(profile: LLMProfile | None) -> ModalityProfileState:
 
 
 def _get_modality_profile_states(application: Application) -> ModalityProfileStates:
-    from system.llm_profile_store import LLMProfileStore
-    data = application.get_system(LLMProfileStore).get_data()
+    data = application.get_system(ILLMProfileStore).get_data()
     return ModalityProfileStates(
         image=_modality_profile_state(data.global_vision_image_profile),
         audio=_modality_profile_state(data.global_audio_profile),
@@ -2322,10 +2295,9 @@ async def get_modality_profiles():
 async def put_modality_profile(update: ModalityProfileUpdateRequest):
     """设置或清空单种媒体的全局回退 Profile 引用。"""
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
 
     application = Application.current()
-    profile_store = application.get_system(LLMProfileStore)
+    profile_store = application.get_system(ILLMProfileStore)
     try:
         with profile_store.locked():
             profile = (
@@ -2358,7 +2330,7 @@ async def put_modality_profile(update: ModalityProfileUpdateRequest):
     except ProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    failures = await application.get_system(FrontendSink).broadcast_modality_profile_change(states)
+    failures = await application.get_system(IFrontendSink).broadcast_modality_profile_change(states)
     return ModalityProfileMutationResponse(
         state=state,
         notification_failures=failures,
@@ -2374,9 +2346,8 @@ async def put_modality_profile(update: ModalityProfileUpdateRequest):
 async def get_metadata_profile():
     """返回项目级全局元数据 Profile 的权威状态。"""
     from system.application import Application
-    from system.session_metadata import SessionMetadataService
 
-    return Application.current().get_system(SessionMetadataService).get_state()
+    return Application.current().get_system(ISessionMetadataService).get_state()
 
 
 @router.put(
@@ -2388,15 +2359,13 @@ async def put_metadata_profile(
 ):
     """设置或清空项目级全局元数据 Profile 引用。"""
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
     from system.session_metadata import (
         MetadataProfileUnavailableError,
-        SessionMetadataService,
     )
 
     application = Application.current()
-    store = application.get_system(LLMProfileStore)
-    metadata_service = application.get_system(SessionMetadataService)
+    store = application.get_system(ILLMProfileStore)
+    metadata_service = application.get_system(ISessionMetadataService)
     try:
         with store.locked():
             profile = (
@@ -2413,7 +2382,7 @@ async def put_metadata_profile(
     except MetadataProfileUnavailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    failures = await application.get_system(FrontendSink).broadcast_metadata_profile_change(
+    failures = await application.get_system(IFrontendSink).broadcast_metadata_profile_change(
         state
     )
     return MetadataProfileMutationResponse(
@@ -2431,9 +2400,8 @@ async def put_metadata_profile(
 async def get_toolchain_summary_profile():
     """返回项目级工具链摘要 Profile 的权威状态。"""
     from system.application import Application
-    from system.session_metadata import SessionMetadataService
 
-    return Application.current().get_system(SessionMetadataService).get_toolchain_summary_state()
+    return Application.current().get_system(ISessionMetadataService).get_toolchain_summary_state()
 
 
 @router.put(
@@ -2445,15 +2413,13 @@ async def put_toolchain_summary_profile(
 ):
     """设置或清空项目级工具链摘要 Profile 引用。"""
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
     from system.session_metadata import (
         MetadataProfileUnavailableError,
-        SessionMetadataService,
     )
 
     application = Application.current()
-    store = application.get_system(LLMProfileStore)
-    metadata_service = application.get_system(SessionMetadataService)
+    store = application.get_system(ILLMProfileStore)
+    metadata_service = application.get_system(ISessionMetadataService)
     try:
         with store.locked():
             profile = (
@@ -2470,7 +2436,7 @@ async def put_toolchain_summary_profile(
     except MetadataProfileUnavailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+    failures = await application.get_system(IFrontendSink).broadcast_toolchain_summary_profile_change(
         state
     )
     return ToolchainSummaryProfileMutationResponse(
@@ -2486,8 +2452,7 @@ async def put_toolchain_summary_profile(
 
 def _agentspace_service():
     from system.application import Application
-    from system.agentspace import AgentspaceService
-    return Application.current().get_system(AgentspaceService)
+    return Application.current().get_system(IAgentspaceService)
 
 
 def _raise_agentspace_http(exc: AgentspaceError) -> NoReturn:
@@ -2695,10 +2660,9 @@ async def agentspace_events(req: Request):
             for initial_event in build_initial_agentspace_events(service):
                 yield _agentspace_sse(initial_event)
             from system.application import Application
-            from system.runtime import RuntimeSystem
             shutdown_wait = _gateway().task_owner.track(
                 asyncio.create_task(
-                    Application.current().get_system(RuntimeSystem).shutdown_event.wait(),
+                    Application.current().get_system(IRuntimeSystem).shutdown_event.wait(),
                     name="agentspace-sse-shutdown-wait",
                 )
             )
@@ -2751,9 +2715,8 @@ async def skills_list():
     """
     from abstract.skills.loader import list_skills
     from system.application import Application
-    from system.sandbox import Sandbox
     from entity.constant import Namespace
-    skills_dir = Application.current().get_system(Sandbox).get_base(Namespace.SKILLS)
+    skills_dir = Application.current().get_system(ISandbox).get_base(Namespace.SKILLS)
     if not skills_dir.exists():
         return {"skills": [], "total": 0}
     skills = list_skills(skills_dir=skills_dir)
@@ -2781,8 +2744,7 @@ async def list_llm_clients_endpoint():
 async def get_llm_profiles():
     """返回共享 v2 根对象的扁平 Profile 列表。"""
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
-    store = Application.current().get_system(LLMProfileStore)
+    store = Application.current().get_system(ILLMProfileStore)
     return {
         "profiles": [
             store.to_payload(profile)
@@ -2795,10 +2757,9 @@ async def get_llm_profiles():
 async def create_llm_profile(payload: LLMProfilePayload):
     """创建单个 LLM Profile。"""
     from system.application import Application
-    from system.llm_profile_store import LLMProfileStore
 
     application = Application.current()
-    store = application.get_system(LLMProfileStore)
+    store = application.get_system(ILLMProfileStore)
     try:
         with store.locked():
             profile = store.create_profile(payload)
@@ -2815,14 +2776,11 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
     """原地更新单个 LLM Profile，并在重命名后广播名称变更。"""
     from entity.constant import SESSIONS_DIR_NAME
     from system.application import Application
-    from system.runtime import RuntimeSystem
     from system.session_store import SessionStore
 
     application = Application.current()
-    from system.llm_profile_store import LLMProfileStore
-    from system.session_metadata import SessionMetadataService
-    store = application.get_system(LLMProfileStore)
-    metadata_service = application.get_system(SessionMetadataService)
+    store = application.get_system(ILLMProfileStore)
+    metadata_service = application.get_system(ISessionMetadataService)
     old_name = request.profile_name
     try:
         with store.locked():
@@ -2831,12 +2789,12 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                 request.profile,
             )
             # 根配置已提交，后续名称指针写入失败也不能保留旧客户端缓存。
-            mgr = application.get_system(ApprovalSystem).backend_manager
+            mgr = application.get_system(IApprovalSystem).backend_manager
             mgr.invalidate()
             new_name = profile.name
             if new_name != old_name:
                 SessionStore(
-                    application.get_system(RuntimeSystem).context.workspace / SESSIONS_DIR_NAME
+                    application.get_system(IRuntimeSystem).context.workspace / SESSIONS_DIR_NAME
                 ).replace_profile_name_pointers(old_name, new_name)
             response_payload = store.to_payload(profile)
             metadata_state = metadata_service.get_state()
@@ -2844,21 +2802,21 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
             modality_states = _get_modality_profile_states(application)
         failures: list[str] = []
         if new_name != old_name:
-            failures = await application.get_system(FrontendSink).broadcast_profile_change(
+            failures = await application.get_system(IFrontendSink).broadcast_profile_change(
                 "renamed", old_name, new_name,
             )
         # 广播审批 Profile 状态变更
         approval_state = mgr.get_state()
-        approval_failures = await application.get_system(FrontendSink).broadcast_approval_profile_change(
+        approval_failures = await application.get_system(IFrontendSink).broadcast_approval_profile_change(
             approval_state,
         )
-        metadata_failures = await application.get_system(FrontendSink).broadcast_metadata_profile_change(
+        metadata_failures = await application.get_system(IFrontendSink).broadcast_metadata_profile_change(
             metadata_state,
         )
-        toolchain_summary_failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+        toolchain_summary_failures = await application.get_system(IFrontendSink).broadcast_toolchain_summary_profile_change(
             toolchain_summary_state,
         )
-        modality_failures = await application.get_system(FrontendSink).broadcast_modality_profile_change(
+        modality_failures = await application.get_system(IFrontendSink).broadcast_modality_profile_change(
             modality_states,
         )
         return LLMProfileMutationResponse(
@@ -2879,14 +2837,11 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
     """删除 Profile，并只切换当前空闲的受影响主会话。"""
     from entity.constant import SESSIONS_DIR_NAME
     from system.application import Application
-    from system.runtime import RuntimeSystem
     from system.session_store import SessionStore
 
     application = Application.current()
-    from system.llm_profile_store import LLMProfileStore
-    from system.session_metadata import SessionMetadataService
-    store = application.get_system(LLMProfileStore)
-    metadata_service = application.get_system(SessionMetadataService)
+    store = application.get_system(ILLMProfileStore)
+    metadata_service = application.get_system(ISessionMetadataService)
     try:
         with store.locked():
             source = store.get_profile(request.profile_name)
@@ -2899,13 +2854,13 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             # 先检查所有阻止删除的引用，再提交删除与审批/元数据/工具链摘要引用清空。
             store.assert_removable(source, clear_global_selections=True)
             store.remove_profile(request.profile_name, clear_global_selections=True)
-            application.get_system(ApprovalSystem).backend_manager.invalidate()
-            switched, busy = application.get_system(SessionManager).replace_idle_loops_using_profile(
+            application.get_system(IApprovalSystem).backend_manager.invalidate()
+            switched, busy = application.get_system(ISessionManager).replace_idle_loops_using_profile(
                 source,
                 replacement,
             )
             SessionStore(
-                application.get_system(RuntimeSystem).context.workspace / SESSIONS_DIR_NAME
+                application.get_system(IRuntimeSystem).context.workspace / SESSIONS_DIR_NAME
             ).replace_profile_name_pointers(
                 request.profile_name,
                 request.replacement_profile_name,
@@ -2914,23 +2869,23 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             toolchain_summary_state = metadata_service.get_toolchain_summary_state()
             modality_states = _get_modality_profile_states(application)
 
-        failures = await application.get_system(FrontendSink).broadcast_profile_change(
+        failures = await application.get_system(IFrontendSink).broadcast_profile_change(
             "deleted",
             request.profile_name,
             request.replacement_profile_name,
         )
         # 广播审批 Profile 状态变更
-        approval_state = application.get_system(ApprovalSystem).backend_manager.get_state()
-        approval_failures = await application.get_system(FrontendSink).broadcast_approval_profile_change(
+        approval_state = application.get_system(IApprovalSystem).backend_manager.get_state()
+        approval_failures = await application.get_system(IFrontendSink).broadcast_approval_profile_change(
             approval_state,
         )
-        metadata_failures = await application.get_system(FrontendSink).broadcast_metadata_profile_change(
+        metadata_failures = await application.get_system(IFrontendSink).broadcast_metadata_profile_change(
             metadata_state,
         )
-        toolchain_summary_failures = await application.get_system(FrontendSink).broadcast_toolchain_summary_profile_change(
+        toolchain_summary_failures = await application.get_system(IFrontendSink).broadcast_toolchain_summary_profile_change(
             toolchain_summary_state,
         )
-        modality_failures = await application.get_system(FrontendSink).broadcast_modality_profile_change(
+        modality_failures = await application.get_system(IFrontendSink).broadcast_modality_profile_change(
             modality_states,
         )
         return LLMProfileDeleteResult(
@@ -3008,7 +2963,6 @@ async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
     from system.application import Application
     from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-    from system.runtime import RuntimeSystem
 
     gateway = _gateway()
     try:
@@ -3049,7 +3003,7 @@ async def ws_chat(ws: WebSocket) -> None:
     # 的行为在不同 Starlette 版本中不一致，WebSocketException 是官方推荐的
     # 握手拒绝方式，版本无关。
     from system.application import Application as _AppLock
-    _sink = _AppLock.current().get_system(FrontendSink)
+    _sink = _AppLock.current().get_system(IFrontendSink)
     if _sink.is_session_occupied(sid, conn_token):
         logger.info("WebSocket rejected (session locked) | session=%s", sid)
         raise WebSocketException(code=4001, reason="session_locked")
@@ -3085,13 +3039,12 @@ async def ws_chat(ws: WebSocket) -> None:
             )
 
         from system.application import Application
-        from system.runtime import RuntimeSystem
         from entity.constant import SESSIONS_DIR_NAME
         application = Application.current()
-        application.get_system(SessionManager).create_session(
+        application.get_system(ISessionManager).create_session(
             session_id=sid,
-            frontend_sink=application.get_system(FrontendSink),
-            history_store_dir=application.get_system(RuntimeSystem).context.workspace / SESSIONS_DIR_NAME,
+            frontend_sink=application.get_system(IFrontendSink),
+            history_store_dir=application.get_system(IRuntimeSystem).context.workspace / SESSIONS_DIR_NAME,
         )
         # 发送欢迎消息
         await ws.send_text(
@@ -3120,7 +3073,7 @@ async def ws_chat(ws: WebSocket) -> None:
             )
 
         # 服务端状态构造失败直接终止连接，不继续提供不完整的握手状态。
-        state = application.get_system(ApprovalSystem).backend_manager.get_state()
+        state = application.get_system(IApprovalSystem).backend_manager.get_state()
         await ws.send_text(
             Message(
                 type=MessageType.SYSTEM,
@@ -3143,7 +3096,7 @@ async def ws_chat(ws: WebSocket) -> None:
             agents_info: list[str] | None = None
             from entry.multi_agent_loop import MultiAgentLoop
             if isinstance(loop, MultiAgentLoop):
-                agents_info = list(loop._agent_names)
+                agents_info = list(loop.get_agents().keys())
             await ws.send_text(
                 json.dumps(
                     Message(
@@ -3260,11 +3213,10 @@ async def ws_chat(ws: WebSocket) -> None:
             )
         finally:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             # 旧连接释放不得取消已经接管该会话的新连接的交互。
+            # unregister_ws 自身已拒绝该会话的待处理审批与提问，无需另行调用内部方法。
             if _get_ws(sid) is ws:
-                sink._deny_session_confirms(sid)
-                sink._deny_session_asks(sid)
                 sink.unregister_ws(sid)
 
 

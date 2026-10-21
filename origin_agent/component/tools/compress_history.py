@@ -10,6 +10,8 @@ danger_level 为 critical：操作本身可能安全，但用户必须亲自许�
 
 from __future__ import annotations
 
+from interface.session_metadata_service import ISessionMetadataService
+
 import asyncio
 import logging
 
@@ -189,9 +191,8 @@ class CompressHistoryTool(BaseTool):
         # 重新取得提交后的完整历史快照：本次调用此时已有配对结果。
         # 排除集合包含当前 tool_call_id，使当前调用所在整条链不参与压缩。
         snapshot = list(history.iter_messages())
-        from system.session_metadata import SessionMetadataService
 
-        metadata_service = context.app.get_system(SessionMetadataService)
+        metadata_service = context.app.get_system(ISessionMetadataService)
         replacements = await prepare_tool_chain_replacements(
             snapshot,
             session_id=session_id,

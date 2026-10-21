@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from interface.cron_router import ICronRouter
+
 from typing import Any
 
 from abstract.tools.tool import (
@@ -37,7 +39,7 @@ from entity.constant import CRON_MIN_INTERVAL_SECONDS
 def _get_cr() -> CronRouter:
     """获取 Application 的 CronRouter 实例。"""
     from system.application import Application
-    return Application.current().get_system(CronRouter)
+    return Application.current().get_system(ICronRouter)
 
 
 # ── 工具 handler ─────────────────────────────────────────────

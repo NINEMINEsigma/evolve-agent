@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+from interface.tool_registry import IToolRegistry
+
 import json
 import logging
 from typing import TYPE_CHECKING
 
-from entity.puretype import ApprovalOutcome, ApprovalMode, ToolDangerLevel
+from entity.puretype import ApprovalOutcome, ApprovalMode, ApprovalResult, ToolDangerLevel
 from component.approval.handsfree import get_approval_mode, is_handsfree_mode
 from component.approval.core import build_denied_tool_result, request_user_confirm
 from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
@@ -19,7 +21,7 @@ from component.approval.allowlist import is_allowed as is_tool_allowlisted
 from component.approval.policy import needs_approval as _policy_needs_approval, MAIN_SESSION_POLICY
 
 if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +40,8 @@ def _needs_approval(tool_name: str, session_id: str) -> bool:
     - write 级别仅在脱手模式下需要
     - safe 直接执行
     """
-    from abstract.tools.registry import ToolRegistry
     from system.application import Application
-    tool_registry = Application.current().get_system(ToolRegistry)
+    tool_registry = Application.current().get_system(IToolRegistry)
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
     approval_mode = get_approval_mode(session_id)
     return _policy_needs_approval(MAIN_SESSION_POLICY, danger_level, approval_mode)
@@ -51,7 +52,7 @@ async def execute_with_approval(
     args: dict,
     session_id: str,
     *,
-    sink: "AgentSink",
+    sink: "IAgentSink",
     hooks_context: str = "",
 ) -> ApprovalOutcome:
     """统一的工具审批流程。
@@ -63,7 +64,7 @@ async def execute_with_approval(
         tool_name: 工具名称。
         args: 工具参数 dict（审批通过后会原地修改，加入 _pre_approved / _approval_action）。
         session_id: 会话 ID。
-        sink: AgentSink 实例，用于手动模式通过前端请求审批。
+        sink: IAgentSink 实例，用于手动模式通过前端请求审批。
         hooks_context: 脱手模式下注入审批请求的 hooks 上下文。
 
     Returns:
@@ -85,9 +86,8 @@ async def execute_with_approval(
     approval_args = {k: v for k, v in args.items() if k != "_session_id"}
 
     # 获取 danger_level 用于 critical 级别特殊处理
-    from abstract.tools.registry import ToolRegistry
     from system.application import Application
-    tool_registry = Application.current().get_system(ToolRegistry)
+    tool_registry = Application.current().get_system(IToolRegistry)
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
 
     # critical 级别：始终需要审批，跳过 allowlist 检查
@@ -111,7 +111,7 @@ async def execute_with_approval(
             extra_context=hooks_context if hooks_context else None,
         )
     else:
-        # 正常模式 或 critical 级别：通过 AgentSink 请求前端用户审批
+        # 正常模式 或 critical 级别：通过 IAgentSink 请求前端用户审批
         approval = await sink.request_approval(
             tool_name=tool_name,
             args=approval_args,

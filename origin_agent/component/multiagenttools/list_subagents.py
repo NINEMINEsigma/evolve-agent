@@ -1,6 +1,8 @@
 """动态列出角色档案及其当前运行会话。"""
 
-from __future__ import annotations
+from interface.llm_profile_store import ILLMProfileStore
+from interface.sandbox import ISandbox
+from interface.subagent_orchestrator import ISubAgentOrchestrator
 
 import logging
 from typing import Any
@@ -26,8 +28,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     name_to_session: dict[str, dict[str, Any]] = {}
     if parent_session_id:
         try:
-            from subagent.orchestrator import SubAgentOrchestrator
-            orch = Application.current().get_system(SubAgentOrchestrator)
+            orch = Application.current().get_system(ISubAgentOrchestrator)
             snapshot = orch.get_snapshot(parent_session_id=parent_session_id)
             for session_id, info in snapshot.subagents.items():
                 name = info.name
@@ -49,9 +50,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
             )
 
     app = Application.current()
-    from system.sandbox import Sandbox
-    from system.llm_profile_store import LLMProfileStore
-    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
+    resolver = CharacterProfileResolver(app.get_system(ISandbox), app.get_system(ILLMProfileStore))
     agents: list[dict[str, Any]] = []
     for profile in resolver.discover():
         agents.append({

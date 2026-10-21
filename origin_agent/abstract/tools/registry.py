@@ -31,7 +31,8 @@ from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner,
     close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
 )
-from system.runtime import RuntimeSystem
+from interface.runtime_system import IRuntimeSystem
+from interface.tool_registry import IToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ DEFAULT_LOADED_TOOLSET: str = "core"
 # ---------------------------------------------------------------------------
 
 
-class ToolRegistry(AsyncSystem):
+class ToolRegistry(IToolRegistry):
     """工具注册表与执行器，注册为 framework AsyncSystem。
 
     依赖 RuntimeSystem；无参构造，``virtual_awake`` 取得 RuntimeSystem 并
@@ -63,7 +64,7 @@ class ToolRegistry(AsyncSystem):
     _CHECK_FN_TTL_SECONDS: float = 30.0
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem,))
+        super().__init__(dependencies=(IRuntimeSystem,))
         self._tools: dict[str, BaseTool] = {}
         self._toolset_checks: dict[str, Callable] = {}
         self._toolset_aliases: dict[str, str] = {}
@@ -86,10 +87,10 @@ class ToolRegistry(AsyncSystem):
         self._task_owner: TaskOwner | None = None
         self._executor_shutdown_task: asyncio.Task[None] | None = None
         self._dispatch_closed: bool = False
-        self._runtime: RuntimeSystem | None = None
+        self._runtime: IRuntimeSystem | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
         self._task_owner = TaskOwner("tool-registry", self.runtime.record_failure)
         self._sync_changed = asyncio.Event()
         self._executor = concurrent.futures.ThreadPoolExecutor(
@@ -97,7 +98,7 @@ class ToolRegistry(AsyncSystem):
         )
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("ToolRegistry has not been awakened")
         return self._runtime
@@ -230,7 +231,7 @@ class ToolRegistry(AsyncSystem):
     def get_definitions_for_availability(
         self,
         scope: ToolAvailability,
-        tool_names: set | None = None,
+        tool_names: set[str] | None = None,
         quiet: bool = False,
     ) -> list[dict]:
         """返回指定 availability 范围的工具的 OpenAI 格式 schema。"""
@@ -402,7 +403,7 @@ class ToolRegistry(AsyncSystem):
 
     def get_definitions(
         self,
-        tool_names: set,
+        tool_names: set[str],
         quiet: bool = False,
     ) -> list[dict]:
         """返回请求工具名称的 OpenAI 格式 tool schema。"""

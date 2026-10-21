@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from interface.mcp_system import IMCPSystem
+
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
@@ -39,9 +41,7 @@ class MCPRefreshTool(BaseTool):
         )
 
     async def handle(self, execution: ToolExecution) -> ToolHandlerResult:
-        from abstract.mcp.system import MCPSystem
-
-        return ToolHandlerResult(result=await execution.context.app.get_system(MCPSystem).refresh())
+        return ToolHandlerResult(result=await execution.context.app.get_system(IMCPSystem).refresh())
 
 
 TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))

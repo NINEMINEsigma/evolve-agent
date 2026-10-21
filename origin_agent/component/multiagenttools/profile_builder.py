@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Callable, Mapping, TYPE_CHECKING
 
-from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import AgentConfig, CharacterProfile, LLMProfile
@@ -14,6 +13,8 @@ from entry.agent_support.messages import (
     collect_skill_prompts,
 )
 from entry.multi_agent_loop import AgentProfile
+from interface.sandbox import ISandbox
+from interface.tool_registry import IToolRegistry
 from subagent.profile import (
     character_profile_to_agent_config,
     get_character_system_prompts,
@@ -21,12 +22,11 @@ from subagent.profile import (
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
-    from abstract.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
 
-def build_multi_agent_tools(tool_registry: ToolRegistry) -> list[dict]:
+def build_multi_agent_tools(tool_registry: IToolRegistry) -> list[dict]:
     """返回多Agent模式下可用的工具定义。"""
     from entity.puretype import ToolAvailability
 
@@ -36,7 +36,7 @@ def build_multi_agent_tools(tool_registry: ToolRegistry) -> list[dict]:
 
 
 SystemPromptsResolver = Callable[
-    [str, AgentConfig, "RuntimeContext", Sandbox],
+    [str, AgentConfig, "RuntimeContext", ISandbox],
     list[str],
 ]
 
@@ -45,7 +45,7 @@ def _resolve_main_agent_prompts(
     _name: str,
     _config: AgentConfig,
     parent_ctx: RuntimeContext,
-    _sandbox: Sandbox,
+    _sandbox: ISandbox,
     profile: LLMProfile | None = None,
     session_id: str = "",
     loaded_toolsets: set[str] | None = None,
@@ -75,7 +75,7 @@ def build_agent_profiles(
     parent_ctx: RuntimeContext,
     llm_client_factory: Callable[[str, LLMProfile | None], BaseLLMClient | None],
     system_prompt_template: str,
-    sandbox: Sandbox,
+    sandbox: ISandbox,
     profiles: Mapping[str, CharacterProfile],
     *,
     session_id: str = "",

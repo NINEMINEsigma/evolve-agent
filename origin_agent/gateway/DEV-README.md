@@ -34,9 +34,9 @@ gateway/
 
 ## 主会话系统迁移（S16进行中）
 
-`gateway/session_manager.py::SessionManager`已继承AsyncSystem并声明计划依赖，无参构造仅建立内存字段，virtual_awake创建索引管理器并确保随意聊聊索引；此时不创建Loop。Gateway、工具及钩子的Application.session_manager引用改为get_system(SessionManager)。输入关闭分为freeze_inputs、stop_rounds、flush_inputs，最后者返回ShutdownInputReport；运行期Loop及退役Loop由同一Manager持有，不并发保存同一History。
+`gateway/session_manager.py::SessionManager`已继承AsyncSystem并声明计划依赖，无参构造仅建立内存字段，virtual_awake创建索引管理器并确保随意聊聊索引；此时不创建Loop。Gateway、工具及钩子的Application.session_manager引用改为get_system(ISessionManager)。输入关闭分为freeze_inputs、stop_rounds、flush_inputs，最后者返回ShutdownInputReport；运行期Loop及退役Loop由同一Manager持有，不并发保存同一History。
 
-主队列先同步登记InputDelivery再安排消费者，Parent/Multi逐项APPENDED/PERSISTED后回显；Loop替换保留旧回复与工具结果提交，记录原sequence转交新队列。`SubAgentOrchestrator` 已作为 framework `AsyncSystem` 迁移，Gateway及工具调用统一经 `Application.current().get_system(SubAgentOrchestrator)` 取得；它不再由 `main.py` 注入启动用 Loop。子会话输入登记、反馈关闭交接和普通子Agent最终保存由该System持有；Gateway USER_MESSAGE 在后台任务之前的多目标接收/ready准备已由 S21 完成，Application 最终装配由 P22 完成。
+主队列先同步登记InputDelivery再安排消费者，Parent/Multi逐项APPENDED/PERSISTED后回显；Loop替换保留旧回复与工具结果提交，记录原sequence转交新队列。`SubAgentOrchestrator` 已作为 framework `AsyncSystem` 迁移，Gateway及工具调用统一经 `Application.current().get_system(ISubAgentOrchestrator)` 取得；它不再由 `main.py` 注入启动用 Loop。子会话输入登记、反馈关闭交接和普通子Agent最终保存由该System持有；Gateway USER_MESSAGE 在后台任务之前的多目标接收/ready准备已由 S21 完成，Application 最终装配由 P22 完成。
 
 ## MessageRouter
 
@@ -132,7 +132,7 @@ WS /ws/chat?resume=<sid>
 
 `ws_chat` 从连接登记后的初始化起进入统一 `try/finally`：客户端信息读取、Loop 创建、服务端状态与 Agentspace 订阅任一步意外失败均传播，不继续提供不完整握手。订阅释放即使失败，也在嵌套 `finally` 中释放本连接的待审批/询问和连接登记；旧连接不得清除已接管的新连接状态。明确断线按正常生命周期结束，取消继续传播；通用 `RuntimeError` 不再被解释成正常断线。Agentspace 后台转发失败记录原异常并关闭连接，不伪造 watcher 降级状态。
 
-`entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。Gateway经`Application.current().get_system(FrontendSink)`取得唯一实例（`_get_ws`、HTTP confirm/ask、会话占用检查、删除关闭、Profile广播与连接释放均走此入口），不再访问`Application.frontend_sink`属性。
+`entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。Gateway经`Application.current().get_system(IFrontendSink)`取得唯一实例（`_get_ws`、HTTP confirm/ask、会话占用检查、删除关闭、Profile广播与连接释放均走此入口），不再访问`Application.frontend_sink`属性。
 
 `ToolCallRequest`、`ToolCallDelta`、`MessageMetrics` 在进程内保持类型，流式事件在 `FrontendSink._send_stream_event()` 才执行一次 JSON 序列化；可选 `None` 字段省略。工具增量保留 `id/index/name/args_delta/phase`，起始 `id` 可为空，`phase` 为 `start/append/done`，不把未完成的 `args_delta` 当作完整 JSON解析。现有事件出口的空结束正文仍按旧规则省略，不改变中断时的部分输出。其他非流式事件与入站通用 `Message` 暂时保持原协议。
 
@@ -258,7 +258,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主动推送。WebSocket 断线不停止 Shell；自动旋转迁移所有权；手动终结、永久删除和应用关闭负责停止。
 
-Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronRouter)`，不再导入cron_tools获取服务。任务持久化、调度和实际命令属于CronRouter；应用冻结不同于用户取消，不删除持久任务或把未执行任务标为完成。激活由 Application 在全部 System 唤醒且 Gateway ready 后统一执行，关闭编排由 Application 统一执行。`GET /api/sessions/{id}/cron-tasks` 原样返回 `CronTaskInfo` 列表，响应新增只读字段 `is_wait`/`wait_message`（等待提醒身份与内容），路由、调度与执行语义不变。
+Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(ICronRouter)`，不再导入cron_tools获取服务。任务持久化、调度和实际命令属于CronRouter；应用冻结不同于用户取消，不删除持久任务或把未执行任务标为完成。激活由 Application 在全部 System 唤醒且 Gateway ready 后统一执行，关闭编排由 Application 统一执行。`GET /api/sessions/{id}/cron-tasks` 原样返回 `CronTaskInfo` 列表，响应新增只读字段 `is_wait`/`wait_message`（等待提醒身份与内容），路由、调度与执行语义不变。
 
 ### LLM Profile
 
@@ -293,7 +293,7 @@ Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronR
 | GET | `/api/metadata/profile` | 返回全局元数据 Profile 的可空名称、模型与配置可用性 |
 | PUT | `/api/metadata/profile` | 按 Profile 名称设置或以 `null`清空全局元数据 Profile |
 
-自动标题、自动标签和摘要直接调用 `Application.current().get_system(SessionMetadataService)`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
+自动标题、自动标签和摘要直接调用 `Application.current().get_system(ISessionMetadataService)`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
 
 ### 全局多模态回退 Profile
 
@@ -306,7 +306,7 @@ Cron REST、Loop路由注册/注销与会话清理统一调用 `get_system(CronR
 
 `/files` 的会话视觉入口支持 GET/HEAD 探测：源目录同级 `.meta` 的 `[redirect]` 只解析一层，合法目标通过 307 指向带 `visual_raw` 的原始入口，避免目标目录再次解析；最终 HEAD 响应返回 `X-Session-Visual-Version`。无效配置静默使用源目录，普通静态文件不受影响。site 的 `/zip` 源目录同样复用该规则。
 
-`/files`、`/downloads` 与 `/zip` 均复用 `Application.current().get_system(Sandbox)`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
+`/files`、`/downloads` 与 `/zip` 均复用 `Application.current().get_system(ISandbox)`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
@@ -362,10 +362,15 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 
 ## 文件修改记录 REST 与永久删除
 
-新增只读`GET /api/sessions/{session_id}/file-changes/summary`及`GET /api/sessions/{session_id}/file-changes?offset=0&limit=100`。通过`Application.current().get_system(AgentspaceService).file_changes`读取唯一Store，使用线程池，不创建Loop、不读History；已归档或尚未恢复Loop的已知会话都可读。摘要只含会话、revision、文件/目录路径条目数、全局操作次数和最近UTC时间；分页附同次摘要与最多200行条目，默认100。未知/删除中404，参数越界422，停机503；返回前二次确认会话，Cache-Control=no-store。读取损坏不伪空，普通返回值保留BaseModel。
+新增只读`GET /api/sessions/{session_id}/file-changes/summary`及`GET /api/sessions/{session_id}/file-changes?offset=0&limit=100`。通过`Application.current().get_system(IAgentspaceService).file_changes`读取唯一Store，使用线程池，不创建Loop、不读History；已归档或尚未恢复Loop的已知会话都可读。摘要只含会话、revision、文件/目录路径条目数、全局操作次数和最近UTC时间；分页附同次摘要与最多200行条目，默认100。未知/删除中404，参数越界422，停机503；返回前二次确认会话，Cache-Control=no-store。读取损坏不伪空，普通返回值保留BaseModel。
 
 独立持久文件为会话目录内`file_changes.es`，不在ws:工作空间的sessions资源目录。新会话缺文件返回空，不回填；已有文件缺key/损坏/残留备份直接失败。
 
 永久删除现在由既有GatewaySystem.task_owner.run_request管理完整REQUEST。原业务主体移入`_delete_session_impl`，在begin_session_delete后的try内先进入`_file_changes_delete_scope`，成功封闭统计后才按原顺序关闭连接、停止子Agent/主Loop、sm.remove、清理资源，最外层finally仍清deleting标记。block_session在线程中有界等待5秒，超时只返回409且不提前拆除连接/Loop。scope以shield等待真实封闭/收尾线程，调用方取消不放弃真实工作；会话尚在则解封，已删则forget并保留封闭标记。必要清理失败保留异常并传播，不把取消外层等待当作线程已经结束。
 
 统计保存前验证会话目录已存在，easysave内部可建父目录但删除封闭防止迟到写入重建会话目录。封闭后的旧GET不再打开待删除统计文件，已知删除竞态映射404，其他读取异常继续传播。统计文件随会话目录删除，不删除原业务文件。仅源码实施与只读审阅，尚未运行验证。
+
+## System 接口槽位约定（2026-10-20）
+
+`SessionManager` 和 `GatewaySystem` 分别使用 `ISessionManager` 与 `IGatewaySystem` 作为 Application 装配槽位。Gateway 路由、会话清理、动态端点和前端连接查询均按接口取得唯一实例；GatewaySystem 仍最后唤醒、首先注销，SessionManager 的输入冻结、轮次停止和 History 刷新顺序不变。
+

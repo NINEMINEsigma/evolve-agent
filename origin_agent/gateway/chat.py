@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+
 import json
 import logging
 import threading
@@ -183,9 +185,8 @@ class SessionManager:
         if self._store_dir is None:
             try:
                 from system.application import Application
-                from system.runtime import RuntimeSystem
                 from entity.constant import SESSIONS_DIR_NAME
-                ws: Path = Application.current().get_system(RuntimeSystem).context.workspace
+                ws: Path = Application.current().get_system(IRuntimeSystem).context.workspace
                 candidate: Path = ws / SESSIONS_DIR_NAME
                 if candidate.exists():
                     self._store_dir = candidate

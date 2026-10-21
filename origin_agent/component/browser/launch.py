@@ -8,6 +8,10 @@ profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
 
 from __future__ import annotations
 
+from interface.browser_system import IBrowserSystem
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+
 import asyncio
 import logging
 import subprocess  # nosec
@@ -15,12 +19,9 @@ from typing import Any
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
-from component.browser.system import BrowserSystem
 from entity.constant import CDP_ENDPOINT_DEFAULT, EDGE_CANDIDATE_PATHS
 from entity.puretype import ToolDangerLevel
 from system.application import Application
-from system.sandbox import Sandbox
-from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
     timeout: int = int(args.get("timeout", 20))
     headless: bool = bool(args.get("headless", False))
 
-    bs = Application.current().get_system(BrowserSystem)
+    bs = Application.current().get_system(IBrowserSystem)
 
     # 幂等：端口已就绪（无论由谁拉起）直接返回
     if await asyncio.to_thread(_connection.probe_cdp_endpoint, endpoint, 2.0):
@@ -67,9 +68,9 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
             searched=list(EDGE_CANDIDATE_PATHS),
         )
 
-    resolved = Application.current().get_system(Sandbox).resolve_write(_PROFILE_LOGICAL)
+    resolved = Application.current().get_system(ISandbox).resolve_write(_PROFILE_LOGICAL)
     resolved.real.mkdir(parents=True, exist_ok=True)
-    Application.current().get_system(RuntimeSystem).require_running()
+    Application.current().get_system(IRuntimeSystem).require_running()
     proc = _launch_edge_process(str(resolved.real), endpoint, headless=headless)
     if headless:
         bs.register_headless_proc(proc)

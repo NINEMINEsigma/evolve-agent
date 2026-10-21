@@ -128,9 +128,9 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ### `abstract/tools/registry.py`
 
-`ToolRegistry` 已迁移为依赖 `RuntimeSystem` 的 framework `AsyncSystem`，通过 `app.get_system(ToolRegistry)` 取得唯一实例。工具表、工具集元数据、检查缓存及锁均由该实例持有，不再提供模块级 `registry` 单例或兼容代理。
+`ToolRegistry` 已迁移为依赖 `RuntimeSystem` 的 framework `AsyncSystem`，通过 `app.get_system(IToolRegistry)` 取得唯一实例。工具表、工具集元数据、检查缓存及锁均由该实例持有，不再提供模块级 `registry` 单例或兼容代理。
 
-工具模块通过顶层固定名称 `TOOLSET = BaseToolSet(...)` 显式声明；导入模块不取得 Application、不修改注册表。ToolDiscoverySystem 持有本次已注册模块集合并交给唯一 `ToolRegistry`。下文 `registry` 表示运行期经 `app.get_system(ToolRegistry)` 取得的实例，而非可导入的全局对象。
+工具模块通过顶层固定名称 `TOOLSET = BaseToolSet(...)` 显式声明；导入模块不取得 Application、不修改注册表。ToolDiscoverySystem 持有本次已注册模块集合并交给唯一 `ToolRegistry`。下文 `registry` 表示运行期经 `app.get_system(IToolRegistry)` 取得的实例，而非可导入的全局对象。
 
 提供：
 
@@ -251,3 +251,7 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 - **自定义 LLM 客户端**：在 `custom_llm_client/` 下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。
 - **自定义工具**：在 `custom_tools/` 下编写 `.py` 文件，声明顶层固定名称 `TOOLSET = BaseToolSet(...)` 并在其中持有 `BaseTool` 子类实例；ToolDiscoverySystem 按 AST 发现后交给唯一 ToolRegistry 注册并预热，导入模块只创建无连接工具对象、不注册也不取得运行时服务。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
+
+## System 接口槽位约定（2026-10-20）
+
+`ToolRegistry`、`ToolDiscoverySystem` 和 `MCPSystem` 分别继承 `IToolRegistry`、`IToolDiscoverySystem` 和 `IMCPSystem`。工具发现使用 `IToolRegistry` 查询注册表，MCP 使用 `IMCPSystem` 作为运行期槽位；具体实现仍负责对象工具注册、发现记录和原生资源清理。抽象层不得通过具体 System 类型查询 Application。

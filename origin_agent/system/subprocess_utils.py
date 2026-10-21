@@ -27,7 +27,8 @@ from entity.constant import (
 )
 from entity.puretype import ProcessLineStreamResult
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
-from system.runtime import RuntimeSystem
+from interface.runtime_system import IRuntimeSystem
+from interface.subprocess_runner import ISubprocessRunner
 
 logger = logging.getLogger(__name__)
 
@@ -184,17 +185,17 @@ def _kill_proc_tree(pid: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
-class SubprocessRunner(AsyncSystem):
+class SubprocessRunner(ISubprocessRunner):
     """子进程执行的唯一实现层，持有活动进程登记表与进程树终止逻辑。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem；由 Application 在
-    P22 装配后经 ``app.get_system(SubprocessRunner)`` 取得。提供同步
+    P22 装配后经 ``app.get_system(ISubprocessRunner)`` 取得。提供同步
     ``run()``（任意线程可用）与真异步 ``run_async()``（事件循环内 await）。
    活动进程按 ``session_id`` 分桶登记，供中断路径 ``kill_active()`` 按会话终止。
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem,))
+        super().__init__(dependencies=(IRuntimeSystem,))
         # session_id -> [Popen | asyncio.subprocess.Process]；kill_active 终止用。
         self._active_procs: dict[str, list[subprocess.Popen | asyncio.subprocess.Process]] = {}
         self._procs_lock: threading.Lock = threading.Lock()
@@ -204,13 +205,13 @@ class SubprocessRunner(AsyncSystem):
         self._idle.set()
         self._cleanup_failures: list[BaseException] = []
         self._admission_closed = False
-        self._runtime: RuntimeSystem | None = None
+        self._runtime: IRuntimeSystem | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("SubprocessRunner has not been awakened")
         return self._runtime

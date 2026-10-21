@@ -6,14 +6,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from entity.constant import ApplicationState
+from interface.runtime_system import IRuntimeSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
 
 
 class GatewayAdmission:
     """HTTP/WS 新业务与 WS 连接共享同一 Runtime 接收状态。"""
 
-    def __init__(self, runtime: RuntimeSystem) -> None:
+    def __init__(self, runtime: IRuntimeSystem) -> None:
         self._runtime = runtime
         self._accepting = True
 

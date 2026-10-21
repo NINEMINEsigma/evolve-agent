@@ -23,10 +23,10 @@ from entity.constant import (
     SESSION_MEDIA_PLACEHOLDER_TEMPLATE,
 )
 from entry.history_media import HistoryMediaOccurrence, project_media_item
-from system.runtime import RuntimeSystem
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
 from system.templates import read_template
 from system.modality_capability import (
-    ModalityCapabilitySystem,
     resolve_active_model_base_url,
     wrap_forwarded_description,
 )
@@ -103,7 +103,7 @@ async def prepare_main_multimodal_request(
     last_user_message: CharacterConversationMessage | None,
 ) -> PreparedMultimodalRequest:
     """首个 await 前固定开关；关闭的媒体绝不在主请求中恢复直传。"""
-    runtime = context.app.get_system(RuntimeSystem)
+    runtime = context.app.get_system(IRuntimeSystem)
     runtime.require_running()
     if context.loop.is_interrupted():
         raise asyncio.CancelledError
@@ -131,7 +131,7 @@ async def prepare_main_multimodal_request(
         last_user_message, context.character_name,
     )
     model_name, _, profile = resolve_active_model_base_url(context)
-    system = context.app.get_system(ModalityCapabilitySystem)
+    system = context.app.get_system(IModalityCapabilitySystem)
     has_enabled_media = any(
         isinstance(block, (ImageBlock, AudioBlock, VideoBlock)) and block.send_multimodal
         for message in request.messages if isinstance(message.content, list)

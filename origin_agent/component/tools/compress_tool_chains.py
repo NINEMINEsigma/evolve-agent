@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from interface.session_metadata_service import ISessionMetadataService
+
 import asyncio
 import logging
 
@@ -90,8 +92,6 @@ class CompressToolChainsTool(BaseTool):
         return ToolHandlerResult(result=tool_result(success=True, _compression_pending=True))
 
     async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
-        from system.session_metadata import SessionMetadataService
-
         context = execution.context
         loop = context.loop
         session_id = context.session_id
@@ -99,7 +99,7 @@ class CompressToolChainsTool(BaseTool):
 
         # 重新取得提交后的完整历史快照：本次调用已有配对结果，可包含自身。
         snapshot = list(history.iter_messages())
-        metadata_service = context.app.get_system(SessionMetadataService)
+        metadata_service = context.app.get_system(ISessionMetadataService)
         replacements = await prepare_tool_chain_replacements(
             snapshot,
             session_id=session_id,

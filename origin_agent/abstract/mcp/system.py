@@ -14,10 +14,11 @@ from framework import AsyncSystem
 
 from abstract.mcp.client import MCPCore, _MCP_AVAILABLE, _validate_remote_mcp_url
 from abstract.mcp.work import MCPThreadWork
-from abstract.tools.registry import ToolRegistry
+from interface.mcp_system import IMCPSystem
+from interface.runtime_system import IRuntimeSystem
+from interface.tool_registry import IToolRegistry
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources
-from system.runtime import RuntimeSystem
 
 
 def _positive(value: Any, name: str, *, integer: bool = False, zero: bool = False) -> None:
@@ -98,10 +99,10 @@ def _validate_servers(raw: Any) -> dict[str, dict[str, Any]]:
     return raw
 
 
-class MCPSystem(AsyncSystem):
+class MCPSystem(IMCPSystem):
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, ToolRegistry))
-        self._runtime: RuntimeSystem | None = None
+        super().__init__(dependencies=(IRuntimeSystem, IToolRegistry))
+        self._runtime: IRuntimeSystem | None = None
         self._core: MCPCore | None = None
         self._work: MCPThreadWork | None = None
         self._requests: TaskOwner | None = None
@@ -110,7 +111,7 @@ class MCPSystem(AsyncSystem):
         self._close_task: asyncio.Task[None] | None = None
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("MCPSystem has not been awakened")
         return self._runtime
@@ -134,8 +135,8 @@ class MCPSystem(AsyncSystem):
         return self._requests
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._core = MCPCore(self.runtime.context, self.get_system(ToolRegistry), self.runtime)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._core = MCPCore(self.runtime.context, self.get_system(IToolRegistry), self.runtime)
         self._requests = TaskOwner("mcp-system", self.runtime.record_failure)
         self._work = MCPThreadWork("mcp-core-work", self.runtime.record_failure)
         self._work.start()

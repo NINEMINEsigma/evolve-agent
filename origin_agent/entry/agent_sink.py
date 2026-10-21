@@ -1,7 +1,7 @@
-"""Agent 交互抽象 — AgentSink 定义向上（用户/父Agent）通信的统一接口。
+"""Agent 交互实现 — 向上（用户/父Agent）通信的事件契约见 interface.agent_sink。
 
-- FrontendSink：主 Agent 通过 WebSocket 与前端用户交互
-- ParentAgentSink：子 Agent 通过 outbox + orchestrator 与父 Agent 交互
+- FrontendSink：主 Agent 通过 WebSocket 与前端用户交互，槽位类型为 IFrontendSink
+- ParentAgentSink：子 Agent 通过 outbox + orchestrator 与父 Agent 交互，类型为 IAgentSink
 """
 
 from __future__ import annotations
@@ -23,22 +23,29 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
 )
 from entity.puretype import (
+    ApprovalProfileState,
     ApprovalResult,
     AskAnswerItem,
     HistoryUpdatedEvent,
     Message,
+    MessageContent,
     MessageMetrics,
     MessageType,
+    MetadataProfileState,
     ModalityProfileStates,
     StreamDeltaEvent,
     StreamDoneEvent,
     StreamEvent,
     ToolCallDelta,
     ToolCallRequest,
+    ToolchainSummaryProfileState,
 )
 from framework import AsyncSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner
-from system.runtime import RuntimeSystem
+from interface.agent_sink import IAgentSink
+from interface.frontend_sink import IFrontendSink
+from interface.tool_registry import IToolRegistry
+from interface.runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -58,136 +65,18 @@ class WsConnectionEntry:
     connected_at: float
 
 
-class AgentSink(ABC):
-    """Agent 向上层（用户/父Agent）通信的抽象接口。
+class FrontendSink(IFrontendSink):
+    """主 Agent 的实现 — 通过 WebSocket 与前端用户通信。
 
-    主 Agent 使用 FrontendSink，子 Agent 使用 ParentAgentSink。
-    """
-
-    @abstractmethod
-    async def ask_question(self, questions: list[dict], session_id: str = "") -> dict:
-        """向用户提问（多问题表单），等待回答后返回结果。"""
-        ...
-
-    @abstractmethod
-    async def request_approval(self, tool_name: str, args: dict,
-                               reason: str = "", content: str = "",
-                               session_id: str = "") -> "ApprovalResult":
-        """请求审批一个工具调用。"""
-        ...
-
-    @abstractmethod
-    async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict,
-                             character_name: str | None = None) -> None:
-        """推送 tool_call 事件。"""
-        ...
-
-    @abstractmethod
-    async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str,
-                               character_name: str | None = None,
-                               tool_call_meta: dict | None = None,
-                               embedded_messages: list[dict] | None = None,
-                               consumed_client_message_ids: list[str] | None = None) -> None:
-        """推送 tool_result 事件。"""
-        ...
-
-    @abstractmethod
-    async def emit_tool_calls_discarded(
-        self, session_id: str, stream_id: str, tool_call_ids: list[str],
-    ) -> None:
-        """Remove tool calls that were rejected by the declared batch boundary."""
-        ...
-
-    @abstractmethod
-    async def emit_history_updated(self, session_id: str) -> None:
-        """Invalidate the frontend view of a committed session History."""
-        ...
-
-    @abstractmethod
-    async def emit_user_message(self, session_id: str, content: Any,
-                                character_name: str, message_index: int,
-                                visible_characters: list[str] | None = None,
-                                response_characters: list[str] | None = None,
-                                client_message_id: str | None = None,
-                                message_suffix: str | None = None,
-                                dynamic_message_suffix: str | None = None) -> None:
-        """推送用户消息到前端。"""
-        ...
-
-    @abstractmethod
-    async def emit_assistant_message(self, session_id: str, content: Any,
-                                     character_name: str,
-                                     visible_characters: list[str] | None = None,
-                                     response_characters: list[str] | None = None) -> None:
-        """推送 assistant 消息到前端。"""
-        ...
-
-    @abstractmethod
-    async def emit_stream_delta(self, session_id: str, stream_id: str,
-                                delta: str = "", reasoning_delta: str = "",
-                                tool_call: ToolCallRequest | None = None,
-                                tool_call_delta: ToolCallDelta | None = None,
-                                character_name: str | None = None) -> None:
-        """推送流式增量。"""
-        ...
-
-    @abstractmethod
-    async def emit_stream_done(self, session_id: str, stream_id: str,
-                               finish_reason: str = "stop",
-                               content: str = "",
-                               metrics: MessageMetrics | None = None) -> None:
-        """推送流结束事件。
-
-        Args:
-            content: 本轮 LLM 响应的完整文本，供前端权威固化，避免 delta 累积竞态。
-            metrics: 本轮 LLM 调用的计时与 token 速度元信息。
-        """
-        ...
-
-    @abstractmethod
-    async def emit_usage_update(self, session_id: str, token_usage: int,
-                                context_tokens: int) -> None:
-        """推送 token 消耗更新。"""
-        ...
-
-    @abstractmethod
-    async def emit_progress(self, session_id: str, tool_name: str,
-                            payload: str) -> None:
-        """推送进度事件。"""
-        ...
-
-    @abstractmethod
-    async def emit_clipboard_display(self, session_id: str, tool_name: str,
-                                     payload: str) -> None:
-        """推送剪贴板展示事件。"""
-        ...
-
-    @abstractmethod
-    async def emit_subagent_update(self, session_id: str, payload: dict) -> None:
-        """推送子 Agent 状态更新。"""
-        ...
-
-    @abstractmethod
-    async def emit_system_message(self, session_id: str, content: str,
-                                  history_index: int | None = None,
-                                  is_system_status: bool = False) -> None:
-        """推送系统消息到前端；可选携带已持久化 History 索引。"""
-        ...
-
-
-class FrontendSink(AsyncSystem, AgentSink):
-    """主 Agent 的交互抽象 — 通过 WebSocket 与前端用户通信。
-
-    继承 AsyncSystem 以纳入 framework 生命周期；依赖 RuntimeSystem。
-    发送与交互属有调用方等待的请求级操作，经 TaskOwner.run_request 登记：
-    新交互（审批/提问）只在 RUNNING 接收；既有结果与 History 回显在
-    STOPPING 仍允许到关闭输出，发送期限不超过 SHUTDOWN_SEND_TIMEOUT_SECONDS。
+    通过 IFrontendSink 同时满足 System 槽位与 IAgentSink 事件出口；依赖
+    RuntimeSystem。发送与交互属有调用方等待的请求级操作，经
+    TaskOwner.run_request 登记：新交互（审批/提问）只在 RUNNING 接收；
+    既有结果与 History 回显在 STOPPING 仍允许到关闭输出，发送期限不超过
+    SHUTDOWN_SEND_TIMEOUT_SECONDS。
     """
 
     def __init__(self) -> None:
-        AsyncSystem.__init__(self, dependencies=(RuntimeSystem,))
+        IFrontendSink.__init__(self, dependencies=(IRuntimeSystem,))
         # session_id → WsConnectionEntry
         self._ws_sinks: dict[str, WsConnectionEntry] = {}
         # {request_id: Future[ApprovalResult]}
@@ -198,7 +87,7 @@ class FrontendSink(AsyncSystem, AgentSink):
         self._pending_asks: dict[str, asyncio.Future] = {}
         # {request_id: session_id}
         self._ask_session_map: dict[str, str] = {}
-        self._runtime: RuntimeSystem
+        self._runtime: IRuntimeSystem
         self._requests: TaskOwner
         self._send_closed: bool = False
         self._interaction_closed: bool = False
@@ -206,7 +95,7 @@ class FrontendSink(AsyncSystem, AgentSink):
         self._send_deadlines: set[asyncio.Timeout] = set()
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
         self._requests = TaskOwner("FrontendSink", self._runtime.record_failure)
 
     # -- 接收边界 --
@@ -386,7 +275,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def broadcast_approval_profile_change(
         self,
-        state,
+        state: ApprovalProfileState,
     ) -> list[str]:
         """向所有已连接前端广播审批 Profile 状态变更。
 
@@ -402,7 +291,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def _broadcast_approval_profile_change(
         self,
-        state,
+        state: ApprovalProfileState,
     ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -422,7 +311,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def broadcast_metadata_profile_change(
         self,
-        state,
+        state: MetadataProfileState,
     ) -> list[str]:
         """向所有已连接前端广播全局元数据 Profile 状态变更。"""
         return await self._requests.run_request(
@@ -434,7 +323,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def _broadcast_metadata_profile_change(
         self,
-        state,
+        state: MetadataProfileState,
     ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -454,7 +343,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def broadcast_toolchain_summary_profile_change(
         self,
-        state,
+        state: ToolchainSummaryProfileState,
     ) -> list[str]:
         """向所有已连接前端广播工具链摘要 Profile 状态变更。"""
         return await self._requests.run_request(
@@ -466,7 +355,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def _broadcast_toolchain_summary_profile_change(
         self,
-        state,
+        state: ToolchainSummaryProfileState,
     ) -> list[str]:
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -549,7 +438,7 @@ class FrontendSink(AsyncSystem, AgentSink):
 
     async def request_approval(self, tool_name: str, args: dict,
                                reason: str = "", content: str = "",
-                               session_id: str = "") -> "ApprovalResult":
+                               session_id: str = "") -> ApprovalResult:
         """向 WebSocket 发送 confirm_request 并等待前端响应。"""
         from entity.puretype import ApprovalResult
 
@@ -593,11 +482,10 @@ class FrontendSink(AsyncSystem, AgentSink):
         reason: str,
         content: str,
         fut: asyncio.Future,
-    ) -> "ApprovalResult":
+    ) -> ApprovalResult:
         from entity.puretype import ApprovalResult
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
         # 前端期望 request_id/tool/args/content 在消息顶层
         display_args = dict(args)
         if reason:
@@ -790,7 +678,7 @@ class FrontendSink(AsyncSystem, AgentSink):
             tool_call_ids=tool_call_ids,
         )
 
-    async def emit_user_message(self, session_id: str, content: Any,
+    async def emit_user_message(self, session_id: str, content: MessageContent,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
                                 response_characters: list[str] | None = None,
@@ -816,7 +704,7 @@ class FrontendSink(AsyncSystem, AgentSink):
             cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
         )
 
-    async def emit_assistant_message(self, session_id: str, content: Any,
+    async def emit_assistant_message(self, session_id: str, content: MessageContent,
                                      character_name: str,
                                      visible_characters: list[str] | None = None,
                                      response_characters: list[str] | None = None) -> None:
@@ -991,7 +879,7 @@ class FrontendSink(AsyncSystem, AgentSink):
         await self.close_all_connections()
 
 
-class ParentAgentSink(AgentSink):
+class ParentAgentSink(IAgentSink):
     """子 Agent 的交互抽象 — 通过 outbox + orchestrator 与父 Agent 通信。
 
     子 Agent 不能直接与前端通信；所有交互事件通过 outbox
@@ -1007,7 +895,7 @@ class ParentAgentSink(AgentSink):
 
     async def request_approval(self, tool_name: str, args: dict,
                                reason: str = "", content: str = "",
-                               session_id: str = "") -> "ApprovalResult":
+                               session_id: str = "") -> ApprovalResult:
         """将审批请求放入子 Agent 的待审批队列，阻塞等待父 Agent 决策。
 
         脱手模式走 request_user_confirm 到父 session（由 approval 模型审批）；
@@ -1098,7 +986,7 @@ class ParentAgentSink(AgentSink):
         # SubAgent tools do not own an independent frontend stream.
         return
 
-    async def emit_user_message(self, session_id: str, content: Any,
+    async def emit_user_message(self, session_id: str, content: MessageContent,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
                                 response_characters: list[str] | None = None,
@@ -1108,7 +996,7 @@ class ParentAgentSink(AgentSink):
         # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
         pass
 
-    async def emit_assistant_message(self, session_id: str, content: Any,
+    async def emit_assistant_message(self, session_id: str, content: MessageContent,
                                      character_name: str,
                                      visible_characters: list[str] | None = None,
                                      response_characters: list[str] | None = None) -> None:
@@ -1141,7 +1029,7 @@ class ParentAgentSink(AgentSink):
         """转发流结束事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_stream_done(
                 self._loop.parent_session_id, stream_id, finish_reason,
                 content=content,
@@ -1157,7 +1045,7 @@ class ParentAgentSink(AgentSink):
         """转发 token 消耗更新到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_usage_update(
                 self._loop.parent_session_id, token_usage, context_tokens,
             )
@@ -1171,7 +1059,7 @@ class ParentAgentSink(AgentSink):
         """转发进度事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_progress(
                 self._loop.parent_session_id, tool_name, payload,
             )
@@ -1185,7 +1073,7 @@ class ParentAgentSink(AgentSink):
         """转发剪贴板展示事件到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_clipboard_display(
                 self._loop.parent_session_id, tool_name, payload,
             )
@@ -1198,7 +1086,7 @@ class ParentAgentSink(AgentSink):
         """转发子 Agent 状态更新到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_subagent_update(
                 self._loop.parent_session_id, payload,
             )
@@ -1213,7 +1101,7 @@ class ParentAgentSink(AgentSink):
         """转发系统消息到父 Agent 前端。"""
         try:
             from system.application import Application
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             await sink.emit_system_message(
                 self._loop.parent_session_id,
                 content,

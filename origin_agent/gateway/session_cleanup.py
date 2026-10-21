@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from component.cron_router import CronRouter
+from interface.cron_router import ICronRouter
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.shell_manager import IShellManager
 from system.lifecycle import requires_lifecycle_propagation
-from component.dynamic_endpoints import DynamicEndpointSystem
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,8 @@ async def cleanup_session_resources(session_id: str) -> None:
     """异步清理指定主会话的 Shell、Cron 与动态端点。"""
     try:
         from system.application import Application
-        from system.shell_manager import ShellManager
 
-        stopped = await Application.current().get_system(ShellManager).stop_session(session_id)
+        stopped = await Application.current().get_system(IShellManager).stop_session(session_id)
         if stopped:
             logger.info(
                 "Session cleanup: stopped %d Shell session(s) | session=%s",
@@ -38,7 +38,7 @@ async def cleanup_session_resources(session_id: str) -> None:
 
     try:
         from system.application import Application
-        Application.current().get_system(CronRouter).cleanup_session_cron_jobs(session_id)
+        Application.current().get_system(ICronRouter).cleanup_session_cron_jobs(session_id)
     except Exception as error:
         if requires_lifecycle_propagation(error):
             raise
@@ -49,7 +49,7 @@ async def cleanup_session_resources(session_id: str) -> None:
         )
 
     from system.application import Application
-    removed = Application.current().get_system(DynamicEndpointSystem).cleanup_session_endpoints(session_id)
+    removed = Application.current().get_system(IDynamicEndpointSystem).cleanup_session_endpoints(session_id)
     if removed:
         logger.info(
             "Session cleanup: removed %d endpoint(s) | session=%s",

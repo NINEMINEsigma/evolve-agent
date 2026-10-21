@@ -43,21 +43,19 @@ from entity.puretype import (
     SubAgentUpdate,
     QueuedMessage,
 )
-from framework import AsyncSystem
-from component.approval.system import ApprovalSystem
-from abstract.tools.registry import ToolRegistry
-from component.cron_router import CronRouter
-from system.agentspace import AgentspaceService
-from system.sandbox import Sandbox
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.llm_profile_store import LLMProfileStore
-from system.session_metadata import SessionMetadataService
-from system.shell_manager import ShellManager
-from system.modality_capability import ModalityCapabilitySystem
-from gateway.session_manager import SessionManager
-from system.runtime import RuntimeSystem
 from system.templates import read_template
-from entry.agent_sink import FrontendSink
+from interface.frontend_sink import IFrontendSink
+from interface.approval_system import IApprovalSystem
+from interface.agentspace_service import IAgentspaceService
+from interface.cron_router import ICronRouter
+from interface.llm_profile_store import ILLMProfileStore
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
+from interface.subagent_orchestrator import Decision, ISubAgentOrchestrator
+from interface.tool_registry import IToolRegistry
 from entry.base_agent_loop import IMainSessionLoop
 from entity.puretype import SubAgentFeedbackDelivery
 
@@ -79,7 +77,7 @@ def _parse_tool_arguments(arguments: str) -> dict[str, Any]:
 class _OrchestratorContext:
     """单个主会话的子 Agent 上下文。"""
 
-    def __init__(self, parent_session_id: str, session_manager: SessionManager) -> None:
+    def __init__(self, parent_session_id: str, session_manager: ISessionManager) -> None:
         self._parent_session_id: str = parent_session_id
         self._session_manager = session_manager
         self._active: dict[str, SubAgentLoop] = {}
@@ -210,7 +208,7 @@ class _OrchestratorContext:
         profile: LLMProfile,
     ) -> None:
         """创建 TaskAgentLoop 并以 asyncio.Task 启动。"""
-        parent_ctx = self._require_agent_loop().loop.app.get_system(RuntimeSystem).context
+        parent_ctx = self._require_agent_loop().loop.app.get_system(IRuntimeSystem).context
         ctx = await build_taskagent_context(profile, parent_ctx)
 
         tools = self._build_task_tool_set()
@@ -432,7 +430,7 @@ class _OrchestratorContext:
         )
         return SubAgentChatResult(success=True, session_id=session_id)
 
-    async def approve(self, session_id: str, decisions: list[dict[str, Any]]) -> SubAgentApprovalResult:
+    async def approve(self, session_id: str, decisions: list[Decision]) -> SubAgentApprovalResult:
         """审批子 Agent 的工具调用。"""
         if session_id in self._starting:
             return SubAgentApprovalResult(
@@ -751,7 +749,7 @@ class _OrchestratorContext:
         历史文件与前端回放事件先在未提交状态中准备；只有全部准备成功后，
         才将实例登记为 active。登记后若启动阶段失败，则统一回滚运行态对象。
         """
-        parent_ctx = self._require_agent_loop().loop.app.get_system(RuntimeSystem).context
+        parent_ctx = self._require_agent_loop().loop.app.get_system(IRuntimeSystem).context
         ctx = await build_subagent_context(profile, temperature, parent_ctx)
         tools = self._build_tool_set()
 
@@ -874,8 +872,8 @@ class _OrchestratorContext:
     def _build_tool_set(self) -> list[dict[str, Any]]:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = Application.current().get_system(ToolRegistry)
+        from interface.tool_registry import IToolRegistry
+        tool_registry = Application.current().get_system(IToolRegistry)
         return tool_registry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
 
     def _build_task_tool_set(self) -> list[dict[str, Any]]:
@@ -885,8 +883,8 @@ class _OrchestratorContext:
         然后按 danger_level 过滤为 safe。
         """
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = Application.current().get_system(ToolRegistry)
+        from interface.tool_registry import IToolRegistry
+        tool_registry = Application.current().get_system(IToolRegistry)
         all_defs: list[dict] = tool_registry.get_definitions_for_availability(
             ToolAvailability.TASKAGENT,
         )
@@ -979,30 +977,30 @@ class _OrchestratorContext:
     def _history_path(session_id: str) -> Path:
         """普通子Agent历史的临时 easysave 路径。"""
         from system.application import Application
-        ctx = Application.current().get_system(RuntimeSystem).context
+        ctx = Application.current().get_system(IRuntimeSystem).context
         directory = ctx.agentspace / SUBAGENT_TEMP_DIR_NAME
         directory.mkdir(parents=True, exist_ok=True)
         return directory / f"{session_id}{SUBAGENT_HISTORY_SUFFIX}"
 
 
-class SubAgentOrchestrator(AsyncSystem):
+class SubAgentOrchestrator(ISubAgentOrchestrator):
     """按主会话管理多个子Agent上下文，并拥有其全部后台任务。"""
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            RuntimeSystem, SessionManager, ApprovalSystem, FrontendSink,
-            ToolRegistry, CronRouter, AgentspaceService,
-            Sandbox, LLMProfileStore, ModalityCapabilitySystem,
+            IRuntimeSystem, ISessionManager, IApprovalSystem, IFrontendSink,
+            IToolRegistry, ICronRouter, IAgentspaceService,
+            ISandbox, ILLMProfileStore, IModalityCapabilitySystem,
         ))
-        self._runtime: RuntimeSystem | None = None
-        self._session_manager: SessionManager | None = None
+        self._runtime: IRuntimeSystem | None = None
+        self._session_manager: ISessionManager | None = None
         self._contexts: dict[str, _OrchestratorContext] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._frozen = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._session_manager = self.get_system(SessionManager)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._session_manager = self.get_system(ISessionManager)
 
     async def virtual_shotdown(self) -> None:
         await self.shutdown_all()
@@ -1012,13 +1010,13 @@ class SubAgentOrchestrator(AsyncSystem):
         self._session_manager = None
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("SubAgentOrchestrator has not been awakened")
         return self._runtime
 
     @property
-    def session_manager(self) -> SessionManager:
+    def session_manager(self) -> ISessionManager:
         if self._session_manager is None:
             raise LifecycleFailure("SubAgentOrchestrator has not been awakened")
         return self._session_manager
@@ -1048,8 +1046,27 @@ class SubAgentOrchestrator(AsyncSystem):
 
     # ── 公共代理方法 ─────────────────────────────────────────────────
 
-    async def launch(self, parent_session_id: str, **kwargs: Any) -> SubAgentLaunchResult:
-        return await self._get_context(parent_session_id).launch(parent_session_id=parent_session_id, **kwargs)
+    async def launch(
+        self,
+        parent_session_id: str,
+        name: str,
+        profile: CharacterProfile,
+        temperature: float,
+        initial_prompt: str,
+        user_name: str,
+        message_type: str,
+        history_path: str | None = None,
+    ) -> SubAgentLaunchResult:
+        return await self._get_context(parent_session_id).launch(
+            name=name,
+            profile=profile,
+            temperature=temperature,
+            initial_prompt=initial_prompt,
+            user_name=user_name,
+            message_type=message_type,
+            parent_session_id=parent_session_id,
+            history_path=history_path,
+        )
 
     async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat_user_direct(session_id, message, co_recipients)
@@ -1057,7 +1074,7 @@ class SubAgentOrchestrator(AsyncSystem):
     async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat(session_id, message, user_name, message_type, co_recipients)
 
-    async def approve(self, parent_session_id: str, session_id: str, decisions: list[dict[str, Any]]) -> SubAgentApprovalResult:
+    async def approve(self, parent_session_id: str, session_id: str, decisions: list[Decision]) -> SubAgentApprovalResult:
         return await self._get_context(parent_session_id).approve(session_id, decisions)
 
     async def stop(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:

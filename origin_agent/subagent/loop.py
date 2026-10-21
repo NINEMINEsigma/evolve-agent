@@ -8,6 +8,11 @@
 
 from __future__ import annotations
 
+from interface.cron_router import ICronRouter
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.tool_registry import IToolRegistry
+
 import asyncio
 import json
 import logging
@@ -44,14 +49,14 @@ from entity.messages import (
 )
 from entity.puretype import Role
 from subagent.context import SubRuntimeContext
-from entry.agent_sink import AgentSink, ParentAgentSink
+from interface.agent_sink import IAgentSink
+from entry.agent_sink import ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
 from abstract.tools.tool import ToolExecution
 from entry.tool_post_dispatch import PreparedToolResult, ToolPostprocessor, prepare_tool_result
 from entry.tool_executor import _interrupted_result, cancel_tool_wait
 from system.lifecycle import requires_lifecycle_propagation
-from system.runtime import RuntimeSystem
 from system.prompt import (
     build_dynamic_sandbox_spaces_block,
     build_session_chat_style_block,
@@ -127,7 +132,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         from system.application import Application
         app = Application.current()
         super().__init__(app, session_id)
-        self._runtime = app.get_system(RuntimeSystem)
+        self._runtime = app.get_system(IRuntimeSystem)
         self._tool_postprocessor = ToolPostprocessor(self)
         self._cancel_cleanup_tasks: set[asyncio.Future[Any]] = set()
 
@@ -180,9 +185,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         继续由自身标量配置构造运行时 Profile。最终 Profile存入
         ``self._llm_profile``，供 ToolContext 和多模态分工使用。
         """
-        from system.runtime import RuntimeSystem
 
-        parent_ctx = self.app.get_system(RuntimeSystem).context
+        parent_ctx = self.app.get_system(IRuntimeSystem).context
         if ctx.llm_profile is not None:
             profile = ctx.llm_profile
         else:
@@ -223,7 +227,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _get_context(self) -> SubRuntimeContext:
         return self._ctx
 
-    def get_sink(self) -> AgentSink:
+    def get_sink(self) -> IAgentSink:
         return ParentAgentSink(self)
 
     def get_tool_availability_scope(self) -> ToolAvailability:
@@ -250,8 +254,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         chat_style_block = build_session_chat_style_block(self._parent_session_id, owner="parent")
         if chat_style_block:
             prompts.append(chat_style_block)
-        from system.sandbox import Sandbox
-        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             prompts.append(dynamic_spaces_block)
         # 注入工具集目录
@@ -371,8 +374,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         if get_approval_mode(self._parent_session_id) == ApprovalMode.YOLO:
             return True
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
         entry = tool_registry.get_tool(name)
         if entry is None:
             return False
@@ -393,15 +395,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """子 Agent 主循环。"""
         # 注册到 CronRouter，使 cron 结果能投递到 inbox
         from system.application import Application
-        from component.cron_router import CronRouter
-        _cron = Application.current().get_system(CronRouter)
+        _cron = Application.current().get_system(ICronRouter)
         _cron.register(self.session_id, self)
         active_round_id: str | None = None
         postprocessing = False
         try:
             # 初始 prompt 也必须先登记为 Inbox 输入，避免启动 task 前丢失。
-            from system.runtime import RuntimeSystem
-            _main_name = Application.current().get_system(RuntimeSystem).main_agent_character_name
+            _main_name = Application.current().get_system(IRuntimeSystem).main_agent_character_name
             initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or _main_name)
             self._inbox.put(UserMessage(
                 content=format_user_message(user_name, message_type, initial_prompt),
@@ -466,8 +466,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                                character_name=self.current_character_agent)
 
                 # 子会话保留原审批出口，仅先截断声明不接受的同批后续调用。
-                from abstract.tools.registry import ToolRegistry
-                batch = self.app.get_system(ToolRegistry).plan_tool_batch(resp.tool_calls)
+                batch = self.app.get_system(IToolRegistry).plan_tool_batch(resp.tool_calls)
                 resp = resp.model_copy(update={"tool_calls": batch.accepted})
 
                 # 存储带 tool_calls 的 assistant 消息
@@ -619,8 +618,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._last_message_from_parent = (message_type != "user_direct")
         content = format_user_message(user_name, message_type, text, co_recipients)
         if character_name is None:
-            from system.runtime import RuntimeSystem
-            character_name = USER_CHARACTER_NAME if message_type == "user_direct" else Application.current().get_system(RuntimeSystem).main_agent_character_name
+            from system.application import Application
+            character_name = USER_CHARACTER_NAME if message_type == "user_direct" else Application.current().get_system(IRuntimeSystem).main_agent_character_name
         return self.enqueue_inbox_message(
             UserMessage(content=content, character_name=character_name),
             from_parent=message_type != "user_direct",
@@ -948,8 +947,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         execution: ToolExecution | None = None
         try:
             from system.application import Application
-            from abstract.tools.registry import ToolRegistry
-            tool_registry = Application.current().get_system(ToolRegistry)
+            tool_registry = Application.current().get_system(IToolRegistry)
             entry = tool_registry.get_tool(tc.name)
             if entry is None:
                 return self._make_tool_msg(tc.id, {"error": f"Tool '{tc.name}' not found in registry"})
@@ -1036,8 +1034,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 # 返回强制中断失败结果
                 await self._cancel_tool_wait(dispatch_task)
                 from system.application import Application
-                from system.sandbox import Sandbox
-                Application.current().get_system(Sandbox).kill_active(self.session_id)
+                Application.current().get_system(ISandbox).kill_active(self.session_id)
                 return PreparedToolResult(
                     message=_interrupted_result(tc, self.current_character_agent, "dispatch")
                 )

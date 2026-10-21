@@ -34,7 +34,7 @@ component/
 
 `component/` 下全部工具来源（`tools/` 18、`extools/` 5、`multiagenttools/` 9、`browser/` 10、`automation/` 9 个模块）均已迁移为 `BaseTool` 子类与顶层 `TOOLSET = BaseToolSet(...)` 声明；每个模块导入只创建无连接工具对象，不取得 Application、不注册、不创建运行时连接。自定义工具与 MCP 来源使用同一对象契约。来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。
 
-`ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `get_system(ToolRegistry)` 取得唯一实例；注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载并执行一次 `preheat()`。模块级 registry 单例、函数式 `register`、`ToolEntry`/`ToolsetEntry` 镜像、`HandlerToolAdapter` 与 `UIEventRouter` 均已移除；AST 发现对退役的 `register_tools`、旧全局注册表导入与导入期注册直接失败。
+`ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `get_system(IToolRegistry)` 取得唯一实例；注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载并执行一次 `preheat()`。模块级 registry 单例、函数式 `register`、`ToolEntry`/`ToolsetEntry` 镜像、`HandlerToolAdapter` 与 `UIEventRouter` 均已移除；AST 发现对退役的 `register_tools`、旧全局注册表导入与导入期注册直接失败。
 
 工具四阶段（工具调用前 `before_handle`、工具主体 `handle`、工具调用后处理 `after_handle`）与工具集 `preheat()` 的完整契约见 `abstract/DEV-README.md`。专属后处理示例：
 
@@ -95,23 +95,23 @@ component/
 
 ### 会话变量工具
 
-`ReadSessionVariables` 位于filesystem工具集，需先LoadToolset加载，safe、EVERY、同步handler由既有ToolRegistry执行器持有。没有会话选择参数，普通子Agent/临时Agent读父主会话池；临时Agent仍仅已加载∩TASKAGENT∩safe。service由`get_system(AgentspaceService).session_variables`取得，读取的每个明确文件登记既有回复轮次接触，不锁整树，不创建UI事件。
+`ReadSessionVariables` 位于filesystem工具集，需先LoadToolset加载，safe、EVERY、同步handler由既有ToolRegistry执行器持有。没有会话选择参数，普通子Agent/临时Agent读父主会话池；临时Agent仍仅已加载∩TASKAGENT∩safe。service由`get_system(IAgentspaceService).session_variables`取得，读取的每个明确文件登记既有回复轮次接触，不锁整树，不创建UI事件。
 
 返回完整原值、raw_value、raw_metadata、normalized metadata、条目/池级issues及scan_complete；工具与REST复用read_pool。无法完整扫描时显式诊断，池级预算拒绝返回error，不返回伪空列表。写入通过Read/Write/PatchEdit管理`ws:sessions/<sid>/variables/`中的JSON标量与同级.meta，数值限制仅提示，percent=true仅显示×100。主Agent统一共享结算，不提供原子增减或聊天回滚。
 
 ### 多模态能力生命周期（S14）
 
-Read的能力缓存查询、自动探测与转发经 `get_system(ModalityCapabilitySystem)` 调用；System持有共享锁、探针媒体、缓存路径和完整请求任务，纯媒体内容块构造仍从模块导入。关闭封闭新模型请求并等待六路子探针真实结束后再释放锁；明确停止和生命周期异常不得转换为普通工具结果。缓存与Read的媒体协议保持。
+Read的能力缓存查询、自动探测与转发经 `get_system(IModalityCapabilitySystem)` 调用；System持有共享锁、探针媒体、缓存路径和完整请求任务，纯媒体内容块构造仍从模块导入。关闭封闭新模型请求并等待六路子探针真实结束后再释放锁；明确停止和生命周期异常不得转换为普通工具结果。缓存与Read的媒体协议保持。
 
 ### BrowserSystem 生命周期迁移（S13）
 
-`component/browser/system.py::BrowserSystem` 依赖 RuntimeSystem，唯一持有 Playwright、CDP连接、当前端点及应用启动的无头进程。virtual_awake不加载Playwright或启动浏览器；工具运行期通过get_system(BrowserSystem)查询，原_connection仅保留无状态探测、标签页定位与DOM函数，常量由entity/constant/browser.py导出。
+`component/browser/system.py::BrowserSystem` 依赖 RuntimeSystem，唯一持有 Playwright、CDP连接、当前端点及应用启动的无头进程。virtual_awake不加载Playwright或启动浏览器；工具运行期通过get_system(IBrowserSystem)查询，原_connection仅保留无状态探测、标签页定位与DOM函数，常量由entity/constant/browser.py导出。
 
 连接请求经TaskOwner.run_request管理并以连接锁串行化，部分连接失败释放已取得资源。断连及原生进程回收各有明确持有的清理任务，取消调用方等待不取消真实释放；关闭超时/失败上报并保留资源引用。多次无头启动保留每个自有进程句柄，不覆盖丢失旧进程；只有这些登记进程会被终止，用户自己启动的浏览器不被杀死。最终注销先停止请求，再尝试独立资源释放并传播全部失败，main.py不再重复cleanup。工具handler任务与其他浏览器操作先由ToolRegistry收尾，应用级关闭编排由 Application 统一执行。
 
 ### LSP 工具生命周期
 
-LSP工具与文件修改后的诊断附加统一通过 `Application.current().get_system(LSPManager)` 调用。System唤醒只绑定Runtime主loop与Sandbox，pyright仍由LSPStart按需启动；工具不再传入Sandbox或创建独立manager。启动/替换和关闭均确认进程及reader线程实际结局，关闭失败传播，main.py不再执行另一套cleanup。
+LSP工具与文件修改后的诊断附加统一通过 `Application.current().get_system(ILSPManager)` 调用。System唤醒只绑定Runtime主loop与Sandbox，pyright仍由LSPStart按需启动；工具不再传入Sandbox或创建独立manager。启动/替换和关闭均确认进程及reader线程实际结局，关闭失败传播，main.py不再执行另一套cleanup。
 
 ### Read 正文单行限制
 
@@ -151,7 +151,7 @@ LSP工具与文件修改后的诊断附加统一通过 `Application.current().ge
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
 | `dynamic_endpoint_tools.py` | 动态端点工具（仅参数解析与 `DynamicEndpointSystem` 结果适配） |
 
-`component/dynamic_endpoints.py::DynamicEndpointSystem` 是依赖 `RuntimeSystem`、`SessionManager` 的 framework `AsyncSystem`，唯一持有动态端点字典、锁和 `dynamic_endpoints.json`。`virtual_awake` 严格恢复合法记录，缺失会话只跳过内存加载但保留磁盘条目；损坏文件、非法记录和持久化失败直接传播。工具、Gateway、会话删除和旋转只通过 `get_system(DynamicEndpointSystem)` 调用公开实例方法。`close_admission()` 只停止新注册、迁移和显式注销，不删除持久端点配置；永久删除会话的清理由独立公开清理方法负责。
+`component/dynamic_endpoints.py::DynamicEndpointSystem` 是依赖 `RuntimeSystem`、`SessionManager` 的 framework `AsyncSystem`，唯一持有动态端点字典、锁和 `dynamic_endpoints.json`。`virtual_awake` 严格恢复合法记录，缺失会话只跳过内存加载但保留磁盘条目；损坏文件、非法记录和持久化失败直接传播。工具、Gateway、会话删除和旋转只通过 `get_system(IDynamicEndpointSystem)` 调用公开实例方法。`close_admission()` 只停止新注册、迁移和显式注销，不删除持久端点配置；永久删除会话的清理由独立公开清理方法负责。
 | `archive_tools.py` | 归档工具 |
 | `diff_tools.py` | diff 工具 |
 
@@ -323,7 +323,7 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 
 ### `component/cron_router.py`
 
-- `CronRouter` 已改为依赖 RuntimeSystem、Sandbox、SubprocessRunner 的 AsyncSystem，经 `get_system(CronRouter)` 访问。`_CronTask` 与原时间解析迁至 `component/cron_tasks.py`；工具层只解析参数、调用公开 `schedule_task/reschedule_task/list/trigger/cancel` 方法并适配结果，不读取注册表或调用私有调度/持久化。
+- `CronRouter` 已改为依赖 RuntimeSystem、Sandbox、SubprocessRunner 的 AsyncSystem，经 `get_system(ICronRouter)` 访问。`_CronTask` 与原时间解析迁至 `component/cron_tasks.py`；工具层只解析参数、调用公开 `schedule_task/reschedule_task/list/trigger/cancel` 方法并适配结果，不读取注册表或调用私有调度/持久化。
 - `virtual_awake` 严格加载原 JSON 并校验身份/调度；缺文件可初始化，已有文件损坏或任务非法直接失败。此阶段不安排 Timer；全应用 RUNNING 后由 `activate` 开放调度。
 - Timer 直接执行单次命令，所有真实 Timer（含已取消尚未退出）保留在实例集合中，只有 join/实际结束确认后移除。回调登记、立即触发与冻结受接收边界和实例锁协调；已被替换/取消的 Timer 不能执行另一轮。任务与运行中命令分别登记，删除会话或取消任务不会丢失尚在执行的进程所有权。
 - 命令统一通过 SubprocessRunner 执行，使用独立 `CRON_PROCESS_SESSION_PREFIX` 键；关闭先冻结和终止命令，再在线程中 join 全部 Timer。期限内未结束保留资源、错误汇总传播；不以清空集合宣告成功，主事件循环不阻塞 join。
@@ -348,3 +348,7 @@ ModalityCapabilitySystem新 `describe_media_block`返回结构化成功描述/�
 ## 会话视觉资源重定向
 
 `stage/`、`site/` 与 `chat-style/` 的源目录可以使用同级 `.meta` 文件的 `[redirect]` 字段复用其他逻辑目录。服务端只解析源目录一次，合法目标由稳定视觉入口通过 HTTP 307 使用；缺失或非法配置静默回退源目录。前端 Hook 不解析 `.meta`，只消费最终入口并通过 Agentspace 事件与 HEAD 版本探测刷新。会话状态 REST 及扩展调用方可通过公开服务接口读取三项非持久化视觉资源状态。`Read` 对源目录保留原始元数据语义，并只将非法 `redirect` 原因放入 `meta.redirect`。
+
+## System 接口槽位约定（2026-10-20）
+
+ApprovalSystem、BrowserSystem、CronRouter 和 DynamicEndpointSystem 分别使用 `IApprovalSystem`、`IBrowserSystem`、`ICronRouter` 和 `IDynamicEndpointSystem` 作为依赖、查询和 Application 注册槽位。工具模块只通过这些接口访问运行期服务；审批、浏览器、Timer 与动态端点的资源所有权仍由具体实现持有。

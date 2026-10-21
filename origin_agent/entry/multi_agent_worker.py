@@ -8,6 +8,9 @@ MultiAgentWorker — 单 Agent tool loop 执行器。
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+from interface.tool_registry import IToolRegistry
+
 import json
 import logging
 import re
@@ -45,7 +48,7 @@ from entry.agent_support.multimodal import prepare_main_multimodal_request
 import asyncio
 
 if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
     from abstract.llm.client import BaseLLMClient
     from entity.puretype import LLMResponse
 
@@ -107,7 +110,7 @@ class MultiAgentWorker:
         history: list[BaseMessage],
         tools: list[dict[str, Any]],
         llm_client: BaseLLMClient,
-        sink: AgentSink,
+        sink: IAgentSink,
         loop: IMainSessionLoop,
         round_id: str,
         activity_id: str,
@@ -121,7 +124,7 @@ class MultiAgentWorker:
         self._tools: list[dict[str, Any]] = tools
         self._llm: BaseLLMClient = llm_client
         self._llm_profile: LLMProfile | None = llm_profile
-        self._sink: AgentSink = sink
+        self._sink: IAgentSink = sink
         self._loop: IMainSessionLoop = loop
         self._round_id: str = round_id
         self._activity_id: str = activity_id
@@ -231,8 +234,7 @@ class MultiAgentWorker:
         self._turn_counter.value = 0
         self._collected_metrics = []
         while self._turn_counter.value < MAX_TOOL_TURNS:
-            from system.runtime import RuntimeSystem
-            self._loop.loop.app.get_system(RuntimeSystem).require_running()
+            self._loop.loop.app.get_system(IRuntimeSystem).require_running()
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
@@ -364,10 +366,9 @@ class MultiAgentWorker:
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:
-                from abstract.tools.registry import ToolRegistry
                 from entry.tool_execution import accept_tool_batch
                 resp = await accept_tool_batch(
-                    resp, self._loop.loop.app.get_system(ToolRegistry), self._sink,
+                    resp, self._loop.loop.app.get_system(IToolRegistry), self._sink,
                     self._loop.loop.session_id, stream_id,
                 )
                 self._loop.loop.set_main_session_activity_phase(

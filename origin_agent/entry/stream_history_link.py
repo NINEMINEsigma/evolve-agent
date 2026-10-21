@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from entity.puretype import HistoryRowLink
 
 if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def _validate_links(links: list[HistoryRowLink]) -> None:
 
 
 async def emit_history_links(
-    sink: AgentSink,
+    sink: IAgentSink,
     session_id: str,
     *,
     stream_id: str = "",
@@ -76,7 +76,7 @@ async def emit_history_links(
 
 
 async def emit_stream_history_link(
-    sink: AgentSink,
+    sink: IAgentSink,
     session_id: str,
     stream_id: str,
     history_index: int,

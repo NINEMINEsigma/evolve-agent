@@ -23,13 +23,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from framework import AsyncSystem
-
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox, SandboxError
+from interface.lsp_manager import ILSPManager
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ _SYMBOL_KIND_MAP: dict[int, str] = {
 # LSPManager
 # ---------------------------------------------------------------------------
 
-class LSPManager(AsyncSystem):
+class LSPManager(ILSPManager):
     """pyright LSP server 的全局单例管理器。
 
     生命周期: IDLE → STARTING → READY → (lsp_start 替换) → STARTING → READY → ...
@@ -77,18 +77,18 @@ class LSPManager(AsyncSystem):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, Sandbox))
+        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
         self._lock = threading.RLock()
         self._operation_lock = threading.Lock()
         self._admission_closed = threading.Event()
-        self._runtime: RuntimeSystem | None = None
+        self._runtime: IRuntimeSystem | None = None
         self._request_waiters: set[asyncio.Task[Any]] = set()
         self._cleanup_task: asyncio.Task[int] | None = None
         self._state: LSPState = LSPState.IDLE
         self._process: subprocess.Popen | None = None
         self._root_path: Path | None = None
         self._root_uri: str | None = None
-        self._sandbox: Sandbox | None = None
+        self._sandbox: ISandbox | None = None
         self._next_id: int = 1
         self._pending: dict[int, dict[str, Any]] = {}
         self._diagnostics_cache: dict[str, list[LSPDiagnostic]] = {}
@@ -97,18 +97,18 @@ class LSPManager(AsyncSystem):
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._sandbox = self.get_system(Sandbox)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._sandbox = self.get_system(ISandbox)
         self._loop = self._runtime.loop
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("LSPManager has not been awakened")
         return self._runtime
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> ISandbox:
         if self._sandbox is None:
             raise LifecycleFailure("LSPManager has not been awakened")
         return self._sandbox
@@ -200,7 +200,7 @@ class LSPManager(AsyncSystem):
 
     # -- start -----------------------------------------------------
 
-    def start(self, root_logical: str) -> dict:
+    def start(self, root_logical: str) -> dict[str, str | bool]:
         """启动或替换 pyright 实例。
 
         *root_logical* — 逻辑路径（如 ``"fork:"``），通过 sandbox 解析为真实路径。
@@ -291,7 +291,7 @@ class LSPManager(AsyncSystem):
             with self._lock:
                 self._state = LSPState.READY
 
-            result: dict = {
+            result: dict[str, str | bool] = {
                 "started": True,
                 "root": root_logical,
                 "root_uri": self._root_uri,
@@ -382,7 +382,7 @@ class LSPManager(AsyncSystem):
 
     async def refresh(
         self, logical_path: str | None
-    ) -> dict:
+    ) -> dict[str, str | bool]:
         self._require_running()
         sandbox = self.sandbox
         if not self.is_ready():
@@ -466,7 +466,7 @@ class LSPManager(AsyncSystem):
     def _path_to_uri(self, path: Path) -> str:
         return path.as_uri()
 
-    def _resolve_to_uri(self, logical_path: str, sandbox: Sandbox) -> str | None:
+    def _resolve_to_uri(self, logical_path: str, sandbox: ISandbox) -> str | None:
         try:
             resolved = sandbox.resolve_read(logical_path)
             if not self.is_in_workspace(resolved.real):
@@ -475,7 +475,7 @@ class LSPManager(AsyncSystem):
         except SandboxError:
             return None
 
-    def _uri_to_logical(self, uri: str, sandbox: Sandbox) -> str | None:
+    def _uri_to_logical(self, uri: str, sandbox: ISandbox) -> str | None:
         """将 file URI 反向映射为逻辑路径。"""
         if not uri.startswith("file://"):
             return None
@@ -864,7 +864,7 @@ class LSPManager(AsyncSystem):
 
     # -- LSP 响应转换 ----------------------------------------------
 
-    def _location_to_reference(self, loc: dict, sandbox: Sandbox) -> LSPReference | None:
+    def _location_to_reference(self, loc: dict, sandbox: ISandbox) -> LSPReference | None:
         uri = loc.get("uri", "")
         rng = loc.get("range", {})
         start = rng.get("start", {})
@@ -888,7 +888,7 @@ class LSPManager(AsyncSystem):
             preview=preview,
         )
 
-    def _location_to_definition(self, loc: dict, sandbox: Sandbox) -> LSPDefinition | None:
+    def _location_to_definition(self, loc: dict, sandbox: ISandbox) -> LSPDefinition | None:
         # LocationLink 格式有 targetUri/targetRange；Location 格式有 uri/range
         uri = loc.get("uri") or loc.get("targetUri", "")
         rng = loc.get("range") or loc.get("targetRange", {})

@@ -227,7 +227,7 @@ graph TD
 
 ## 工具注册表迁移（S10）
 
-运行期工具查询与执行统一使用 `app.get_system(ToolRegistry)`。注册表管理异步请求任务和真实同步 Future，子Agent取消等待不代表同步 handler 已退出；子Agent仅负责本次分发/审批等待的完整交接。停止、生命周期及 History 持久化失败（包括异常组）透传到运行边界，不能在工具错误、审批拒绝或 Loop 兜底中改写为正常完成。普通工具失败仍保持原消息协议。
+运行期工具查询与执行统一使用 `app.get_system(IToolRegistry)`。注册表管理异步请求任务和真实同步 Future，子Agent取消等待不代表同步 handler 已退出；子Agent仅负责本次分发/审批等待的完整交接。停止、生命周期及 History 持久化失败（包括异常组）透传到运行边界，不能在工具错误、审批拒绝或 Loop 兜底中改写为正常完成。普通工具失败仍保持原消息协议。
 
 子会话输入登记、最终停止与 History 保存顺序已由 S17 完成；Application 最终装配件 P22 接通。
 
@@ -263,5 +263,10 @@ TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe�
 ### 主会话媒体输入控制的排除范围
 
 媒体输入Tab只管理当前主会话History的独立媒体实例，普通子Agent和临时Agent的独立History不列入、不增加其控制REST，也不把主会话关闭开关传播到子会话模型请求。共享消息类型新增MediaBlock持久字段不会改变as_object的客户端wire输出；临时Agent仍不持久化。多Agent模式参与者使用主会话共享History，因此遵守该主会话媒体开关，但其动态后缀注入仍保持既有None语义。子Agent工具权限不变。
+
+## System 接口槽位约定（2026-10-20）
+
+`SubAgentOrchestrator` 继承 `ISubAgentOrchestrator`，依赖和运行期查询使用 `IRuntimeSystem`、`ISessionManager` 及其他接口槽位。`_OrchestratorContext` 仍是编排器内部运行对象，不注册为 System；子Agent Loop 的 History、反馈交接和关闭所有权不因接口化改变。
+
 
 

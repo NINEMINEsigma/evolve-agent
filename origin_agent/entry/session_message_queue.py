@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+
 import asyncio
 import uuid
 from datetime import datetime
@@ -14,7 +16,6 @@ from entity.puretype import (
 )
 from entry.input_delivery import InputDeliveryBuffer, ToolInputReservation
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
@@ -40,7 +41,7 @@ class SessionMessageQueue:
 
     def __init__(self, loop: IMainSessionLoop) -> None:
         self._loop = loop
-        self._runtime = loop.loop.app.get_system(RuntimeSystem)
+        self._runtime = loop.loop.app.get_system(IRuntimeSystem)
         self._event_loop = self._runtime.loop
         self._input_buffer = InputDeliveryBuffer[QueuedMessage](self._runtime)
         self._wakeup = asyncio.Event()

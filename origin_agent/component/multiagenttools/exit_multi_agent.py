@@ -7,8 +7,10 @@ multiagent 工具集重新可用，可正常使用 run_subagent / chat_subagent 
 
 from __future__ import annotations
 
+from interface.session_manager import ISessionManager
+
 import logging
-from typing import Any, cast
+from typing import Any
 
 from abstract.tools.tool import (
     BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, ToolPostprocessEffect,
@@ -17,12 +19,9 @@ from abstract.tools.tool import (
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
-from entry.agent_sink import FrontendSink
 from entry.multi_agent_loop import MultiAgentLoop
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-
-from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ async def _prepare_exit_multi_agent(execution: ToolExecution) -> ToolHandlerResu
     app = execution.context.app
 
     # 获取当前 MultiAgentLoop
-    _multi_loop = app.get_system(SessionManager).get_loop(session_id)
+    _multi_loop = app.get_system(ISessionManager).get_loop(session_id)
     if _multi_loop is None:
         return ToolHandlerResult(tool_error(f"No active loop found for session {session_id}"))
     elif isinstance(_multi_loop.loop, MultiAgentLoop):
@@ -132,13 +131,13 @@ class ExitMultiAgentTool(BaseTool):
             return ToolPostprocessEffect()
         multi_loop = execution.state
         context = execution.context
-        manager = context.app.get_system(SessionManager)
+        manager = context.app.get_system(ISessionManager)
         current = manager.get_loop(context.session_id)
         if current is None or current.loop is not multi_loop:
             raise RuntimeError("Session Loop changed during normal-mode preparation")
         parent_loop = ParentAgentLoop(
             app=context.app, session_id=context.session_id,
-            frontend_sink=cast(FrontendSink, multi_loop.get_sink()),
+            frontend_sink=multi_loop.get_sink(),
             history_store_dir=multi_loop.history_store_dir,
         )
         parent_loop.set_session_manager(manager)

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import datetime
 import json
 import logging
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _s() -> Sandbox:
     from system.application import Application
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 _UPLOAD_TIME_RE = re.compile(UPLOAD_TIME_RE_PATTERN)

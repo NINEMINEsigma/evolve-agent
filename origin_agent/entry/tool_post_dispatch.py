@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+from interface.tool_registry import IToolRegistry
+
 import asyncio
 from typing import TYPE_CHECKING, Protocol
 from collections.abc import Awaitable
@@ -15,7 +18,7 @@ from entry.agent_support.multimodal import (
 )
 
 if TYPE_CHECKING:
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
     from entry.base_agent_loop import BaseAgentLoop
 
 
@@ -69,7 +72,7 @@ class PreparedToolResult(BaseModel):
         if self.execution is not None:
             self.execution.result = payload
 
-    async def emit(self, sink: AgentSink) -> None:
+    async def emit(self, sink: IAgentSink) -> None:
         notice = self.notification
         if notice is None:
             return
@@ -85,10 +88,8 @@ class ToolPostprocessor:
     """Invocation postprocessing shared by main, multi, sub and task Loops."""
 
     def __init__(self, loop: BaseAgentLoop) -> None:
-        from system.runtime import RuntimeSystem
-
         self._loop = loop
-        self._runtime = loop.app.get_system(RuntimeSystem)
+        self._runtime = loop.app.get_system(IRuntimeSystem)
         self._cancel_cleanup_tasks: set[asyncio.Future] = set()
 
     async def _await_phase(self, operation: Awaitable[ToolPostprocessEffect]) -> ToolPostprocessEffect:
@@ -110,16 +111,14 @@ class ToolPostprocessor:
             await asyncio.gather(cancel_wait, return_exceptions=True)
 
     async def after_committed(
-        self, prepared: PreparedToolResult, sink: AgentSink,
+        self, prepared: PreparedToolResult, sink: IAgentSink,
     ) -> ToolPostprocessEffect:
-        from abstract.tools.registry import ToolRegistry
-
         execution = prepared.execution
         effect = ToolPostprocessEffect()
         if execution is not None and execution.body_completed_normally:
             if execution.result_message is not prepared.message or execution.history_index is None:
                 raise RuntimeError("Tool postprocessing requires a committed result")
-            registry = self._loop.app.get_system(ToolRegistry)
+            registry = self._loop.app.get_system(IToolRegistry)
             try:
                 effect = await self._await_phase(registry.async_postprocess(execution))
                 if execution.context.is_interrupted:

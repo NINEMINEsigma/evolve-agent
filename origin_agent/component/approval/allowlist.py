@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from interface.approval_system import IApprovalSystem
+
 import json
 import logging
 import threading
@@ -90,13 +92,11 @@ class ToolAllowlistStore:
 
 def is_allowed(tool_name: str, args: dict[str, Any]) -> bool:
     """公共审批业务入口；不持有实例或状态。"""
-    from component.approval.system import ApprovalSystem
     from system.application import Application
-    return Application.current().get_system(ApprovalSystem).allowlist.is_allowed(tool_name, args)
+    return Application.current().get_system(IApprovalSystem).allowlist.is_allowed(tool_name, args)
 
 
 def add_allowed(tool_name: str, args: dict[str, Any]) -> None:
     """公共审批业务入口；委托唯一系统拥有的白名单。"""
-    from component.approval.system import ApprovalSystem
     from system.application import Application
-    Application.current().get_system(ApprovalSystem).allowlist.add_allowed(tool_name, args)
+    Application.current().get_system(IApprovalSystem).allowlist.add_allowed(tool_name, args)

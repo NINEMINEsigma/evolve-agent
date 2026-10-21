@@ -306,7 +306,7 @@ classDiagram
         +consume()
     }
 
-    class AgentSink {
+    class IAgentSink {
         +ask_question()*
         +request_approval()*
         +emit_tool_call()*
@@ -755,8 +755,9 @@ classDiagram
     SubAgentLoop <|-- TaskAgentLoop
     IMainSessionLoop <|.. ParentAgentLoop
     IMainSessionLoop <|.. MultiAgentLoop
-    AgentSink <|-- FrontendSink
-    AgentSink <|-- ParentAgentSink
+    IAgentSink <|-- IFrontendSink
+    IFrontendSink <|.. FrontendSink
+    IAgentSink <|.. ParentAgentSink
     FrontendSink --> StreamDeltaEvent : constructs and sends
     FrontendSink --> StreamDoneEvent : constructs and sends
     StreamDeltaEvent --> ToolCallRequest : contains
@@ -839,20 +840,20 @@ classDiagram
 | `_interrupt_lock` | `IMainSessionLoop`（公共实现） | `asyncio.Lock` | 同会话中断请求互斥锁 |
 | `_active_round_task` | `IMainSessionLoop`（公共实现） | `asyncio.Task \| None` | 已取得 `_process_lock` 的当前单次主会话回复 task；长期队列 consumer 与等待处理锁的 child 不登记 |
 | `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置档案 |
-| `_sink` | `MultiAgentLoop` | `AgentSink` | sink |
+| `_sink` | `MultiAgentLoop` | `IAgentSink` | sink |
 | `_agent_names` | `MultiAgentLoop` | `list[str]` | agent 名列表 |
 | `_system_prompts` | `MultiAgentWorker` | `list[str]` | Agent 系统提示词 |
 | `_messages` | `MultiAgentWorker` | `list[BaseMessage]` | 该 Agent 视角的历史消息 |
 | `_tools` | `MultiAgentWorker` | `list[dict]` | 该 Agent 可用的工具定义 |
 | `_llm` | `MultiAgentWorker` | `BaseLLMClient` | LLM 客户端 |
-| `_sink` | `MultiAgentWorker` | `AgentSink` | 前端流式输出 sink |
+| `_sink` | `MultiAgentWorker` | `IAgentSink` | 前端流式输出 sink |
 | `_loop` | `MultiAgentWorker` | `IMainSessionLoop` | 所属 MultiAgentLoop 引用 |
 | `_stream_consumer` | `MultiAgentWorker` | `StreamConsumer` | 流消费器（每轮独立 stream_id） |
 | `_tool_executor` | `MultiAgentWorker` | `ToolExecutor` | 工具执行器（复用统一逻辑） |
 | `_total_token_usage` | `MultiAgentWorker` | `int` | 被 `MultiAgentLoop._aggregate_worker_usage` 读取 |
 | `_last_prompt_tokens` | `MultiAgentWorker` | `int` | 被 `MultiAgentLoop._aggregate_worker_usage` 读取 |
 | `_llm` | `StreamConsumer` | `BaseLLMClient` | LLM 客户端 |
-| `_sink` | `StreamConsumer` | `AgentSink` | 前端 sink |
+| `_sink` | `StreamConsumer` | `IAgentSink` | 前端 sink |
 | `_character_name` | `StreamConsumer` | `str` | 当前角色名 |
 | `_cancel_event` | `StreamConsumer` | `asyncio.Event` | 共享的当前回复轮次取消信号；消费器将其与流读取竞速 |
 | `_last_partial` | `StreamConsumer` | `LLMResponse \| None` | 当前 stream 正常结束或强制取消前保存的部分结果；每次 `consume()` 开始时重置 |
@@ -923,8 +924,8 @@ classDiagram
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
 | `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
 | `tool_registry` | `Application` | `ToolRegistry \| None` | 工具注册表 |
-| ~~`frontend_sink`~~ | ~~`Application`~~ | ~~`FrontendSink \| None`~~ | 已迁移为 `AsyncSystem`，经 `get_system(FrontendSink)` 取得（S09） |
-| `SubAgentOrchestrator` | `SubAgentOrchestrator` | `AsyncSystem` | 由 framework 注册表持有，经 `get_system(SubAgentOrchestrator)` 取得 |
+| ~~`frontend_sink`~~ | ~~`Application`~~ | ~~`FrontendSink \| None`~~ | 已迁移为 `AsyncSystem`，经 `get_system(IFrontendSink)` 取得（S09） |
+| `SubAgentOrchestrator` | `SubAgentOrchestrator` | `AsyncSystem` | 由 framework 注册表持有，经 `get_system(ISubAgentOrchestrator)` 取得 |
 | `_backend` | `ApprovalBackendManager` | `ApprovalBackend \| None` | 审批后端实例（懒加载） |
 | `_failed` | `ApprovalBackendManager` | `bool` | 审批后端是否不可用 |
 | `character_name` | `AgentProfile` | `str` | Agent 角色名 |
@@ -972,7 +973,7 @@ classDiagram
 | `ToolExecutor.execute` | `is_interrupted()` / `current_character_agent` | `IMainSessionLoop` / `BaseAgentLoop` | `entry/tool_executor.py` | 访问 loop 状态 |
 | `ParentAgentSink.request_approval` | `_parent_session_id`, `_pending_approvals`, `_paused_event`, `_emit()` | `SubAgentLoop` | `entry/agent_sink.py` | 直接访问子 agent 内部字段/方法 |
 | `ParentAgentSink.emit_*` | `_emit()` / `_parent_session_id` | `SubAgentLoop` | `entry/agent_sink.py` | 转发事件时读取子 agent 内部 |
-| `ParentAgentSink.emit_stream_done` | `get_system(FrontendSink)` | `Application` | `entry/agent_sink.py` | 通过 `Application.current().get_system(FrontendSink)` 转发到父会话前端 |
+| `ParentAgentSink.emit_stream_done` | `get_system(IFrontendSink)` | `Application` | `entry/agent_sink.py` | 通过 `Application.current().get_system(IFrontendSink)` 转发到父会话前端 |
 | `ShowTool._visible_tool_names` | `get_effective_visible_tool_names()` | `SubAgentLoop`（TaskAgentLoop 经虚分派覆写） | `component/tools/show_tool.py` | 子Agent可见性查询走公开方法，动态口径（loaded ∩ scope ∩ check_fn） |
 | `LoopSessionManager.initialize` | `_session_store`, `_history`, `session_id` | `ParentAgentLoop` | `entry/session_manager.py` | 初始化时读写 loop 内部 |
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
@@ -997,7 +998,7 @@ classDiagram
 | `cron_tools` 模块函数 | `_lock`, `_tasks` | `CronRouter` | `component/extools/cron_tools.py` | 直接访问 CronRouter 内部字段 |
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
-| 全局 `Application.current()` | `session_manager`, `get_system(FrontendSink)`, `get_system(SubAgentOrchestrator)`, `get_system(ApprovalSystem)` | `Application` | 多处 | 各模块通过单例访问子系统；编排器、frontend_sink与审批均迁移为 `get_system(T)` |
+| 全局 `Application.current()` | `session_manager`, `get_system(IFrontendSink)`, `get_system(ISubAgentOrchestrator)`, `get_system(IApprovalSystem)` | `Application` | 多处 | 各模块通过单例访问子系统；编排器、frontend_sink与审批均迁移为 `get_system(T)` |
 | 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `component/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 Application持有的 Store恢复、更新和显式重置模式 |
 | Gateway主会话生命周期 | `initialize_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py` | 新建普通/派生/随意聊聊主会话时初始化手动模式；永久删除成功后清理缓存，不复制来源模式 |
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`gateway/message_router.py`（首条用户消息经 `maybe_generate_first_title` 触发一次性 LLM 标题生成+截取回退，SessionManager/FrontendSink 由服务动态取得）、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
@@ -1073,7 +1074,7 @@ classDiagram
 
 `AgentspaceService`新增protected字段`_session_variables: SessionVariableService | None`，仅由其virtual_awake在取得唯一Sandbox后构造；公开只读`session_variables`属性。无新AsyncSystem、后台Owner、watcher或模块单例，Application拓扑仍为21个System。业务类位于system/session_variables.py，纯字段响应/继承材料位于entity/puretype/session_variables.py，未进入easysave或typeref。
 
-`ReadSessionVariables`及Gateway变量REST经`get_system(AgentspaceService).session_variables.read_pool`调用共享解析；工具通过公开ToolContext.resource_session_id取得主会话归属，并经agentspace_access登记精确文件。Parent/Multi/Sub提示词只用公开构建器追加协议，不读取变量、不新增Loop protected字段；临时Agent空prompt与safe交集不变。
+`ReadSessionVariables`及Gateway变量REST经`get_system(IAgentspaceService).session_variables.read_pool`调用共享解析；工具通过公开ToolContext.resource_session_id取得主会话归属，并经agentspace_access登记精确文件。Parent/Multi/Sub提示词只用公开构建器追加协议，不读取变量、不新增Loop protected字段；临时Agent空prompt与safe交集不变。
 
 `terminate_and_rotate_session`和BaseAgentLoop.merge_sessions调用capture_inheritance/install_inheritance，在同步初始化scope内完整复制并复查来源/目标、写History，之后归档。安装失败按独占目录二元身份回收，文件四元身份只用于读取变动检测；取消/History/必要清理失败传播，多个失败异常组保留，提交后错误不删除已提交副本。普通子Agent旧parent_session_id不自动重绑，不把独立文件继承宣称为跨文件事务。正常永久删除不清理工作空间变量文件，History重新生成不回滚变量。上述仅源码实施与静态复核，未运行验证。
 
@@ -1095,17 +1096,17 @@ classDiagram
 
 ### 独立工具链压缩（2026-10-14）
 
-新增 `CompressToolChains` 与现有 `CompressHistory` 分工：前者仅替换全部历史中的完整工具链，不截断轮次、不插入会话摘要，后者保持旧轮次截断及保留轮次链压缩。两个 handler 共用 `component/tools/_history_compression.py::prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0)`，该入口只准备摘要及 `ToolChainReplacement`，不修改 History、不查询 Application；唯一摘要服务仍由 handler 的 `ToolContext.app.get_system(SessionMetadataService)` 取得，无新 System、缓存或全局生命周期对象。
+新增 `CompressToolChains` 与现有 `CompressHistory` 分工：前者仅替换全部历史中的完整工具链，不截断轮次、不插入会话摘要，后者保持旧轮次截断及保留轮次链压缩。两个 handler 共用 `component/tools/_history_compression.py::prepare_tool_chain_replacements(messages, *, session_id, metadata_service, start_index=0)`，该入口只准备摘要及 `ToolChainReplacement`，不修改 History、不查询 Application；唯一摘要服务仍由 handler 的 `ToolContext.app.get_system(ISessionMetadataService)` 取得，无新 System、缓存或全局生命周期对象。
 
 `ToolChainReplacement` 为 `entity/puretype_after/session.py` 中的消息后纯类型 BaseModel，包含半开区间与正式 `BaseMessage` 列表，经 `entity.puretype_after` 显式导出，不加入 easysave/typeref。它在定义模块中直接导入真实 `BaseMessage`，不再放在消息前纯类型包中，也不再由共享准备模块调用 `model_rebuild` 补装配；导入期不查询运行时或注册工具。
 
 `BaseAgentLoop.reset_context_tokens()` 是新公开接口，仅清零原 `_token_record.prompt_tokens`；两工具通过它替代跨类私有字段访问，不新增 protected 字段。检测层要求链包含真实调用，跳过纯 `CompressedToolChain` 占位链。摘要全部成功才逆序替换，保存沿原 `save_history` 责任；新工具提交前检查协作式中断，无符合条件链时不保存或调用模型。原 `MAIN` / `critical` / `no_timeout` 范围保持，不扩展其他 Loop；本轮未完成的压缩调用不被配对清理删除。源码已实施，未运行验证。
 
-> **异步架构迁移（已完成源码实施）**（按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`）：`Application` 继承 `AsyncArchitecture`，不持有服务镜像字段；21 个 framework `AsyncSystem` 由 `Application.start()` 按固定拓扑顺序串行注册，业务系统一律经 `app.get_system(T)` 取得。`LLMProfileStore.locked()` 暴露唯一共享 RLock。`Application.frontend_sink` 等旧属性已移除，全量引用迁移为 `get_system(FrontendSink)`；`SubAgentOrchestrator` 为依赖 `SessionManager` 的 `AsyncSystem`。关闭由 `Application.shutdown()` 统一编排并逆拓扑注销。上述为源码实施与静态审阅结果，尚未运行验证。
+> **异步架构迁移（已完成源码实施）**（按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`）：`Application` 继承 `AsyncArchitecture`，不持有服务镜像字段；21 个 framework `AsyncSystem` 由 `Application.start()` 按固定拓扑顺序串行注册，业务系统一律经 `app.get_system(T)` 取得。`LLMProfileStore.locked()` 暴露唯一共享 RLock。`Application.frontend_sink` 等旧属性已移除，全量引用迁移为 `get_system(IFrontendSink)`；`SubAgentOrchestrator` 为依赖 `SessionManager` 的 `AsyncSystem`。关闭由 `Application.shutdown()` 统一编排并逆拓扑注销。上述为源码实施与静态审阅结果，尚未运行验证。
 
 ### 工具注册表生命周期迁移（S10）
 
-`ToolRegistry` 继承 AsyncSystem，依赖 RuntimeSystem；工具表、工具集元数据、检查缓存/锁及唯一 ThreadPoolExecutor 均为实例字段。运行期统一 `app.get_system(ToolRegistry)`，不提供模块级单例或代理；声明期注册协议留待 S20。异步 handler 使用 TaskOwner 的 REQUEST 责任，原生线程使用 puretype/lifecycle.py 的 SyncToolCallRecord 保存真实 Future 和请求释放状态，取消包装任务不能代表线程已结束。关闭超时保留活记录，完成实际工作后再在线程中 join 执行器。调用方明确透传停止、生命周期与持久化失败，不将其作为普通工具失败继续执行。
+`ToolRegistry` 继承 AsyncSystem，依赖 RuntimeSystem；工具表、工具集元数据、检查缓存/锁及唯一 ThreadPoolExecutor 均为实例字段。运行期统一 `app.get_system(IToolRegistry)`，不提供模块级单例或代理；声明期注册协议留待 S20。异步 handler 使用 TaskOwner 的 REQUEST 责任，原生线程使用 puretype/lifecycle.py 的 SyncToolCallRecord 保存真实 Future 和请求释放状态，取消包装任务不能代表线程已结束。关闭超时保留活记录，完成实际工作后再在线程中 join 执行器。调用方明确透传停止、生命周期与持久化失败，不将其作为普通工具失败继续执行。
 
 ### 工具显式注册与发现生命周期迁移（S20）
 
@@ -1117,7 +1118,7 @@ System 注销只清本次发现记录和自身添加的宿主导入路径，工�
 
 ### 主会话输入与工具提交迁移（S16进行中）
 
-SessionManager已继承AsyncSystem并按依赖图获取服务，virtual_awake加载索引及随意聊聊索引，无构造期Application查询/磁盘I/O。外部系统引用经get_system(SessionManager)，原Application.session_manager字段与旧构造签名不再有效。Manager新增退役Loop/交接任务、唯一停止任务和显式删除排除记录。
+SessionManager已继承AsyncSystem并按依赖图获取服务，virtual_awake加载索引及随意聊聊索引，无构造期Application查询/磁盘I/O。外部系统引用经get_system(ISessionManager)，原Application.session_manager字段与旧构造签名不再有效。Manager新增退役Loop/交接任务、唯一停止任务和显式删除排除记录。
 
 InputDeliveryBuffer是主队列唯一投递记录表，返回sequence之前同步登记，回调只唤醒。Parent/Multi的run_pending_round接收InputDelivery列表，消息构造保持角色/媒体/hook语义；append→标APPENDED→严格save→标PERSISTED之间不await，回显最后执行。累计报告独立于成功记录清理，保存失败由BaseAgentLoop持有并请求Runtime失败关闭，不重试。
 
@@ -1125,7 +1126,7 @@ PreparedToolResult是带方法的非持久化业务模型，ToolInputReservation
 
 ### Cron 生命周期迁移（S15）
 
-CronRouter继承AsyncSystem，依赖RuntimeSystem/Sandbox/SubprocessRunner；_CronTask及纯时间解析迁至component/cron_tasks.py。任务、路由、全部Timer、运行中命令及原生停止任务均归Router，工具不再访问_lock/_tasks/_timer或私有持久化/调度方法。get_system(CronRouter)替代Application.cron_router，Gateway REST、会话注册/注销、旋转与主/子会话工具同步迁移。
+CronRouter继承AsyncSystem，依赖RuntimeSystem/Sandbox/SubprocessRunner；_CronTask及纯时间解析迁至component/cron_tasks.py。任务、路由、全部Timer、运行中命令及原生停止任务均归Router，工具不再访问_lock/_tasks/_timer或私有持久化/调度方法。get_system(ICronRouter)替代Application.cron_router，Gateway REST、会话注册/注销、旋转与主/子会话工具同步迁移。
 
 唤醒严格加载不调度，RUNNING后activate；freeze不清除持久调度标记，callback只在统一接收边界内开始。Timer直接执行命令，退出确认后才移除真实线程，取消或删除任务仍保留运行中命令所有权。关闭先终止再join，不吞释放/保存错误；SubprocessRunner对迟到创建重新检查Runtime封闭状态。旧类图/字段表中的Cron工具跨类写字段描述为迁移前记录，实际以此节为准；输入与最终装配仍待S16/S17/P22。
 
@@ -1135,11 +1136,11 @@ ModalityCapabilitySystem依赖RuntimeSystem/LLMProfileStore，持有_probe_locks
 
 ### 浏览器生命周期迁移（S13）
 
-BrowserSystem依赖RuntimeSystem，唯一持有_pw/_browser/_endpoint、按PID登记的_headless_procs以及连接锁和清理任务。多次无头启动不能覆盖尚未释放的旧进程；只有已登记自有无头进程会被终止。工具经Application.get_system(BrowserSystem)调用明确实例API，_connection无可变连接状态，常量在entity/constant/browser.py。get_browser使用TaskOwner请求，断连和原生进程释放持有独立任务并在真实完成后回收，取消/超时不清空活句柄。
+BrowserSystem依赖RuntimeSystem，唯一持有_pw/_browser/_endpoint、按PID登记的_headless_procs以及连接锁和清理任务。多次无头启动不能覆盖尚未释放的旧进程；只有已登记自有无头进程会被终止。工具经Application.get_system(IBrowserSystem)调用明确实例API，_connection无可变连接状态，常量在entity/constant/browser.py。get_browser使用TaskOwner请求，断连和原生进程释放持有独立任务并在真实完成后回收，取消/超时不清空活句柄。
 
 ### LSP 生命周期迁移（S12）
 
-`LSPManager` 是依赖 RuntimeSystem/Sandbox 的 AsyncSystem，持有 pyright 进程、唯一 stdout reader、stderr reader、pending 请求、原生响应等待与关闭任务。组件工具及文件修改后的诊断附加经 `get_system(LSPManager)` 调用，移除独立 getter/cleanup。`start(root_logical)` 以及查询/通知方法复用唤醒时保存的 Sandbox，不再由外部传入；主loop固定为 Runtime.loop。替换/释放使用独立operation锁，状态锁不覆盖thread.join；实际退出后才清除资源句柄，失败传播。
+`LSPManager` 是依赖 RuntimeSystem/Sandbox 的 AsyncSystem，持有 pyright 进程、唯一 stdout reader、stderr reader、pending 请求、原生响应等待与关闭任务。组件工具及文件修改后的诊断附加经 `get_system(ILSPManager)` 调用，移除独立 getter/cleanup。`start(root_logical)` 以及查询/通知方法复用唤醒时保存的 Sandbox，不再由外部传入；主loop固定为 Runtime.loop。替换/释放使用独立operation锁，状态锁不覆盖thread.join；实际退出后才清除资源句柄，失败传播。
 
 ### Gateway 快速失败与 Profile 提交顺序
 
@@ -1151,7 +1152,7 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 ### 流式事件模型与发送边界收敛
 
-`AgentSink.emit_stream_delta()` 及两个实现均接收 `ToolCallRequest` / `ToolCallDelta`，`StreamConsumer` 不再在调用前降级为 dict。`FrontendSink` 构造 `entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent`，以 `StreamEvent` 判别联合约束 `_send_stream_event()`，仅在此执行 `model_dump_json(exclude_none=True)` 并发送；模型/序列化错误不作为网络错误吞掉。`MessageMetrics` 全程保持实例，`ParentAgentSink` 通过属性适配原子会话反馈通道，主/子会话路由、History与中断收尾顺序不变。
+`IAgentSink.emit_stream_delta()` 及两个实现均接收 `ToolCallRequest` / `ToolCallDelta`，`StreamConsumer` 不再在调用前降级为 dict。`FrontendSink` 构造 `entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent`，以 `StreamEvent` 判别联合约束 `_send_stream_event()`，仅在此执行 `model_dump_json(exclude_none=True)` 并发送；模型/序列化错误不作为网络错误吞掉。`MessageMetrics` 全程保持实例，`ParentAgentSink` 通过属性适配原子会话反馈通道，主/子会话路由、History与中断收尾顺序不变。
 
 `stream_delta` 的工具载荷改为顶层对象，前端两种流式事件在 `WSMessage` 中拥有独立类型，旧消息分支排除这两种 `type`，接收时校验实际结构。`stream_done` 的可选正文区分缺失与显式空字符串，既有 `emit_stream_done(content="")` 调用仍按原行为省略正文。前后端同步部署，不保留旧工具载荷内嵌 JSON。
 
@@ -1438,7 +1439,7 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 - `abstract/mcp/client.py`：`MCPToolSet(BaseToolSet)` 只声明 `mcp-{server}` 元数据、不持有连接；`MCPTool(BaseTool)` 把远端操作桥接进统一四阶段，`handle()` 调用无状态 `_make_tool_handler()` factory。参数剥离（`TOOL_INTERNAL_ARG_KEYS`）、schema 规范化、断路器、连接与原生资源仍由 `MCPCore` 持有。
 - `_register_server_tools()` 用 `registry.register_tool(MCPTool(...), replace=True)` 注册远程工具与资源/提示词辅助工具，跨 toolset 名称冲突快速失败，`mcp-{server}` 与裸 server 名别名保留。刷新在同名同集锁内替换，只注销新集合中已消失的名称（含 utility），在途 `execution` 继续持有原实例。
-- `component/mcp_tools.py::MCPRefreshTool`（`toolset="mcp"`、`is_async=True`、`safe`、`MAIN`）经 `execution.context.app.get_system(MCPSystem).refresh()` 刷新；顶层 `TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))`。对外工具名 `MCPRefresh` 不变。
+- `component/mcp_tools.py::MCPRefreshTool`（`toolset="mcp"`、`is_async=True`、`safe`、`MAIN`）经 `execution.context.app.get_system(IMCPSystem).refresh()` 刷新；顶层 `TOOLSET = BaseToolSet(name="mcp", tools=(MCPRefreshTool(),))`。对外工具名 `MCPRefresh` 不变。
 
 **System 拓扑**
 
@@ -1460,7 +1461,7 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 ### 会话 Tab 能力探测（2026-10-17）
 
-`SessionTabCapabilities` 是 `entity/puretype/session.py` 中的非持久化纯响应模型，由 Gateway 返回媒体实例计数和变量 Tab 可见内容标志。`BaseAgentLoop.get_session_media_count()` 通过 `entry/history_media.py::count_history_media()` 只读遍历 History；Gateway 通过公开方法访问，不读取 protected 字段，不改变 `IMainSessionLoop` 或 Application/System 拓扑。`SessionVariableService.has_visible_content()` 是 `AgentspaceService` 持有的无缓存叶服务公开入口，复用变量扫描预算并按值文件、`.json.meta`、节点/顶层问题和 `scan_complete` 判定可见内容；Gateway 通过 `get_system(AgentspaceService).session_variables` 在线程池调用。
+`SessionTabCapabilities` 是 `entity/puretype/session.py` 中的非持久化纯响应模型，由 Gateway 返回媒体实例计数和变量 Tab 可见内容标志。`BaseAgentLoop.get_session_media_count()` 通过 `entry/history_media.py::count_history_media()` 只读遍历 History；Gateway 通过公开方法访问，不读取 protected 字段，不改变 `IMainSessionLoop` 或 Application/System 拓扑。`SessionVariableService.has_visible_content()` 是 `AgentspaceService` 持有的无缓存叶服务公开入口，复用变量扫描预算并按值文件、`.json.meta`、节点/顶层问题和 `scan_complete` 判定可见内容；Gateway 通过 `get_system(IAgentspaceService).session_variables` 在线程池调用。
 
 前端 `useSessionTabCapabilities` 通过 `GET /api/sessions/{id}/tab-capabilities` 获取轻量状态，按 sessionId/generation 丢弃迟到响应，使用 History 低频信号和变量 Agentspace 事件去抖刷新。首次未知、会话切换和失败时禁用目标 Tab；同会话后台 refreshing 保留已确认快照，成功确认空内容后由 `useTabSystem` 触发现有 active-tab 回退。`fetchJsonWithTimeout` 的可选 `createHttpError` 只被新能力 API 使用，既有调用方未传该选项时保持原行为。无新增 protected 字段、持久化版本、System 或测试源。
 
@@ -1486,5 +1487,19 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 `SessionFileChangeEntry.display_state`是持久化当前生命周期状态：`created`、`modified`或`deleted`。Store保留deleted条目但摘要/分页只投影可见文件，父目录由前端纯函数合成。首次创建/复制目的/移动目的为created；created文件继续修改保持created；删除隐藏；删除后同路径再次创建/复制目的/移动目的为modified。Move源隐藏、目的按是否有历史决定颜色状态。最后操作仍单独由`last_operation`徽章显示，不能用它替代display_state。
 
 一次激活的文件修改Tab在完整可见分页全部到达且revision一致后才替换目录树；目录节点只读可折叠，文件节点按display_state使用绿色/黄色/隐藏规则。目录目标不产生可见条目，操作总数仍包括隐藏删除；无可见文件时Tab禁用或显示空态。
+
+### System 接口槽位关系（2026-10-20）
+
+20 个 framework System 的稳定依赖节点是 `origin_agent/interface/` 中的 `I...` 接口，而不是具体实现类。Application 保存接口槽位顺序，并以配对的具体实例注册到对应槽位；依赖图校验、`has_system()`、`unregister()` 和关闭路径都以接口类型为准。具体实现必须继承其接口，接口层不得反向导入具体 System。
+
+System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubprocessRunner、Sandbox/ISandbox、ShellManager/IShellManager、AgentspaceService/IAgentspaceService、LLMProfileStore/ILLMProfileStore、SessionMetadataService/ISessionMetadataService、ApprovalSystem/IApprovalSystem、FrontendSink/IFrontendSink、ToolRegistry/IToolRegistry、LSPManager/ILSPManager、BrowserSystem/IBrowserSystem、ModalityCapabilitySystem/IModalityCapabilitySystem、CronRouter/ICronRouter、SessionManager/ISessionManager、SubAgentOrchestrator/ISubAgentOrchestrator、DynamicEndpointSystem/IDynamicEndpointSystem、MCPSystem/IMCPSystem、ToolDiscoverySystem/IToolDiscoverySystem、GatewaySystem/IGatewaySystem。`FrontendSink` 只实现 `IFrontendSink`，该接口继承 `IAgentSink`（详见下节）；`IAgentSink` 不是 System 槽位。
+
+### 事件契约分层（2026-10-21）
+
+`interface/agent_sink.py::IAgentSink` 是向上通信事件契约的唯一声明处，共 15 个方法（`ask_question`、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_tool_calls_discarded`、`emit_history_updated`、`emit_user_message`、`emit_assistant_message`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_clipboard_display`、`emit_subagent_update`、`emit_system_message`）。`IFrontendSink(AsyncSystem, IAgentSink)` 只追加前端专有的 16 个连接、广播与交互解析成员，不复述事件方法；`FrontendSink` 单一继承 `IFrontendSink`，`ParentAgentSink` 直接实现 `IAgentSink`。`entry/agent_sink.py` 不再定义 `AgentSink`。
+
+此前的方案让 `IFrontendSink` 与 `entry.AgentSink` 各自独立声明同一批事件方法，两者之间没有类型关系：`FrontendSink` 必须多重继承两个不相干的 ABC，且从 System 槽位取出的 `IFrontendSink` 实例在静态类型上不能传给任何声明 `AgentSink` 的参数，只能靠 `cast` 压制，两份契约还会各自漂移。改为接口层单一声明后，`IFrontendSink` 是 `IAgentSink` 的子类型，槽位实例可直接向下传递，所有 `cast` 已移除；新增事件方法只需修改 `IAgentSink` 一处。
+
+所有 sink 参数与返回类型统一为 `IAgentSink`（`BaseAgentLoop.sink`、`BaseAgentLoop.get_sink`、`ParentAgentLoop`、`MultiAgentLoop`、`MultiAgentWorker`、`StreamConsumer`、`StreamHistoryLink`、`ToolExecution.accept_tool_batch`、`ToolPostprocessor`、`execute_with_approval`），只有 System 槽位查询使用 `IFrontendSink`。
 
 

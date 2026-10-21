@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from interface.frontend_sink import IFrontendSink
+
 import logging
 from typing import Any
 
@@ -70,9 +72,8 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
         return tool_error("Missing session_id, cannot send question")
 
     # QUESTION: 按时序必须是注册完成的
-    from entry.agent_sink import FrontendSink
     try:
-        sink = Application.current().get_system(FrontendSink)
+        sink = Application.current().get_system(IFrontendSink)
     except RuntimeError:
         return tool_error("FrontendSink not available")
 

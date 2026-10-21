@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_result
 from entity.constant import SOUL_META_CHARACTER_NAME_KEY
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
-from system.runtime import RuntimeSystem
 
 _DEFAULT_SOUL_FILE: str = "SOUL.md"
 
@@ -45,7 +46,7 @@ class RefreshIdentityTool(BaseTool):
 
     def handle(self, execution: ToolExecution) -> ToolHandlerResult:
         del execution
-        runtime = Application.current().get_system(RuntimeSystem)
+        runtime = Application.current().get_system(IRuntimeSystem)
         new_name = runtime.refresh_main_agent_character_name(_DEFAULT_SOUL_FILE)
         return ToolHandlerResult(
             result=tool_result(

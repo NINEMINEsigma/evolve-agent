@@ -10,6 +10,12 @@ memory provider 迁移和 cron 任务迁移，与 gateway.SessionManager 协作�
 
 from __future__ import annotations
 
+from interface.agentspace_service import IAgentspaceService
+from interface.cron_router import ICronRouter
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -154,7 +160,7 @@ class LoopSessionManager:
 
         warnings: list[str] = []
         from system.session_metadata import SessionMetadataService
-        metadata_service = self._loop.app.get_system(SessionMetadataService)
+        metadata_service = self._loop.app.get_system(ISessionMetadataService)
         try:
             await metadata_service.ensure_summary(session_id)
         except Exception as exc:
@@ -181,8 +187,7 @@ class LoopSessionManager:
 
         sm.archive(session_id, continuation_sid=None)
         try:
-            from system.shell_manager import ShellManager
-            await self._loop.app.get_system(ShellManager).stop_session(session_id)
+            await self._loop.app.get_system(IShellManager).stop_session(session_id)
         except Exception as exc:
             logger.exception(
                 "Failed to stop Shell sessions during termination | session=%s",
@@ -241,7 +246,7 @@ class LoopSessionManager:
                 session_id=session_id,
                 session_store=self._loop.session_store,
                 session_manager=sm,
-                metadata_service=self._loop.app.get_system(SessionMetadataService),
+                metadata_service=self._loop.app.get_system(ISessionMetadataService),
                 loop_meta=loop_meta,
                 current_character_agent=self._loop.current_character_agent,
             )
@@ -275,7 +280,7 @@ class LoopSessionManager:
 
         try:
             from system.session_metadata import SessionMetadataService
-            tags = await self._loop.app.get_system(SessionMetadataService).generate_tags(
+            tags = await self._loop.app.get_system(ISessionMetadataService).generate_tags(
                 session_id,
                 sm.get_all_tags(),
             )
@@ -353,10 +358,9 @@ async def terminate_and_rotate_session(
         )
 
     from system.application import Application
-    from system.agentspace import AgentspaceService
     from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
-    variable_service = Application.current().get_system(AgentspaceService).session_variables
+    variable_service = Application.current().get_system(IAgentspaceService).session_variables
     if not session_manager.exists(old_sid) or session_manager.is_session_deleting(old_sid):
         raise MetadataGenerationError("Source session no longer exists")
     try:
@@ -411,18 +415,15 @@ async def terminate_and_rotate_session(
 
     session_manager.archive(old_sid, continuation_sid=new_sid)
 
-    from component.cron_router import CronRouter
     from system.application import Application
-    Application.current().get_system(CronRouter).migrate_session_cron_jobs(old_sid, new_sid)
+    Application.current().get_system(ICronRouter).migrate_session_cron_jobs(old_sid, new_sid)
 
-    from component.dynamic_endpoints import DynamicEndpointSystem
-    Application.current().get_system(DynamicEndpointSystem).migrate_session_endpoints(old_sid, new_sid)
+    Application.current().get_system(IDynamicEndpointSystem).migrate_session_endpoints(old_sid, new_sid)
 
     try:
         from system.application import Application
-        from system.shell_manager import ShellManager
 
-        migrated_shells = Application.current().get_system(ShellManager).migrate_session(
+        migrated_shells = Application.current().get_system(IShellManager).migrate_session(
             old_sid,
             new_sid,
         )

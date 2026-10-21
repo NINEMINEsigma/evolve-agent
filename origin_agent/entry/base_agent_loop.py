@@ -8,6 +8,13 @@ LLM 调用、工具执行、memory 和 hooks 能力。
 
 from __future__ import annotations
 
+from interface.agentspace_service import IAgentspaceService
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_metadata_service import ISessionMetadataService
+from interface.tool_registry import IToolRegistry
+
 import asyncio
 import logging
 import shutil
@@ -90,13 +97,12 @@ from entry.history_media import (
 )
 from system.session_store import SessionStore, HistoryPersistenceError
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
     from system.context import RuntimeContext
     from system.application import Application
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
     from gateway.session_manager import SessionManager
     from entry.tool_post_dispatch import PreparedToolResult, ResultFieldInjector
     from entry.session_message_queue import SessionMessageQueue
@@ -240,8 +246,7 @@ class ToolContext(BaseModel):
 
     @property
     def runtime_context(self) -> RuntimeContext:
-        from system.runtime import RuntimeSystem
-        return self.app.get_system(RuntimeSystem).context
+        return self.app.get_system(IRuntimeSystem).context
 
     @property
     def resource_session_id(self) -> str:
@@ -253,7 +258,7 @@ class ToolContext(BaseModel):
         return self.session_id
 
     @property
-    def sink(self) -> AgentSink:
+    def sink(self) -> IAgentSink:
         return self.loop.get_sink()
 
     @property
@@ -273,8 +278,7 @@ class ToolContext(BaseModel):
             character_name=self.character_name,
             round_id=self.round_id,
         )
-        from system.agentspace import AgentspaceService
-        return self.app.get_system(AgentspaceService).agent_access(owner, paths)
+        return self.app.get_system(IAgentspaceService).agent_access(owner, paths)
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +376,7 @@ class BaseAgentLoop(ABC):
     """所有 Agent 循环的最基础抽象基类。
 
     子类必须实现：
-    - _get_sink() → AgentSink
+    - _get_sink() → IAgentSink
 
     可选覆盖：
     - schedule_inbox_processing() → None
@@ -381,8 +385,7 @@ class BaseAgentLoop(ABC):
     def __init__(self, app: Application, session_id: str) -> None:
         self.session_id: str = session_id
         self.app: Application = app
-        from system.runtime import RuntimeSystem
-        self._inbox: Inbox = Inbox(app.get_system(RuntimeSystem))
+        self._inbox: Inbox = Inbox(app.get_system(IRuntimeSystem))
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._disgust_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
@@ -445,8 +448,7 @@ class BaseAgentLoop(ABC):
             )
             return
         try:
-            from system.agentspace import AgentspaceService
-            self.app.get_system(AgentspaceService).release_agent_access(round_id)
+            self.app.get_system(IAgentspaceService).release_agent_access(round_id)
         finally:
             if self._agentspace_round_ids.get(character_name) == round_id:
                 self._agentspace_round_ids.pop(character_name, None)
@@ -490,8 +492,8 @@ class BaseAgentLoop(ABC):
     # -- 抽象方法 ---------------------------------------------------------
 
     @abstractmethod
-    def get_sink(self) -> AgentSink:
-        """返回当前 loop 的 AgentSink 实例。"""
+    def get_sink(self) -> IAgentSink:
+        """返回当前 loop 的 IAgentSink 实例。"""
         ...
 
     @property
@@ -640,8 +642,7 @@ class BaseAgentLoop(ABC):
         子类通过 get_tool_availability_scope() 返回当前 Loop 的 ToolAvailability。
         """
         from system.application import Application
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
         scope = self.get_tool_availability_scope()
         return tool_registry.get_definitions_for_loaded_toolsets(
             scope=scope,
@@ -714,7 +715,7 @@ class BaseAgentLoop(ABC):
             self._session_store.write_history(session_id, history)
         except HistoryPersistenceError as error:
             self._history_failure = error
-            self.app.get_system(RuntimeSystem).record_failure(error)
+            self.app.get_system(IRuntimeSystem).record_failure(error)
             raise
 
     def save_history(self, session_id: str) -> None:
@@ -1443,12 +1444,11 @@ class BaseAgentLoop(ABC):
         )
         from system.session_metadata import SessionMetadataError
         from system.templates import read_template
-        from system.session_metadata import SessionMetadataService
 
         summaries: list[tuple[str, str]] = []
         for source_id in sources:
             try:
-                summary = await self.app.get_system(SessionMetadataService).ensure_summary(
+                summary = await self.app.get_system(ISessionMetadataService).ensure_summary(
                     source_id
                 )
             except SessionMetadataError as exc:
@@ -1476,7 +1476,7 @@ class BaseAgentLoop(ABC):
                 f"[Session {source_id}]: {summary}"
                 for source_id, summary in summaries
             )
-            threshold = self.app.get_system(RuntimeSystem).context.merge_concat_threshold
+            threshold = self.app.get_system(IRuntimeSystem).context.merge_concat_threshold
             if threshold > 0 and len(joined) > threshold:
                 joined = joined[-threshold:]
             context = (
@@ -1511,10 +1511,9 @@ class BaseAgentLoop(ABC):
                 + "\n\n---\n\n".join(tail_blocks)
             )
 
-        from system.agentspace import AgentspaceService
         from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
-        variable_service = self.app.get_system(AgentspaceService).session_variables
+        variable_service = self.app.get_system(IAgentspaceService).session_variables
         try:
             for source_id in sources:
                 if not sm.exists(source_id) or sm.is_session_deleting(source_id):
@@ -1586,8 +1585,7 @@ class BaseAgentLoop(ABC):
         if self._message_hooks_cache is not None:
             return self._message_hooks_cache
         from entity.constant import Namespace
-        from system.sandbox import Sandbox
-        hooks_dir: Path = self.app.get_system(Sandbox).get_base(Namespace.CUSTOM_HOOKS)
+        hooks_dir: Path = self.app.get_system(ISandbox).get_base(Namespace.CUSTOM_HOOKS)
         hooks = load_message_hooks(hooks_dir, logger)
         self._message_hooks_cache = hooks
         return hooks
@@ -1595,7 +1593,7 @@ class BaseAgentLoop(ABC):
     def _get_workspace(self) -> str:
         """返回当前 loop 使用的 workspace 路径。"""
         from system.runtime import RuntimeSystem
-        return str(self.app.get_system(RuntimeSystem).context.workspace)
+        return str(self.app.get_system(IRuntimeSystem).context.workspace)
 
     def _collect_hooks_context(
         self,
@@ -1615,7 +1613,7 @@ class BaseAgentLoop(ABC):
             hooks=hooks,
             session_id=sid,
             workspace=workspace,
-            runtime_ctx=self.app.get_system(RuntimeSystem).context,
+            runtime_ctx=self.app.get_system(IRuntimeSystem).context,
         )
 
     def get_hooks_context(self, session_id: str) -> str:
@@ -1668,7 +1666,7 @@ class IMainSessionLoop(ABC):
 
     @asynccontextmanager
     async def reply_scope(self) -> AsyncIterator[None]:
-        runtime = self.loop.app.get_system(RuntimeSystem)
+        runtime = self.loop.app.get_system(IRuntimeSystem)
         task = asyncio.current_task()
         if task is None:
             raise LifecycleFailure("Reply operation requires an asyncio task")
@@ -1774,8 +1772,7 @@ class IMainSessionLoop(ABC):
 
             # 终止本会话登记的活动子进程树。
             try:
-                from system.sandbox import Sandbox
-                self.loop.app.get_system(Sandbox).kill_active(sid)
+                self.loop.app.get_system(ISandbox).kill_active(sid)
             except Exception:
                 logger.warning(
                     "kill_active failed during interrupt | session=%s", sid, exc_info=True,

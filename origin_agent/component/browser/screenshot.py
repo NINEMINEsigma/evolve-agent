@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+from interface.browser_system import IBrowserSystem
+from interface.sandbox import ISandbox
+
 import logging
 import uuid
 from typing import Any
@@ -17,7 +20,6 @@ from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
 from system.application import Application
 from system.lifecycle import requires_lifecycle_propagation
-from system.sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ _TAB_NOT_FOUND: str = (
 
 
 def _browser_system() -> BrowserSystem:
-    return Application.current().get_system(BrowserSystem)
+    return Application.current().get_system(IBrowserSystem)
 
 
 async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
@@ -56,7 +58,7 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
         return tool_error(_TAB_NOT_FOUND, tab=tab)
 
     logical = f"ws:logs/browser_screenshots/{uuid.uuid4().hex[:12]}.png"
-    resolved = Application.current().get_system(Sandbox).resolve_write(logical)
+    resolved = Application.current().get_system(ISandbox).resolve_write(logical)
     resolved.real.parent.mkdir(parents=True, exist_ok=True)
     await page.screenshot(path=str(resolved.real), full_page=full_page)
 

@@ -33,6 +33,7 @@ from entity.constant import (
     SEARCH_TEXT_EXTENSIONS,
 )
 from system.pathutils import get_agent_dir
+from interface.sandbox import ISandbox
 from system.sandbox import SandboxError
 from system.subprocess_utils import safe_decode
 from system.text_codec import strip_lf_line_ending
@@ -59,9 +60,8 @@ class RipgrepFatalError(RuntimeError):
 
 def _s():
     from system.application import Application
-    from system.sandbox import Sandbox
 
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 
 def parse_bool_arg(args: dict[str, Any], name: str, default: bool = False) -> bool:

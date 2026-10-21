@@ -10,13 +10,14 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+
 from typing import Any, TYPE_CHECKING
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import DynamicSandboxSpace, ToolAvailability, ToolDangerLevel
 from system.application import Application
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 def _fast_mode_available() -> bool:
     """仅在 fast 模式暴露动态空间管理工具。"""
-    return Application.current().get_system(RuntimeSystem).context.mode == "fast"
+    return Application.current().get_system(IRuntimeSystem).context.mode == "fast"
 
 
 def _require_main_agent(context: ToolContext | None) -> str | None:
@@ -34,7 +35,7 @@ def _require_main_agent(context: ToolContext | None) -> str | None:
     if context.runtime_context.mode != "fast":
         return "Dynamic sandbox spaces can only be modified in fast mode"
     character_name = context.character_name or context.loop.current_character_agent
-    if character_name != Application.current().get_system(RuntimeSystem).main_agent_character_name:
+    if character_name != Application.current().get_system(IRuntimeSystem).main_agent_character_name:
         return "Only the main Agent can modify global dynamic sandbox spaces"
     return None
 
@@ -84,7 +85,7 @@ def _handle_add_sandbox_space(
     if type(is_readonly) is not bool:
         return tool_error("'is_readonly' is required and must be a boolean")
 
-    sandbox = Application.current().get_system(Sandbox)
+    sandbox = Application.current().get_system(ISandbox)
     try:
         normalized_path = sandbox.normalize_dynamic_space_path(path)
     except (TypeError, ValueError) as exc:
@@ -132,7 +133,7 @@ def _handle_remove_sandbox_space(
     _ = reason
 
     try:
-        removed = Application.current().get_system(Sandbox).remove_dynamic_space(
+        removed = Application.current().get_system(ISandbox).remove_dynamic_space(
             name,
             session_id=context.session_id if context is not None else "",
         )

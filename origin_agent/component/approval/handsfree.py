@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from interface.approval_system import IApprovalSystem
+from interface.frontend_sink import IFrontendSink
+from interface.llm_profile_store import ILLMProfileStore
+from interface.tool_registry import IToolRegistry
+
 import json
 import logging
 from typing import Any, TYPE_CHECKING
@@ -23,17 +28,15 @@ if TYPE_CHECKING:
 def _get_approval_mode_store() -> ApprovalModeStore:
     """返回 Application 持有的唯一审批模式存储。"""
     from system.application import Application
-    from component.approval.system import ApprovalSystem
 
-    return Application.current().get_system(ApprovalSystem).mode_store
+    return Application.current().get_system(IApprovalSystem).mode_store
 
 
 def is_handsfree_available() -> bool:
     """返回项目级审批 Profile 是否已配置且具备必需连接字段。"""
     from system.application import Application
-    from component.approval.system import ApprovalSystem
 
-    manager = Application.current().get_system(ApprovalSystem).backend_manager
+    manager = Application.current().get_system(IApprovalSystem).backend_manager
     return manager.get_backend() is not None
 
 
@@ -125,9 +128,8 @@ async def _handsfree_confirm(
 ) -> ApprovalResult:
     """把工具调用发送给审批 Profile，并解释单次普通文本响应。"""
     from system.application import Application
-    from component.approval.system import ApprovalSystem
 
-    approval_system = Application.current().get_system(ApprovalSystem)
+    approval_system = Application.current().get_system(IApprovalSystem)
     backend = approval_system.backend_manager.get_backend()
 
     if backend is None:
@@ -135,8 +137,7 @@ async def _handsfree_confirm(
         return _approval_model_failure("backend unavailable")
 
     from system.application import Application as _App
-    from system.llm_profile_store import LLMProfileStore
-    _approval_profile = _App.current().get_system(LLMProfileStore).get_approval_profile()
+    _approval_profile = _App.current().get_system(ILLMProfileStore).get_approval_profile()
     logger.info(
         "Approval model request | tool=%s profile=%s model=%s",
         tool_name,
@@ -148,9 +149,8 @@ async def _handsfree_confirm(
 
     # 获取工具的参数 schema，使审批模型能理解每个参数的类型、描述、
     # 默认值和是否必填，从而区分"必需信息缺失"与"可选参数省略"。
-    from abstract.tools.registry import ToolRegistry
     from system.application import Application
-    tool_registry = Application.current().get_system(ToolRegistry)
+    tool_registry = Application.current().get_system(IToolRegistry)
     tool_schema = tool_registry.get_schema(tool_name)
 
     system_prompt = (

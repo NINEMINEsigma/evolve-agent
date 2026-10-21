@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import logging
 import urllib.error
 import urllib.request
@@ -109,8 +111,7 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
                 import uuid
                 save_path = f"ws:logs/web_fetch/{uuid.uuid4().hex[:12]}.txt"
                 from system.application import Application
-                from system.sandbox import Sandbox
-                Application.current().get_system(Sandbox).write(save_path, text)
+                Application.current().get_system(ISandbox).write(save_path, text)
                 preview = text[:TOOL_RESULT_PREVIEW_CHARS]
                 return tool_result(
                     preview=preview,

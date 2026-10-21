@@ -12,24 +12,23 @@ import threading
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from component.approval.system import ApprovalSystem
-from component.cron_router import CronRouter
-from gateway.chat import SessionManager as ChatSessionManager
+from interface.approval_system import IApprovalSystem
+from interface.agentspace_service import IAgentspaceService
+from interface.cron_router import ICronRouter
+from interface.frontend_sink import IFrontendSink
+from interface.llm_profile_store import ILLMProfileStore
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+from interface.tool_registry import IToolRegistry
 from entity.puretype import (
     Loop, LoopMeta, Role, SessionInfo, ClientInfo, ShutdownInputReport,
-    QueuedMessage, SubAgentFeedbackDelivery,
+    QueuedMessage, SubAgentFeedbackDelivery, LLMProfile,
 )
-from system.session_store import SessionStore
-from framework import AsyncSystem
-from abstract.tools.registry import ToolRegistry
-from entry.agent_sink import FrontendSink
-from system.runtime import RuntimeSystem
-from system.llm_profile_store import LLMProfileStore
-from system.session_metadata import SessionMetadataService
-from system.agentspace import AgentspaceService
-from system.shell_manager import ShellManager
-from system.modality_capability import ModalityCapabilitySystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from gateway.chat import SessionManager as ChatSessionManager
 from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS, SYSTEM_CHARACTER_NAME
 
 if TYPE_CHECKING:
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SessionManager(AsyncSystem):
+class SessionManager(ISessionManager):
     """Session 生命周期管理 + ParentAgentLoop 映射。
 
     持有：
@@ -56,12 +55,12 @@ class SessionManager(AsyncSystem):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            RuntimeSystem, LLMProfileStore, SessionMetadataService, ApprovalSystem,
-            FrontendSink, ToolRegistry, CronRouter, AgentspaceService,
-            ShellManager, ModalityCapabilitySystem,
+            IRuntimeSystem, ILLMProfileStore, ISessionMetadataService, IApprovalSystem,
+            IFrontendSink, IToolRegistry, ICronRouter, IAgentspaceService,
+            IShellManager, IModalityCapabilitySystem,
         ))
         self._chat_sm: ChatSessionManager
-        self._runtime: RuntimeSystem
+        self._runtime: IRuntimeSystem
         self._loops: dict[str, IMainSessionLoop] = {}
         self._store_path: str | None = None
         self._client_infos: dict[str, ClientInfo] = {}
@@ -76,7 +75,7 @@ class SessionManager(AsyncSystem):
     async def virtual_awake(self) -> None:
         from system.application import Application
         self._app = Application.current()
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
         self._store_path = str(self._runtime.context.workspace / SESSIONS_DIR_NAME)
         self._chat_sm = ChatSessionManager(self._store_path)
         self.ensure_colloquy_session()
@@ -139,7 +138,7 @@ class SessionManager(AsyncSystem):
             context, parent_sid=parent_sid, parents=parents,
             role=role, loop_meta=loop_meta,
         )
-        self._app.get_system(ApprovalSystem).mode_store.initialize_session(session_id)
+        self._app.get_system(IApprovalSystem).mode_store.initialize_session(session_id)
         return session_id
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
@@ -178,14 +177,14 @@ class SessionManager(AsyncSystem):
             parents=parents,
             session_id=session_id,
         )
-        self._app.get_system(ApprovalSystem).mode_store.initialize_session(new_session_id)
+        self._app.get_system(IApprovalSystem).mode_store.initialize_session(new_session_id)
         return new_session_id
 
     def remove(self, session_id: str) -> None:
         """从内存和磁盘移除 session（含目录）及审批模式缓存。"""
         self._chat_sm.remove(session_id)
         if not self._chat_sm.exists(session_id):
-            self._app.get_system(ApprovalSystem).mode_store.forget_session(session_id)
+            self._app.get_system(IApprovalSystem).mode_store.forget_session(session_id)
 
     def remove_from_index(self, session_id: str) -> None:
         """仅从索引移除 session，不删除磁盘目录。"""
@@ -324,14 +323,14 @@ class SessionManager(AsyncSystem):
 
     def replace_idle_loops_using_profile(
         self,
-        source_profile,
-        replacement_profile,
+        source_profile: LLMProfile,
+        replacement_profile: LLMProfile | None,
     ) -> tuple[list[str], list[str]]:
         """只切换当前空闲且正在使用源 Profile 的主会话。"""
-        from system.llm_profile_store import LLMProfileStore
+        from interface.llm_profile_store import ILLMProfileStore
         switched: list[str] = []
         busy: list[str] = []
-        with self._app.get_system(LLMProfileStore).locked():
+        with self._app.get_system(ILLMProfileStore).locked():
             for session_id, managed_loop in self._loops.items():
                 loop = managed_loop.loop
                 if loop.active_llm_profile is not source_profile:
@@ -348,7 +347,7 @@ class SessionManager(AsyncSystem):
     def create_session(
         self,
         session_id: str,
-        frontend_sink,
+        frontend_sink: IFrontendSink,
         history_store_dir: Path | None = None,
     ) -> IMainSessionLoop:
         """为 session 创建或复用 loop 实例。
@@ -388,24 +387,24 @@ class SessionManager(AsyncSystem):
         self._loops[session_id] = loop
 
         # 注册到 CronRouter，使 cron 结果能投递到该 loop 的 inbox
-        self._app.get_system(CronRouter).register(session_id, loop.loop)
+        self._app.get_system(ICronRouter).register(session_id, loop.loop)
 
         return loop
 
     def _create_multi_loop(
         self,
         session_id: str,
-        frontend_sink,
+        frontend_sink: IFrontendSink,
         history_store_dir: Path | None = None,
     ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
-        from system.runtime import RuntimeSystem
+        from interface.runtime_system import IRuntimeSystem
         from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
         from subagent.profile import CharacterProfileResolver
         from system.templates import get_templates_dir
-        from abstract.tools.registry import ToolRegistry
-        tool_registry = self._app.get_system(ToolRegistry)
+        from interface.tool_registry import IToolRegistry
+        tool_registry = self._app.get_system(IToolRegistry)
         from system.session_store import SessionStore
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
@@ -415,12 +414,12 @@ class SessionManager(AsyncSystem):
         info = self._chat_sm.get(session_id)
         agents_names: list[str] = (info.agents or []) if info else []
 
-        parent_ctx = self._app.get_system(RuntimeSystem).context
-        main_agent_name = self._app.get_system(RuntimeSystem).main_agent_character_name
-        from system.sandbox import Sandbox
-        from system.llm_profile_store import LLMProfileStore
-        sandbox = self._app.get_system(Sandbox)
-        profile_store = self._app.get_system(LLMProfileStore)
+        parent_ctx = self._app.get_system(IRuntimeSystem).context
+        main_agent_name = self._app.get_system(IRuntimeSystem).main_agent_character_name
+        from interface.sandbox import ISandbox
+        from interface.llm_profile_store import ILLMProfileStore
+        sandbox = self._app.get_system(ISandbox)
+        profile_store = self._app.get_system(ILLMProfileStore)
         resolver = CharacterProfileResolver(sandbox, profile_store)
         profiles: dict[str, Any] = {}
         for character_profile in resolver.discover():
@@ -488,7 +487,7 @@ class SessionManager(AsyncSystem):
             )
             loop.set_session_manager(self)
             self._loops[session_id] = loop
-            self._app.get_system(CronRouter).register(session_id, loop)
+            self._app.get_system(ICronRouter).register(session_id, loop)
             return loop
 
         # 读取 history.es
@@ -512,13 +511,13 @@ class SessionManager(AsyncSystem):
         )
         multi_loop.set_session_manager(self)
         self._loops[session_id] = multi_loop
-        self._app.get_system(CronRouter).register(session_id, multi_loop)
+        self._app.get_system(ICronRouter).register(session_id, multi_loop)
         return multi_loop
 
     def _create_colloquy_loop(
         self,
         session_id: str,
-        frontend_sink,
+        frontend_sink: IFrontendSink,
         history_store_dir: Path | None = None,
     ) -> IMainSessionLoop:
         """创建 ColloquyLoop 实例。"""
@@ -533,7 +532,7 @@ class SessionManager(AsyncSystem):
         loop.set_session_manager(self)
         self._loops[session_id] = loop
 
-        self._app.get_system(CronRouter).register(session_id, loop.loop)
+        self._app.get_system(ICronRouter).register(session_id, loop.loop)
 
         return loop
 
@@ -550,7 +549,7 @@ class SessionManager(AsyncSystem):
             self._discarded_loops.add(loop)
             loop.loop.interrupt()
             loop.loop.stop_message_queue()
-            self._app.get_system(CronRouter).unregister(session_id)
+            self._app.get_system(ICronRouter).unregister(session_id)
             logger.info("Session terminated: %s", session_id)
 
     async def delete_session_runtime(self, session_id: str) -> None:
@@ -580,7 +579,7 @@ class SessionManager(AsyncSystem):
         finally:
             if loop is not None:
                 loop.loop.stop_message_queue()
-            self._app.get_system(CronRouter).unregister(session_id)
+            self._app.get_system(ICronRouter).unregister(session_id)
         logger.info("Session runtime deleted | session=%s", session_id)
 
     async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
@@ -621,7 +620,7 @@ class SessionManager(AsyncSystem):
             # 标记旧队列停止但不取消 consumer task——让当前 run_pending_round
             # 自然完成（含 tool_result 追加和 LLM 过渡回复）后再退出。
             old_loop.loop.mark_queue_stopped()
-            self._app.get_system(CronRouter).unregister(session_id)
+            self._app.get_system(ICronRouter).unregister(session_id)
             logger.info(
                 "Loop replaced for session=%s: %s → %s",
                 session_id,
@@ -638,7 +637,7 @@ class SessionManager(AsyncSystem):
         new_loop.loop.set_session_id(session_id)
         self._loops[session_id] = new_loop
 
-        self._app.get_system(CronRouter).register(session_id, new_loop.loop)
+        self._app.get_system(ICronRouter).register(session_id, new_loop.loop)
 
         # 更新索引中的 LoopMeta
         from entry.multi_agent_loop import MultiAgentLoop
@@ -647,8 +646,8 @@ class SessionManager(AsyncSystem):
             self._chat_sm.update_loop_type(session_id, Loop.multi, agents)
             # 通知前端 agents 列表已变更
             try:
-                from entry.agent_sink import FrontendSink
-                sink = self._app.get_system(FrontendSink)
+                from interface.frontend_sink import IFrontendSink
+                sink = self._app.get_system(IFrontendSink)
                 import json as _json
                 ws = sink.get_ws(session_id)
                 if ws is not None:
@@ -663,8 +662,8 @@ class SessionManager(AsyncSystem):
             self._chat_sm.update_loop_type(session_id, Loop.parent)
             # 通知前端 agents 列表已清空（退出多 Agent 模式）
             try:
-                from entry.agent_sink import FrontendSink
-                sink = self._app.get_system(FrontendSink)
+                from interface.frontend_sink import IFrontendSink
+                sink = self._app.get_system(IFrontendSink)
                 import json as _json
                 ws = sink.get_ws(session_id)
                 if ws is not None:
@@ -689,10 +688,10 @@ class SessionManager(AsyncSystem):
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""
         loop = self._loops.pop(old_sid, None)
         if loop is not None:
-            self._app.get_system(CronRouter).unregister(old_sid)
+            self._app.get_system(ICronRouter).unregister(old_sid)
             loop.loop.set_session_id(new_sid)
             self._loops[new_sid] = loop
-            self._app.get_system(CronRouter).register(new_sid, loop.loop)
+            self._app.get_system(ICronRouter).register(new_sid, loop.loop)
             ci = self._client_infos.pop(old_sid, None)
             if ci is not None:
                 self._client_infos[new_sid] = ci

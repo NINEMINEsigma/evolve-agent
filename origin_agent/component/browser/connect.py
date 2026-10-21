@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from interface.browser_system import IBrowserSystem
+
 import logging
 from typing import Any
 
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def _browser_system() -> BrowserSystem:
-    return Application.current().get_system(BrowserSystem)
+    return Application.current().get_system(IBrowserSystem)
 
 
 async def _handle_browser_connect(args: dict[str, Any]) -> dict:

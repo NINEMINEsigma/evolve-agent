@@ -33,8 +33,10 @@ from entity.constant import (
 from entity.puretype import ShellInfo, ShellOutputSlice
 from framework import AsyncSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox, SandboxError
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.shell_manager import IShellManager
+from system.sandbox import SandboxError
 from system.shell_text import ShellTextNormalizer
 from system.subprocess_utils import _kill_proc_tree
 
@@ -250,20 +252,20 @@ def _tracked_operation(
     return invoke
 
 
-class ShellManager(AsyncSystem):
+class ShellManager(IShellManager):
     """Application 持有的唯一 Shell会话管理器。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem 与 Sandbox；由 Application
-    在 P22 装配后经 ``app.get_system(ShellManager)`` 取得。virtual_awake 只取得
+    在 P22 装配后经 ``app.get_system(IShellManager)`` 取得。virtual_awake 只取得
     Sandbox 依赖，不强制创建 Shell 或导入不可用平台的 PTY。关闭接收后不再允
     许新建 Shell 会话；应用关闭时停止每个 Shell，尽力回收 reader 和 PTY，
     资源释放失败作为 Shell 操作/清理错误返回或记录，不升级为进程级失败。
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, Sandbox))
-        self._sandbox: Sandbox | None = None
-        self._runtime: RuntimeSystem | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
+        self._sandbox: ISandbox | None = None
+        self._runtime: IRuntimeSystem | None = None
         self._conpty_spawn_lock = threading.Lock()
         self._operations: set[asyncio.Task[Any]] = set()
         self._native_tasks: set[asyncio.Task[Any]] = set()
@@ -275,11 +277,11 @@ class ShellManager(AsyncSystem):
         self._admission_closed = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._sandbox = self.get_system(Sandbox)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._sandbox = self.get_system(ISandbox)
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("ShellManager has not been awakened")
         return self._runtime
@@ -318,7 +320,7 @@ class ShellManager(AsyncSystem):
             self.runtime.record_failure(error)
 
     @property
-    def sandbox(self) -> Sandbox:
+    def sandbox(self) -> ISandbox:
         if self._sandbox is None:
             raise LifecycleFailure("ShellManager has not been awakened")
         return self._sandbox

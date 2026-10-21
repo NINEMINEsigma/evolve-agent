@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from interface.frontend_sink import IFrontendSink
+
 from typing import Any
 
 from entity.constant import SYSTEM_CHARACTER_NAME
@@ -28,9 +30,8 @@ async def request_user_confirm(
         )
 
     from system.application import Application
-    from entry.agent_sink import FrontendSink
 
-    return await Application.current().get_system(FrontendSink).request_approval(
+    return await Application.current().get_system(IFrontendSink).request_approval(
         tool_name=tool_name,
         args=args,
         reason=reason,

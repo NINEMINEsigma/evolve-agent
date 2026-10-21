@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+from interface.session_metadata_service import ISessionMetadataService
+from interface.tool_registry import IToolRegistry
+
 import logging
 from typing import Any
 
-from abstract.tools.registry import ToolRegistry
 from entity.puretype import Role, ToolAvailability, SessionTerminationResult
 from entity.constant import (
     COLLOQUY_COMPRESS_RATIO,
@@ -46,7 +48,7 @@ class ColloquyLoop(ParentAgentLoop):
         """
         definitions: list[dict] = self._get_effective_tool_definitions()
         from system.application import Application
-        tool_registry = Application.current().get_system(ToolRegistry)
+        tool_registry = Application.current().get_system(IToolRegistry)
         filtered: list[dict] = []
         for d in definitions:
             func = d.get("function") or {}
@@ -109,8 +111,7 @@ class ColloquyLoop(ParentAgentLoop):
 
         # 5. 全局元数据服务生成摘要
         try:
-            from system.session_metadata import SessionMetadataService
-            summary = await self.app.get_system(SessionMetadataService).generate_summary(
+            summary = await self.app.get_system(ISessionMetadataService).generate_summary(
                 sid,
                 temp_history,
             )

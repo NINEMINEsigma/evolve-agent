@@ -12,6 +12,13 @@
 
 from __future__ import annotations
 
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+from interface.tool_registry import IToolRegistry
+
 import logging
 from typing import Any
 
@@ -25,11 +32,8 @@ from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-from system.runtime import RuntimeSystem
 from system.templates import get_templates_dir
 from entry.multi_agent_loop import MultiAgentLoop
-
-from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ async def _prepare_enter_multi_agent(execution: ToolExecution) -> ToolHandlerRes
     app = execution.context.app
 
     # 获取当前 ParentAgentLoop
-    _parent_loop = app.get_system(SessionManager).get_loop(session_id)
+    _parent_loop = app.get_system(ISessionManager).get_loop(session_id)
     if _parent_loop is None:
         return ToolHandlerResult(tool_error(f"No active loop found for session {session_id}"))
     elif isinstance(_parent_loop.loop, ParentAgentLoop):
@@ -58,9 +62,7 @@ async def _prepare_enter_multi_agent(execution: ToolExecution) -> ToolHandlerRes
 
     # 动态扫描角色档案。无参进入过滤无效/重名角色；显式名称严格校验。
     from subagent.profile import CharacterProfileResolver
-    from system.sandbox import Sandbox
-    from system.llm_profile_store import LLMProfileStore
-    resolver = CharacterProfileResolver(app.get_system(Sandbox), app.get_system(LLMProfileStore))
+    resolver = CharacterProfileResolver(app.get_system(ISandbox), app.get_system(ILLMProfileStore))
     all_profiles = resolver.discover()
     explicit_agents: list[str] = args.get("agents") or []
     profiles: dict[str, Any] = {}
@@ -105,17 +107,15 @@ async def _prepare_enter_multi_agent(execution: ToolExecution) -> ToolHandlerRes
         system_prompt_template = f.read()
 
     # 获取父 Agent 的 LLM client 和工具定义
-    from abstract.tools.registry import ToolRegistry
     from system.application import Application
     from component.multiagenttools.profile_builder import (
         build_multi_agent_tools,
         build_agent_profiles,
     )
-    tool_registry = Application.current().get_system(ToolRegistry)
+    tool_registry = Application.current().get_system(IToolRegistry)
     tools = build_multi_agent_tools(tool_registry)
-    parent_ctx = app.get_system(RuntimeSystem).context
-    from system.sandbox import Sandbox
-    sandbox = app.get_system(Sandbox)
+    parent_ctx = app.get_system(IRuntimeSystem).context
+    sandbox = app.get_system(ISandbox)
 
     from entity.puretype import LLMProfile as _LlmProfile
     # 从 loop active profile 获取主 agent 的 LlmProfile
@@ -267,16 +267,15 @@ class EnterMultiAgentTool(BaseTool):
     async def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
         if execution.state is None:
             return ToolPostprocessEffect()
-        from subagent.orchestrator import SubAgentOrchestrator
 
         parent_loop, agent_profiles, main_agent_name = execution.state
         context = execution.context
         app = context.app
-        manager = app.get_system(SessionManager)
+        manager = app.get_system(ISessionManager)
         current = manager.get_loop(context.session_id)
         if current is None or current.loop is not parent_loop:
             raise RuntimeError("Session Loop changed during multi-Agent preparation")
-        await app.get_system(SubAgentOrchestrator).shutdown(context.session_id)
+        await app.get_system(ISubAgentOrchestrator).shutdown(context.session_id)
         multi_loop = MultiAgentLoop(
             app=app, session_id=context.session_id, history=parent_loop.history,
             agents=agent_profiles, sink=parent_loop.get_sink(),

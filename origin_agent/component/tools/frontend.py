@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import logging
 import subprocess  # nosec
 from typing import Any, Dict
@@ -24,8 +26,7 @@ logger = logging.getLogger(__name__)
 
 def _s():
     from system.application import Application
-    from system.sandbox import Sandbox
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 
 # ---------------------------------------------------------------------------

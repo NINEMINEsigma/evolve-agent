@@ -23,8 +23,22 @@ from entity.constant import (
 )
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from system.pathutils import find_repo_root, get_agent_dir
-from system.runtime import RuntimeSystem
-from .registry import ToolRegistry
+from interface.approval_system import IApprovalSystem
+from interface.agentspace_service import IAgentspaceService
+from interface.browser_system import IBrowserSystem
+from interface.cron_router import ICronRouter
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.lsp_manager import ILSPManager
+from interface.mcp_system import IMCPSystem
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+from interface.tool_discovery_system import IToolDiscoverySystem
+from interface.tool_registry import IToolRegistry
 from .tool import BaseToolSet
 from .toolsets_meta import register_builtin_toolset_descriptions
 
@@ -90,7 +104,7 @@ def _iter_tool_paths(directory: Path) -> Iterator[Path]:
 
 
 def _register_module(
-    module_name: str, *, registry: ToolRegistry, loaded_modules: set[str],
+    module_name: str, *, registry: IToolRegistry, loaded_modules: set[str],
 ) -> None:
     if module_name in loaded_modules:
         raise LifecycleFailure(f"Tool module already registered in this discovery: {module_name}")
@@ -105,7 +119,7 @@ def _register_module(
 
 
 def _discover_tools(
-    tools_path: Path, package_prefix: str, *, registry: ToolRegistry, loaded_modules: set[str],
+    tools_path: Path, package_prefix: str, *, registry: IToolRegistry, loaded_modules: set[str],
 ) -> list[str]:
     registered: list[str] = []
     for path in _iter_tool_paths(tools_path):
@@ -119,7 +133,7 @@ def _discover_tools(
 
 
 def discover_builtin_tools(
-    tools_dir: str, package_prefix: str, *, registry: ToolRegistry,
+    tools_dir: str, package_prefix: str, *, registry: IToolRegistry,
 ) -> list[str]:
     """Import and register object declarations in path order; failures propagate."""
     return _discover_tools(
@@ -127,30 +141,30 @@ def discover_builtin_tools(
     )
 
 
-class ToolDiscoverySystem(AsyncSystem):
+class ToolDiscoverySystem(IToolDiscoverySystem):
     """Own startup discovery without duplicating registries or MCP connections."""
 
     def __init__(self) -> None:
         # 延迟类型导入，避免 abstract.tools 包入口形成业务模块循环导入。
-        from abstract.mcp.system import MCPSystem
-        from component.approval.system import ApprovalSystem
-        from component.browser.system import BrowserSystem
-        from component.cron_router import CronRouter
-        from component.dynamic_endpoints import DynamicEndpointSystem
-        from gateway.session_manager import SessionManager
-        from subagent.orchestrator import SubAgentOrchestrator
-        from system.agentspace.service import AgentspaceService
-        from system.lsp import LSPManager
-        from system.modality_capability import ModalityCapabilitySystem
-        from system.sandbox import Sandbox
-        from system.session_metadata import SessionMetadataService
-        from system.shell_manager import ShellManager
+        from interface.approval_system import IApprovalSystem
+        from interface.browser_system import IBrowserSystem
+        from interface.cron_router import ICronRouter
+        from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+        from interface.mcp_system import IMCPSystem
+        from interface.session_manager import ISessionManager
+        from interface.subagent_orchestrator import ISubAgentOrchestrator
+        from interface.agentspace_service import IAgentspaceService
+        from interface.lsp_manager import ILSPManager
+        from interface.modality_capability_system import IModalityCapabilitySystem
+        from interface.sandbox import ISandbox
+        from interface.session_metadata_service import ISessionMetadataService
+        from interface.shell_manager import IShellManager
 
         super().__init__(dependencies=(
-            RuntimeSystem, ToolRegistry, Sandbox, ShellManager,
-            AgentspaceService, SessionMetadataService, ApprovalSystem,
-            LSPManager, BrowserSystem, ModalityCapabilitySystem, CronRouter,
-            SessionManager, SubAgentOrchestrator, DynamicEndpointSystem, MCPSystem,
+            IRuntimeSystem, IToolRegistry, ISandbox, IShellManager,
+            IAgentspaceService, ISessionMetadataService, IApprovalSystem,
+            ILSPManager, IBrowserSystem, IModalityCapabilitySystem, ICronRouter,
+            ISessionManager, ISubAgentOrchestrator, IDynamicEndpointSystem, IMCPSystem,
         ))
         self._loaded_modules: set[str] = set()
         self._started = False
@@ -161,14 +175,12 @@ class ToolDiscoverySystem(AsyncSystem):
         return frozenset(self._loaded_modules)
 
     async def virtual_awake(self) -> None:
-        from system.sandbox import Sandbox
-
         if self._started:
             raise LifecycleFailure("Tool discovery cannot be restarted")
         self._started = True
-        runtime = self.get_system(RuntimeSystem)
-        registry = self.get_system(ToolRegistry)
-        sandbox = self.get_system(Sandbox)
+        runtime = self.get_system(IRuntimeSystem)
+        registry = self.get_system(IToolRegistry)
+        sandbox = self.get_system(ISandbox)
         if runtime.state != ApplicationState.STARTING:
             raise ApplicationStoppingError("Tool discovery requires application startup")
         root = str(find_repo_root())

@@ -19,19 +19,20 @@ from entity.constant import (
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources,
 )
-from system.runtime import RuntimeSystem
+from interface.browser_system import IBrowserSystem
+from interface.runtime_system import IRuntimeSystem
 from system.subprocess_utils import _kill_proc_tree
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser, Playwright
 
 
-class BrowserSystem(AsyncSystem):
+class BrowserSystem(IBrowserSystem):
     """仅关闭 CDP 客户端连接；只终止明确登记为应用自有的无头进程。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem,))
-        self._runtime: RuntimeSystem | None = None
+        super().__init__(dependencies=(IRuntimeSystem,))
+        self._runtime: IRuntimeSystem | None = None
         self._owner: TaskOwner | None = None
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
@@ -45,11 +46,11 @@ class BrowserSystem(AsyncSystem):
         self._teardown_task: asyncio.Task[None] | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
         self._owner = TaskOwner("browser-requests", self.runtime.record_failure)
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("BrowserSystem has not been awakened")
         return self._runtime

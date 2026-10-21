@@ -13,6 +13,7 @@ import signal
 from typing import TYPE_CHECKING
 
 from system.application import Application
+from interface.runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -56,8 +57,7 @@ class App:
             logger.critical("Application startup failed: %s", exc, exc_info=True)
             return EXIT_FAILURE
 
-        from system.runtime import RuntimeSystem
-        runtime = application.get_system(RuntimeSystem)
+        runtime = application.get_system(IRuntimeSystem)
 
         # ---- 信号处理（与 RuntimeSystem 共享同一关闭请求通道）----
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()

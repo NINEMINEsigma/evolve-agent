@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING, Literal, TypeGuard
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from framework import AsyncSystem
-from system.runtime import RuntimeSystem
-from system.llm_profile_store import LLMProfileStore
+from interface.llm_profile_store import ILLMProfileStore
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.runtime_system import IRuntimeSystem
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner, requires_lifecycle_propagation,
 )
@@ -236,7 +236,7 @@ def _media_description_prompt(media_type: ModalityType) -> str:
 
 
 async def _request_media_description(
-    system: ModalityCapabilitySystem, ref_profile: LLMProfile,
+    system: IModalityCapabilitySystem, ref_profile: LLMProfile,
     media_type: ModalityType, block: MediaBlock,
 ) -> str:
     """复用单跳描述请求；媒体 URL 由目标客户端处理，不由服务器抓取。"""
@@ -249,10 +249,10 @@ async def _request_media_description(
 
 
 async def _forward_modality_to_ref_profile(
-    system: ModalityCapabilitySystem,
+    system: IModalityCapabilitySystem,
     context: ToolContext | None,
     active_profile: LLMProfile,
-    media_data: dict,
+    media_data: dict[str, str | int | float | bool | None],
     media_type: Literal["image", "audio", "video"],
 ) -> str:
     """转发多模态内容到有效引用 Profile 对应的模型，返回描述文本。
@@ -355,7 +355,7 @@ def is_explicit_modality_rejection(exc: Exception, media_type: ModalityType) -> 
 
 
 async def _describe_media_block(
-    system: ModalityCapabilitySystem, context: ToolContext,
+    system: IModalityCapabilitySystem, context: ToolContext,
     active_profile: LLMProfile, block: MediaBlock,
 ) -> ModalityDescriptionResult:
     if isinstance(block, ImageBlock):
@@ -366,7 +366,7 @@ async def _describe_media_block(
         media_type = "video"
     else:
         raise TypeError("Unknown media description block")
-    profiles = context.app.get_system(LLMProfileStore)
+    profiles = context.app.get_system(ILLMProfileStore)
     # 解析和深快照共用根对象锁，不能快照已被其他线程移出根的引用。
     with profiles.locked():
         reference = resolve_modality_reference_profile(active_profile, media_type, profiles.get_data())
@@ -451,13 +451,13 @@ def _save_cache(path: Path, data: dict[str, ModalityCapability]) -> None:
             logger.warning("Failed to save modality capability cache: %s", exc)
 
 
-class ModalityCapabilitySystem(AsyncSystem):
+class ModalityCapabilitySystem(IModalityCapabilitySystem):
     """多模态探测锁、探针媒体、缓存路径与请求的唯一所有者。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, LLMProfileStore))
-        self._runtime: RuntimeSystem | None = None
-        self._profiles: LLMProfileStore | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        self._runtime: IRuntimeSystem | None = None
+        self._profiles: ILLMProfileStore | None = None
         self._owner: TaskOwner | None = None
         self._cache_file: Path | None = None
         self._probe_locks: dict[str, asyncio.Lock] = {}
@@ -466,15 +466,15 @@ class ModalityCapabilitySystem(AsyncSystem):
         self._closed = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._profiles = self.get_system(LLMProfileStore)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._profiles = self.get_system(ILLMProfileStore)
         self._owner = TaskOwner("modality-capability", self.runtime.record_failure)
         self._cache_file = self.runtime.context.workspace / MODALITY_CAPABILITY_ES_FILENAME
         self._wav = _generate_dummy_wav_b64()
         self._mp4 = _load_dummy_mp4_b64()
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("ModalityCapabilitySystem has not been awakened")
         return self._runtime
@@ -566,7 +566,8 @@ class ModalityCapabilitySystem(AsyncSystem):
 
     async def forward_modality_to_ref_profile(
         self, context: ToolContext | None, active_profile: LLMProfile,
-        media_data: dict, media_type: Literal["image", "audio", "video"],
+        media_data: dict[str, str | int | float | bool | None],
+        media_type: Literal["image", "audio", "video"],
     ) -> str:
         return await self.task_owner.run_request(
             lambda: _forward_modality_to_ref_profile(self, context, active_profile, media_data, media_type),
@@ -667,7 +668,7 @@ def _build_modality_blocks(modality: str, wav: str, mp4: str) -> list[MessageBlo
 
 
 async def _probe_single_modality(
-    system: ModalityCapabilitySystem,
+    system: IModalityCapabilitySystem,
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
@@ -719,7 +720,7 @@ def _build_user_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
 
 
 async def _probe_single_user_modality(
-    system: ModalityCapabilitySystem,
+    system: IModalityCapabilitySystem,
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
@@ -760,7 +761,7 @@ async def _probe_single_user_modality(
 # ---------------------------------------------------------------------------
 
 async def _run_modality_probe(
-    system: ModalityCapabilitySystem,
+    system: IModalityCapabilitySystem,
     context: ToolContext | None,
 ) -> ModalityCapability:
     """执行一次完整的多模态能力探测，返回 ModalityCapability（六项全非 None）。
@@ -858,7 +859,7 @@ def _fmt_support(value: bool | None) -> str:
 
 
 def _build_modality_prompt_block(
-    system: ModalityCapabilitySystem,
+    system: IModalityCapabilitySystem,
     profile: LLMProfile,
     agentspace: Path | None = None,
 ) -> str:

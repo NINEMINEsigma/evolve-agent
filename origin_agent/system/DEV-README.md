@@ -23,7 +23,7 @@
 | BrowserSystem | CDP/Playwright、自有无头进程及清理任务 | RuntimeSystem |
 | ModalityCapabilitySystem | 探测锁、媒体、缓存路径、探测与转发请求 | RuntimeSystem、LLMProfileStore |
 
-RuntimeContext继续是不可变BaseModel；system.context不再提供模块级配置单例。业务通过已持有的app获取`get_system(RuntimeSystem).context`，不创建备用上下文。Application.current()/get()只取得同一个已创建实例，不调用framework的默认惰性工厂。
+RuntimeContext继续是不可变BaseModel；system.context不再提供模块级配置单例。业务通过已持有的app获取`get_system(IRuntimeSystem).context`，不创建备用上下文。Application.current()/get()只取得同一个已创建实例，不调用framework的默认惰性工厂。
 
 ## 生命周期公共工具
 
@@ -57,7 +57,7 @@ kill_active只请求终止，不清空注册表。原run操作在确认进程退
 
 Sandbox为无参AsyncSystem，virtual_awake取得唯一RuntimeContext和SubprocessRunner，加载fast模式全局动态空间。fallback仍不读取或启用这些动态配置；目录暂时不可用仍是原有业务状态，不改变权限规则。
 
-业务通过get_system(Sandbox)取得唯一实例，禁止从另一个工具模块导入私有_s入口。它没有自有进程线程，关闭不删除动态空间文件或清空持久映射。
+业务通过get_system(ISandbox)取得唯一实例，禁止从另一个工具模块导入私有_s入口。它没有自有进程线程，关闭不删除动态空间文件或清空持久映射。
 
 ## ShellManager
 
@@ -77,13 +77,13 @@ Agentspace 逻辑路径由 `AgentspaceService._normalize()` 统一规范化：�
 
 初始化失败时也等待正在恢复垃圾桶的线程结束并释放已取得资源；Observer在start前即记录，部分启动可以找到资源并停止。最终virtual_shotdown在后续应用编排完成History提交及Gateway事件流关闭后执行。
 
-watcher停止时封闭新的debounce安排，取消并join已持有Timer及Observer，检查实际存活状态；超时是资源清理失败。SessionVisualResourceService仍为独立可复用业务类，由`get_system(AgentspaceService).visual_resources`暴露，不自行创建另一份Sandbox。
+watcher停止时封闭新的debounce安排，取消并join已持有Timer及Observer，检查实际存活状态；超时是资源清理失败。SessionVisualResourceService仍为独立可复用业务类，由`get_system(IAgentspaceService).visual_resources`暴露，不自行创建另一份Sandbox。
 
 ## LLMProfileStore
 
 注册为framework AsyncSystem，依赖RuntimeSystem；无参构造，virtual_awake取得RuntimeContext确定agentspace路径并加载v2根对象。Store自身创建唯一的共享``threading.RLock``，通过``locked()``上下文管理器暴露同一把锁，替代原Application.profile_lock；SessionMetadataService、审批后端及Gateway Profile CRUD均经此接口进入事务边界，不再注入第二把锁。
 
-原六写方法的「先准备候选、保存成功后提交共享内存」顺序不变；update的两阶段复制并重连引用图、Profile实例身份与根对象引用图、先save后commit、easysave直接保存LLMProfileData的约定完全保留。未替换easysave为framework存储，未复制实例替代注册表根。业务经``get_system(LLMProfileStore)``取得唯一实例。
+原六写方法的「先准备候选、保存成功后提交共享内存」顺序不变；update的两阶段复制并重连引用图、Profile实例身份与根对象引用图、先save后commit、easysave直接保存LLMProfileData的约定完全保留。未替换easysave为framework存储，未复制实例替代注册表根。业务经``get_system(ILLMProfileStore)``取得唯一实例。
 
 ## SessionMetadataService
 
@@ -93,7 +93,7 @@ watcher停止时封闭新的debounce安排，取消并join已持有Timer及Obser
 
 _admit_generation在Runtime接收锁内只校验服务接收状态，不执行I/O或模型调用；_create_client在新模型调用前再次检查状态。close_admission在所属loop同步设置服务关闭标志，STOPPING时也合法；cancel_pending先封闭接收再等待Owner的任务和结果交接，virtual_shotdown即使pending为空也核对Owner历史失败，不在解绑后get_system。普通元数据错误仍交原业务边界；生命周期失败、取消及相关异常组继续传播，不能被包装成普通MetadataGenerationError。
 
-元数据Profile优先与会话回退语义不变；关闭消息刷新不调用本服务生成接口，仅允许既有钩子做只读查询。既有业务Profile选择及fallback保持；Runtime停止后不新启LLM。全量Application.session_metadata_service引用已迁移为``get_system(SessionMetadataService)``。
+元数据Profile优先与会话回退语义不变；关闭消息刷新不调用本服务生成接口，仅允许既有钩子做只读查询。既有业务Profile选择及fallback保持；Runtime停止后不新启LLM。全量Application.session_metadata_service引用已迁移为``get_system(ISessionMetadataService)``。
 
 首条用户消息自动标题：MessageRouter在准备任务内调用同步入口``maybe_generate_first_title(session_id, text)``（前置「标题为空+文本非空」判定保留在路由层）。入口在同一同步代码段内完成per-session防重集合（``_first_title_pending``）的检查+登记，经``task_owner.create``派发一次性后台任务（不套run_request，与内部实现不嵌套公开包装的惯例一致）。任务体``_first_title_task``按固定分流：LLM成功→``_apply_first_title``写入标题（内存+磁盘）并经SYSTEM消息推送``session_title_updated``；``SessionMetadataError``及未知业务异常→30字符截取回退（``_fallback_title``）后同样写入推送；``ApplicationStoppingError``停机竞态与``LifecycleFailure``（create入口捕获）均静默放弃不写标题，避免把正常停止翻转为失败关闭；``CancelledError``传播；finally对称清理防重集合。``_apply_first_title``中SessionManager/FrontendSink经``Application.current().get_system``动态取得（依赖图不变），update_title磁盘失败与推送失败均仅warning降级不回滚。
 
@@ -103,7 +103,7 @@ _admit_generation在Runtime接收锁内只校验服务接收状态，不执行I/
 
 ## FrontendSink接入
 
-`entry/agent_sink.py::FrontendSink`已继承`AsyncSystem`与`AgentSink`，依赖RuntimeSystem；无参构造只创建内存字段，`virtual_awake`取得RuntimeSystem并创建TaskOwner。Application不再提供`frontend_sink`属性；全量`app.frontend_sink`/`Application.current().frontend_sink`引用已迁移为`get_system(FrontendSink)`，包括Gateway、MessageRouter、SessionManager、main.py引导Loop、审批core、ask_question工具与ParentAgentSink转发路径。
+`entry/agent_sink.py::FrontendSink`只继承`IFrontendSink`（该接口本身是`AsyncSystem`子类并继承`IAgentSink`），依赖RuntimeSystem；无参构造只创建内存字段，`virtual_awake`取得RuntimeSystem并创建TaskOwner。Application不再提供`frontend_sink`属性；全量`app.frontend_sink`/`Application.current().frontend_sink`引用已迁移为`get_system(IFrontendSink)`，包括Gateway、MessageRouter、SessionManager、main.py引导Loop、审批core、ask_question工具与ParentAgentSink转发路径。
 
 发送与交互属有调用方等待的请求级操作，经`TaskOwner.run_request`登记。新交互（`request_approval`/`ask_question`）只在RUNNING接收：`_admit_interaction`经`RuntimeSystem.require_running`校验并检查`_interaction_closed`，关闭后返回ApplicationStoppingError而非发起模型或等待前端。既有结果与History回显（`emit_*`与四个broadcast）在STOPPING仍允许到关闭输出：`_admit_send`只检查`_send_closed`，不要求RUNNING，使关闭刷新的发送不被Runtime.require_running拒绝。
 
@@ -111,11 +111,11 @@ _admit_generation在Runtime接收锁内只校验服务接收状态，不执行I/
 
 `cancel_pending_interactions`同步解除所有待审批与提问Future。`close_all_connections`以标准1001关闭所有连接，结束连接前调用`cancel_and_wait`等待/取消真实发送任务及交接；本方法不登记进同一TaskOwner再等待自己，由独立应用关闭任务协调；`_closing_connections`标志防止重复close并发。`close_session`保留永久删除4004语义，与应用退出1001分开。`virtual_shotdown`关闭接收、取消在途请求并关闭连接，资源/内部错误传播。
 
-ParentAgentSink不作为System；其转发方法经`Application.current().get_system(FrontendSink)`取得唯一实例，不在运行时新建单例。所有原emit签名与消息协议保持不变；typed stream boundary不退化，`_send_stream_event`仍是流式事件唯一序列化发送边界。
+ParentAgentSink不作为System；它直接实现`IAgentSink`，其转发方法经`Application.current().get_system(IFrontendSink)`取得唯一实例，不在运行时新建单例。所有原emit签名与消息协议保持不变；typed stream boundary不退化，`_send_stream_event`仍是流式事件唯一序列化发送边界。
 
 ## ToolRegistry接入
 
-`abstract/tools/registry.py::ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，拥有工具/工具集/可用性缓存及唯一执行器。工具表按名保存 `BaseTool` 对象，工具集元数据使用 `BaseToolSet`，运行期成员索引为 `_tool_names_by_toolset`；模块级单例与兼容代理均已删除，运行期使用 `get_system(ToolRegistry)`。注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载 `BaseToolSet` 并执行一次 `preheat()`；`register_tool(tool, replace=True)` 供 MCP 动态刷新原子替换同名工具；查询入口为 `get_tool`/`get_toolset`，不再有 `get_entry`/`get_toolset_entry` 或函数式 `register`。
+`abstract/tools/registry.py::ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，拥有工具/工具集/可用性缓存及唯一执行器。工具表按名保存 `BaseTool` 对象，工具集元数据使用 `BaseToolSet`，运行期成员索引为 `_tool_names_by_toolset`；模块级单例与兼容代理均已删除，运行期使用 `get_system(IToolRegistry)`。注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载 `BaseToolSet` 并执行一次 `preheat()`；`register_tool(tool, replace=True)` 供 MCP 动态刷新原子替换同名工具；查询入口为 `get_tool`/`get_toolset`，不再有 `get_entry`/`get_toolset_entry` 或函数式 `register`。
 
 异步请求通过 TaskOwner.run_request 托管；同步 handler 通过 contextvars.copy_context 和 executor.submit 保留上下文及真实 Future。SyncToolCallRecord 是非持久化纯数据记录，真实线程结束且请求交接完成后才解除登记。请求取消不提前清除原生工作，迟到失败仍报告 Runtime。关闭先封闭接收、取消并等待请求，再等待真实线程；线程池 join 在线程中执行并持有关闭任务，超时/清理失败传播，不以清表或 wait=False 伪装释放完成。关闭编排由 Application 统一执行。
 
@@ -125,7 +125,7 @@ ParentAgentSink不作为System；其转发方法经`Application.current().get_sy
 
 ## LSPManager接入
 
-LSPManager继承AsyncSystem并依赖RuntimeSystem、Sandbox；virtual_awake只保存唯一Sandbox和Runtime主loop，pyright仍按需启动，不从工具线程新建事件循环。旧get_lsp_manager/cleanup_lsp模块入口已删除，工具和文件诊断附加经get_system(LSPManager)查询；公开业务方法不再传入可由System取得的Sandbox。
+LSPManager继承AsyncSystem并依赖RuntimeSystem、Sandbox；virtual_awake只保存唯一Sandbox和Runtime主loop，pyright仍按需启动，不从工具线程新建事件循环。旧get_lsp_manager/cleanup_lsp模块入口已删除，工具和文件诊断附加经get_system(ILSPManager)查询；公开业务方法不再传入可由System取得的Sandbox。
 
 启动/替换与最终原生清理由独立operation锁串行化，状态锁不覆盖等待或join。握手与后续响应都由同一stdout reader读取，启动线程通过pending Event有界等待，避免直接readline绕过截止。异步请求的原生Event等待任务单独持有，取消请求的异步等待不取消真实线程。close_admission唤醒现有请求，拒绝新操作；最终关闭在线程中杀进程、等待进程退出、join reader/stderr线程并关闭管道，全部成功才移除句柄。清理失败/超时保留引用并传播，独立原生清理task受实例持有，主loop不阻塞join。最终注销由 Application 逆拓扑统一执行。
 
@@ -141,11 +141,11 @@ system/modality_capability.py 的 ModalityCapabilitySystem依赖RuntimeSystem与
 
 run_modality_probe/ensure_modality_capability与多模态转发使用TaskOwner.run_request托管完整操作，开始与同模型锁等待后检查Runtime；六路子探针由TaskGroup持有，全部结束/清理后才返回或传播错误，锁与媒体只在实际任务完成后释放。HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式路径由客户端转换抛出、流式回退路径经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/限流/服务端错误继续传播且不写缓存。不同模型探测保存前重新合并最新缓存根，保留其他已完成探测；仍直接交easysave保存ModalityCapability实例。缓存可丢弃的既有读取/保存策略不因System迁移扩大为其他存储策略。
 
-全部有状态缓存/探测/有效Profile解析/提示词查询经get_system(ModalityCapabilitySystem)，关闭刷新只允许只读查询，不触发模型。
+全部有状态缓存/探测/有效Profile解析/提示词查询经get_system(IModalityCapabilitySystem)，关闭刷新只允许只读查询，不触发模型。
 
 ## CronRouter接入
 
-CronRouter依赖RuntimeSystem/Sandbox/SubprocessRunner，唯一持有任务、路由、全部Timer、运行中命令记录和原生停止任务。唤醒严格加载并验证原JSON，不启动Timer；activate仅在RUNNING开放。工具/API/会话生命周期统一get_system(CronRouter)，工具层不再读写任务内部状态。_CronTask与时间解析位于component/cron_tasks.py，JSON字段不变。
+CronRouter依赖RuntimeSystem/Sandbox/SubprocessRunner，唯一持有任务、路由、全部Timer、运行中命令记录和原生停止任务。唤醒严格加载并验证原JSON，不启动Timer；activate仅在RUNNING开放。工具/API/会话生命周期统一get_system(ICronRouter)，工具层不再读写任务内部状态。_CronTask与时间解析位于component/cron_tasks.py，JSON字段不变。
 
 接收与Timer登记锁序固定Runtime→Cron，磁盘快照及同路径原子写只在Cron事务锁内串行执行，不在Runtime接收锁内I/O。freeze取消Timer但保留should_schedule和真实线程引用；实际回调完成后也须join确认才移除。运行命令按独立cron前缀登记SubprocessRunner，停止先kill再join，工作线程中完成原生等待；关闭任务自身强引用并免受调用方取消传播，失败汇总，超时保留活资源。
 
@@ -153,7 +153,7 @@ SubprocessRunner登记迟到创建的进程后再次检查Runtime状态，修复
 
 ## SessionManager接入（S16进行中）
 
-Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划包含Runtime、Profile/元数据/审批、FrontendSink、工具/事件注册表、Cron、Agentspace、Shell和模态系统。virtual_awake才加载索引和确保随意聊聊索引，不创建Loop或提前取得尚未唤醒的自身；运行入口经get_system(SessionManager)，不保留Application镜像属性。
+Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划包含Runtime、Profile/元数据/审批、FrontendSink、工具/事件注册表、Cron、Agentspace、Shell和模态系统。virtual_awake才加载索引和确保随意聊聊索引，不创建Loop或提前取得尚未唤醒的自身；运行入口经get_system(ISessionManager)，不保留Application镜像属性。
 
 输入登记与接收关闭同步，记录状态与严格History保存绑定，主/多Agent共享准备后提交工具结果协议。SessionManager持有退役Loop与交接任务，等待所有可能写入History的回复任务后才串行刷新；反馈关闭交接沿用子会话已分配sequence，不重开普通接收。原任务和原始错误保留；System 最后注销与 60 秒硬截止由 Application/RuntimeSystem 在 P22 统一接通。Gateway 跨连接输入的提前承诺已由 S21 完成（路由内同步登记 + ready 准备任务）。
 
@@ -200,3 +200,8 @@ Move在一次revision中更新源和目的两行，源为deleted、目的按历�
 ## 验证约束
 
 本次迁移未由开发助手AI运行测试、类型检查、Lint、构建或应用。只做源文件读取和定向差异审阅；正式运行验证由用户在完整迁移完成后执行。
+
+## System 接口槽位约定（2026-10-20）
+
+本包的 Runtime、SubprocessRunner、Sandbox、Shell、Agentspace、Profile、元数据、LSP 和多模态等 System 均继承对应 `interface/` 接口。它们的 `dependencies` 和内部 `get_system()` 查询只使用接口类型；Application 负责将实现实例注册到接口槽位。资源所有权、virtual lifecycle 和关闭错误传播仍由具体实现负责，接口不声明这些 framework 生命周期成员。
+

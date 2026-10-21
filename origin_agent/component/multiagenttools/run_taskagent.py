@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+from interface.llm_profile_store import ILLMProfileStore
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+
 from typing import TYPE_CHECKING, Any
 
 from abstract.tools.tool import (
@@ -44,14 +47,12 @@ async def _handle_run_taskagent(
 
     try:
         from system.application import Application
-        from system.llm_profile_store import LLMProfileStore
 
         app = Application.current()
-        profile_snapshot = app.get_system(LLMProfileStore).snapshot_profile(
+        profile_snapshot = app.get_system(ILLMProfileStore).snapshot_profile(
             context.llm_profile
         )
-        from subagent.orchestrator import SubAgentOrchestrator
-        orch = app.get_system(SubAgentOrchestrator)
+        orch = app.get_system(ISubAgentOrchestrator)
         result = await orch.launch_taskagent(
             parent_session_id=parent_session_id,
             prompt=prompt,

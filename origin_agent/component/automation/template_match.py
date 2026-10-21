@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import logging
 from typing import * # type: ignore
 
@@ -45,8 +47,7 @@ def _check_cv2() -> bool:
 
 def _s():
     from system.application import Application
-    from system.sandbox import Sandbox
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 
 def _imread_unicode(path: str, flags: int) -> "MatLike | None":

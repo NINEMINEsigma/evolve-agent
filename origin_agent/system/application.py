@@ -14,14 +14,16 @@ from entity.constant import ApplicationState, ShutdownReason
 from system.lifecycle import LifecycleFailure, close_resources
 
 if TYPE_CHECKING:
+    from interface.runtime_system import IRuntimeSystem
     from system.context import RuntimeContext
-    from system.runtime import RuntimeSystem
 
 logger = logging.getLogger(__name__)
 
 
-def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
-    """按 P1 拓扑顺序构造唯一 System 清单；构造无副作用。"""
+def _build_system_manifest(
+    context: RuntimeContext,
+) -> list[tuple[type[AsyncSystem], AsyncSystem]]:
+    """Build the ordered interface-slot and implementation pairs without side effects."""
     from abstract.mcp.system import MCPSystem
     from abstract.tools.discover import ToolDiscoverySystem
     from abstract.tools.registry import ToolRegistry
@@ -32,6 +34,26 @@ def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
     from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
     from gateway.system import GatewaySystem
+    from interface.approval_system import IApprovalSystem
+    from interface.agentspace_service import IAgentspaceService
+    from interface.browser_system import IBrowserSystem
+    from interface.cron_router import ICronRouter
+    from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+    from interface.frontend_sink import IFrontendSink
+    from interface.gateway_system import IGatewaySystem
+    from interface.llm_profile_store import ILLMProfileStore
+    from interface.lsp_manager import ILSPManager
+    from interface.mcp_system import IMCPSystem
+    from interface.modality_capability_system import IModalityCapabilitySystem
+    from interface.runtime_system import IRuntimeSystem
+    from interface.sandbox import ISandbox
+    from interface.session_manager import ISessionManager
+    from interface.session_metadata_service import ISessionMetadataService
+    from interface.shell_manager import IShellManager
+    from interface.subagent_orchestrator import ISubAgentOrchestrator
+    from interface.subprocess_runner import ISubprocessRunner
+    from interface.tool_discovery_system import IToolDiscoverySystem
+    from interface.tool_registry import IToolRegistry
     from subagent.orchestrator import SubAgentOrchestrator
     from system.agentspace.service import AgentspaceService
     from system.llm_profile_store import LLMProfileStore
@@ -44,26 +66,26 @@ def _build_system_manifest(context: RuntimeContext) -> list[AsyncSystem]:
     from system.subprocess_utils import SubprocessRunner
 
     return [
-        RuntimeSystem(context),
-        SubprocessRunner(),
-        Sandbox(),
-        ShellManager(),
-        AgentspaceService(),
-        LLMProfileStore(),
-        SessionMetadataService(),
-        ApprovalSystem(),
-        FrontendSink(),
-        ToolRegistry(),
-        LSPManager(),
-        BrowserSystem(),
-        ModalityCapabilitySystem(),
-        CronRouter(),
-        SessionManager(),
-        SubAgentOrchestrator(),
-        DynamicEndpointSystem(),
-        MCPSystem(),
-        ToolDiscoverySystem(),
-        GatewaySystem(),
+        (IRuntimeSystem, RuntimeSystem(context)),
+        (ISubprocessRunner, SubprocessRunner()),
+        (ISandbox, Sandbox()),
+        (IShellManager, ShellManager()),
+        (IAgentspaceService, AgentspaceService()),
+        (ILLMProfileStore, LLMProfileStore()),
+        (ISessionMetadataService, SessionMetadataService()),
+        (IApprovalSystem, ApprovalSystem()),
+        (IFrontendSink, FrontendSink()),
+        (IToolRegistry, ToolRegistry()),
+        (ILSPManager, LSPManager()),
+        (IBrowserSystem, BrowserSystem()),
+        (IModalityCapabilitySystem, ModalityCapabilitySystem()),
+        (ICronRouter, CronRouter()),
+        (ISessionManager, SessionManager()),
+        (ISubAgentOrchestrator, SubAgentOrchestrator()),
+        (IDynamicEndpointSystem, DynamicEndpointSystem()),
+        (IMCPSystem, MCPSystem()),
+        (IToolDiscoverySystem, ToolDiscoverySystem()),
+        (IGatewaySystem, GatewaySystem()),
     ]
 
 
@@ -80,7 +102,7 @@ class Application(AsyncArchitecture):
         self._state = ApplicationState.NEW
         self._registered_types: list[type[AsyncSystem]] = []
         self._shutdown_task: asyncio.Task[None] | None = None
-        self._runtime_ref: RuntimeSystem | None = None
+        self._runtime_ref: IRuntimeSystem | None = None
         Application._current = self
 
     @classmethod
@@ -99,33 +121,38 @@ class Application(AsyncArchitecture):
 
     def _validate_system_graph(
         self,
-        systems: Sequence[AsyncSystem],
+        systems: Sequence[tuple[type[AsyncSystem], AsyncSystem]],
     ) -> tuple[type[AsyncSystem], ...]:
-        """检查完整依赖图，并保持经验证的显式装配顺序。"""
-        system_types = tuple(type(system) for system in systems)
+        """Validate the interface-slot dependency graph and explicit order."""
+        system_types = tuple(system_type for system_type, _ in systems)
         if len(set(system_types)) != len(system_types):
             raise LifecycleFailure("Application contains duplicate System slots")
         known = set(system_types)
         graph: dict[type[AsyncSystem], frozenset[type[AsyncSystem]]] = {}
-        for system in systems:
+        for system_type, system in systems:
+            if not isinstance(system, system_type):
+                raise LifecycleFailure(
+                    f"System implementation {type(system).__name__} does not implement "
+                    f"slot {system_type.__name__}"
+                )
             missing = system.dependencies - known
             if missing:
                 names = ", ".join(sorted(dependency.__name__ for dependency in missing))
                 raise LifecycleFailure(
-                    f"System {type(system).__name__} has missing dependencies: {names}"
+                    f"System slot {system_type.__name__} has missing dependencies: {names}"
                 )
-            graph[type(system)] = system.dependencies
+            graph[system_type] = system.dependencies
         try:
             TopologicalSorter(graph).prepare()
         except CycleError as exc:
             raise LifecycleFailure("Application System dependency graph contains a cycle") from exc
         preceding: set[type[AsyncSystem]] = set()
-        for system in systems:
+        for system_type, system in systems:
             if not system.dependencies.issubset(preceding):
                 raise LifecycleFailure(
-                    f"System {type(system).__name__} precedes one of its dependencies"
+                    f"System slot {system_type.__name__} precedes one of its dependencies"
                 )
-            preceding.add(type(system))
+            preceding.add(system_type)
         return system_types
 
     # -- 装配与关闭（P22）--
@@ -137,18 +164,17 @@ class Application(AsyncArchitecture):
         self._state = ApplicationState.STARTING
         systems = _build_system_manifest(self._startup_context)
         order = self._validate_system_graph(systems)
-        instances = {type(system): system for system in systems}
         self._registered_types = []
-        from system.runtime import RuntimeSystem
+        from interface.cron_router import ICronRouter
+        from interface.runtime_system import IRuntimeSystem
         try:
-            for system_type in order:
-                # 记录“尝试注册过的类型”：awake 失败的节点可能已进入 framework
-                # 注册表但未唤醒，必须由 _unregister_systems 显式移除（RV10）。
+            for system_type, system in systems:
+                # Record every attempted slot so an awake failure is explicitly unregistered.
                 self._registered_types.append(system_type)
-                registered = await self.register(instances[system_type])
+                registered = await self.register(system, system_type=system_type)
                 if not registered:
                     raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
-                if not instances[system_type].is_awake:
+                if not system.is_awake:
                     raise LifecycleFailure(
                         f"System {system_type.__name__} was not awakened after registration"
                     )
@@ -163,11 +189,10 @@ class Application(AsyncArchitecture):
                 ) from startup_error
             raise
         try:
-            runtime = AsyncArchitecture.get_system(self, RuntimeSystem)
+            runtime = AsyncArchitecture.get_system(self, IRuntimeSystem)
             runtime.mark_running()
             self._runtime_ref = runtime
-            from component.cron_router import CronRouter
-            AsyncArchitecture.get_system(self, CronRouter).activate()
+            AsyncArchitecture.get_system(self, ICronRouter).activate()
         except BaseException as startup_error:
             self._state = ApplicationState.FAILED
             try:
@@ -200,29 +225,30 @@ class Application(AsyncArchitecture):
 
     async def _stop_business(self) -> None:
         """P3 步骤 2—7：冻结输入、停止生成、提交 History、保留输出到最后。"""
-        from abstract.mcp.system import MCPSystem
-        from abstract.tools.registry import ToolRegistry
-        from component.approval.system import ApprovalSystem
-        from component.cron_router import CronRouter
-        from entry.agent_sink import FrontendSink
-        from gateway.session_manager import SessionManager
-        from gateway.system import GatewaySystem
-        from subagent.orchestrator import SubAgentOrchestrator
-        from system.modality_capability import ModalityCapabilitySystem
-        from system.session_metadata import SessionMetadataService
-        from system.subprocess_utils import SubprocessRunner
+        from interface.approval_system import IApprovalSystem
+        from interface.cron_router import ICronRouter
+        from interface.frontend_sink import IFrontendSink
+        from interface.gateway_system import IGatewaySystem
+        from interface.llm_profile_store import ILLMProfileStore
+        from interface.mcp_system import IMCPSystem
+        from interface.modality_capability_system import IModalityCapabilitySystem
+        from interface.session_manager import ISessionManager
+        from interface.session_metadata_service import ISessionMetadataService
+        from interface.subagent_orchestrator import ISubAgentOrchestrator
+        from interface.subprocess_runner import ISubprocessRunner
+        from interface.tool_registry import IToolRegistry
 
-        gateway = AsyncArchitecture.get_system(self, GatewaySystem)
-        sessions = AsyncArchitecture.get_system(self, SessionManager)
-        orchestrator = AsyncArchitecture.get_system(self, SubAgentOrchestrator)
-        cron = AsyncArchitecture.get_system(self, CronRouter)
-        sink = AsyncArchitecture.get_system(self, FrontendSink)
-        registry = AsyncArchitecture.get_system(self, ToolRegistry)
-        mcp = AsyncArchitecture.get_system(self, MCPSystem)
-        subprocesses = AsyncArchitecture.get_system(self, SubprocessRunner)
-        metadata = AsyncArchitecture.get_system(self, SessionMetadataService)
-        approval = AsyncArchitecture.get_system(self, ApprovalSystem)
-        modality = AsyncArchitecture.get_system(self, ModalityCapabilitySystem)
+        gateway = AsyncArchitecture.get_system(self, IGatewaySystem)
+        sessions = AsyncArchitecture.get_system(self, ISessionManager)
+        orchestrator = AsyncArchitecture.get_system(self, ISubAgentOrchestrator)
+        cron = AsyncArchitecture.get_system(self, ICronRouter)
+        sink = AsyncArchitecture.get_system(self, IFrontendSink)
+        registry = AsyncArchitecture.get_system(self, IToolRegistry)
+        mcp = AsyncArchitecture.get_system(self, IMCPSystem)
+        subprocesses = AsyncArchitecture.get_system(self, ISubprocessRunner)
+        metadata = AsyncArchitecture.get_system(self, ISessionMetadataService)
+        approval = AsyncArchitecture.get_system(self, IApprovalSystem)
+        modality = AsyncArchitecture.get_system(self, IModalityCapabilitySystem)
 
         # 步骤 2：同一接收状态下封闭新工作；长连接与输出保留。
         gateway.stop_accepting()
@@ -278,8 +304,8 @@ class Application(AsyncArchitecture):
         await asyncio.shield(task)
 
     async def _shutdown_impl(self) -> None:
-        from system.runtime import RuntimeSystem
-        runtime = AsyncArchitecture.get_system(self, RuntimeSystem)
+        from interface.runtime_system import IRuntimeSystem
+        runtime = AsyncArchitecture.get_system(self, IRuntimeSystem)
         self._state = ApplicationState.STOPPING
         failures: list[BaseException] = []
         try:

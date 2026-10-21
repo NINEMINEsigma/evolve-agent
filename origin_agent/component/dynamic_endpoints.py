@@ -14,25 +14,26 @@ from entity.constant import DYNAMIC_ENDPOINTS_STORE_FILENAME
 from entity.puretype import DynamicEndpointInfo
 from system.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
-from gateway.session_manager import SessionManager
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.runtime_system import IRuntimeSystem
+from interface.session_manager import ISessionManager
 
 
-class DynamicEndpointSystem(AsyncSystem):
+class DynamicEndpointSystem(IDynamicEndpointSystem):
     """持有动态端点注册表、锁和原JSON持久化。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, SessionManager))
-        self._runtime: RuntimeSystem | None = None
-        self._session_manager: SessionManager | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ISessionManager))
+        self._runtime: IRuntimeSystem | None = None
+        self._session_manager: ISessionManager | None = None
         self._store_path: Path | None = None
         self._endpoints: dict[str, DynamicEndpointInfo] = {}
         self._lock = threading.RLock()
         self._frozen = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._session_manager = self.get_system(SessionManager)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._session_manager = self.get_system(ISessionManager)
         self._store_path = self._runtime.context.workspace / DYNAMIC_ENDPOINTS_STORE_FILENAME
         self._load_all_endpoints()
 
@@ -40,13 +41,13 @@ class DynamicEndpointSystem(AsyncSystem):
         self.close_admission()
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("DynamicEndpointSystem has not been awakened")
         return self._runtime
 
     @property
-    def session_manager(self) -> SessionManager:
+    def session_manager(self) -> ISessionManager:
         if self._session_manager is None:
             raise LifecycleFailure("DynamicEndpointSystem has not been awakened")
         return self._session_manager

@@ -29,9 +29,12 @@ from system.lifecycle import (
     TaskOwner,
     contains_lifecycle_failure,
 )
-from system.llm_profile_store import LLMProfileStore
+from interface.frontend_sink import IFrontendSink
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
 from system.session_store import SessionStore
-from system.runtime import RuntimeSystem
 from system.templates import read_template
 
 if TYPE_CHECKING:
@@ -52,7 +55,7 @@ class MetadataGenerationError(SessionMetadataError):
     """元数据模型调用或输出解析失败。"""
 
 
-class SessionMetadataService(AsyncSystem):
+class SessionMetadataService(ISessionMetadataService):
     """解析目标会话的元数据 Profile，并生成标题、标签与摘要。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem 与 LLMProfileStore；
@@ -61,9 +64,9 @@ class SessionMetadataService(AsyncSystem):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, LLMProfileStore))
-        self._runtime: RuntimeSystem | None = None
-        self._llm_profile_store: LLMProfileStore | None = None
+        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        self._runtime: IRuntimeSystem | None = None
+        self._llm_profile_store: ILLMProfileStore | None = None
         self._session_store: SessionStore | None = None
         self._task_owner: TaskOwner | None = None
         self._admission_closed = False
@@ -71,8 +74,8 @@ class SessionMetadataService(AsyncSystem):
         self._first_title_pending: set[str] = set()
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        self._llm_profile_store = self.get_system(LLMProfileStore)
+        self._runtime = self.get_system(IRuntimeSystem)
+        self._llm_profile_store = self.get_system(ILLMProfileStore)
         ctx = self._runtime.context
         self._session_store = SessionStore(ctx.workspace / SESSIONS_DIR_NAME)
         self._task_owner = TaskOwner(
@@ -81,13 +84,13 @@ class SessionMetadataService(AsyncSystem):
         )
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("SessionMetadataService has not been awakened")
         return self._runtime
 
     @property
-    def llm_profile_store(self) -> LLMProfileStore:
+    def llm_profile_store(self) -> ILLMProfileStore:
         if self._llm_profile_store is None:
             raise LifecycleFailure("SessionMetadataService has not been awakened")
         return self._llm_profile_store
@@ -584,19 +587,15 @@ class SessionMetadataService(AsyncSystem):
         不回滚已完成写入）；推送失败仅降级日志，下次连接 fetchSessions 补齐。
         """
         from system.application import Application
-        from gateway.session_manager import SessionManager
-
         application = Application.current()
         try:
-            application.get_system(SessionManager).update_title(session_id, title)
+            application.get_system(ISessionManager).update_title(session_id, title)
         except Exception:
             logger.warning(
                 "First title persistence failed | session=%s", session_id, exc_info=True
             )
         try:
-            from entry.agent_sink import FrontendSink
-
-            await application.get_system(FrontendSink).emit_system_message(
+            await application.get_system(IFrontendSink).emit_system_message(
                 session_id,
                 json.dumps(
                     {"action": SESSION_TITLE_UPDATED_ACTION, "title": title},

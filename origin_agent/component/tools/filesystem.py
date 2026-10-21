@@ -1,7 +1,7 @@
 """文件系统工具 — 所有路径均为逻辑路径（带命名空间前缀）。
 
 模块导出 ``TOOLSET`` 对象，工具类通过调用态材料访问当前会话。
-每个工具 handler 通过 ``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例解析路径。
+每个工具 handler 通过 ``Application.current().get_system(ISandbox)`` 获取共享的 ``Sandbox`` 实例解析路径。
 
 路径格式：``namespace:relative/path``
   - ``fork:``    读写（进化代码目标）
@@ -17,6 +17,11 @@
 """
 # TODO: _blocks构建应该具有一个公用的工厂
 from __future__ import annotations
+
+from interface.agentspace_service import IAgentspaceService
+from interface.lsp_manager import ILSPManager
+from interface.modality_capability_system import IModalityCapabilitySystem
+from interface.sandbox import ISandbox
 
 import base64
 import io
@@ -42,7 +47,7 @@ from entity.constant import (
     WRITE_FILE_TRUNCATION_TAIL,
 )
 from system.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import Access, Sandbox, SandboxError
+from system.sandbox import Access, SandboxError
 from system.text_codec import split_lf_lines
 from system.text_preview import truncate_lf_lines
 from pathlib import Path
@@ -58,7 +63,6 @@ except Exception:  # pragma: no cover — PIL is optional
     PILImage = None  # type: ignore
 
 from system.modality_capability import (
-    ModalityCapabilitySystem,
     resolve_active_model_base_url,
     wrap_forwarded_description,
     forwarded_tag_for_media,
@@ -67,16 +71,16 @@ from system.modality_capability import (
 logger = logging.getLogger(__name__)
 
 
-def _s() -> Sandbox:
+def _s() -> ISandbox:
     """委托到 Application 已注册的 Sandbox System。"""
     from system.application import Application
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 
-def _mcs() -> ModalityCapabilitySystem:
+def _mcs() -> IModalityCapabilitySystem:
     """委托到 Application 已注册的 ModalityCapabilitySystem。"""
     from system.application import Application
-    return Application.current().get_system(ModalityCapabilitySystem)
+    return Application.current().get_system(IModalityCapabilitySystem)
 
 
 def _read_meta_fields(
@@ -94,9 +98,8 @@ def _read_meta_fields(
     logical = f"{namespace.strip()}:{'/'.join(parts)}"
     meta_path = logical + META_FILE_SUFFIX
     from system.application import Application
-    from system.agentspace import AgentspaceService
     from entity.constant import VISUAL_REDIRECT_KEY
-    visual_service = Application.current().get_system(AgentspaceService).visual_resources
+    visual_service = Application.current().get_system(IAgentspaceService).visual_resources
     visual_source = visual_service.match_source_directory(logical) if is_directory else None
     try:
         sandbox = _s()
@@ -227,8 +230,7 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
     不满足条件或 LSP 未启动时返回 None（不附加字段）。
     """
     from system.application import Application
-    from system.lsp import LSPManager
-    manager = Application.current().get_system(LSPManager)
+    manager = Application.current().get_system(ILSPManager)
     if not manager.is_ready():
         return None
 

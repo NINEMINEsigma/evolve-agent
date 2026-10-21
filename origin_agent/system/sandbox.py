@@ -50,8 +50,9 @@ from entity.puretype import (
 from system.atomic_io import replace_atomic
 from system.context import RuntimeContext
 from system.pathutils import find_repo_root
-from system.runtime import RuntimeSystem
-from system.subprocess_utils import SubprocessRunner
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.subprocess_runner import ISubprocessRunner
 from system.text_codec import decode_text, split_lf_lines
 
 from pydantic import BaseModel, ConfigDict
@@ -138,26 +139,26 @@ class ResolvedPath(BaseModel):
     namespace: str  # 不带冒号的内置或动态命名空间名
 
 
-class Sandbox(AsyncSystem):
+class Sandbox(ISandbox):
     """Application 持有的路径安全边界与动态空间管理单例。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem 与 SubprocessRunner；
-    由 Application 在 P22 装配后经 ``app.get_system(Sandbox)`` 取得。
+    由 Application 在 P22 装配后经 ``app.get_system(ISandbox)`` 取得。
     virtual_awake 取得 RuntimeContext 与 SubprocessRunner，并加载动态空间。
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, SubprocessRunner))
+        super().__init__(dependencies=(IRuntimeSystem, ISubprocessRunner))
         self._ctx: RuntimeContext
-        self._runner: SubprocessRunner
+        self._runner: ISubprocessRunner
         self._dynamic_spaces_path: Path
         self._dynamic_spaces_lock: threading.RLock = threading.RLock()
         self._dynamic_space_availability: dict[str, bool] = {}
         self._dynamic_spaces_data: DynamicSandboxSpaceData = DynamicSandboxSpaceData()
 
     async def virtual_awake(self) -> None:
-        runtime = self.get_system(RuntimeSystem)
-        runner = self.get_system(SubprocessRunner)
+        runtime = self.get_system(IRuntimeSystem)
+        runner = self.get_system(ISubprocessRunner)
         self._ctx = runtime.context
         self._runner = runner
         self._dynamic_spaces_path = (
@@ -627,7 +628,7 @@ class Sandbox(AsyncSystem):
         """返回指定命名空间的物理根目录。
 
         供需要物理路径的外部消费者（importlib 注册、工具发现等）使用，
-        而非沙盒文件操作。调用方应通过 ``Application.current().get_system(Sandbox)``
+        而非沙盒文件操作。调用方应通过 ``Application.current().get_system(ISandbox)``
         或等价途径获取 Sandbox 实例。
         """
         base: Path | None = self.namespace_bases().get(ns.value)

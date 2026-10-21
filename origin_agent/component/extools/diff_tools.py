@@ -21,6 +21,8 @@ diff_fast_fork   fast_agent_space/                   fork（slow 目录）
 
 from __future__ import annotations
 
+from interface.sandbox import ISandbox
+
 import difflib
 import fnmatch
 import logging
@@ -60,8 +62,7 @@ _ORIGIN_ROOT: Path = _FAST_ROOT.parent.parent / "origin_agent"
 def _resolve_fork_root() -> Path | None:
     """通过 sandbox 获取 fork（slow）目录的绝对路径。"""
     from system.application import Application
-    from system.sandbox import Sandbox
-    r = Application.current().get_system(Sandbox).resolve("fork:", Access.READ)
+    r = Application.current().get_system(ISandbox).resolve("fork:", Access.READ)
     return r.real
 
 

@@ -9,6 +9,8 @@ type 可先行填写、提交前确认。工具对象通过模块级 ``TOOLSET``
 
 from __future__ import annotations
 
+from interface.browser_system import IBrowserSystem
+
 import logging
 from typing import Any
 
@@ -36,7 +38,7 @@ _DEFAULT_TIMEOUT_MS: int = 30000
 
 
 def _browser_system() -> BrowserSystem:
-    return Application.current().get_system(BrowserSystem)
+    return Application.current().get_system(IBrowserSystem)
 
 
 async def _resolve_page_and_locator(

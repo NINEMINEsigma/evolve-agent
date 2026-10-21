@@ -7,6 +7,12 @@ MultiAgentLoop — 多 Agent 广播协作循环。
 
 from __future__ import annotations
 
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+
 import asyncio
 import json
 import logging
@@ -51,7 +57,7 @@ from entry.agent_support.multimodal import content_to_text, summarize_message_fo
 
 if TYPE_CHECKING:
     from system.application import Application
-    from entry.agent_sink import AgentSink
+    from interface.agent_sink import IAgentSink
     from entity.messages import ToolResultMessage
     from entry.tool_post_dispatch import ResultFieldInjector
 
@@ -97,14 +103,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         *,
         history: History,
         agents: dict[str, AgentProfile],
-        sink: AgentSink,
+        sink: IAgentSink,
         main_agent_name: str,
         history_store_dir: Path | None = None,
     ) -> None:
         super().__init__(app, session_id)
         self._history: History = history
         self._agents: dict[str, AgentProfile] = agents
-        self._sink: AgentSink = sink
+        self._sink: IAgentSink = sink
         self._agent_names: list[str] = list(agents.keys())
         self._main_agent_name: str = main_agent_name
         main_agent = agents.get(self._main_agent_name)
@@ -143,7 +149,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
-    def get_sink(self) -> AgentSink:
+    def get_sink(self) -> IAgentSink:
         return self._sink
 
     @property
@@ -221,7 +227,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     async def _rotate_session_for_context_limit(self) -> str:
         """摘要成功后创建并切换到多Agent延续会话。"""
         from entry.session_manager import terminate_and_rotate_session
-        from system.session_metadata import SessionMetadataService
 
         old_sid = self.session_id
         sm = self.session_manager
@@ -232,7 +237,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             session_id=old_sid,
             session_store=self._session_store,
             session_manager=sm,
-            metadata_service=self.app.get_system(SessionMetadataService),
+            metadata_service=self.app.get_system(ISessionMetadataService),
             loop_meta=LoopMeta(
                 loopType=Loop.multi,
                 agents=list(self._agents.keys()),
@@ -309,10 +314,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         client = None
         if profile is not None:
             from abstract.llm.loader import create_llm_client
-            from system.runtime import RuntimeSystem
             client = create_llm_client(
                 profile.llm_client_name,
-                self.app.get_system(RuntimeSystem).context,
+                self.app.get_system(IRuntimeSystem).context,
                 profile,
             )
             main_agent.config.base_url = profile.base_url
@@ -327,14 +331,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._active_llm_profile = profile
 
         from component.multiagenttools.profile_builder import _resolve_main_agent_prompts
-        from system.runtime import RuntimeSystem
         common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
-        from system.sandbox import Sandbox
         main_agent.system_prompts = _resolve_main_agent_prompts(
             self._main_agent_name,
             main_agent.config,
-            self.app.get_system(RuntimeSystem).context,
-            self.app.get_system(Sandbox),
+            self.app.get_system(IRuntimeSystem).context,
+            self.app.get_system(ISandbox),
             profile=profile,
             session_id=self.session_id,
         ) + common_prompt
@@ -358,8 +360,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         logger.info("Terminating multi-agent session | session=%s", self.session_id)
         self.interrupt()
         warnings: list[str] = []
-        from system.session_metadata import SessionMetadataService
-        service = self.app.get_system(SessionMetadataService)
+        service = self.app.get_system(ISessionMetadataService)
 
         try:
             await service.ensure_summary(self.session_id)
@@ -395,8 +396,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         self.session_manager.archive(self.session_id, continuation_sid=None)
         try:
-            from system.shell_manager import ShellManager
-            await self.app.get_system(ShellManager).stop_session(self.session_id)
+            await self.app.get_system(IShellManager).stop_session(self.session_id)
         except Exception as exc:
             logger.exception(
                 "Failed to stop Shell sessions during multi-agent termination | session=%s",
@@ -538,8 +538,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     stream_id=None,
                 )
                 try:
-                    from system.runtime import RuntimeSystem
-                    if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+                    if self.app.get_system(IRuntimeSystem).state is not ApplicationState.RUNNING:
                         return None
                     sid = self.session_id
                     queue = self._message_queue
@@ -550,11 +549,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     self._history.remove_unpaired_tool_calls()
                     self.save_history(self.session_id)
                     await self._commit_input_deliveries(items)
-                    from system.runtime import RuntimeSystem
                     should_run = (
                         not rotated
                         and not interrupted
-                        and self.app.get_system(RuntimeSystem).state is ApplicationState.RUNNING
+                        and self.app.get_system(IRuntimeSystem).state is ApplicationState.RUNNING
                     )
                     selected_name = next(
                         (m.payload.llm_profile_name for m in reversed(items)
@@ -563,8 +561,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     )
                     if should_run and selected_name is not None:
                         try:
-                            from system.llm_profile_store import LLMProfileStore
-                            selected = self.app.get_system(LLMProfileStore).resolve_profile_name(
+                            selected = self.app.get_system(ILLMProfileStore).resolve_profile_name(
                                 selected_name,
                             )
                             self.set_profile(selected)
@@ -662,12 +659,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         from subagent.profile import CharacterProfileResolver
         from system.application import Application
-        from system.sandbox import Sandbox
-        from system.llm_profile_store import LLMProfileStore
 
         resolver = CharacterProfileResolver(
-            Application.current().get_system(Sandbox),
-            Application.current().get_system(LLMProfileStore),
+            Application.current().get_system(ISandbox),
+            Application.current().get_system(ILLMProfileStore),
         )
         available_names = {
             profile.name
@@ -741,8 +736,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         )
 
         while queue and step < max_steps:
-            from system.runtime import RuntimeSystem
-            if self.app.get_system(RuntimeSystem).state is not ApplicationState.RUNNING:
+            if self.app.get_system(IRuntimeSystem).state is not ApplicationState.RUNNING:
                 return
             char = queue.popleft()
 
@@ -927,7 +921,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         委托给 MultiAgentWorker 执行完整的 LLM → tool_calls → tool_result → 循环。
         """
         profile = self._agents[character_name]
-        from system.sandbox import Sandbox
         llm_client = profile.llm_client
         if llm_client is None:
             raise RuntimeError(
@@ -962,7 +955,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         variables_block = build_session_variables_block(self.session_id)
         if variables_block:
             system_prompts = system_prompts + [variables_block]
-        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(Sandbox))
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             system_prompts = system_prompts + [dynamic_spaces_block]
         logger.info(

@@ -11,32 +11,32 @@ from typing import Any, TypeVar
 
 import uvicorn
 from fastapi import FastAPI
-from framework import AsyncSystem
+from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
+from system.lifecycle import LifecycleFailure, TaskOwner, close_resources
 
-from abstract.tools.discover import ToolDiscoverySystem
-from component.approval.system import ApprovalSystem
-from component.cron_router import CronRouter
-from component.dynamic_endpoints import DynamicEndpointSystem
+from interface.approval_system import IApprovalSystem
+from interface.agentspace_service import IAgentspaceService
+from interface.cron_router import ICronRouter
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
+from interface.frontend_sink import IFrontendSink
+from interface.gateway_system import IGatewaySystem
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+from interface.shell_manager import IShellManager
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+from interface.tool_discovery_system import IToolDiscoverySystem
 from entity.constant import (
     GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
     GATEWAY_START_TIMEOUT_SECONDS,
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
-from entry.agent_sink import FrontendSink
-from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
-from gateway.session_manager import SessionManager
-from subagent.orchestrator import SubAgentOrchestrator
-from system.agentspace.service import AgentspaceService
-from system.lifecycle import LifecycleFailure, TaskOwner, close_resources
-from system.llm_profile_store import LLMProfileStore
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox
-from system.session_metadata import SessionMetadataService
-from system.shell_manager import ShellManager
 
 logger = logging.getLogger(__name__)
 
-WorkResultT = TypeVar("WorkResultT")
+WorkT = TypeVar("WorkT")
 
 
 class GatewayPortBusyError(RuntimeError):
@@ -71,16 +71,16 @@ class _GatewayUvicornServer(uvicorn.Server):
         self._ready_tracker.mark_ready()
 
 
-class GatewaySystem(AsyncSystem):
+class GatewaySystem(IGatewaySystem):
     """最后唤醒、首先注销；History 刷新完成前只封闭输入不关闭输出。"""
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            RuntimeSystem, ToolDiscoverySystem, SessionManager, SubAgentOrchestrator,
-            DynamicEndpointSystem, FrontendSink, AgentspaceService, ApprovalSystem,
-            LLMProfileStore, SessionMetadataService, CronRouter, ShellManager, Sandbox,
+            IRuntimeSystem, IToolDiscoverySystem, ISessionManager, ISubAgentOrchestrator,
+            IDynamicEndpointSystem, IFrontendSink, IAgentspaceService, IApprovalSystem,
+            ILLMProfileStore, ISessionMetadataService, ICronRouter, IShellManager, ISandbox,
         ))
-        self._runtime: RuntimeSystem | None = None
+        self._runtime: IRuntimeSystem | None = None
         self._admission: GatewayAdmission | None = None
         self._ready = GatewayReadyTracker()
         self._owner: TaskOwner | None = None
@@ -113,12 +113,12 @@ class GatewaySystem(AsyncSystem):
             raise LifecycleFailure("GatewaySystem has not been awakened")
         return self._owner
 
-    def spawn_work(self, coro: Coroutine[Any, Any, WorkResultT], *, name: str) -> asyncio.Task[WorkResultT]:
+    def spawn_work(self, coro: Coroutine[Any, Any, WorkT], *, name: str) -> asyncio.Task[WorkT]:
         """登记路由启动的后台任务；输入登记必须在创建本任务之前完成。"""
         return self.task_owner.create(coro, name=name)
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
+        self._runtime = self.get_system(IRuntimeSystem)
         self._admission = GatewayAdmission(self._runtime)
         self._owner = TaskOwner("gateway", self._runtime.record_failure)
         await self._start()
@@ -185,7 +185,7 @@ class GatewaySystem(AsyncSystem):
             raise
 
     @property
-    def runtime(self) -> RuntimeSystem:
+    def runtime(self) -> IRuntimeSystem:
         if self._runtime is None:
             raise LifecycleFailure("GatewaySystem has not been awakened")
         return self._runtime

@@ -4,7 +4,7 @@
 并调用其 ``create_llm_client`` 工厂构造 ``BaseLLMClient`` 实例。
 """
 
-from __future__ import annotations
+from interface.sandbox import ISandbox
 
 import importlib
 import logging
@@ -28,9 +28,8 @@ def _ensure_namespace_package() -> None:
     if "custom_llm_client" in sys.modules:
         return
     from system.application import Application
-    from system.sandbox import Sandbox
     from entity.constant import Namespace
-    client_dir = Application.current().get_system(Sandbox).get_base(Namespace.CUSTOM_LLM_CLIENT)
+    client_dir = Application.current().get_system(ISandbox).get_base(Namespace.CUSTOM_LLM_CLIENT)
     pkg = types.ModuleType("custom_llm_client")
     pkg.__path__ = [str(client_dir)]
     sys.modules["custom_llm_client"] = pkg
@@ -86,9 +85,8 @@ def list_llm_clients() -> list[str]:
     仅列出以 ``.py`` 结尾且不是 ``_`` 开头的文件，并去掉 ``.py`` 后缀。
     """
     from system.application import Application
-    from system.sandbox import Sandbox
     from entity.constant import Namespace
-    client_dir = Application.current().get_system(Sandbox).get_base(Namespace.CUSTOM_LLM_CLIENT)
+    client_dir = Application.current().get_system(ISandbox).get_base(Namespace.CUSTOM_LLM_CLIENT)
     if not client_dir.is_dir():
         return []
     return [

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
 
 from entity.constant import (
     CHARACTER_DESCRIPTION_META_KEY,
@@ -18,10 +17,9 @@ from entity.constant import (
 )
 from entity.puretype import AgentConfig, CharacterProfile
 from system.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import Sandbox, SandboxError
-
-if TYPE_CHECKING:
-    from system.llm_profile_store import LLMProfileStore
+from system.sandbox import SandboxError
+from interface.llm_profile_store import ILLMProfileStore
+from interface.sandbox import ISandbox
 
 
 class CharacterProfileError(ValueError):
@@ -31,7 +29,7 @@ class CharacterProfileError(ValueError):
 class CharacterProfileResolver:
     """每次调用都从工作空间动态读取角色档案的解析器。"""
 
-    def __init__(self, sandbox: Sandbox, profile_store: LLMProfileStore) -> None:
+    def __init__(self, sandbox: ISandbox, profile_store: ILLMProfileStore) -> None:
         self._sandbox = sandbox
         self._profile_store = profile_store
 
@@ -196,7 +194,7 @@ def _parse_system_prompt_paths(raw_value: str) -> list[str]:
 
 
 def _load_system_prompts(
-    sandbox: Sandbox,
+    sandbox: ISandbox,
     *,
     profile_path: str,
     system_prompt: str,

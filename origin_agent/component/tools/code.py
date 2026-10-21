@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -29,8 +32,7 @@ logger = logging.getLogger(__name__)
 
 def _s():
     from system.application import Application
-    from system.sandbox import Sandbox
-    return Application.current().get_system(Sandbox)
+    return Application.current().get_system(ISandbox)
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +225,9 @@ class EvolveCodeTool(BaseTool):
         ))
 
     def after_handle(self, execution: ToolExecution) -> ToolPostprocessEffect:
-        from system.runtime import RuntimeSystem
-
         if not execution.context.consume_evolution_request():
             return ToolPostprocessEffect()
-        execution.context.app.get_system(RuntimeSystem).request_shutdown(ShutdownReason.EVOLUTION)
+        execution.context.app.get_system(IRuntimeSystem).request_shutdown(ShutdownReason.EVOLUTION)
         return ToolPostprocessEffect(
             evolution_requested=True,
             stop_current_round=True,

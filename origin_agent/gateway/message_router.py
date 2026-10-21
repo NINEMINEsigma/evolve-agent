@@ -24,6 +24,14 @@ USER_MESSAGE 在 route 内同步完成目标校验与输入登记（S21/RV5/RV9�
 
 from __future__ import annotations
 
+from interface.frontend_sink import IFrontendSink
+from interface.gateway_system import IGatewaySystem
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
+from interface.session_manager import ISessionManager
+from interface.session_metadata_service import ISessionMetadataService
+from interface.subagent_orchestrator import ISubAgentOrchestrator
+
 import asyncio
 import base64
 import json
@@ -92,7 +100,7 @@ def _observe_background_interrupt(task: asyncio.Task) -> None:
 def _get_sm() -> SessionManager | None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
-    return Application.current().get_system(SessionManager)
+    return Application.current().get_system(ISessionManager)
 
 
 def _get_loop(session_id: str) -> IMainSessionLoop | None:
@@ -104,8 +112,7 @@ def _get_loop(session_id: str) -> IMainSessionLoop | None:
 def _get_ws(session_id: str) -> WebSocket | None:
     """返回指定 session 的 WebSocket sink。"""
     from system.application import Application
-    from entry.agent_sink import FrontendSink
-    sink = Application.current().get_system(FrontendSink)
+    sink = Application.current().get_system(IFrontendSink)
     return sink.get_ws(session_id)
 
 
@@ -126,7 +133,7 @@ def get_subagent_orchestrator() -> SubAgentOrchestrator | None:
     """返回 SubAgentOrchestrator 单例。"""
     from system.application import Application
     from subagent.orchestrator import SubAgentOrchestrator
-    return Application.current().get_system(SubAgentOrchestrator)
+    return Application.current().get_system(ISubAgentOrchestrator)
 
 
 # ---------------------------------------------------------------------------
@@ -185,8 +192,7 @@ class MessageRouter:
                     await self._send_router_error(reject_reason)
                 return True
             from system.application import Application
-            from gateway.system import GatewaySystem
-            Application.current().get_system(GatewaySystem).spawn_work(
+            Application.current().get_system(IGatewaySystem).spawn_work(
                 self._prepare_user_message(msg, accepted),
                 name=f"user-msg-prepare-{self.sid[:8]}",
             )
@@ -246,7 +252,6 @@ class MessageRouter:
         """
         from datetime import datetime
         from system.application import Application
-        from system.llm_profile_store import LLMProfileStore
 
         sm = _get_sm()
         session_info = sm.get(self.sid) if sm is not None else None
@@ -272,7 +277,7 @@ class MessageRouter:
 
         # 指定 Profile 必须命中；未命中不产生任何记录。
         if msg.llm_profile_name:
-            store = Application.current().get_system(LLMProfileStore)
+            store = Application.current().get_system(ILLMProfileStore)
             try:
                 store.get_profile(msg.llm_profile_name)
             except ProfileNotFoundError:
@@ -304,9 +309,7 @@ class MessageRouter:
         非取消异常按 RV9 进入应用失败关闭；记录保留由关闭刷新只落 History。
         """
         from system.application import Application
-        from system.llm_profile_store import LLMProfileStore
-        from system.runtime import RuntimeSystem
-        runtime = Application.current().get_system(RuntimeSystem)
+        runtime = Application.current().get_system(IRuntimeSystem)
         try:
             await self._prepare_user_message_inner(msg, accepted)
             if accepted.sequence is not None:
@@ -331,7 +334,6 @@ class MessageRouter:
             )
             return
         from system.application import Application
-        from system.llm_profile_store import LLMProfileStore
 
         loop = _get_loop(self.sid)
         if loop is None:
@@ -341,7 +343,7 @@ class MessageRouter:
 
         # 空闲主会话尽早切换；忙碌会话仅把名称保留到 FIFO 消息中。
         if "main" in accepted.target_sessions and not loop.loop.is_processing():
-            store = Application.current().get_system(LLMProfileStore)
+            store = Application.current().get_system(ILLMProfileStore)
             with store.locked():
                 selected = store.resolve_profile_name(msg.llm_profile_name or "")
                 loop.set_profile(selected)
@@ -384,8 +386,7 @@ class MessageRouter:
         if msg.request_id is not None and msg.action is not None:
             logger.info("WS confirm response | session=%s request_id=%s action=%s", self.sid, msg.request_id, msg.action)
             from system.application import Application
-            from entry.agent_sink import FrontendSink
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             sink.resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
 
     async def handle_ask_response(self, msg: Message) -> None:
@@ -393,8 +394,7 @@ class MessageRouter:
         if msg.request_id is not None:
             logger.info("WS ask response | session=%s request_id=%s", self.sid, msg.request_id)
             from system.application import Application
-            from entry.agent_sink import FrontendSink
-            sink = Application.current().get_system(FrontendSink)
+            sink = Application.current().get_system(IFrontendSink)
             sink.resolve_ask(msg.request_id, answers=msg.answers)
 
     async def handle_interrupt(self) -> None:
@@ -402,8 +402,7 @@ class MessageRouter:
         loop = _get_loop(self.sid)
         if loop is not None and loop.loop is not None:
             from system.application import Application
-            from gateway.system import GatewaySystem
-            task = Application.current().get_system(GatewaySystem).spawn_work(
+            task = Application.current().get_system(IGatewaySystem).spawn_work(
                 loop.request_interrupt(reason="user"),
                 name=f"ws-interrupt-{self.sid[:8]}",
             )
@@ -432,9 +431,8 @@ class MessageRouter:
         unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
 
         from system.application import Application
-        from system.runtime import RuntimeSystem
         agentspace_path: Path = (
-            Application.current().get_system(RuntimeSystem).context.agentspace
+            Application.current().get_system(IRuntimeSystem).context.agentspace
         )
         upload_dir: Path = agentspace_path / UPLOADS_DIR_NAME
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -640,8 +638,7 @@ class MessageRouter:
             # 纯附件/空文本：跳过，不写入空标题（修复原空标题 bug）
             return
         from system.application import Application
-        from system.session_metadata import SessionMetadataService
-        Application.current().get_system(SessionMetadataService).maybe_generate_first_title(
+        Application.current().get_system(ISessionMetadataService).maybe_generate_first_title(
             self.sid, text_content
         )
 
@@ -665,8 +662,7 @@ class MessageRouter:
             also_main = "main" in target_sessions
 
             from system.application import Application
-            from gateway.system import GatewaySystem
-            gateway = Application.current().get_system(GatewaySystem)
+            gateway = Application.current().get_system(IGatewaySystem)
 
             # 建立 session_id → name 映射
             try:
@@ -737,8 +733,7 @@ class MessageRouter:
             return
 
         from system.application import Application
-        from entry.agent_sink import FrontendSink
-        sink = Application.current().get_system(FrontendSink)
+        sink = Application.current().get_system(IFrontendSink)
         sink.unregister_ws(_old)
         sink.register_ws(_rotated, self.ws, self.conn_token)
         self.sid = _rotated
@@ -766,8 +761,7 @@ class MessageRouter:
         if not reply:
             return
         from system.application import Application
-        from entry.agent_sink import FrontendSink
-        sink = Application.current().get_system(FrontendSink)
+        sink = Application.current().get_system(IFrontendSink)
         await sink.emit_assistant_message(
             self.sid, reply, loop.current_character_agent,
         )
@@ -814,8 +808,7 @@ class MessageRouter:
         send_text 触发 RuntimeError 并产生 ERROR 级 traceback 噪声。
         """
         from system.application import Application
-        from entry.agent_sink import FrontendSink
-        sink = Application.current().get_system(FrontendSink)
+        sink = Application.current().get_system(IFrontendSink)
         await sink.emit_usage_update(
             self.sid, loop.get_token_usage(), loop.get_context_tokens(),
         )

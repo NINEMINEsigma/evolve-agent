@@ -13,7 +13,7 @@ entry/
 ├── colloquy_loop.py              ← ColloquyLoop（闲聊循环，继承 ParentAgentLoop）
 ├── multi_agent_loop.py           ← 多 Agent 广播协作循环
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
-├── agent_sink.py                 ← AgentSink / FrontendSink / ParentAgentSink
+├── agent_sink.py                 ← FrontendSink / ParentAgentSink（契约见 interface/agent_sink.py）
 ├── history_projection.py       ← History 到前端骨架/内容页/资源索引的唯一投影层
 ├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称；drain_injected 额外返回 consumed_client_message_ids 供前端移除已排队徽章）
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
@@ -47,7 +47,7 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
 
 两种压缩工具在实际结构替换并严格保存后同步调用 `ToolExecution.mark_history_updated()`，保存与标记之间没有 await。该调用级事实独立于 after 是否成功返回；`ToolPostprocessor` 成功路径在结果回填保存后发送 typed `history_updated`，再发送 `ToolPostprocessEffect.system_message` 和未抑制的工具结果。取消/后续失败时仍根据已提交标记尝试发送失效通知，然后传播原异常；通知失败与原错误以异常组保留，不发送压缩成功系统消息。完成系统通知不再在压缩 after 内等待，也不复用进化的 assistant `completion_message`。
 
-压缩返回的 `discarded_tool_call_ids` 只用于内部移除事实/suppress 校验，Postprocessor不再发送 `tool_calls_discarded`；后者只由 `accept_tool_batch` 为从未被接受的批次后缀发送。suppress同时要求已提交结构更新标记及自身ID在移除集合中。`AgentSink.emit_history_updated(session_id)` 不依赖 stream_id，FrontendSink沿既有TaskOwner/发送截止统一序列化 `HistoryUpdatedEvent`；ParentAgentSink不向父主会话投递子会话History更新。当前实际触发方仅为两种主会话压缩工具，普通追加、业务拒绝和零链结果回填不触发。源码已接入，尚未运行验证。
+压缩返回的 `discarded_tool_call_ids` 只用于内部移除事实/suppress 校验，Postprocessor不再发送 `tool_calls_discarded`；后者只由 `accept_tool_batch` 为从未被接受的批次后缀发送。suppress同时要求已提交结构更新标记及自身ID在移除集合中。`IAgentSink.emit_history_updated(session_id)` 不依赖 stream_id，FrontendSink沿既有TaskOwner/发送截止统一序列化 `HistoryUpdatedEvent`；ParentAgentSink不向父主会话投递子会话History更新。当前实际触发方仅为两种主会话压缩工具，普通追加、业务拒绝和零链结果回填不触发。源码已接入，尚未运行验证。
 
 ## 关键抽象
 
@@ -93,9 +93,9 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
 - 流式 LLM 调用与实时前端推送（通过 `StreamConsumer`）。
 - 工具审批：复用 `ToolExecutor` + `execute_with_approval`；safe 始终免审批，手动模式 write 也免审批；其余按模式分流到用户或审批模型，非 critical 可命中白名单，critical 在手动/脱手模式均由用户审批，YOLO 全部免审批。
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 在摘要保障成功后创建延续会话，最后才归档旧会话；摘要失败时保留当前会话与触发消息，追加系统状态并中断本轮。
-- 标题、标签与摘要生成：统一委托 `Application.current().get_system(SessionMetadataService)`；全局元数据 Profile优先，未配置时按目标会话活动 Profile回退。
+- 标题、标签与摘要生成：统一委托 `Application.current().get_system(ISessionMetadataService)`；全局元数据 Profile优先，未配置时按目标会话活动 Profile回退。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
-- LLM Profile：活动配置始终是 `Application.current().get_system(LLMProfileStore)` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
+- LLM Profile：活动配置始终是 `Application.current().get_system(ILLMProfileStore)` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
 
 ### `MultiAgentLoop` / `MultiAgentWorker`
 
@@ -114,17 +114,18 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
   - 输出自然语言 + DSL 路由标签（`@visible(...)` / `@response(...)`）。
   - 返回 `WorkerResult`（含 `AgentResponse` 解析结果）。
 
-### `AgentSink` / `FrontendSink` / `ParentAgentSink`
+### `IAgentSink` / `IFrontendSink` / `FrontendSink` / `ParentAgentSink`
 
-`agent_sink.py` 定义 Agent 向上通信的抽象：
+向上通信的抽象契约位于 `interface/`，`agent_sink.py` 只保留实现：
 
-- **`AgentSink`**（ABC）：抽象接口，声明 `ask_question`（多问题表单，`questions: list[dict]` 参数）、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_clipboard_display`、`emit_subagent_update`、`emit_system_message` 等方法。
-- **`FrontendSink`**：主 Agent 使用，继承 `AsyncSystem` 与 `AgentSink`，依赖 `RuntimeSystem`。无参构造只创建内存字段；`virtual_awake` 取得 `RuntimeSystem` 并创建 `TaskOwner`。持有 `_ws_sinks`（session_id → WebSocket 映射）、`_pending_confirms` / `_pending_asks`（Future 映射），管理审批和提问的异步等待。提问为多问题表单：`ask_question(questions, session_id)` 下行 ask_request 携带 questions 数组，`resolve_ask(request_id, answers)` 接收按题回答列表（`AskAnswerItem`，None=整表跳过），Future 结果含 answers 与整表 answered_any。发送与交互属有调用方等待的请求级操作，经 `TaskOwner.run_request` 登记：新交互（审批/提问）只在 `RUNNING` 接收（`_admit_interaction` 经 `RuntimeSystem.require_running`）；既有结果与 History 回显在 `STOPPING` 仍允许到关闭输出（`_admit_send` 只检查 `_send_closed`），关闭发送期限不超过 `SHUTDOWN_SEND_TIMEOUT_SECONDS`（1 秒）。网络断线/明确发送超时只跳过网络输出，不回滚 History；模型构造/序列化错误与其他内部错误传播。`cancel_pending_interactions` 同步解除所有待审批/提问 Future；`close_all_connections` 以标准 1001 关闭所有连接，结束连接前等待/取消真实发送任务及交接，不把自身登记进同一 Owner 再等待。`close_session` 保留永久删除 4004 语义，与应用退出 1001 分开。流式事件单独构造 `StreamDeltaEvent` / `StreamDoneEvent`，只经 `_send_stream_event(StreamEvent)` 序列化发送；不再经过接收字符串的 `_send_msg()`。`virtual_shotdown` 关闭接收、取消在途请求并关闭连接，资源/内部错误传播。协议类型直接从 `entity.puretype` 导入，不依赖 `gateway.chat` 的兼容导出。
-- **`ParentAgentSink`**：子 Agent 使用，通过 `SubAgentLoop` 的公开反馈记录接口与编排器通信；不作为 System。审批请求放入子 Agent 的 `_pending_approvals` 队列；事件转发通过 `Application.current().get_system(FrontendSink)` 推送到父会话前端。
+- **`IAgentSink`**（`interface/agent_sink.py`，ABC）：事件出口的唯一抽象类型，声明 `ask_question`（多问题表单，`questions: list[dict]` 参数）、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_clipboard_display`、`emit_subagent_update`、`emit_system_message` 等方法。
+- **`IFrontendSink`**（`interface/frontend_sink.py`）：`AsyncSystem` System 槽位，同时继承 `IAgentSink`；只追加前端专有的连接、广播与交互解析契约，不重复声明事件方法。
+- **`FrontendSink`**：主 Agent 使用，单一继承 `IFrontendSink`，依赖 `RuntimeSystem`。无参构造只创建内存字段；`virtual_awake` 取得 `RuntimeSystem` 并创建 `TaskOwner`。持有 `_ws_sinks`（session_id → WebSocket 映射）、`_pending_confirms` / `_pending_asks`（Future 映射），管理审批和提问的异步等待。提问为多问题表单：`ask_question(questions, session_id)` 下行 ask_request 携带 questions 数组，`resolve_ask(request_id, answers)` 接收按题回答列表（`AskAnswerItem`，None=整表跳过），Future 结果含 answers 与整表 answered_any。发送与交互属有调用方等待的请求级操作，经 `TaskOwner.run_request` 登记：新交互（审批/提问）只在 `RUNNING` 接收（`_admit_interaction` 经 `RuntimeSystem.require_running`）；既有结果与 History 回显在 `STOPPING` 仍允许到关闭输出（`_admit_send` 只检查 `_send_closed`），关闭发送期限不超过 `SHUTDOWN_SEND_TIMEOUT_SECONDS`（1 秒）。网络断线/明确发送超时只跳过网络输出，不回滚 History；模型构造/序列化错误与其他内部错误传播。`cancel_pending_interactions` 同步解除所有待审批/提问 Future；`close_all_connections` 以标准 1001 关闭所有连接，结束连接前等待/取消真实发送任务及交接，不把自身登记进同一 Owner 再等待。`close_session` 保留永久删除 4004 语义，与应用退出 1001 分开。流式事件单独构造 `StreamDeltaEvent` / `StreamDoneEvent`，只经 `_send_stream_event(StreamEvent)` 序列化发送；不再经过接收字符串的 `_send_msg()`。`virtual_shotdown` 关闭接收、取消在途请求并关闭连接，资源/内部错误传播。协议类型直接从 `entity.puretype` 导入，不依赖 `gateway.chat` 的兼容导出。
+- **`ParentAgentSink`**：子 Agent 使用，实现 `IAgentSink`，通过 `SubAgentLoop` 的公开反馈记录接口与编排器通信；不作为 System。审批请求放入子 Agent 的 `_pending_approvals` 队列；事件转发通过 `Application.current().get_system(IFrontendSink)` 推送到父会话前端。
 
 ### 流式事件类型与传输边界
 
-- `AgentSink.emit_stream_delta()` 接收 `ToolCallRequest` / `ToolCallDelta` 实例，`StreamConsumer` 直接传递 `StreamChunk` 内的模型，不提前 `.model_dump()` 或手工拆成字典；`emit_stream_done()` 同样保留 `MessageMetrics` 实例。
+- `IAgentSink.emit_stream_delta()` 接收 `ToolCallRequest` / `ToolCallDelta` 实例，`StreamConsumer` 直接传递 `StreamChunk` 内的模型，不提前 `.model_dump()` 或手工拆成字典；`emit_stream_done()` 同样保留 `MessageMetrics` 实例。
 - 两种纯数据模型定义在 `entity/puretype/ws.py`，以固定 `type` 构成 `StreamEvent` 判别联合；`session_id` / `stream_id` 必填且非空，拒绝额外字段，事件本身采用 frozen/strict 配置。工具动态参数仍是开放字典，参数片段仍是未闭合 JSON 文本，不逐片解析。
 - `_send_stream_event()` 只在实际 WebSocket发送边界执行一次 `model_dump_json(exclude_none=True)`；模型构造/序列化错误与传输异常分开，后者记录脱敏定位信息，不额外按中断状态丢弃结束事件。`stream_delta.tool_call` / `tool_call_delta` 为顶层对象，前端不再解析 `content` 中的内嵌 JSON。
 - `StreamDoneEvent.content=None` 在传输中省略，显式 `""` 与缺失具有不同意义。现有 `emit_stream_done(content="")` 调用仍按旧行为省略正文，保留前端累计的部分输出；`finish_reason` 保持开放字符串，兼容 Provider 结束原因及 `error` / `cancelled`。流结束前刷新前端增量缓冲，History 和实时行映射的顺序不变。
@@ -141,7 +142,7 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
 - `terminate_session()`：摘要与标签均为 best-effort；失败以 `metadata_warnings`返回但仍归档，并在归档完成后停止该主会话全部 Shell。
 - `pop_session_rotated()`：取出旋转通知（old_sid → new_sid）。
 
-> `MultiAgentLoop` 不使用 `LoopSessionManager`，但复用 `terminate_and_rotate_session()`与同一个 `get_system(SessionMetadataService)`完成多Agent自动旋转；元数据失败语义与普通模式一致。
+> `MultiAgentLoop` 不使用 `LoopSessionManager`，但复用 `terminate_and_rotate_session()`与同一个 `get_system(ISessionMetadataService)`完成多Agent自动旋转；元数据失败语义与普通模式一致。
 
 ### 流式消息与 History 行的权威关联
 
@@ -178,7 +179,7 @@ Gateway在创建后台任务前的多目标接收与ready准备已由 S21 完成
 - `execute(tc, session_id, *, round_id, ...) -> ToolResultMessage`：执行单个工具调用；`round_id` 传入每个 `ToolContext`。
 - `get_tool_stats()`：返回工具调用统计。
 - 审批或 dispatch 等待与主会话取消事件竞速；handler task 取消只等待正式清理窗口，超时 task 由 `_cancel_cleanup_tasks` 强引用并在最终结束时观察异常，禁止无限阻塞主轮次。
-- 工具 handler 的真实执行归 `get_system(ToolRegistry)`：异步请求由注册表的 TaskOwner.run_request 持有；异步 handler 内的同步历史扫描、磁盘读取或 CPU 密集计算必须改为同步 handler 并交给 ToolRegistry 的专用线程池，不能仅因声明为 async 就在事件循环线程执行阻塞逻辑。同步线程由注册表登记原生 Future。ToolExecutor 只持有本次审批/分发等待包装及中断清理；取消包装不表示底层线程已经退出。`cancel_tool_wait` 由主/子Agent共用，一秒窗口仅用于及时结束调用方等待，超出后保留包装 Future，真实取消期限由所属 System 的 TaskOwner 管理；不能在内层十秒清理期限尚未到达时误报失败。取消请求只发一次，迟到回调使用预先取得的 Runtime 引用；停止拒绝及预期取消不报告失败。停止、生命周期与 History 持久化失败（包括异常组）继续传播，取消收尾失败报告 Runtime；普通工具错误保持既有结果协议。
+- 工具 handler 的真实执行归 `get_system(IToolRegistry)`：异步请求由注册表的 TaskOwner.run_request 持有；异步 handler 内的同步历史扫描、磁盘读取或 CPU 密集计算必须改为同步 handler 并交给 ToolRegistry 的专用线程池，不能仅因声明为 async 就在事件循环线程执行阻塞逻辑。同步线程由注册表登记原生 Future。ToolExecutor 只持有本次审批/分发等待包装及中断清理；取消包装不表示底层线程已经退出。`cancel_tool_wait` 由主/子Agent共用，一秒窗口仅用于及时结束调用方等待，超出后保留包装 Future，真实取消期限由所属 System 的 TaskOwner 管理；不能在内层十秒清理期限尚未到达时误报失败。取消请求只发一次，迟到回调使用预先取得的 Runtime 引用；停止拒绝及预期取消不报告失败。停止、生命周期与 History 持久化失败（包括异常组）继续传播，取消收尾失败报告 Runtime；普通工具错误保持既有结果协议。
 - 通过 `IMainSessionLoop.loop` 访问 loop 内部字段（`cancel_event`、`get_sink()`、`get_hooks_context()` 等）。
 
 > 由 `ParentAgentLoop` 和 `MultiAgentWorker` 分别持有独立实例。
@@ -264,7 +265,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 当单一会话的总 token 接近模型窗口上限时：
 
 1. `LoopSessionManager.is_context_over_limit()` 检测超限。
-2. `rotate_session_for_continuation()`先调用 `get_system(SessionMetadataService).ensure_summary()`；摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
+2. `rotate_session_for_continuation()`先调用 `get_system(ISessionMetadataService).ensure_summary()`；摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
 3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮），完成 History 初始化后才归档旧会话。
 4. 迁移运行态资源（工具副作用、cron 任务）。
 5. 前端通过 `session_rotated` 系统消息刷新。
@@ -352,3 +353,17 @@ ParentAgentLoop将最后用户消息按对象身份重连到请求副本，保�
 ## 与子代理的关系
 
 `ParentAgentLoop` 通过 `main.py` 中挂载的 `SubAgentOrchestrator` 创建子 Agent。子 Agent 本身也是 `BasePrivateChatAgentLoop` 的实现（`SubAgentLoop`），但通过 `ParentAgentSink` 将事件路由回父会话的前端。详见 `../subagent/DEV-README.md`。
+
+## System 接口槽位约定（2026-10-20）
+
+`FrontendSink` 单一继承 `IFrontendSink`；`IFrontendSink` 是 Application 的 System 注册槽位和跨模块查询类型，并继承接口层的 `IAgentSink` 获得全部事件出口契约。`ParentAgentSink` 不是 System，直接实现 `IAgentSink`。entry 目录内所有对前端出口的 Application 查询均使用 `IFrontendSink`，不再以 `FrontendSink` 作为槽位类型。
+
+## 事件契约分层（2026-10-21）
+
+向上通信的事件契约只在 `interface/agent_sink.py::IAgentSink` 声明一次：
+
+- `IAgentSink(ABC)`：15 个事件与交互方法（`ask_question`、`request_approval`、`emit_*`），是主会话与子 Agent 出口的唯一抽象类型。
+- `IFrontendSink(AsyncSystem, IAgentSink)`：只追加前端专有的连接与广播契约（`register_ws`、`close_session`、`broadcast_*_profile_change`、`resolve_*` 等），不重复声明事件方法。
+- `FrontendSink(IFrontendSink)` 与 `ParentAgentSink(IAgentSink)` 分别实现各自契约；`entry/agent_sink.py` 不再定义 `AgentSink`。
+
+因为 `IFrontendSink` 是 `IAgentSink` 的子类型，从 System 槽位取出的 sink 可以直接传给任何声明 `IAgentSink` 的 Loop、StreamConsumer 或审批执行器，不需要 `cast`。新增事件方法只改 `IAgentSink` 一处，两个实现和所有调用方同时生效。

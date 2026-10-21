@@ -7,8 +7,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 import os
 import threading
+from pathlib import Path
 
-from framework import AsyncSystem
+from interface.runtime_system import IRuntimeSystem
 
 from entity.constant import (
     APPLICATION_SHUTDOWN_TIMEOUT_SECONDS,
@@ -24,7 +25,7 @@ from system.context import RuntimeContext
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 
 
-def _read_main_agent_character_name_from_soul_meta(meta_path) -> str:
+def _read_main_agent_character_name_from_soul_meta(meta_path:Path) -> str:
     """从 SOUL.md.meta 读取主Agent角色名。
 
     文件不存在、无 [character_name] 键或解析失败时回退默认角色名。
@@ -50,14 +51,14 @@ def _read_main_agent_character_name_from_soul_meta(meta_path) -> str:
     return name if name else DEFAULT_MAIN_AGENT_CHARACTER_NAME
 
 
-def _resolve_soul_meta_path(agentspace, soul_file: str) -> "Path":
+def _resolve_soul_meta_path(agentspace, soul_file: str) -> Path:
     """根据当前 SOUL 文件名推导对应 .meta 文件路径。"""
     from pathlib import Path
     from entity.constant import META_FILE_SUFFIX
     return Path(agentspace) / f"{soul_file}{META_FILE_SUFFIX}"
 
 
-class RuntimeSystem(AsyncSystem):
+class RuntimeSystem(IRuntimeSystem):
     """所有业务接收与关闭请求共享同一把进程内锁。"""
 
     def __init__(self, ctx: RuntimeContext) -> None:

@@ -28,7 +28,8 @@ from entity.puretype.llm import (
 from system.atomic_io import replace_atomic
 from system.context import RuntimeContext
 from system.lifecycle import LifecycleFailure
-from system.runtime import RuntimeSystem
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,11 @@ class ProfileConflictError(ValueError):
     """LLM Profile 名称冲突或引用占用导致拒绝操作（可预期的用户请求错误）。"""
 
 
-class LLMProfileStore(AsyncSystem):
+class LLMProfileStore(ILLMProfileStore):
     """进程内唯一的 ``LLMProfileData`` 根对象存储。
 
     注册为 framework AsyncSystem，依赖 RuntimeSystem；由 Application 在最终
-    装配时经 ``get_system(LLMProfileStore)`` 取得。本 Store 自身创建唯一的
+    装配时经 ``get_system(ILLMProfileStore)`` 取得。本 Store 自身创建唯一的
     共享 ``threading.RLock``，所有 Profile 事务边界通过 ``locked()`` 访问同一把锁，
     不再由 Application 注入或经模块级全局暴露。
 
@@ -55,7 +56,7 @@ class LLMProfileStore(AsyncSystem):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem,))
+        super().__init__(dependencies=(IRuntimeSystem,))
         self._agentspace_dir: Path | None = None
         self._path: Path | None = None
         self._lock = threading.RLock()
@@ -63,7 +64,7 @@ class LLMProfileStore(AsyncSystem):
 
     async def virtual_awake(self) -> None:
         """取得 RuntimeContext，确定 agentspace 路径并加载 v2 根对象。"""
-        ctx: RuntimeContext = self.get_system(RuntimeSystem).context
+        ctx: RuntimeContext = self.get_system(IRuntimeSystem).context
         self._agentspace_dir = ctx.agentspace
         self._path = self._agentspace_dir / LLM_PROFILES_ES_FILENAME
         with self._lock:

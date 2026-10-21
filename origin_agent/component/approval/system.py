@@ -13,16 +13,17 @@ from component.approval.mode_store import ApprovalModeStore
 from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.messages import BaseMessage
 from system.lifecycle import ApplicationStoppingError, TaskOwner
-from system.llm_profile_store import LLMProfileStore
-from system.runtime import RuntimeSystem
+from interface.approval_system import IApprovalSystem
+from interface.llm_profile_store import ILLMProfileStore
+from interface.runtime_system import IRuntimeSystem
 
 
-class ApprovalSystem(AsyncSystem):
+class ApprovalSystem(IApprovalSystem):
     """不在唤醒时请求模型；已配置模型的调用由明确请求方等待。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(RuntimeSystem, LLMProfileStore))
-        self._runtime: RuntimeSystem
+        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        self._runtime: IRuntimeSystem
         self._mode_store: ApprovalModeStore
         self._backend_manager: ApprovalBackendManager
         self._allowlist: ToolAllowlistStore
@@ -30,8 +31,8 @@ class ApprovalSystem(AsyncSystem):
         self._admission_closed = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(RuntimeSystem)
-        profiles = self.get_system(LLMProfileStore)
+        self._runtime = self.get_system(IRuntimeSystem)
+        profiles = self.get_system(ILLMProfileStore)
         ctx = self._runtime.context
         self._mode_store = ApprovalModeStore(ctx.workspace / SESSIONS_DIR_NAME)
         self._backend_manager = ApprovalBackendManager(ctx, profiles)
