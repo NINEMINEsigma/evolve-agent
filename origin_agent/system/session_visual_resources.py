@@ -41,7 +41,7 @@ class SessionVisualResourceService:
     @staticmethod
     def _valid_session_id(session_id: str) -> bool:
         return bool(
-            isinstance(session_id, str) and session_id
+            session_id
             and session_id not in (".", "..")
             and not any(char in session_id for char in ":/\\\x00\r\n")
         )
@@ -49,7 +49,7 @@ class SessionVisualResourceService:
     @staticmethod
     def _normalize(logical: str) -> str:
         """只消除等价路径段，不消除非法遍历或绝对路径。"""
-        if not isinstance(logical, str) or ":" not in logical:
+        if ":" not in logical:
             raise SessionVisualResourceError("目标必须是带命名空间的逻辑路径")
         namespace, relative = logical.split(":", 1)
         if not namespace or namespace != namespace.strip():

@@ -1203,7 +1203,7 @@ class BaseAgentLoop(ABC):
         visible_characters: list[str] | None = None
         ) -> SessionMessageEditResult:
         logger.info("Edit message | session=%s index=%d", self.session_id, index)
-        if not isinstance(index, int) or index < 0:
+        if index < 0:
             logger.warning("Edit message fail | session=%s error=invalid index", self.session_id)
             return SessionMessageEditResult(
                 updated=False,
@@ -1334,7 +1334,7 @@ class BaseAgentLoop(ABC):
         # ── 解析目标 user 消息索引 ──
         if message_index is not None:
             # 显式路径
-            if not isinstance(message_index, int) or message_index < 0 or message_index >= self._history.count:
+            if message_index < 0 or message_index >= self._history.count:
                 logger.warning("Regenerate fail | session=%s index=%s out of range", self.session_id, message_index)
                 return SessionRegenerateResult(
                     regenerate=False,

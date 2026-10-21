@@ -275,8 +275,6 @@ class SessionStore:
     @staticmethod
     def _write_profile_name_pointer(path: Path, profile_name: str) -> None:
         """原子写入精确的 Profile 名称指针对象。"""
-        if not isinstance(profile_name, str):
-            raise TypeError("profile_name must be a string")
         write_text_atomic(
             path,
             json.dumps({"profile_name": profile_name}, ensure_ascii=False, indent=2),

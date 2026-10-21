@@ -17,7 +17,7 @@ def truncate_lf_lines(
     """
     if max_line_chars < 1:
         raise ValueError("max_line_chars must be a positive integer")
-    if not isinstance(marker, str) or not marker or "\r" in marker or "\n" in marker:
+    if not marker or "\r" in marker or "\n" in marker:
         raise ValueError("marker must be a non-empty string without CR or LF")
 
     lines = split_lf_lines(text)

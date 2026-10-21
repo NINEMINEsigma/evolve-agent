@@ -41,7 +41,7 @@ class SessionFileChangeStore:
         self._closed_sessions: set[str] = set()
 
     def _validate_session_id(self, session_id: str) -> None:
-        if (not isinstance(session_id, str) or not session_id
+        if (not session_id
                 or session_id in (".", "..")
                 or any(char in session_id for char in ":/\\\x00\r\n")):
             raise ValueError("Invalid session ID for file changes")
@@ -54,7 +54,7 @@ class SessionFileChangeStore:
 
     @staticmethod
     def _normalize_path(logical_path: str) -> str:
-        if not isinstance(logical_path, str) or ":" not in logical_path:
+        if ":" not in logical_path:
             raise ValueError("File change path requires a namespace")
         namespace, relative = logical_path.split(":", 1)
         namespace = namespace.strip()
@@ -75,18 +75,13 @@ class SessionFileChangeStore:
 
     @staticmethod
     def _validate_utc_timestamp(value: str) -> None:
-        if not isinstance(value, str):
-            raise TypeError("File change timestamp must be a string")
         parsed = datetime.fromisoformat(value)
         if parsed.utcoffset() != timedelta(0) or parsed.isoformat(timespec="milliseconds") != value:
             raise ValueError("File change timestamp must be canonical UTC with milliseconds")
 
     @staticmethod
     def _validate_actor(actor: SessionFileChangeActor) -> None:
-        if not isinstance(actor, SessionFileChangeActor):
-            raise TypeError("File change actor has an invalid type")
-        if (not isinstance(actor.session_id, str) or not actor.session_id
-                or not isinstance(actor.character_name, str) or not actor.character_name):
+        if not actor.session_id or not actor.character_name:
             raise ValueError("File change actor requires a session and character")
 
     def _validate_data(
@@ -280,7 +275,7 @@ class SessionFileChangeStore:
         offset: int = 0,
         limit: int = SESSION_FILE_CHANGES_DEFAULT_LIMIT
         ) -> SessionFileChangesPage:
-        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= SESSION_FILE_CHANGES_MAX_LIMIT:
+        if offset < 0 or not 1 <= limit <= SESSION_FILE_CHANGES_MAX_LIMIT:
             raise ValueError("Invalid file changes pagination")
         with self._session_lock(session_id):
             data = self._load_unlocked(session_id)

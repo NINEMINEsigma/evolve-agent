@@ -229,8 +229,6 @@ class AgentspaceService(IAgentspaceService):
         allow_root: bool,
         allow_internal_trash: bool
         ) -> str:
-        if not isinstance(path, str):
-            raise AgentspaceInvalidPathError("路径必须是字符串。")
         raw = path
         if raw.startswith("ws:"):
             raw = raw[3:]

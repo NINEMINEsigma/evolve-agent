@@ -1051,8 +1051,6 @@ class ShellManager(IShellManager):
         allow_empty: bool,
         field: str
         ) -> None:
-        if not isinstance(text, str):
-            raise ShellError(f"{field} must be a string")
         if not allow_empty and not text:
             raise ShellError(f"{field} must not be empty")
         if "\r" in text or "\n" in text:

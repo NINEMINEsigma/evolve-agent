@@ -536,7 +536,7 @@ class Sandbox(ISandbox):
 
     def is_namespaced_path(self, path: str) -> bool:
         """识别内置前缀及 fast 模式全部已配置动态前缀。"""
-        if not isinstance(path, str) or ":" not in path:
+        if ":" not in path:
             return False
         namespace = path.split(":", 1)[0]
         if namespace in _PERMISSIONS.get(self._ctx.mode, {}):
@@ -554,7 +554,7 @@ class Sandbox(ISandbox):
         access: Access
         ) -> ResolvedPath:
         """解析固定或 fast 动态逻辑路径，检查权限并返回真实路径。"""
-        if not logical or not isinstance(logical, str):
+        if not logical:
             raise SandboxError("logical path must be a non-empty string")
 
         if ":" not in logical:

@@ -158,7 +158,7 @@ class SessionVariableService:
         self._sandbox = sandbox
 
     def source_path(self, session_id: str) -> str:
-        if (not isinstance(session_id, str) or not session_id
+        if (not session_id
                 or session_id in (".", "..")
                 or any(char in session_id for char in ":/\\\x00\r\n")):
             raise SessionVariableInputError("Invalid session ID", code="invalid_session_id")

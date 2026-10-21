@@ -329,8 +329,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     def append_feedback(self, text: str) -> None:
         """登记一条父Agent反馈；记录使用Runtime全局sequence。"""
-        if not isinstance(text, str):
-            raise TypeError("Sub-agent feedback must be text")
         with self._runtime.admission():
             sequence = self._runtime.next_input_sequence()
             self._feedback_records.append(

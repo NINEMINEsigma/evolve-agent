@@ -56,7 +56,7 @@ def resolve_local_font(font_path: str, *, strict_reparse: bool = False) -> Path:
     ``strict_reparse`` 为真时额外拒绝目录组件中的符号链接/reparse，并强制绝对路径；
     在线路由以假值保持原有语义（含相对路径按当前工作目录解析）。
     """
-    if not isinstance(font_path, str) or not font_path or "\x00" in font_path:
+    if not font_path or "\x00" in font_path:
         raise LocalFontAccessError("invalid_font_path", "Invalid font path", 400)
     if ".." in font_path:
         raise LocalFontAccessError("font_traversal", "Path traversal not allowed", 403)
