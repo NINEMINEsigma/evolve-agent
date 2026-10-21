@@ -37,10 +37,12 @@ from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from .agentspace_event_bridge import (
-    AgentspaceSendTimeout,
+    AgentspaceConnectionClosed,
     attach_agentspace_events,
     build_initial_agentspace_events,
     detach_agentspace_events,
+    is_connection_termination,
+    requires_connection_eviction,
 )
 from datetime import datetime, timezone
 from entity.constant import (
@@ -3289,7 +3291,26 @@ async def ws_chat(ws: WebSocket) -> None:
         agentspace_service = _agentspace_service()
 
         async def _send_current_agentspace_event(event: AgentspaceEvent) -> None:
-            await _send_agentspace_ws_event(ws, sid, event)
+            # 预检：close 帧已发出后 Starlette 抛 RuntimeError 而非
+            # WebSocketDisconnect，故先用状态判定让已死连接稳定落入哨兵。
+            if ws.application_state is WebSocketState.DISCONNECTED:
+                raise AgentspaceConnectionClosed(
+                    f"agentspace connection closed | session={sid}"
+                )
+            try:
+                await _send_agentspace_ws_event(ws, sid, event)
+            except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError) as exc:
+                raise AgentspaceConnectionClosed(
+                    f"agentspace send failed on closed connection | session={sid}"
+                ) from exc
+            except RuntimeError:
+                # 仅当连接确已断开时才归类为连接级结束；其余 RuntimeError
+                # 属于序列化/协议错误，必须原样传播。
+                if ws.application_state is not WebSocketState.DISCONNECTED:
+                    raise
+                raise AgentspaceConnectionClosed(
+                    f"agentspace send raced with connection close | session={sid}"
+                )
 
         agentspace_subscription_id, agentspace_event_task = await attach_agentspace_events(
             agentspace_service,
@@ -3303,7 +3324,9 @@ async def ws_chat(ws: WebSocket) -> None:
             failure = task.exception()
             if failure is None:
                 return
-            if isinstance(failure, AgentspaceSendTimeout):
+            # 判定顺序不可交换：AgentspaceSendTimeout 同时满足两个判定，
+            # 必须先判驱逐，否则慢消费者会被静默收尾而失去 1011 驱逐能力。
+            if requires_connection_eviction(failure):
                 # 例常的连接级驱逐：标记预期失败，不触发应用失败关闭。
                 try:
                     gateway.task_owner.mark_expected_failure(task)
@@ -3314,12 +3337,25 @@ async def ws_chat(ws: WebSocket) -> None:
                     "Agentspace WebSocket send timeout; evicting slow connection | session=%s",
                     sid,
                 )
+            elif is_connection_termination(failure):
+                # 对端已断开：只做连接级静默收尾，不发送关闭帧（发送必然
+                # 失败），连接与订阅登记由 ws_chat 的 finally 统一回收。
+                try:
+                    gateway.task_owner.mark_expected_failure(task)
+                except LifecycleFailure:
+                    pass
+                logger.info(
+                    "Agentspace WebSocket peer disconnected | session=%s", sid,
+                )
             else:
                 logger.error(
                     "Agentspace WebSocket forwarding failed | session=%s",
                     sid,
                     exc_info=(type(failure), failure, failure.__traceback__),
                 )
+            if ws.application_state is WebSocketState.DISCONNECTED:
+                # 连接已消失：再发关闭帧只会产生二次异常。
+                return
             try:
                 gateway.spawn_work(
                     ws.close(code=1011, reason="agentspace_event_forward_failed"),
@@ -3372,7 +3408,7 @@ async def ws_chat(ws: WebSocket) -> None:
             # session 旋转后同步 sid
             sid = router.sid
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, AgentspaceConnectionClosed):
         logger.info("WebSocket disconnected | session=%s", sid)
     except asyncio.CancelledError:
         logger.debug("WebSocket handler cancelled for session=%s (server shutting down)", sid)

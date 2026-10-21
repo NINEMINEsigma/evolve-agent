@@ -26,6 +26,33 @@ class AgentspaceSendTimeout(TimeoutError):
     """Per-event send timeout for a slow agentspace WebSocket consumer."""
 
 
+class AgentspaceConnectionClosed(Exception):
+    """聊天 WebSocket 对端已断开：连接级例常结束，不作为应用级失败上报。
+
+    由传输层发送回调在发现连接已关闭（或发送时收到对端断开）时抛出，
+    转发循环原样传播。与 `AgentspaceSendTimeout` 的区别是对端已不存在，
+    无需也不能再发送 1011 关闭帧。
+    """
+
+
+def is_connection_termination(error: BaseException) -> bool:
+    """返回 True 表示该异常属于连接级例常结束，应标记预期失败。
+
+    `AgentspaceSendTimeout` 与 `AgentspaceConnectionClosed` 均只终止当前
+    连接，不代表应用不变式破裂，因此不进入应用失败关闭流程。
+    """
+    return isinstance(error, (AgentspaceSendTimeout, AgentspaceConnectionClosed))
+
+
+def requires_connection_eviction(error: BaseException) -> bool:
+    """返回 True 表示需主动驱逐该连接（对端仍可能存活但接收不过来）。
+
+    仅 `AgentspaceSendTimeout` 返回 True；对端已断开时没有可关闭的连接，
+    调用方必须先判定本函数再判定 `is_connection_termination`。
+    """
+    return isinstance(error, AgentspaceSendTimeout)
+
+
 def build_initial_agentspace_events(
     service: AgentspaceService,
 ) -> list[AgentspaceEvent]:
@@ -158,7 +185,11 @@ async def forward_agentspace_events(
 
     单事件发送超过 AGENTSPACE_WS_SEND_TIMEOUT_SECONDS 时抛
     AgentspaceSendTimeout 终止转发，由调用方标记预期失败并以 1011
-    断连驱逐慢消费者；折叠告警按时间窗限流并携带窗口累计 dropped。
+    断连驱逐慢消费者。`send_event` 回调在发现对端已断开时抛
+    AgentspaceConnectionClosed；本循环不做包裹也不吞掉任何异常，
+    该哨兵原样传播给调用方作为连接级例常结束处理。
+
+    折叠告警按时间窗限流并携带窗口累计 dropped。
     """
     last_warned = -AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS
     window_dropped_total = 0
