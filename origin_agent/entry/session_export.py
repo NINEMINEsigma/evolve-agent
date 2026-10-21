@@ -32,7 +32,12 @@ logger = logging.getLogger(__name__)
 class SessionExportError(ValueError):
     """导出边界的已识别业务拒绝；服务层复用而不建立循环依赖。"""
 
-    def __init__(self, code: str, message: str, status: int = 400) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status: int = 400
+        ) -> None:
         super().__init__(message)
         self.code = code
         self.status = status
@@ -65,7 +70,11 @@ class _CopyBudget:
         self.nodes = 0
         self.text_lower_bound = 0
 
-    def visit(self, value: Any, depth: int) -> None:
+    def visit(
+        self,
+        value: Any,
+        depth: int
+        ) -> None:
         self.nodes += 1
         if self.nodes > SESSION_EXPORT_MAX_NODES:
             raise SessionExportLimitError(
@@ -199,9 +208,10 @@ async def capture_export_messages(
 
 
 def export_history_digest(
-    source: SessionExportHistorySource, metrics: dict[int, MessageMetrics],
-    check: Callable[[], None] = lambda: None,
-) -> str:
+    source: SessionExportHistorySource,
+    metrics: dict[int, MessageMetrics],
+    check: Callable[[], None] = lambda: None
+    ) -> str:
     """只在线程池处理已隔离模型，按 UTF-8 字节增量核算。"""
     digest = hashlib.sha256()
     digest.update(source.fallback_character.encode("utf-8"))
@@ -236,9 +246,10 @@ def export_history_digest(
 
 
 def project_export_history(
-    source: SessionExportHistorySource, metrics: dict[int, MessageMetrics],
-    check: Callable[[], None] = lambda: None,
-) -> SessionExportHistorySnapshot:
+    source: SessionExportHistorySource,
+    metrics: dict[int, MessageMetrics],
+    check: Callable[[], None] = lambda: None
+    ) -> SessionExportHistorySnapshot:
     digest = export_history_digest(source, metrics, check)
     rows = project_history_content_rows(
         list(source.messages), 0, source.history_count, source.fallback_character, metrics,

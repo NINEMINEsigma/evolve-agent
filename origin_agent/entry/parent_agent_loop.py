@@ -118,8 +118,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         app: Application,
         session_id: str,
         frontend_sink: IAgentSink,
-        history_store_dir: Path | None = None,
-    ) -> None:
+        history_store_dir: Path | None = None
+        ) -> None:
         super().__init__(app, session_id)
         self._frontend_sink: IAgentSink = frontend_sink
 
@@ -251,8 +251,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     async def _check_over_limit_before_process(
         self,
         sid: str,
-        move_last_user_message: bool,
-    ) -> str | None:
+        move_last_user_message: bool
+        ) -> str | None:
         """入口超限检查；元数据失败时报告并返回 None 终止本轮。"""
         if not self._lifecycle.is_context_over_limit():
             return sid
@@ -310,8 +310,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         character_name: str = USER_CHARACTER_NAME,
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
-        **kwargs,
-    ) -> str:
+        **kwargs
+        ) -> str:
         sid = self.session_id
         self._cancel_event.clear()
         self._disgust_event.clear()
@@ -435,8 +435,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         messages: list[BaseMessage],
         user_message: MessageContent,
         *,
-        activity_id: str,
-    ) -> str:
+        activity_id: str
+        ) -> str:
         """执行 LLM 工具调用循环。"""
         round_id = self.begin_agentspace_round(self.current_character_agent)
 
@@ -784,8 +784,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self,
         sid: str,
         messages: list[BaseMessage],
-        round_id: str,
-    ) -> PreparedMultimodalRequest:
+        round_id: str
+        ) -> PreparedMultimodalRequest:
         """请求视图不能覆盖原消息列表，重新开启才能恢复原媒体。"""
         context = ToolContext(
             loop=self,
@@ -803,12 +803,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     async def append_user_message(
-        self, content: Any, *,
+        self,
+        content: Any,
+        *,
         display_content: Any | None = None,
         character_name: str = USER_CHARACTER_NAME,
         client_message_id: str | None = None,
-        **kwargs: Any,
-    ) -> int:
+        **kwargs: Any
+        ) -> int:
         hooks_context, fixator_context = self._collect_hooks_context()
 
         dynamic_parts: list[str] = []
@@ -957,13 +959,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self.unregister_round_task(current_task)
 
     def _append(
-        self, session_id: str, role: Role,
+        self,
+        session_id: str,
+        role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
         character_name: str | None = None,
         message_suffix: str | None = None,
-        dynamic_message_suffix: str | None = None,
-    ) -> int:
+        dynamic_message_suffix: str | None = None
+        ) -> int:
         if character_name is None:
             character_name = (
                 self.current_character_agent
@@ -1077,10 +1081,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._get_full_history(session_id)
 
     def append_history(
-        self, session_id: str, role: Role,
+        self,
+        session_id: str,
+        role: Role,
         content: str | list[dict[str, Any]],
-        **kwargs: Any,
-    ) -> int:
+        **kwargs: Any
+        ) -> int:
         """追加一条消息到历史并持久化。"""
         return self._append(session_id, role, content, **kwargs)
 
@@ -1088,7 +1094,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """移除 History 中最后一条 user 消息并持久化。"""
         self._remove_last_user_message(session_id)
 
-    def build_inherited_context(self, old_sid: str, summary: str) -> str:
+    def build_inherited_context(
+        self,
+        old_sid: str,
+        summary: str
+        ) -> str:
         """为继承会话构建初始上下文消息。"""
         from system.templates import read_template
         return (
@@ -1111,8 +1121,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._session_export_epoch += 1
 
     def _store_assistant_with_tools(
-        self, session_id: str, resp: LLMResponse,
-    ) -> int:
+        self,
+        session_id: str,
+        resp: LLMResponse
+        ) -> int:
         tool_calls_data: list[HistoryToolCall] = [
             HistoryToolCall(
                 id=tc.id,
@@ -1135,7 +1147,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self.save_history(session_id)
         return index
 
-    async def _emit_persisted_system_status(self, session_id: str, text: str) -> int:
+    async def _emit_persisted_system_status(
+        self,
+        session_id: str,
+        text: str
+        ) -> int:
         """持久化系统状态并按同一索引实时发送。"""
         index = self.append_system_status(text, session_id=session_id)
         await self._frontend_sink.emit_system_message(
@@ -1177,10 +1193,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     async def _emit_stream_done(
-        self, session_id: str, stream_id: str, finish_reason: str,
+        self,
+        session_id: str,
+        stream_id: str,
+        finish_reason: str,
         content: str = "",
-        metrics: MessageMetrics | None = None,
-    ) -> None:
+        metrics: MessageMetrics | None = None
+        ) -> None:
         try:
             await self._frontend_sink.emit_stream_done(
                 session_id, stream_id, finish_reason,

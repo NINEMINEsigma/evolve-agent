@@ -65,8 +65,8 @@ class _ToolPair:
 def history_row_id(
     history_index: int,
     row_kind: SessionHistoryRowKind,
-    tool_index: int | None = None,
-) -> str:
+    tool_index: int | None = None
+    ) -> str:
     """返回一个骨架代际内稳定的前端投影行 ID。"""
     if row_kind == SessionHistoryRowKind.tool_card:
         if tool_index is None or tool_index < 0:
@@ -153,8 +153,8 @@ def _skeleton_for_message(
     message: BaseMessage,
     history_index: int,
     fallback_character: str,
-    pairs: dict[str, _ToolPair],
-) -> list[SessionHistorySkeletonRow]:
+    pairs: dict[str, _ToolPair]
+    ) -> list[SessionHistorySkeletonRow]:
     character_name = _character_name(message, fallback_character)
     rows: list[SessionHistorySkeletonRow] = []
     if has_visible_history_message_row(message):
@@ -188,8 +188,8 @@ def project_history_skeleton(
     messages: list[BaseMessage],
     fallback_character: str,
     *,
-    start_index: int = 0,
-) -> list[SessionHistorySkeletonRow]:
+    start_index: int = 0
+    ) -> list[SessionHistorySkeletonRow]:
     """投影完整 History，并返回锚定索引不小于 start_index 的视觉行。"""
     pairs, consumed_results = _build_tool_pairs(messages)
     rows: list[SessionHistorySkeletonRow] = []
@@ -221,8 +221,8 @@ def _message_content_row(
     message: BaseMessage,
     history_index: int,
     fallback_character: str,
-    metrics: MessageMetrics | None,
-) -> SessionHistoryContentRow:
+    metrics: MessageMetrics | None
+    ) -> SessionHistoryContentRow:
     character_name = _character_name(message, fallback_character)
     visible_characters: list[str] | None = None
     response_characters: list[str] | None = None
@@ -258,8 +258,8 @@ def _tool_card_content_row(
     pair: _ToolPair,
     fallback_character: str,
     metrics: MessageMetrics | None,
-    character_name: str | None = None,
-) -> SessionHistoryContentRow:
+    character_name: str | None = None
+    ) -> SessionHistoryContentRow:
     request = pair.request
     tool_args, tool_args_raw = _tool_args(request.tool_call.function.arguments)
     character_name = character_name or fallback_character
@@ -313,8 +313,8 @@ def project_history_content_rows(
     start_index: int,
     end_index: int,
     fallback_character: str,
-    metrics_map: dict[int, MessageMetrics] | None = None,
-) -> list[SessionHistoryContentRow]:
+    metrics_map: dict[int, MessageMetrics] | None = None
+    ) -> list[SessionHistoryContentRow]:
     """按完整 History 建立配对，并投影命中请求或结果范围的视觉行。"""
     pairs, consumed_results = _build_tool_pairs(messages)
     rows: list[SessionHistoryContentRow] = []
@@ -354,8 +354,8 @@ def _append_image(
     seen: set[str],
     url: str,
     alt: str,
-    history_index: int,
-) -> None:
+    history_index: int
+    ) -> None:
     if not url or url in seen:
         return
     seen.add(url)
@@ -364,7 +364,12 @@ def _append_image(
     ))
 
 
-def _scan_markdown_images(text: str, images: list[SessionHistoryImageResource], seen: set[str], history_index: int) -> None:
+def _scan_markdown_images(
+    text: str,
+    images: list[SessionHistoryImageResource],
+    seen: set[str],
+    history_index: int
+    ) -> None:
     for alt, url in _MARKDOWN_IMAGE_RE.findall(text):
         _append_image(images, seen, url, alt, history_index)
 

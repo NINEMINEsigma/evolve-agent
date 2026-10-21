@@ -77,7 +77,11 @@ def _parse_tool_arguments(arguments: str) -> dict[str, Any]:
 class _OrchestratorContext:
     """单个主会话的子 Agent 上下文。"""
 
-    def __init__(self, parent_session_id: str, session_manager: ISessionManager) -> None:
+    def __init__(
+        self,
+        parent_session_id: str,
+        session_manager: ISessionManager
+        ) -> None:
         self._parent_session_id: str = parent_session_id
         self._session_manager = session_manager
         self._active: dict[str, SubAgentLoop] = {}
@@ -90,7 +94,12 @@ class _OrchestratorContext:
         self._interrupted: bool = False
         self._shutting_down: bool = False
 
-    def _create_background(self, coro: Coroutine[Any, Any, Any], *, name: str) -> asyncio.Task[Any]:
+    def _create_background(
+        self,
+        coro: Coroutine[Any, Any, Any],
+        *,
+        name: str
+        ) -> asyncio.Task[Any]:
         if self._shutting_down:
             coro.close()
             raise ApplicationStoppingError("Sub-agent context is shutting down")
@@ -110,8 +119,8 @@ class _OrchestratorContext:
         user_name: str,
         message_type: str,
         parent_session_id: str,
-        history_path: str | None = None,
-    ) -> SubAgentLaunchResult:
+        history_path: str | None = None
+        ) -> SubAgentLaunchResult:
         """启动一个子 Agent 会话。"""
         if self._shutting_down:
             return SubAgentLaunchResult(
@@ -167,8 +176,8 @@ class _OrchestratorContext:
         self,
         parent_session_id: str,
         prompt: str,
-        profile: LLMProfile,
-    ) -> SubAgentLaunchResult:
+        profile: LLMProfile
+        ) -> SubAgentLaunchResult:
         """使用调用时活动 Profile快照启动一次性临时Agent。"""
         if self._shutting_down:
             return SubAgentLaunchResult(
@@ -205,8 +214,8 @@ class _OrchestratorContext:
         self,
         session_id: str,
         prompt: str,
-        profile: LLMProfile,
-    ) -> None:
+        profile: LLMProfile
+        ) -> None:
         """创建 TaskAgentLoop 并以 asyncio.Task 启动。"""
         parent_ctx = self._require_agent_loop().loop.app.get_system(IRuntimeSystem).context
         ctx = await build_taskagent_context(profile, parent_ctx)
@@ -336,7 +345,11 @@ class _OrchestratorContext:
         sub.mark_feedback_delivered([item.sequence for item in items])
         return [item.text for item in items]
 
-    def enqueue_user_input(self, session_id: str, message: QueuedMessage) -> int:
+    def enqueue_user_input(
+        self,
+        session_id: str,
+        message: QueuedMessage
+        ) -> int:
         sub = self._active.get(session_id)
         if sub is None:
             raise LookupError(f"Sub-agent does not exist: {session_id}")
@@ -352,7 +365,12 @@ class _OrchestratorContext:
             from_parent=message.source != "user",
         )
 
-    async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
+    async def chat_user_direct(
+        self,
+        session_id: str,
+        message: str,
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         """最终用户直接向子会话发送消息。"""
         if session_id in self._starting:
             return SubAgentChatResult(
@@ -384,8 +402,8 @@ class _OrchestratorContext:
         message: str,
         user_name: str,
         message_type: str,
-        co_recipients: list[str] | None = None,
-    ) -> SubAgentChatResult:
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         """父 Agent 向子 Agent 发送消息。"""
         if session_id in self._starting:
             return SubAgentChatResult(
@@ -430,7 +448,11 @@ class _OrchestratorContext:
         )
         return SubAgentChatResult(success=True, session_id=session_id)
 
-    async def approve(self, session_id: str, decisions: list[Decision]) -> SubAgentApprovalResult:
+    async def approve(
+        self,
+        session_id: str,
+        decisions: list[Decision]
+        ) -> SubAgentApprovalResult:
         """审批子 Agent 的工具调用。"""
         if session_id in self._starting:
             return SubAgentApprovalResult(
@@ -644,8 +666,8 @@ class _OrchestratorContext:
         event: SubAgentFeedback | dict[str, Any] | None = None,
         *,
         status_override: str | None = None,
-        interactive: bool | None = None,
-    ) -> None:
+        interactive: bool | None = None
+        ) -> None:
         """推送一条结构化事件到前端面板。
 
         interactive 为 None 时自动推断：TaskAgentLoop → False，其他 → True。
@@ -693,8 +715,8 @@ class _OrchestratorContext:
         session_id: str,
         startup: Coroutine[Any, Any, None],
         *,
-        task_name: str,
-    ) -> None:
+        task_name: str
+        ) -> None:
         """在可取消的独立任务中运行一次启动流程。"""
         task = asyncio.create_task(startup, name=task_name)
         self._startup_tasks[session_id] = task
@@ -704,7 +726,11 @@ class _OrchestratorContext:
             if self._startup_tasks.get(session_id) is task:
                 self._startup_tasks.pop(session_id, None)
 
-    def _rollback_startup(self, session_id: str, loop: SubAgentLoop) -> None:
+    def _rollback_startup(
+        self,
+        session_id: str,
+        loop: SubAgentLoop
+        ) -> None:
         """回滚已经提交但尚未完成的子Agent启动。"""
         if self._active.get(session_id) is loop:
             self._active.pop(session_id, None)
@@ -723,8 +749,8 @@ class _OrchestratorContext:
         self,
         session_id: str,
         name: str,
-        error: str,
-    ) -> None:
+        error: str
+        ) -> None:
         """向前端报告启动失败。"""
         await self._push_subagent_ws(
             session_id,
@@ -742,8 +768,8 @@ class _OrchestratorContext:
         initial_prompt: str,
         user_name: str,
         message_type: str,
-        history_path: str | None = None,
-    ) -> None:
+        history_path: str | None = None
+        ) -> None:
         """创建 SubAgentLoop 并以 asyncio.Task 启动。
 
         历史文件与前端回放事件先在未提交状态中准备；只有全部准备成功后，
@@ -911,7 +937,11 @@ class _OrchestratorContext:
 
     # ── SP-5 D4：事件驱动子→主投递 ──────────────────────────────────
 
-    async def _subagent_waiter(self, session_id: str, sub: SubAgentLoop) -> None:
+    async def _subagent_waiter(
+        self,
+        session_id: str,
+        sub: SubAgentLoop
+        ) -> None:
         """per-subagent 事件驱动 waiter：outbox/pending 变化时即时投递父队列。
 
         R1 修复：循环头 while True，body 内 flush 先于 break-check——
@@ -935,7 +965,11 @@ class _OrchestratorContext:
         except asyncio.CancelledError:
             raise
 
-    async def _flush_subagent_message(self, session_id: str, sub: SubAgentLoop) -> None:
+    async def _flush_subagent_message(
+        self,
+        session_id: str,
+        sub: SubAgentLoop
+        ) -> None:
         """收集单个子 Agent 的 outbox + pending 快照，格式化为 [subagent-result] 并 push 父队列。"""
         feedback = sub.get_pending_feedback()
         pending = sub.pending_approvals_info
@@ -1025,7 +1059,12 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    def _create_background(self, coro: Coroutine[Any, Any, Any], *, name: str) -> asyncio.Task[Any]:
+    def _create_background(
+        self,
+        coro: Coroutine[Any, Any, Any],
+        *,
+        name: str
+        ) -> asyncio.Task[Any]:
         if self._frozen:
             coro.close()
             raise ApplicationStoppingError("SubAgentOrchestrator has frozen input")
@@ -1055,8 +1094,8 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
         initial_prompt: str,
         user_name: str,
         message_type: str,
-        history_path: str | None = None,
-    ) -> SubAgentLaunchResult:
+        history_path: str | None = None
+        ) -> SubAgentLaunchResult:
         return await self._get_context(parent_session_id).launch(
             name=name,
             profile=profile,
@@ -1068,29 +1107,56 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
             history_path=history_path,
         )
 
-    async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
+    async def chat_user_direct(
+        self,
+        parent_session_id: str,
+        session_id: str,
+        message: str,
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat_user_direct(session_id, message, co_recipients)
 
-    async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
+    async def chat(
+        self,
+        parent_session_id: str,
+        session_id: str,
+        message: str,
+        user_name: str,
+        message_type: str,
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat(session_id, message, user_name, message_type, co_recipients)
 
-    async def approve(self, parent_session_id: str, session_id: str, decisions: list[Decision]) -> SubAgentApprovalResult:
+    async def approve(
+        self,
+        parent_session_id: str,
+        session_id: str,
+        decisions: list[Decision]
+        ) -> SubAgentApprovalResult:
         return await self._get_context(parent_session_id).approve(session_id, decisions)
 
-    async def stop(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
+    async def stop(
+        self,
+        parent_session_id: str,
+        session_id: str
+        ) -> SubAgentStopResult:
         return await self._get_context(parent_session_id).stop(session_id)
 
     async def launch_taskagent(
         self,
         parent_session_id: str,
         prompt: str,
-        profile: LLMProfile,
-    ) -> SubAgentLaunchResult:
+        profile: LLMProfile
+        ) -> SubAgentLaunchResult:
         return await self._get_context(parent_session_id).launch_taskagent(
             parent_session_id, prompt, profile
         )
 
-    async def stop_taskagent(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
+    async def stop_taskagent(
+        self,
+        parent_session_id: str,
+        session_id: str
+        ) -> SubAgentStopResult:
         return await self._get_context(parent_session_id).stop_taskagent(session_id)
 
     def interrupt(self, parent_session_id: str) -> None:
@@ -1105,7 +1171,12 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
             return SubAgentSnapshotResponse(session_id=parent_session_id)
         return ctx.get_snapshot()
 
-    def enqueue_user_input(self, parent_session_id: str, session_id: str, message: QueuedMessage) -> int:
+    def enqueue_user_input(
+        self,
+        parent_session_id: str,
+        session_id: str,
+        message: QueuedMessage
+        ) -> int:
         return self._get_context(parent_session_id).enqueue_user_input(session_id, message)
 
     def freeze_inputs(self) -> None:

@@ -32,8 +32,8 @@ class AgentspaceWatcher:
         root: Path,
         event_hub: AgentspaceEventHub,
         debounce_ms: int,
-        ignored_relative_roots: set[str],
-    ) -> None:
+        ignored_relative_roots: set[str]
+        ) -> None:
         self._root = root.resolve()
         self._event_hub = event_hub
         self._debounce_seconds = debounce_ms / 1000.0
@@ -162,8 +162,8 @@ class AgentspaceWatcher:
         self,
         kind: AgentspaceEventKind,
         raw_path: str,
-        is_directory: bool,
-    ) -> None:
+        is_directory: bool
+        ) -> None:
         relative = self._relative(raw_path)
         if relative is None or not relative:
             return
@@ -182,8 +182,8 @@ class AgentspaceWatcher:
         self,
         relative: str,
         raw_path: str,
-        is_directory: bool,
-    ) -> None:
+        is_directory: bool
+        ) -> None:
         def emit() -> None:
             try:
                 with self._timer_lock:
@@ -219,8 +219,8 @@ class AgentspaceWatcher:
         kind: AgentspaceEventKind,
         relative: str,
         raw_path: str,
-        is_directory: bool,
-    ) -> None:
+        is_directory: bool
+        ) -> None:
         self._event_hub.publish_threadsafe(
             AgentspaceEvent(
                 kind=kind,
@@ -236,7 +236,12 @@ class AgentspaceWatcher:
             )
         )
 
-    def _handle_move(self, raw_source: str, raw_destination: str, is_directory: bool) -> None:
+    def _handle_move(
+        self,
+        raw_source: str,
+        raw_destination: str,
+        is_directory: bool
+        ) -> None:
         source = self._relative(raw_source)
         destination = self._relative(raw_destination)
         if source is None and destination is None:

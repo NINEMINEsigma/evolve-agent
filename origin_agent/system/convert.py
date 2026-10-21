@@ -7,7 +7,11 @@ logger = getLogger(__name__)
 E = TypeVar("E", bound=Enum)
 
 
-def as_enum(value: str | None, enum_cls: type[E], default: E | None = None) -> E | None:
+def as_enum(
+    value: str | None,
+    enum_cls: type[E],
+    default: E | None = None
+    ) -> E | None:
     """将字符串值转换为枚举成员，转换失败时返回 default 或 None。"""
     try:
         return enum_cls(value)

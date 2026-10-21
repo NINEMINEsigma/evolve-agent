@@ -119,8 +119,8 @@ async def attach_agentspace_events(
     service: IAgentspaceService,
     send_event: Callable[[AgentspaceEvent], Awaitable[None]],
     *,
-    connection_label: str,
-) -> tuple[str, asyncio.Task[None]]:
+    connection_label: str
+    ) -> tuple[str, asyncio.Task[None]]:
     """订阅 EventHub、发送初始状态并启动转发；失败时回滚订阅。"""
     subscription_id, queue = service.subscribe_events()
     try:
@@ -143,8 +143,8 @@ async def attach_agentspace_events(
 async def detach_agentspace_events(
     service: IAgentspaceService,
     subscription_id: str | None,
-    task: asyncio.Task[None] | None,
-) -> None:
+    task: asyncio.Task[None] | None
+    ) -> None:
     """幂等收割转发 task 并注销 EventHub 订阅。
 
     转发 task 已登记到 GatewaySystem 的 TaskOwner；取消必须经
@@ -179,8 +179,8 @@ async def forward_agentspace_events(
     queue: asyncio.Queue[AgentspaceEvent],
     send_event: Callable[[AgentspaceEvent], Awaitable[None]],
     *,
-    connection_label: str,
-) -> None:
+    connection_label: str
+    ) -> None:
     """低优先级转发事件；突发积压只发送一个 resync。
 
     单事件发送超过 AGENTSPACE_WS_SEND_TIMEOUT_SECONDS 时抛

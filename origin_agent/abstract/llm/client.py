@@ -35,7 +35,11 @@ class LLMAPIStatusError(RuntimeError):
     不依赖任何具体 SDK 的异常族。
     """
 
-    def __init__(self, message: str, status_code: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int
+        ) -> None:
         super().__init__(message)
         self.status_code = status_code
 
@@ -63,8 +67,8 @@ class BaseLLMClient(ABC):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None,
-    ) -> LLMResponse:
+        last_user_message: CharacterConversationMessage | None = None
+        ) -> LLMResponse:
         """发送聊天请求，返回完整结构化响应。
 
         *messages* 为 ``BaseMessage`` 对象列表，子类在发送前自行转换为 wire format。
@@ -86,8 +90,8 @@ class BaseLLMClient(ABC):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None,
-    ) -> AsyncIterator[StreamChunk]:
+        last_user_message: CharacterConversationMessage | None = None
+        ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
         实现应支持 content 增量、reasoning 增量、tool_calls 累积输出，

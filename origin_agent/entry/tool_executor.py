@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 async def cancel_tool_wait(
     task: asyncio.Future[Any],
     pending: set[asyncio.Future[Any]],
-    on_failure: Callable[[BaseException], None],
-) -> None:
+    on_failure: Callable[[BaseException], None]
+    ) -> None:
     """解除工具等待；短窗口只约束调用方响应，不替代 System 的清理截止。"""
     if task not in pending:
         pending.add(task)
@@ -126,12 +126,16 @@ class ToolExecutor:
     async def _cancel_child_task(
         self,
         task: asyncio.Future[Any],
-        phase: str,
-    ) -> None:
+        phase: str
+        ) -> None:
         """复用取消交接；迟到回调使用预先持有的 Runtime，不重新查架构。"""
         await cancel_tool_wait(task, self._cancel_cleanup_tasks, self._runtime.record_failure)
 
-    async def _await_or_cancel(self, coro: Awaitable[Any], phase: str) -> Any:
+    async def _await_or_cancel(
+        self,
+        coro: Awaitable[Any],
+        phase: str
+        ) -> Any:
         """等待工具协程完成，或在主会话中断时有界取消它。"""
         task = asyncio.ensure_future(coro)
         interrupt_wait = asyncio.ensure_future(self._loop.loop.cancel_event.wait())
@@ -167,8 +171,8 @@ class ToolExecutor:
         character_name: str | None = None,
         llm_profile: LLMProfile | None = None,
         activity_id: str | None = None,
-        stream_id: str = "",
-    ) -> PreparedToolResult:
+        stream_id: str = ""
+        ) -> PreparedToolResult:
         """执行单个工具调用，只准备结果；调用方保存后再发送通知。
 
         Args:

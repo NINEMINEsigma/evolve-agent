@@ -124,8 +124,8 @@ async def _handsfree_confirm(
     tool_name: str,
     args: dict,
     reason: str,
-    extra_context: str | None = None,
-) -> ApprovalResult:
+    extra_context: str | None = None
+    ) -> ApprovalResult:
     """把工具调用发送给审批 Profile，并解释单次普通文本响应。"""
     from system.application import Application
 

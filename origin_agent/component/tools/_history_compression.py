@@ -27,8 +27,8 @@ async def prepare_tool_chain_replacements(
     session_id: str,
     metadata_service: SessionMetadataService,
     start_index: int = 0,
-    excluded_tool_call_ids: set[str] | None = None,
-) -> list[ToolChainReplacement]:
+    excluded_tool_call_ids: set[str] | None = None
+    ) -> list[ToolChainReplacement]:
     """从 start_index 起准备全部替换材料；失败与取消直接传播。
 
     ``excluded_tool_call_ids`` 中的任一 ID 命中一条链时整条链跳过：当前调用

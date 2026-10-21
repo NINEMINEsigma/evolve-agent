@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 _PROFILE_LOGICAL: str = "ws:browser_profile"
 
 
-def _launch_edge_process(user_data_dir_real: str, endpoint: str, headless: bool = False) -> subprocess.Popen:
+def _launch_edge_process(
+    user_data_dir_real: str,
+    endpoint: str,
+    headless: bool = False
+    ) -> subprocess.Popen:
     """以调试参数启动 Edge（不等待退出，Edge 常驻），返回进程句柄。
 
     *headless* 为 True 时追加 ``--headless=new``，浏览器窗口不可见，

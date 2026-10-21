@@ -29,7 +29,11 @@ class CharacterProfileError(ValueError):
 class CharacterProfileResolver:
     """每次调用都从工作空间动态读取角色档案的解析器。"""
 
-    def __init__(self, sandbox: ISandbox, profile_store: ILLMProfileStore) -> None:
+    def __init__(
+        self,
+        sandbox: ISandbox,
+        profile_store: ILLMProfileStore
+        ) -> None:
         self._sandbox = sandbox
         self._profile_store = profile_store
 
@@ -94,8 +98,8 @@ class CharacterProfileResolver:
         *,
         name: str,
         character_type: str,
-        directory_path: str,
-    ) -> CharacterProfile:
+        directory_path: str
+        ) -> CharacterProfile:
         profile_path = f"{directory_path}/{CHARACTER_PROFILE_FILENAME}"
         metadata_path = f"{directory_path}/{CHARACTER_PROFILE_META_FILENAME}"
         metadata: dict[str, str] = {}
@@ -198,8 +202,8 @@ def _load_system_prompts(
     *,
     profile_path: str,
     system_prompt: str,
-    system_prompt_paths: list[str],
-) -> list[str]:
+    system_prompt_paths: list[str]
+    ) -> list[str]:
     """按profile.md与[profile]声明顺序读取系统提示词正文。"""
     prompts: list[str] = []
     if system_prompt.strip():

@@ -158,7 +158,12 @@ class MessageRouter:
     实例持有 WebSocket 引用和当前 session_id（session 旋转时会更新）。
     """
 
-    def __init__(self, ws: WebSocket, sid: str, conn_token: str = ""):
+    def __init__(
+        self,
+        ws: WebSocket,
+        sid: str,
+        conn_token: str = ""
+        ):
         self.ws = ws
         self.sid = sid
         self.conn_token = conn_token
@@ -303,7 +308,11 @@ class MessageRouter:
             target_sessions=tuple(target_sessions),
         ), None
 
-    async def _prepare_user_message(self, msg: Message, accepted: "_AcceptedUserMessage") -> None:
+    async def _prepare_user_message(
+        self,
+        msg: Message,
+        accepted: "_AcceptedUserMessage"
+        ) -> None:
         """只处理已登记输入的后台准备：Profile 就绪、标题、客户端信息、子会话转发。
 
         非取消异常按 RV9 进入应用失败关闭；记录保留由关闭刷新只落 History。
@@ -326,8 +335,10 @@ class MessageRouter:
             raise
 
     async def _prepare_user_message_inner(
-        self, msg: Message, accepted: "_AcceptedUserMessage",
-    ) -> None:
+        self,
+        msg: Message,
+        accepted: "_AcceptedUserMessage"
+        ) -> None:
         if accepted.archived:
             await self._send_router_error(
                 "This session has been archived. Please switch to the continuation session or create a new one."
@@ -643,8 +654,10 @@ class MessageRouter:
         )
 
     async def _dispatch_subagent_messages(
-        self, content: str, target_sessions: list[str],
-    ) -> tuple[list[asyncio.Task], list[str], dict[str, str]]:
+        self,
+        content: str,
+        target_sessions: list[str]
+        ) -> tuple[list[asyncio.Task], list[str], dict[str, str]]:
         """转发消息到子 Agent 会话。
 
         返回 (tasks, sub_ids, name_map)。
@@ -756,7 +769,11 @@ class MessageRouter:
                 _old, self.sid, exc_info=True,
             )
 
-    async def _emit_assistant_reply(self, loop: IMainSessionLoop, reply: str) -> None:
+    async def _emit_assistant_reply(
+        self,
+        loop: IMainSessionLoop,
+        reply: str
+        ) -> None:
         """发送 assistant 回复到前端。MultiAgentLoop 空回复跳过。"""
         if not reply:
             return

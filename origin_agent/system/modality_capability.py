@@ -210,8 +210,8 @@ def resolve_active_model_base_url(
 def resolve_modality_reference_profile(
     active_profile: LLMProfile,
     media_type: Literal["image", "audio", "video"],
-    profile_data: LLMProfileData,
-) -> LLMProfile | None:
+    profile_data: LLMProfileData
+    ) -> LLMProfile | None:
     """解析指定媒体的有效转发 Profile（纯函数，不访问 Application 单例）。
 
     活动 Profile 的显式引用优先；活动引用为空时从 ``LLMProfileData``
@@ -236,9 +236,11 @@ def _media_description_prompt(media_type: ModalityType) -> str:
 
 
 async def _request_media_description(
-    system: IModalityCapabilitySystem, ref_profile: LLMProfile,
-    media_type: ModalityType, block: MediaBlock,
-) -> str:
+    system: IModalityCapabilitySystem,
+    ref_profile: LLMProfile,
+    media_type: ModalityType,
+    block: MediaBlock
+    ) -> str:
     """复用单跳描述请求；媒体 URL 由目标客户端处理，不由服务器抓取。"""
     client = create_llm_client(ref_profile.llm_client_name, system.runtime.context, ref_profile)
     messages = [BaseMessage(role=Role.USER, content=[
@@ -253,8 +255,8 @@ async def _forward_modality_to_ref_profile(
     context: ToolContext | None,
     active_profile: LLMProfile,
     media_data: dict[str, str | int | float | bool | None],
-    media_type: Literal["image", "audio", "video"],
-) -> str:
+    media_type: Literal["image", "audio", "video"]
+    ) -> str:
     """转发多模态内容到有效引用 Profile 对应的模型，返回描述文本。
 
     活动 Profile 的对应引用优先；活动引用为空时使用全局多模态回退引用。
@@ -355,9 +357,11 @@ def is_explicit_modality_rejection(exc: Exception, media_type: ModalityType) -> 
 
 
 async def _describe_media_block(
-    system: IModalityCapabilitySystem, context: ToolContext,
-    active_profile: LLMProfile, block: MediaBlock,
-) -> ModalityDescriptionResult:
+    system: IModalityCapabilitySystem,
+    context: ToolContext,
+    active_profile: LLMProfile,
+    block: MediaBlock
+    ) -> ModalityDescriptionResult:
     if isinstance(block, ImageBlock):
         media_type: ModalityType = "image"
     elif isinstance(block, AudioBlock):
@@ -521,38 +525,68 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
         return _build_modality_blocks(modality, self._wav, self._mp4)
 
     def resolve_effective_modality_reference_profile(
-        self, active_profile: LLMProfile, media_type: Literal["image", "audio", "video"],
-    ) -> LLMProfile | None:
+        self,
+        active_profile: LLMProfile,
+        media_type: Literal["image", "audio", "video"]
+        ) -> LLMProfile | None:
         profiles = self._profiles
         if profiles is None:
             raise LifecycleFailure("Modality Profile store has not been initialized")
         with profiles.locked():
             return resolve_modality_reference_profile(active_profile, media_type, profiles.get_data())
 
-    def _get_cached_capability(self, model: str, base_url: str) -> ModalityCapability | None:
+    def _get_cached_capability(
+        self,
+        model: str,
+        base_url: str
+        ) -> ModalityCapability | None:
         return _load_cache(self.cache_path).get(_cache_key(model, base_url))
 
-    def get_cached_vision_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_vision_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.vision if entry is not None else None
 
-    def get_cached_audio_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_audio_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.audio if entry is not None else None
 
-    def get_cached_user_vision_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_vision_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.user_vision if entry is not None else None
 
-    def get_cached_user_audio_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_audio_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.user_audio if entry is not None else None
 
-    def get_cached_video_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_video_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.video if entry is not None else None
 
-    def get_cached_user_video_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_video_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         entry = self._get_cached_capability(model, base_url)
         return entry.user_video if entry is not None else None
 
@@ -565,24 +599,33 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
         return await self.run_modality_probe(context)
 
     async def forward_modality_to_ref_profile(
-        self, context: ToolContext | None, active_profile: LLMProfile,
+        self,
+        context: ToolContext | None,
+        active_profile: LLMProfile,
         media_data: dict[str, str | int | float | bool | None],
-        media_type: Literal["image", "audio", "video"],
-    ) -> str:
+        media_type: Literal["image", "audio", "video"]
+        ) -> str:
         return await self.task_owner.run_request(
             lambda: _forward_modality_to_ref_profile(self, context, active_profile, media_data, media_type),
             name="modality-forward", admission=self._admit,
         )
 
     async def describe_media_block(
-        self, context: ToolContext, active_profile: LLMProfile, block: MediaBlock,
-    ) -> ModalityDescriptionResult:
+        self,
+        context: ToolContext,
+        active_profile: LLMProfile,
+        block: MediaBlock
+        ) -> ModalityDescriptionResult:
         return await self.task_owner.run_request(
             lambda: _describe_media_block(self, context, active_profile, block),
             name="media-description", admission=self._admit,
         )
 
-    def build_modality_prompt_block(self, profile: LLMProfile, agentspace: Path | None = None) -> str:
+    def build_modality_prompt_block(
+        self,
+        profile: LLMProfile,
+        agentspace: Path | None = None
+        ) -> str:
         return _build_modality_prompt_block(self, profile, agentspace)
 
 
@@ -648,7 +691,11 @@ def _build_tool_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
     ]
 
 
-def _build_modality_blocks(modality: str, wav: str, mp4: str) -> list[MessageBlock]:
+def _build_modality_blocks(
+    modality: str,
+    wav: str,
+    mp4: str
+    ) -> list[MessageBlock]:
     """按模态构造探测用 content block 列表（dummy 载荷 + 伪 path 元数据）。"""
     if modality == "vision":
         return [
@@ -672,8 +719,8 @@ async def _probe_single_modality(
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
-    modality: str,
-) -> bool:
+    modality: str
+    ) -> bool:
     """伪装成工具调用单独探测一种模态，返回该模态在工具消息中是否可用。"""
     probe_messages = _build_tool_probe_messages(system.modality_blocks(modality))
 
@@ -724,8 +771,8 @@ async def _probe_single_user_modality(
     client: BaseLLMClient,
     model_name: str,
     session_id: str,
-    modality: str,
-) -> bool:
+    modality: str
+    ) -> bool:
     """发送普通 user 消息单独探测一种模态，返回该模态在 user 消息中是否可用。"""
     probe_messages = _build_user_probe_messages(system.modality_blocks(modality))
 
@@ -861,8 +908,8 @@ def _fmt_support(value: bool | None) -> str:
 def _build_modality_prompt_block(
     system: IModalityCapabilitySystem,
     profile: LLMProfile,
-    agentspace: Path | None = None,
-) -> str:
+    agentspace: Path | None = None
+    ) -> str:
     """构建系统提示词的多模态能力与转发配置块（每轮实时生成）。
 
     文案来自模板 ``templates/modality_capability.txt``，本函数只负责填值：

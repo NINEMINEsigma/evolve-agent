@@ -53,8 +53,8 @@ class ISandbox(AsyncSystem, ABC):
         path: str,
         description: str,
         is_readonly: bool,
-        session_id: str = "",
-    ) -> tuple[DynamicSandboxSpace, bool]:
+        session_id: str = ""
+        ) -> tuple[DynamicSandboxSpace, bool]:
         """Add one fast-mode dynamic space idempotently."""
         ...
 
@@ -66,13 +66,18 @@ class ISandbox(AsyncSystem, ABC):
         path: str,
         description: str,
         is_readonly: bool,
-        session_id: str = "",
-    ) -> DynamicSandboxSpace:
+        session_id: str = ""
+        ) -> DynamicSandboxSpace:
         """Update one dynamic space without changing its name."""
         ...
 
     @abstractmethod
-    def remove_dynamic_space(self, name: str, *, session_id: str = "") -> bool:
+    def remove_dynamic_space(
+        self,
+        name: str,
+        *,
+        session_id: str = ""
+        ) -> bool:
         """Remove one dynamic space idempotently."""
         ...
 
@@ -82,7 +87,11 @@ class ISandbox(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def resolve(self, logical: str, access: Access) -> ResolvedPath:
+    def resolve(
+        self,
+        logical: str,
+        access: Access
+        ) -> ResolvedPath:
         """Resolve a logical path after namespace and access validation."""
         ...
 
@@ -114,8 +123,8 @@ class ISandbox(AsyncSystem, ABC):
         cwd_ns: str = "ws:",
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess:
         """Run a synchronous subprocess inside the logical sandbox."""
         ...
 
@@ -127,8 +136,8 @@ class ISandbox(AsyncSystem, ABC):
         cwd_ns: str = "ws:",
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess:
         """Run a subprocess asynchronously inside the logical sandbox."""
         ...
 
@@ -142,8 +151,8 @@ class ISandbox(AsyncSystem, ABC):
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
         session_id: str = "",
-        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
-    ) -> ProcessLineStreamResult:
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES
+        ) -> ProcessLineStreamResult:
         """Consume sandboxed subprocess output line by line."""
         ...
 
@@ -153,7 +162,14 @@ class ISandbox(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def read(self, logical: str, offset: int = 0, limit: int = 100, *, strict_utf8: bool = False) -> str:
+    def read(
+        self,
+        logical: str,
+        offset: int = 0,
+        limit: int = 100,
+        *,
+        strict_utf8: bool = False
+        ) -> str:
         """Read a sandbox file with line pagination and encoding policy."""
         ...
 
@@ -163,12 +179,20 @@ class ISandbox(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def write(self, logical: str, content: str) -> None:
+    def write(
+        self,
+        logical: str,
+        content: str
+        ) -> None:
         """Write text to a sandbox path without newline normalization."""
         ...
 
     @abstractmethod
-    def append(self, logical: str, content: str) -> None:
+    def append(
+        self,
+        logical: str,
+        content: str
+        ) -> None:
         """Append text to an existing sandbox file."""
         ...
 
@@ -183,17 +207,29 @@ class ISandbox(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def copy(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def copy(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """Copy one sandbox file and return its actual destination."""
         ...
 
     @abstractmethod
-    def copy_folder(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def copy_folder(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """Copy one sandbox directory and return its destination."""
         ...
 
     @abstractmethod
-    def move(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def move(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """Move one sandbox path and return its actual destination."""
         ...
 
@@ -208,7 +244,11 @@ class ISandbox(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def create_folder(self, logical: str, parents: bool = True) -> None:
+    def create_folder(
+        self,
+        logical: str,
+        parents: bool = True
+        ) -> None:
         """Create one sandbox directory."""
         ...
 

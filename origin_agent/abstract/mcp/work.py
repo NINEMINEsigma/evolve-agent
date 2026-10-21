@@ -27,7 +27,11 @@ def _only_stopping(error: BaseException) -> bool:
 class MCPThreadWork:
     """Own one executor on one loop; cancellation never removes live futures."""
 
-    def __init__(self, name: str, on_failure: Callable[[BaseException], None]) -> None:
+    def __init__(
+        self,
+        name: str,
+        on_failure: Callable[[BaseException], None]
+        ) -> None:
         self._name = name
         self._on_failure = on_failure
         self._executor: concurrent.futures.ThreadPoolExecutor | None = None

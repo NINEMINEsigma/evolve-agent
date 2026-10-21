@@ -38,8 +38,8 @@ class ProfileApprovalBackend(ApprovalBackend):
     def __init__(
         self,
         ctx: RuntimeContext,
-        llm_profile_store: LLMProfileStore,
-    ) -> None:
+        llm_profile_store: LLMProfileStore
+        ) -> None:
         self._ctx = ctx
         self._llm_profile_store = llm_profile_store
         self._client: BaseLLMClient | None = None

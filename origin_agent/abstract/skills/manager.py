@@ -30,8 +30,8 @@ def create_skill(
     author: str = "Evolve-Agent",
     version: str = "1.0.0",
     tags: list[str] | None = None,
-    **extra_frontmatter: Any,
-) -> SkillPayload:
+    **extra_frontmatter: Any
+    ) -> SkillPayload:
     """Create a new skill on disk.
 
     Args:
@@ -119,8 +119,8 @@ def update_skill(
     description: str | None = None,
     content: str | None = None,
     tags: list[str] | None = None,
-    **frontmatter_updates: Any,
-) -> SkillPayload:
+    **frontmatter_updates: Any
+    ) -> SkillPayload:
     """Update an existing skill's frontmatter and/or body.
 
     Args:
@@ -168,8 +168,8 @@ def write_skill_file(
     name: str,
     subpath: str,
     content: str,
-    skills_dir: Path | None = None,
-) -> dict[str, Any]:
+    skills_dir: Path | None = None
+    ) -> dict[str, Any]:
     """Write a file into an existing skill's directory.
 
     Args:

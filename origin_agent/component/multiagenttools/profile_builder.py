@@ -48,8 +48,8 @@ def _resolve_main_agent_prompts(
     _sandbox: ISandbox,
     profile: LLMProfile | None = None,
     session_id: str = "",
-    loaded_toolsets: set[str] | None = None,
-) -> list[str]:
+    loaded_toolsets: set[str] | None = None
+    ) -> list[str]:
     """主Agent的系统提示词解析：从模板系统生成人设提示词。"""
     from entity.puretype import ToolAvailability
 
@@ -80,8 +80,8 @@ def build_agent_profiles(
     *,
     session_id: str = "",
     skip_missing_subagent: bool = False,
-    main_profile: LLMProfile | None = None,
-) -> dict[str, AgentProfile]:
+    main_profile: LLMProfile | None = None
+    ) -> dict[str, AgentProfile]:
     """为多Agent模式构造每个参与者的运行时 Profile。
 
     主Agent从当前活动 Profile构造；子Agent从动态角色档案映射获取当前

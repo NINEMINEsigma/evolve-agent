@@ -235,8 +235,11 @@ class SessionMetadataService(ISessionMetadataService):
         )
 
     def _resolve_session_profile_fallback(
-        self, session_id: str, *, purpose: str
-    ) -> LLMProfile:
+        self,
+        session_id: str,
+        *,
+        purpose: str
+        ) -> LLMProfile:
         """读取目标会话活动 Profile 作为全局引用缺失时的回退。
 
         调用方必须持有 ``LLMProfileStore.locked()`` 事务边界。
@@ -259,7 +262,12 @@ class SessionMetadataService(ISessionMetadataService):
                 f"目标会话活动 Profile {profile_name!r} 不存在"
             ) from exc
 
-    def _assert_profile_usable(self, profile: LLMProfile, *, purpose: str) -> None:
+    def _assert_profile_usable(
+        self,
+        profile: LLMProfile,
+        *,
+        purpose: str
+        ) -> None:
         """校验 Profile 连接字段完整，缺失时按用途报错。"""
         missing = self._missing_connection_fields(profile)
         if missing:
@@ -280,8 +288,11 @@ class SessionMetadataService(ISessionMetadataService):
             return profile.model_copy()
 
     def _create_client_for_profile(
-        self, profile: LLMProfile, *, purpose: str
-    ) -> BaseLLMClient:
+        self,
+        profile: LLMProfile,
+        *,
+        purpose: str
+        ) -> BaseLLMClient:
         # 已停机后不再创建 LLM 客户端，避免在关闭期间发起新的模型请求。
         if self._admission_closed:
             raise ApplicationStoppingError(
@@ -324,14 +335,22 @@ class SessionMetadataService(ISessionMetadataService):
             admission=self._admit_generation,
         )
 
-    async def generate_tags(self, session_id: str, existing_tags: list[str]) -> list[str]:
+    async def generate_tags(
+        self,
+        session_id: str,
+        existing_tags: list[str]
+        ) -> list[str]:
         return await self.task_owner.run_request(
             lambda: self._generate_tags(session_id, existing_tags),
             name=f"metadata-tags-{session_id}",
             admission=self._admit_generation,
         )
 
-    async def generate_summary(self, session_id: str, history: History | None = None) -> str:
+    async def generate_summary(
+        self,
+        session_id: str,
+        history: History | None = None
+        ) -> str:
         return await self.task_owner.run_request(
             lambda: self._generate_summary(session_id, history),
             name=f"metadata-summary-{session_id}",
@@ -352,7 +371,11 @@ class SessionMetadataService(ISessionMetadataService):
             admission=self._admit_generation,
         )
 
-    async def generate_tool_chain_summary(self, session_id: str, chain_text: str) -> str:
+    async def generate_tool_chain_summary(
+        self,
+        session_id: str,
+        chain_text: str
+        ) -> str:
         return await self.task_owner.run_request(
             lambda: self._generate_tool_chain_summary(session_id, chain_text),
             name=f"metadata-toolchain-summary-{session_id}",
@@ -397,7 +420,11 @@ class SessionMetadataService(ISessionMetadataService):
             raise MetadataGenerationError("元数据模型返回了空标题")
         return title
 
-    async def _generate_title_from_text(self, session_id: str, text: str) -> str:
+    async def _generate_title_from_text(
+        self,
+        session_id: str,
+        text: str
+        ) -> str:
         """根据单条用户消息文本生成标题（不读 History）。
 
         与 ``_generate_title`` 同构：仅上下文来源不同，避免在首条消息
@@ -432,8 +459,8 @@ class SessionMetadataService(ISessionMetadataService):
     async def _generate_tags(
         self,
         session_id: str,
-        existing_tags: list[str],
-    ) -> list[str]:
+        existing_tags: list[str]
+        ) -> list[str]:
         """根据目标会话完整对话历史生成标签。"""
         history = self._read_history(session_id)
         messages = [
@@ -503,8 +530,8 @@ class SessionMetadataService(ISessionMetadataService):
     async def _generate_summary(
         self,
         session_id: str,
-        history: History | None = None,
-    ) -> str:
+        history: History | None = None
+        ) -> str:
         """生成摘要但不写入磁盘，供临时压缩等调用方使用。"""
         target_history = history if history is not None else self._read_history(session_id)
         if target_history.count == 0:
@@ -542,7 +569,11 @@ class SessionMetadataService(ISessionMetadataService):
             return summary
         return await self._regenerate_summary(session_id)
 
-    async def _generate_tool_chain_summary(self, session_id: str, chain_text: str) -> str:
+    async def _generate_tool_chain_summary(
+        self,
+        session_id: str,
+        chain_text: str
+        ) -> str:
         """用工具链摘要 Profile 对单条工具链文本生成紧凑摘要（不落盘）。"""
         if not chain_text.strip():
             raise MetadataGenerationError("工具链文本为空，无法生成摘要")
@@ -580,7 +611,12 @@ class SessionMetadataService(ISessionMetadataService):
             title += "..."
         return title
 
-    async def _apply_first_title(self, session_id: str, title: str, source: str) -> None:
+    async def _apply_first_title(
+        self,
+        session_id: str,
+        title: str,
+        source: str
+        ) -> None:
         """写入标题（内存+磁盘）并尽力推送前端；失败仅记日志。
 
         update_title 磁盘失败不掩盖内存成功，继续推送（crash-only：
@@ -608,7 +644,11 @@ class SessionMetadataService(ISessionMetadataService):
             )
         logger.info("First title applied | session=%s source=%s", session_id, source)
 
-    async def _first_title_task(self, session_id: str, text: str) -> None:
+    async def _first_title_task(
+        self,
+        session_id: str,
+        text: str
+        ) -> None:
         """后台任务体：LLM 生成 → 写入标题 → 推送前端；业务失败回退截取。"""
         try:
             title = await self._generate_title_from_text(session_id, text)
@@ -641,7 +681,11 @@ class SessionMetadataService(ISessionMetadataService):
         finally:
             self._first_title_pending.discard(session_id)
 
-    def maybe_generate_first_title(self, session_id: str, text: str) -> None:
+    def maybe_generate_first_title(
+        self,
+        session_id: str,
+        text: str
+        ) -> None:
         """首条用户消息触发的一次性异步标题生成入口（fire-and-forget）。
 
         前置判定（会话存在、标题为空、文本非空）由调用方完成；本方法只做

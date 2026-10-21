@@ -20,8 +20,8 @@ class AgentspaceOperationGate:
     def user_operation(
         self,
         paths: list[str],
-        include_descendants: bool = False,
-    ) -> Iterator[None]:
+        include_descendants: bool = False
+        ) -> Iterator[None]:
         with self._lock:
             for path in paths:
                 matches = self._registry.matching(path, include_descendants)
@@ -37,8 +37,8 @@ class AgentspaceOperationGate:
     def agent_access(
         self,
         owner: AgentspaceLockOwner,
-        paths: list[tuple[str, bool]],
-    ) -> Iterator[None]:
+        paths: list[tuple[str, bool]]
+        ) -> Iterator[None]:
         with self._lock:
             for logical_path, recursive in paths:
                 self._registry.acquire(owner, logical_path, recursive)

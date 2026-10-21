@@ -348,7 +348,11 @@ _DOM_SCRIPT: str = r"""(args) => {
 }"""
 
 
-async def _eval_dom(page: "Page", op: str, **params: Any) -> dict:
+async def _eval_dom(
+    page: "Page",
+    op: str,
+    **params: Any
+    ) -> dict:
     """在页面上下文中执行 DOM 查询脚本并校验返回形态。"""
     result = await page.evaluate(_DOM_SCRIPT, {"op": op, **params})
     if not isinstance(result, dict):
@@ -362,8 +366,8 @@ async def dom_snapshot(
     selector: str = "",
     filter_tag: str = "",
     filter_text: str = "",
-    detailed: bool = False,
-) -> dict:
+    detailed: bool = False
+    ) -> dict:
     """返回目标元素的自身形态（self_text/self_html，不含子元素）+ 一层子节点快照。
 
     *detailed* 为 True 时，self 与每个子节点附加完整字段
@@ -378,7 +382,12 @@ async def dom_snapshot(
     )
 
 
-async def dom_query_selector(page: "Page", selector: str, max_results: int, filter_text: str = "") -> dict:
+async def dom_query_selector(
+    page: "Page",
+    selector: str,
+    max_results: int,
+    filter_text: str = ""
+    ) -> dict:
     """CSS/XPath 定位元素引用列表，可选 text 过滤（交集）。"""
     return await _eval_dom(
         page, "query_selector",
@@ -387,7 +396,11 @@ async def dom_query_selector(page: "Page", selector: str, max_results: int, filt
     )
 
 
-async def dom_query_text(page: "Page", text: str, max_results: int) -> dict:
+async def dom_query_text(
+    page: "Page",
+    text: str,
+    max_results: int
+    ) -> dict:
     """全文查找子树文本包含 *text* 的最深匹配元素引用列表。"""
     return await _eval_dom(
         page, "query_text",
@@ -396,7 +409,11 @@ async def dom_query_text(page: "Page", text: str, max_results: int) -> dict:
     )
 
 
-async def dom_text(page: "Page", path: str = "", selector: str = "") -> dict:
+async def dom_text(
+    page: "Page",
+    path: str = "",
+    selector: str = ""
+    ) -> dict:
     """返回指定元素的子树完整 innerText（快速通读，超限由调用方处理）。"""
     return await _eval_dom(page, "text", path=path, selector=selector)
 
@@ -461,7 +478,11 @@ def path_to_playwright_selector(path: str) -> str:
     return " >> ".join(css_parts)
 
 
-def resolve_locator(page: "Page", path: str = "", selector: str = "") -> Any:
+def resolve_locator(
+    page: "Page",
+    path: str = "",
+    selector: str = ""
+    ) -> Any:
     """按 *path*（XPath 或 CSS 链式）或 *selector*（CSS）解析 playwright Locator。
 
     调用方以 ``locator.count() == 0`` 判断目标元素不存在；

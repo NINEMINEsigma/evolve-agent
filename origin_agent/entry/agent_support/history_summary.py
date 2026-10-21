@@ -90,8 +90,8 @@ def history_to_summary_text(history: History) -> str:
 def extract_last_rounds(
     history: History,
     rounds: int = INHERIT_LAST_ROUNDS,
-    include_tool_messages: bool = False,
-) -> list:
+    include_tool_messages: bool = False
+    ) -> list:
     """从 History 中提取倒数 ``rounds`` 个用户/助手消息轮次。
 
     返回的列表包含纯 ``CharacterConversationMessage`` 原始引用（只读）。
@@ -205,8 +205,8 @@ def _safe_media_ref(kind: str, url: str) -> str:
 async def summarize_history(
     history: History,
     llm: BaseLLMClient,
-    character: str = META_EXTRACTOR_CHARACTER,
-) -> str:
+    character: str = META_EXTRACTOR_CHARACTER
+    ) -> str:
     """用 LLM 对 History 实例做压缩生成摘要。
 
     组合 history_to_summary_text() 与 compress / compress_input 模板。

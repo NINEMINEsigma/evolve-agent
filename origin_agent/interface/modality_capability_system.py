@@ -61,38 +61,62 @@ class IModalityCapabilitySystem(AsyncSystem, ABC):
     def resolve_effective_modality_reference_profile(
         self,
         active_profile: LLMProfile,
-        media_type: Literal["image", "audio", "video"],
-    ) -> LLMProfile | None:
+        media_type: Literal["image", "audio", "video"]
+        ) -> LLMProfile | None:
         """Resolve the active Profile's effective modality reference."""
         ...
 
     @abstractmethod
-    def get_cached_vision_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_vision_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached tool-message vision support when known."""
         ...
 
     @abstractmethod
-    def get_cached_audio_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_audio_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached tool-message audio support when known."""
         ...
 
     @abstractmethod
-    def get_cached_user_vision_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_vision_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached user-message vision support when known."""
         ...
 
     @abstractmethod
-    def get_cached_user_audio_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_audio_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached user-message audio support when known."""
         ...
 
     @abstractmethod
-    def get_cached_video_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_video_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached tool-message video support when known."""
         ...
 
     @abstractmethod
-    def get_cached_user_video_support(self, model: str, base_url: str) -> bool | None:
+    def get_cached_user_video_support(
+        self,
+        model: str,
+        base_url: str
+        ) -> bool | None:
         """Return cached user-message video support when known."""
         ...
 
@@ -112,8 +136,8 @@ class IModalityCapabilitySystem(AsyncSystem, ABC):
         context: ToolContext | None,
         active_profile: LLMProfile,
         media_data: dict[str, str | int | float | bool | None],
-        media_type: Literal["image", "audio", "video"],
-    ) -> str:
+        media_type: Literal["image", "audio", "video"]
+        ) -> str:
         """Forward one media payload to its effective reference Profile."""
         ...
 
@@ -122,8 +146,8 @@ class IModalityCapabilitySystem(AsyncSystem, ABC):
         self,
         context: ToolContext,
         active_profile: LLMProfile,
-        block: MediaBlock,
-    ) -> ModalityDescriptionResult:
+        block: MediaBlock
+        ) -> ModalityDescriptionResult:
         """Describe one media block through the configured reference Profile."""
         ...
 
@@ -131,7 +155,7 @@ class IModalityCapabilitySystem(AsyncSystem, ABC):
     def build_modality_prompt_block(
         self,
         profile: LLMProfile,
-        agentspace: Path | None = None,
-    ) -> str:
+        agentspace: Path | None = None
+        ) -> str:
         """Build the prompt block describing available modality capabilities."""
         ...

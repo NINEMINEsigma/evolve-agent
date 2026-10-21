@@ -9,7 +9,11 @@ from collections.abc import Iterator
 class MetaFormatError(ValueError):
     """元数据文本不符合 [key] 分段格式。"""
 
-    def __init__(self, line_number: int, reason: str) -> None:
+    def __init__(
+        self,
+        line_number: int,
+        reason: str
+        ) -> None:
         self.line_number = line_number
         self.reason = reason
         super().__init__(f"line {line_number}: {reason}")

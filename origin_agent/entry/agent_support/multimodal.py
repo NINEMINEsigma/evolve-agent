@@ -73,9 +73,13 @@ class PreparedMultimodalRequest(BaseModel):
 
     @classmethod
     def capture(
-        cls, messages: list[BaseMessage], history: History, session_id: str,
-        last_user_message: CharacterConversationMessage | None, character_name: str,
-    ) -> PreparedMultimodalRequest:
+        cls,
+        messages: list[BaseMessage],
+        history: History,
+        session_id: str,
+        last_user_message: CharacterConversationMessage | None,
+        character_name: str
+        ) -> PreparedMultimodalRequest:
         copied: list[BaseMessage] = []
         last_user: CharacterConversationMessage | None = None
         for message in messages:
@@ -99,9 +103,11 @@ class PreparedMultimodalRequest(BaseModel):
 
 
 async def prepare_main_multimodal_request(
-    messages: list[BaseMessage], context: ToolContext, *,
-    last_user_message: CharacterConversationMessage | None,
-) -> PreparedMultimodalRequest:
+    messages: list[BaseMessage],
+    context: ToolContext,
+    *,
+    last_user_message: CharacterConversationMessage | None
+    ) -> PreparedMultimodalRequest:
     """首个 await 前固定开关；关闭的媒体绝不在主请求中恢复直传。"""
     runtime = context.app.get_system(IRuntimeSystem)
     runtime.require_running()
@@ -213,8 +219,10 @@ async def prepare_main_multimodal_request(
 
 
 def _attach_tool_media_source(
-    blocks: list[MessageBlock], result: dict[str, Any], tool_call_id: str | None,
-) -> None:
+    blocks: list[MessageBlock],
+    result: dict[str, Any],
+    tool_call_id: str | None
+    ) -> None:
     """从正式工具结果附带逻辑来源；不采信物理 absolute_path。"""
     source = result.get("path")
     kind = result.get("type")
@@ -257,8 +265,8 @@ def tool_result_to_follow_up(
     result: dict,
     character_name: str,
     *,
-    tool_call_id: str | None = None,
-) -> tuple[list[BaseMessage] | None, dict[str, Any] | list[MessageBlock]]:
+    tool_call_id: str | None = None
+    ) -> tuple[list[BaseMessage] | None, dict[str, Any] | list[MessageBlock]]:
     """提取 _user_blocks，构造 follow_up 用户消息。
 
     从 result dict 中 pop _user_blocks（有序混合块列表），

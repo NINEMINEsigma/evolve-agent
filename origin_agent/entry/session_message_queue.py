@@ -55,11 +55,19 @@ class SessionMessageQueue:
         self._handoff_ready.set()
         self.last_known_sid = loop.loop.session_id
 
-    def push(self, content: MessageContent, *, character_name: str = "", source: str = "",
-             timestamp: str = "", client_message_id: str | None = None,
-             visible_characters: list[str] | None = None,
-             response_characters: list[str] | None = None,
-             llm_profile_name: str | None = None, ready: bool = True) -> int:
+    def push(
+        self,
+        content: MessageContent,
+        *,
+        character_name: str = "",
+        source: str = "",
+        timestamp: str = "",
+        client_message_id: str | None = None,
+        visible_characters: list[str] | None = None,
+        response_characters: list[str] | None = None,
+        llm_profile_name: str | None = None,
+        ready: bool = True
+        ) -> int:
         item = QueuedMessage(
             content=content, character_name=character_name or SYSTEM_CHARACTER_NAME, source=source,
             timestamp=timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
@@ -68,7 +76,12 @@ class SessionMessageQueue:
         )
         return self.accept(item, ready=ready)
 
-    def accept(self, item: QueuedMessage, *, ready: bool = True) -> int:
+    def accept(
+        self,
+        item: QueuedMessage,
+        *,
+        ready: bool = True
+        ) -> int:
         sequence = self._input_buffer.accept(item, ready=ready)
         try:
             self._event_loop.call_soon_threadsafe(self._wake_on_loop)
@@ -111,7 +124,11 @@ class SessionMessageQueue:
             if error is not None:
                 self._record_failure(error)
 
-    def _round_done(self, task: asyncio.Task[Any], reservation_id: str) -> None:
+    def _round_done(
+        self,
+        task: asyncio.Task[Any],
+        reservation_id: str
+        ) -> None:
         self._round_tasks.discard(task)
         self._input_buffer.release_reservation(reservation_id)
         if not task.cancelled():
@@ -194,7 +211,11 @@ class SessionMessageQueue:
         self._tool_reservations.append(reservation)
         return reservation
 
-    def mark_appended(self, delivery: InputDelivery[QueuedMessage], index: int) -> None:
+    def mark_appended(
+        self,
+        delivery: InputDelivery[QueuedMessage],
+        index: int
+        ) -> None:
         self._input_buffer.mark_appended(delivery.sequence, index)
 
     def mark_persisted(self, items: list[InputDelivery[QueuedMessage]]) -> None:
@@ -207,7 +228,11 @@ class SessionMessageQueue:
     def freeze_inputs(self) -> None:
         self.freeze()
 
-    def accept_shutdown_transfer(self, sequence: int, item: QueuedMessage) -> None:
+    def accept_shutdown_transfer(
+        self,
+        sequence: int,
+        item: QueuedMessage
+        ) -> None:
         if asyncio.get_running_loop() is not self._event_loop:
             raise LifecycleFailure("Shutdown transfer requires the owning event loop")
         self._input_buffer.accept_shutdown_transfer(sequence, item)

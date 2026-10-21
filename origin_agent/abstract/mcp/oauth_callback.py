@@ -20,7 +20,11 @@ class CallbackHTTPServer(HTTPServer):
         connection.settimeout(1.0)
         return connection, address
 
-    def handle_error(self, request: Any, client_address: Any) -> None:
+    def handle_error(
+        self,
+        request: Any,
+        client_address: Any
+        ) -> None:
         error = sys.exception()
         if error is None:
             raise LifecycleFailure("OAuth callback request failed without an exception")
@@ -28,7 +32,12 @@ class CallbackHTTPServer(HTTPServer):
 
 
 class OAuthCallbackServer:
-    def __init__(self, port: int, handler: type[BaseHTTPRequestHandler], result: dict[str, str | None]) -> None:
+    def __init__(
+        self,
+        port: int,
+        handler: type[BaseHTTPRequestHandler],
+        result: dict[str, str | None]
+        ) -> None:
         self.result = result
         self._loop = asyncio.get_running_loop()
         self._server = CallbackHTTPServer(("127.0.0.1", port), handler)

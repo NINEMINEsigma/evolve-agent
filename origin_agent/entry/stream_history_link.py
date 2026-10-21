@@ -40,8 +40,8 @@ async def emit_history_links(
     history_index: int | None = None,
     links: list[HistoryRowLink] | None = None,
     visible_characters: list[str] | None = None,
-    response_characters: list[str] | None = None,
-) -> None:
+    response_characters: list[str] | None = None
+    ) -> None:
     """在 History 写入完成后发送实时行到正典行的权威关联。"""
     if history_index is not None and history_index < 0:
         raise ValueError("History index must be non-negative")
@@ -83,8 +83,8 @@ async def emit_stream_history_link(
     *,
     visible_characters: list[str] | None = None,
     response_characters: list[str] | None = None,
-    links: list[HistoryRowLink] | None = None,
-) -> None:
+    links: list[HistoryRowLink] | None = None
+    ) -> None:
     """兼容入口：发送 assistant stream 与可选工具行关联。"""
     if not stream_id or history_index < 0:
         return

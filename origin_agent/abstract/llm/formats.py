@@ -36,8 +36,8 @@ def to_openai_message(
     message: BaseMessage,
     current_character_agent: str,
     is_last_user_message: bool = False,
-    **kwargs: Any,
-) -> dict[str, Any] | None:
+    **kwargs: Any
+    ) -> dict[str, Any] | None:
     """Convert a ``BaseMessage`` to an OpenAI protocol dict.
 
     Dispatches by ``isinstance``:
@@ -75,8 +75,8 @@ def messages_to_openai_list(
     current_character_agent: str,
     *,
     last_user_message: CharacterConversationMessage | None = None,
-    **kwargs: Any,
-) -> list[dict[str, Any]]:
+    **kwargs: Any
+    ) -> list[dict[str, Any]]:
     """Convert a list of ``BaseMessage`` to a list of OpenAI protocol dicts.
 
     ``last_user_message`` 用于标记 ``is_last_user_message=True``，
@@ -144,8 +144,8 @@ def to_summary_dict(
 def _base_to_openai_dict(
     message: BaseMessage,
     current_character_agent: str,
-    **kwargs: Any,
-) -> dict[str, Any] | None:
+    **kwargs: Any
+    ) -> dict[str, Any] | None:
     """Convert a plain ``BaseMessage`` (or ``CharacterMessage`` /
     ``CharacterSystemMessage``) to an OpenAI protocol dict.
     """
@@ -161,8 +161,8 @@ def _base_to_openai_dict(
 def _charconv_to_openai_dict(
     message: CharacterConversationMessage,
     current_character_agent: str,
-    **kwargs: Any,
-) -> dict[str, Any] | None:
+    **kwargs: Any
+    ) -> dict[str, Any] | None:
     """Convert a ``CharacterConversationMessage`` to an OpenAI protocol dict.
 
     Handles:
@@ -193,8 +193,8 @@ def _charconv_to_openai_dict(
 def _toolresult_to_openai_dict(
     message: ToolResultMessage,
     current_character_agent: str,
-    **kwargs: Any,
-) -> dict[str, Any] | None:
+    **kwargs: Any
+    ) -> dict[str, Any] | None:
     """Convert a ``ToolResultMessage`` to an OpenAI protocol dict.
 
     Injects the ``tool_call_id`` field (OpenAI-specific).
@@ -315,8 +315,8 @@ def messages_to_anthropic_list(
     current_character_agent: str,
     *,
     last_user_message: CharacterConversationMessage | None = None,
-    **kwargs: Any,
-) -> tuple[list[dict[str, Any]], str]:
+    **kwargs: Any
+    ) -> tuple[list[dict[str, Any]], str]:
     """将 ``list[BaseMessage]`` 直接转换为 Anthropic Messages API 格式。
 
     返回 ``(anthropic_messages, system_text)``。

@@ -68,18 +68,26 @@ class ISessionManager(AsyncSystem, ABC):
         parent_sid: str | None = None,
         parents: list[str] | None = None,
         role: Role = Role.USER,
-        loop_meta: LoopMeta | None = None,
-    ) -> str:
+        loop_meta: LoopMeta | None = None
+        ) -> str:
         """Create a session with inherited context and initialized approval mode."""
         ...
 
     @abstractmethod
-    def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
+    def archive(
+        self,
+        session_id: str,
+        continuation_sid: str | None = None
+        ) -> None:
         """Archive one session and optionally link its continuation."""
         ...
 
     @abstractmethod
-    def set_session_tags(self, session_id: str, tags: list[str]) -> None:
+    def set_session_tags(
+        self,
+        session_id: str,
+        tags: list[str]
+        ) -> None:
         """Persist the supplied session tags."""
         ...
 
@@ -94,7 +102,11 @@ class ISessionManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def set_client_info(self, session_id: str, info: ClientInfo) -> None:
+    def set_client_info(
+        self,
+        session_id: str,
+        info: ClientInfo
+        ) -> None:
         """Update connection metadata for one session."""
         ...
 
@@ -108,8 +120,8 @@ class ISessionManager(AsyncSystem, ABC):
         self,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
-        session_id: str | None = None,
-    ) -> str:
+        session_id: str | None = None
+        ) -> str:
         """Create and index a new session."""
         ...
 
@@ -124,7 +136,11 @@ class ISessionManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def update_title(self, session_id: str, title: str) -> None:
+    def update_title(
+        self,
+        session_id: str,
+        title: str
+        ) -> None:
         """Persist a session title update."""
         ...
 
@@ -178,8 +194,8 @@ class ISessionManager(AsyncSystem, ABC):
     def accept_shutdown_feedback(
         self,
         parent_session_id: str,
-        items: list[SubAgentFeedbackDelivery],
-    ) -> None:
+        items: list[SubAgentFeedbackDelivery]
+        ) -> None:
         """Transfer frozen sub-agent feedback into a parent input queue."""
         ...
 
@@ -192,8 +208,8 @@ class ISessionManager(AsyncSystem, ABC):
     def replace_idle_loops_using_profile(
         self,
         source_profile: LLMProfile,
-        replacement_profile: LLMProfile | None,
-    ) -> tuple[list[str], list[str]]:
+        replacement_profile: LLMProfile | None
+        ) -> tuple[list[str], list[str]]:
         """Replace profiles on idle loops and report switched or busy sessions."""
         ...
 
@@ -202,8 +218,8 @@ class ISessionManager(AsyncSystem, ABC):
         self,
         session_id: str,
         frontend_sink: IFrontendSink,
-        history_store_dir: Path | None = None,
-    ) -> IMainSessionLoop:
+        history_store_dir: Path | None = None
+        ) -> IMainSessionLoop:
         """Create or restore the appropriate main session Loop."""
         ...
 
@@ -223,12 +239,20 @@ class ISessionManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
+    async def replace_loop(
+        self,
+        session_id: str,
+        new_loop: IMainSessionLoop
+        ) -> None:
         """Replace a session Loop while preserving ownership and routing."""
         ...
 
     @abstractmethod
-    def rotate_session(self, old_sid: str, new_sid: str) -> None:
+    def rotate_session(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> None:
         """Migrate session-owned runtime routing during continuation."""
         ...
 

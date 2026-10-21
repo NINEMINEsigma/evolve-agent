@@ -52,12 +52,22 @@ class ILSPManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def references(self, logical_path: str, line: int, column: int) -> list[LSPReference]:
+    async def references(
+        self,
+        logical_path: str,
+        line: int,
+        column: int
+        ) -> list[LSPReference]:
         """Return symbol references at a logical source position."""
         ...
 
     @abstractmethod
-    async def definition(self, logical_path: str, line: int, column: int) -> LSPDefinition | None:
+    async def definition(
+        self,
+        logical_path: str,
+        line: int,
+        column: int
+        ) -> LSPDefinition | None:
         """Return the symbol definition at a logical source position."""
         ...
 
@@ -77,7 +87,11 @@ class ILSPManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def notify_did_change(self, logical_path: str, content: str) -> None:
+    def notify_did_change(
+        self,
+        logical_path: str,
+        content: str
+        ) -> None:
         """Notify the server about a changed logical source file."""
         ...
 

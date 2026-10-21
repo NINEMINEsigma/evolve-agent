@@ -46,8 +46,8 @@ class AgentspaceTrashStore:
     def __init__(
         self,
         trash_root: Path,
-        resolve_user_path: Callable[[str], tuple[str, Path]],
-    ) -> None:
+        resolve_user_path: Callable[[str], tuple[str, Path]]
+        ) -> None:
         self._root = trash_root
         self._items = trash_root / AGENTSPACE_TRASH_ITEMS_DIR_NAME
         self._resolve_user_path = resolve_user_path
@@ -84,7 +84,11 @@ class AgentspaceTrashStore:
     def _metadata_text(entry: AgentspaceTrashEntry) -> str:
         return entry.model_dump_json(exclude_none=False)
 
-    def _read_metadata(self, container: Path, entry_id: str) -> tuple[AgentspaceTrashEntry, bytes]:
+    def _read_metadata(
+        self,
+        container: Path,
+        entry_id: str
+        ) -> tuple[AgentspaceTrashEntry, bytes]:
         metadata_path = container / AGENTSPACE_TRASH_METADATA_FILENAME
         raw = metadata_path.read_bytes()
         entry = AgentspaceTrashEntry.model_validate_json(raw, strict=True)
@@ -97,7 +101,12 @@ class AgentspaceTrashStore:
             raise AgentspaceTrashCorruptError("垃圾桶条目目录与元数据不一致。")
         return entry, raw
 
-    def _marker_valid(self, container: Path, entry_id: str, metadata_raw: bytes) -> bool:
+    def _marker_valid(
+        self,
+        container: Path,
+        entry_id: str,
+        metadata_raw: bytes
+        ) -> bool:
         marker_path = container / AGENTSPACE_TRASH_COMMITTED_FILENAME
         payload = container / AGENTSPACE_TRASH_PAYLOAD_NAME
         if not marker_path.is_file() or not payload.exists():
@@ -129,7 +138,11 @@ class AgentspaceTrashStore:
             return candidate
         raise AgentspaceNotFoundError("垃圾桶条目不存在。", path=canonical)
 
-    def _inspect(self, container: Path, entry_id: str) -> AgentspaceTrashEntry:
+    def _inspect(
+        self,
+        container: Path,
+        entry_id: str
+        ) -> AgentspaceTrashEntry:
         payload = container / AGENTSPACE_TRASH_PAYLOAD_NAME
         try:
             entry, metadata_raw = self._read_metadata(container, entry_id)
@@ -274,8 +287,8 @@ class AgentspaceTrashStore:
     def _auto_restore_target(
         self,
         relative_path: str,
-        kind: AgentspaceEntryKind,
-    ) -> tuple[str, Path]:
+        kind: AgentspaceEntryKind
+        ) -> tuple[str, Path]:
         normalized, target = self._resolve_user_path(relative_path)
         if not target.exists():
             return normalized, target

@@ -221,7 +221,11 @@ class Sandbox(ISandbox):
         """返回适合当前平台比较的规范路径键。"""
         return os.path.normcase(os.path.normpath(str(path)))
 
-    def _paths_overlap(self, left: Path, right: Path) -> bool:
+    def _paths_overlap(
+        self,
+        left: Path,
+        right: Path
+        ) -> bool:
         """判断两个路径是否相同或存在父子包含关系。"""
         left_key = self._path_compare_key(left)
         right_key = self._path_compare_key(right)
@@ -236,8 +240,8 @@ class Sandbox(ISandbox):
         space: DynamicSandboxSpace,
         *,
         existing: list[DynamicSandboxSpace],
-        require_normalized: bool,
-    ) -> DynamicSandboxSpace:
+        require_normalized: bool
+        ) -> DynamicSandboxSpace:
         """校验并返回规范化动态空间，不修改传入对象。"""
         name = space.name.strip()
         if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, name):
@@ -386,8 +390,8 @@ class Sandbox(ISandbox):
         path: str,
         description: str,
         is_readonly: bool,
-        session_id: str = "",
-    ) -> tuple[DynamicSandboxSpace, bool]:
+        session_id: str = ""
+        ) -> tuple[DynamicSandboxSpace, bool]:
         """新增全局动态空间；完全相同的同名配置幂等成功。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
@@ -441,8 +445,8 @@ class Sandbox(ISandbox):
         path: str,
         description: str,
         is_readonly: bool,
-        session_id: str = "",
-    ) -> DynamicSandboxSpace:
+        session_id: str = ""
+        ) -> DynamicSandboxSpace:
         """原子更新全局动态空间；名称固定不变。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
@@ -490,7 +494,12 @@ class Sandbox(ISandbox):
             )
             return normalized.model_copy(deep=True)
 
-    def remove_dynamic_space(self, name: str, *, session_id: str = "") -> bool:
+    def remove_dynamic_space(
+        self,
+        name: str,
+        *,
+        session_id: str = ""
+        ) -> bool:
         """按名称删除全局动态空间；名称不存在时幂等成功。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
@@ -539,7 +548,11 @@ class Sandbox(ISandbox):
 
     # -- 路径解析 ----------------------------------------------------
 
-    def resolve(self, logical: str, access: Access) -> ResolvedPath:
+    def resolve(
+        self,
+        logical: str,
+        access: Access
+        ) -> ResolvedPath:
         """解析固定或 fast 动态逻辑路径，检查权限并返回真实路径。"""
         if not logical or not isinstance(logical, str):
             raise SandboxError("logical path must be a non-empty string")
@@ -647,8 +660,8 @@ class Sandbox(ISandbox):
         cwd_ns: str = "ws:",
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess:
         """以沙盒化工作目录运行子进程（同步，委托 SubprocessRunner）。
 
         保留命名空间校验与 cwd 解析层；子进程执行委托给 runner。
@@ -689,8 +702,8 @@ class Sandbox(ISandbox):
         cwd_ns: str = "ws:",
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess:
         """以沙盒化工作目录运行子进程（真异步，事件循环不阻塞）。
 
         与 ``run()`` 同样的命名空间校验与 cwd 解析，但子进程执行为
@@ -730,8 +743,8 @@ class Sandbox(ISandbox):
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
         session_id: str = "",
-        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
-    ) -> ProcessLineStreamResult:
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES
+        ) -> ProcessLineStreamResult:
         """以沙盒化工作目录逐行消费子进程 stdout。
 
         保留与 ``run_async()`` 一致的 cwd 解析和逻辑路径参数拒绝逻辑，
@@ -777,8 +790,8 @@ class Sandbox(ISandbox):
         offset: int = 0,
         limit: int = 100,
         *,
-        strict_utf8: bool = False,
-    ) -> str:
+        strict_utf8: bool = False
+        ) -> str:
         """通过沙盒读取文件内容，支持按行分页和常见编码自动探测。
 
         普通查看路径会按候选编码严格尝试，避免日志中的单个非法 UTF-8
@@ -832,14 +845,22 @@ class Sandbox(ISandbox):
             for index in range(1, missing_count + 1)
         ]
 
-    def write(self, logical: str, content: str) -> None:
+    def write(
+        self,
+        logical: str,
+        content: str
+        ) -> None:
         """通过沙盒写入文件内容，保留传入文本的原始换行序列。"""
         r: ResolvedPath = self.resolve_write(logical)
         r.real.parent.mkdir(parents=True, exist_ok=True)
         with r.real.open("w", encoding="utf-8", newline="") as f:
             f.write(content)
 
-    def append(self, logical: str, content: str) -> None:
+    def append(
+        self,
+        logical: str,
+        content: str
+        ) -> None:
         """通过沙盒追加文件内容，保留传入文本的原始换行序列。"""
         r: ResolvedPath = self.resolve_write(logical)
         if not r.real.exists():
@@ -875,7 +896,11 @@ class Sandbox(ISandbox):
             logical = f"{logical.rstrip('/' + chr(92))}/{suffix.as_posix()}"
         return ResolvedPath(logical=logical, real=actual, namespace=destination.namespace)
 
-    def copy(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def copy(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """复制文件（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -886,7 +911,11 @@ class Sandbox(ISandbox):
         actual = shutil.copy2(src.real, dst.real)
         return self._transfer_destination(dst, actual)
 
-    def copy_folder(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def copy_folder(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """递归复制目录（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -899,7 +928,11 @@ class Sandbox(ISandbox):
         shutil.copytree(src.real, dst.real)
         return dst
 
-    def move(self, logical_src: str, logical_dst: str) -> ResolvedPath:
+    def move(
+        self,
+        logical_src: str,
+        logical_dst: str
+        ) -> ResolvedPath:
         """移动或重命名文件/目录（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
@@ -923,7 +956,11 @@ class Sandbox(ISandbox):
         r: ResolvedPath = self.resolve_read(logical)
         return str(r.real)
 
-    def create_folder(self, logical: str, parents: bool = True) -> None:
+    def create_folder(
+        self,
+        logical: str,
+        parents: bool = True
+        ) -> None:
         """创建目录（写入检查）。"""
         r: ResolvedPath = self.resolve_write(logical)
         r.real.mkdir(parents=parents, exist_ok=True)

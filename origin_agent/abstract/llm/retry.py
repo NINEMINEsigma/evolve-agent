@@ -24,8 +24,8 @@ async def _wait_before_empty_retry(
     attempt: int,
     *,
     character: str,
-    streaming: bool,
-) -> None:
+    streaming: bool
+    ) -> None:
     """对明确的空响应执行有界退避；attempt 为已失败尝试的零基索引。"""
     if attempt + 1 == LLM_EMPTY_RESPONSE_MAX_ATTEMPTS:
         logger.error(
@@ -59,8 +59,8 @@ class EmptyResponseRetryClient(BaseLLMClient):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None,
-    ) -> LLMResponse:
+        last_user_message: CharacterConversationMessage | None = None
+        ) -> LLMResponse:
         """只对正常返回的空结果重试，其他结果和异常保持原语义。"""
         for attempt in range(LLM_EMPTY_RESPONSE_MAX_ATTEMPTS):
             response = await self._client.chat(
@@ -84,8 +84,8 @@ class EmptyResponseRetryClient(BaseLLMClient):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None,
-    ) -> AsyncIterator[StreamChunk]:
+        last_user_message: CharacterConversationMessage | None = None
+        ) -> AsyncIterator[StreamChunk]:
         """透传实时输出，在自然结束且没有正文/工具时重新请求原始输入。
 
         推理增量在同一逻辑流中连续保留；失败尝试不追加到请求消息。

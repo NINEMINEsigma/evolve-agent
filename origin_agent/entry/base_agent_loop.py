@@ -160,7 +160,11 @@ class Inbox:
     def reserve_shutdown(self, *, reservation_id: str) -> list[InputDelivery[InboxMessage]]:
         return self._buffer.reserve_shutdown(reservation_id=reservation_id)
 
-    def mark_appended(self, sequence: int, history_index: int) -> None:
+    def mark_appended(
+        self,
+        sequence: int,
+        history_index: int
+        ) -> None:
         self._buffer.mark_appended(sequence, history_index)
 
     def mark_persisted(self, sequences: list[int]) -> None:
@@ -290,8 +294,8 @@ def _serialize_message_entry(
     msg: BaseMessage,
     index: int,
     fallback_character: str = "assistant",
-    metrics: MessageMetrics | None = None,
-) -> SessionMessageEntry:
+    metrics: MessageMetrics | None = None
+    ) -> SessionMessageEntry:
     """将单条 History 消息序列化为前端展示用的 SessionMessageEntry。
 
     统一 BaseAgentLoop / MultiAgentLoop 两处 get_session_messages 的序列化逻辑，
@@ -383,7 +387,11 @@ class BaseAgentLoop(ABC):
     - schedule_inbox_processing() → None
     """
 
-    def __init__(self, app: Application, session_id: str) -> None:
+    def __init__(
+        self,
+        app: Application,
+        session_id: str
+        ) -> None:
         self.session_id: str = session_id
         self.app: Application = app
         self._inbox: Inbox = Inbox(app.get_system(IRuntimeSystem))
@@ -438,7 +446,11 @@ class BaseAgentLoop(ABC):
                 f"No active Agentspace round for {character_name!r}"
             ) from exc
 
-    def end_agentspace_round(self, character_name: str, round_id: str) -> None:
+    def end_agentspace_round(
+        self,
+        character_name: str,
+        round_id: str
+        ) -> None:
         """仅释放匹配轮次持有的路径锁；重复调用幂等。"""
         current = self._agentspace_round_ids.get(character_name)
         if current is None:
@@ -516,7 +528,13 @@ class BaseAgentLoop(ABC):
         ...
 
     @abstractmethod
-    async def append_user_message(self, content: Any, *, display_content: Any | None = None, **kwargs: Any) -> int:
+    async def append_user_message(
+        self,
+        content: Any,
+        *,
+        display_content: Any | None = None,
+        **kwargs: Any
+        ) -> int:
         """把用户消息加入本 loop 的历史/状态，返回其在持久化历史中的 index。
 
         Args:
@@ -536,7 +554,7 @@ class BaseAgentLoop(ABC):
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
         **kwargs
-    ) -> str:
+        ) -> str:
         """处理一条用户消息，返回助手的回复文本。
 
         由 gateway 在收到来自前端的 user_message 后调用。
@@ -711,7 +729,11 @@ class BaseAgentLoop(ABC):
             self._session_export_epoch += 1
         self.session_id = session_id
 
-    def _persist_history_value(self, session_id: str, history: History) -> None:
+    def _persist_history_value(
+        self,
+        session_id: str,
+        history: History
+        ) -> None:
         """严格保存指定候选；失败遵守当前 History 生命周期责任。"""
         if self._history_failure is not None:
             raise self._history_failure
@@ -791,8 +813,12 @@ class BaseAgentLoop(ABC):
         return count_history_media(self._history)
 
     def get_session_media(
-        self, *, offset: int, limit: int, editable: bool,
-    ) -> SessionMediaListResponse:
+        self,
+        *,
+        offset: int,
+        limit: int,
+        editable: bool
+        ) -> SessionMediaListResponse:
         self.ensure_media_identity()
         return project_history_media(
             self._history, self.session_id, offset=offset, limit=limit, editable=editable,
@@ -803,8 +829,11 @@ class BaseAgentLoop(ABC):
         return find_history_media(self._history, media_id).block.model_copy()
 
     def set_session_media_enabled(
-        self, media_id: str, send_multimodal: bool, expected_send_multimodal: bool,
-    ) -> SessionMediaUpdateResponse:
+        self,
+        media_id: str,
+        send_multimodal: bool,
+        expected_send_multimodal: bool
+        ) -> SessionMediaUpdateResponse:
         """候选先写盘，再修改原实例；不等待完整回复的处理锁。"""
         self.ensure_media_identity()
         occurrence = find_history_media(self._history, media_id)
@@ -821,9 +850,12 @@ class BaseAgentLoop(ABC):
         )
 
     def commit_media_description(
-        self, expected_session_id: str, expected_history: History,
-        media_id: str, description: str,
-    ) -> bool:
+        self,
+        expected_session_id: str,
+        expected_history: History,
+        media_id: str,
+        description: str
+        ) -> bool:
         """迟到结果只改现存实例缓存，绝不覆盖请求期间修改的发送开关。"""
         if not description.strip():
             raise ValueError("A verified media description must not be empty")
@@ -870,9 +902,12 @@ class BaseAgentLoop(ABC):
         return index
 
     def complete_unexecuted_tool_calls(
-        self, accepted_tool_calls: list[ToolCallRequest], executed_tool_call_ids: set[str],
-        character_name: str, phase: str,
-    ) -> None:
+        self,
+        accepted_tool_calls: list[ToolCallRequest],
+        executed_tool_call_ids: set[str],
+        character_name: str,
+        phase: str
+        ) -> None:
         """Pair accepted declarations only, preserving each Loop's storage policy."""
         from entry.tool_pairing import collect_unexecuted_tool_results
         from entry.tool_post_dispatch import PreparedToolResult
@@ -890,7 +925,12 @@ class BaseAgentLoop(ABC):
                 self._history.remove_last_message()
         self.save_history(session_id)
 
-    def append_assistant_text(self, text: str, *, session_id: str | None = None) -> int:
+    def append_assistant_text(
+        self,
+        text: str,
+        *,
+        session_id: str | None = None
+        ) -> int:
         """将一段 assistant 文本作为 CharacterConversationMessage 追加到历史并持久化。
 
         供 gateway 层与 loop 内错误/取消/超限等路径统一使用，确保「凡以 assistant
@@ -906,7 +946,12 @@ class BaseAgentLoop(ABC):
         self.save_history(sid)
         return index
 
-    def append_system_status(self, text: str, *, session_id: str | None = None) -> int:
+    def append_system_status(
+        self,
+        text: str,
+        *,
+        session_id: str | None = None
+        ) -> int:
         """将系统状态消息作为 SystemStatusMessage 追加到历史并持久化。
 
         SystemStatusMessage 对 LLM 不可见（is_visible_to 返回 False），
@@ -928,8 +973,8 @@ class BaseAgentLoop(ABC):
     async def report_context_limit_rotation_blocked(
         self,
         session_id: str,
-        error: Exception,
-    ) -> None:
+        error: Exception
+        ) -> None:
         """持久化并推送上下文超限旋转失败状态。"""
         from entity.constant import CONTEXT_LIMIT_METADATA_FAILURE_STATUS
 
@@ -1087,8 +1132,10 @@ class BaseAgentLoop(ABC):
         )
 
     def get_session_history_page(
-        self, start_index: int, limit: int,
-    ) -> SessionHistoryPageResponse:
+        self,
+        start_index: int,
+        limit: int
+        ) -> SessionHistoryPageResponse:
         """按 History 索引范围返回完整前端内容行。"""
         from entry.history_projection import project_history_content_rows
 
@@ -1150,8 +1197,8 @@ class BaseAgentLoop(ABC):
         )
 
     def edit_session_message(
-        self, 
-        index: int, 
+        self,
+        index: int,
         content: str | list[dict[str, Any]] | None = None,
         visible_characters: list[str] | None = None
         ) -> SessionMessageEditResult:
@@ -1372,8 +1419,8 @@ class BaseAgentLoop(ABC):
         self,
         source: MainSessionActivitySource,
         *,
-        character_name: str | None = None,
-    ) -> str:
+        character_name: str | None = None
+        ) -> str:
         """创建或复用当前主会话活动；只有 queued 阶段允许合并来源。"""
         current = self._main_session_activity
         if current is not None:
@@ -1410,8 +1457,8 @@ class BaseAgentLoop(ABC):
         phase: MainSessionActivityPhase,
         *,
         stream_id: str | None = None,
-        character_name: str | None = None,
-    ) -> None:
+        character_name: str | None = None
+        ) -> None:
         """更新匹配活动的阶段；None stream_id 明确解除当前流绑定。"""
         current = self._main_session_activity
         if current is None or current.activity_id != activity_id:
@@ -1681,8 +1728,8 @@ class BaseAgentLoop(ABC):
         self,
         history: History,
         hooks_context: str,
-        memory_ctx: str = "",
-    ) -> None:
+        memory_ctx: str = ""
+        ) -> None:
         """把非持久化的 hooks_context / memory_ctx 设置到 History 最后一条 user 消息。
 
         由 CharacterConversationMessage.as_content 在 is_last_user_message=True 时自动附加。
@@ -1804,9 +1851,11 @@ class IMainSessionLoop(ABC):
         return task is not None and not task.done()
 
     async def request_interrupt(
-        self, *, reason: str = "user",
-        timeout: float = MAIN_SESSION_INTERRUPT_TIMEOUT,
-    ) -> MainSessionInterruptResult:
+        self,
+        *,
+        reason: str = "user",
+        timeout: float = MAIN_SESSION_INTERRUPT_TIMEOUT
+        ) -> MainSessionInterruptResult:
         """强制中断当前主会话轮次并等待收尾确认（权威结果）。
 
         流程：互斥 → 无活动任务直接 idle → 设置轮次取消信号 →
@@ -1916,8 +1965,8 @@ class IMainSessionLoop(ABC):
         self,
         source: MainSessionActivitySource,
         *,
-        character_name: str | None = None,
-    ) -> str:
+        character_name: str | None = None
+        ) -> str:
         return self.loop.ensure_main_session_activity(
             source,
             character_name=character_name,
@@ -1929,8 +1978,8 @@ class IMainSessionLoop(ABC):
         phase: MainSessionActivityPhase,
         *,
         stream_id: str | None = None,
-        character_name: str | None = None,
-    ) -> None:
+        character_name: str | None = None
+        ) -> None:
         self.loop.set_main_session_activity_phase(
             activity_id,
             phase,
@@ -2031,7 +2080,11 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     - _build_system_prompt() → list[str]
     """
 
-    def __init__(self, app: Application, session_id: str) -> None:
+    def __init__(
+        self,
+        app: Application,
+        session_id: str
+        ) -> None:
         super().__init__(app, session_id)
 
     # -- 抽象方法 ---------------------------------------------------------

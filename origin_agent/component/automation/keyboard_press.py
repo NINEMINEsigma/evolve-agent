@@ -149,7 +149,11 @@ def _resolve_vk(key: str) -> int | None:
     return None
 
 
-def _post_key_press(hwnd: int, vk_codes: list[int], presses: int) -> bool:
+def _post_key_press(
+    hwnd: int,
+    vk_codes: list[int],
+    presses: int
+    ) -> bool:
     """后台单键：通过 PostMessage 发送 WM_KEYDOWN / WM_KEYUP。
 
     仅用于无修饰键的单键场景。组合键用 ``_post_combo``。

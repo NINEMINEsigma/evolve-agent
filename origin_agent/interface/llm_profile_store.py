@@ -96,8 +96,8 @@ class ILLMProfileStore(AsyncSystem, ABC):
     def set_global_modality_profile(
         self,
         media_type: Literal["image", "audio", "video"],
-        profile: LLMProfile | None,
-    ) -> None:
+        profile: LLMProfile | None
+        ) -> None:
         """Persist one modality's global fallback Profile reference."""
         ...
 
@@ -105,8 +105,8 @@ class ILLMProfileStore(AsyncSystem, ABC):
     def is_global_modality_profile(
         self,
         profile: LLMProfile,
-        media_type: Literal["image", "audio", "video"],
-    ) -> bool:
+        media_type: Literal["image", "audio", "video"]
+        ) -> bool:
         """Check whether a Profile is referenced by one modality fallback."""
         ...
 
@@ -149,8 +149,8 @@ class ILLMProfileStore(AsyncSystem, ABC):
     def update_profile(
         self,
         original_name: str,
-        payload: LLMProfilePayload,
-    ) -> LLMProfile:
+        payload: LLMProfilePayload
+        ) -> LLMProfile:
         """Update a Profile while preserving its root instance identity."""
         ...
 
@@ -159,8 +159,8 @@ class ILLMProfileStore(AsyncSystem, ABC):
         self,
         profile: LLMProfile,
         *,
-        clear_global_selections: bool = False,
-    ) -> None:
+        clear_global_selections: bool = False
+        ) -> None:
         """Reject deletion when any protected Profile reference remains."""
         ...
 
@@ -169,7 +169,7 @@ class ILLMProfileStore(AsyncSystem, ABC):
         self,
         name: str,
         *,
-        clear_global_selections: bool = False,
-    ) -> LLMProfile:
+        clear_global_selections: bool = False
+        ) -> LLMProfile:
         """Remove and persist a named Profile after reference checks."""
         ...

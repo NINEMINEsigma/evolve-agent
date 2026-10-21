@@ -50,8 +50,8 @@ class SubRuntimeContext(BaseModel):
 async def build_subagent_context(
     profile: CharacterProfile,
     temperature: float,
-    parent_ctx: RuntimeContext,
-) -> SubRuntimeContext:
+    parent_ctx: RuntimeContext
+    ) -> SubRuntimeContext:
     """从动态角色档案构建普通子Agent运行时上下文。"""
     from system.templates import read_template
 

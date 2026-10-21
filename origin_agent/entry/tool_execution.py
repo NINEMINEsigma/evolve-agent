@@ -12,8 +12,8 @@ async def accept_tool_batch(
     registry: ToolRegistry,
     sink: IAgentSink,
     session_id: str,
-    stream_id: str,
-) -> LLMResponse:
+    stream_id: str
+    ) -> LLMResponse:
     """Retain only the declared accepted prefix, independent of approval outcome."""
     decision = registry.plan_tool_batch(response.tool_calls)
     if decision.discarded:

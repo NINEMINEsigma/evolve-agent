@@ -138,7 +138,12 @@ logger = logging.getLogger(__name__)
 class MCPCore:
     """Own MCP-loop tasks and cross-thread handoffs for one Application."""
 
-    def __init__(self, ctx: RuntimeContext, registry: ToolRegistry, runtime: RuntimeSystem) -> None:
+    def __init__(
+        self,
+        ctx: RuntimeContext,
+        registry: ToolRegistry,
+        runtime: RuntimeSystem
+        ) -> None:
         self.context = ctx
         self.registry = registry
         self.runtime = runtime
@@ -254,7 +259,11 @@ class MCPCore:
         finally:
             self._started.set()
 
-    def _loop_exception(self, loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+    def _loop_exception(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        context: dict[str, Any]
+        ) -> None:
         error = context.get("exception")
         if error is None:
             error = LifecycleFailure(context.get("message", "MCP event loop failure"))
@@ -262,10 +271,14 @@ class MCPCore:
         loop.default_exception_handler(context)
 
     def call(
-        self, factory: Callable[[], Coroutine[Any, Any, Any]], *,
-        timeout: float, startup: bool = False,
-        owner: TaskOwner | None = None, admission: Callable | None = None,
-    ) -> Any:
+        self,
+        factory: Callable[[], Coroutine[Any, Any, Any]],
+        *,
+        timeout: float,
+        startup: bool = False,
+        owner: TaskOwner | None = None,
+        admission: Callable | None = None
+        ) -> Any:
         # 同步工具handler/系统工作线程使用此入口，绝不能阻塞任一事件循环。
         try:
             asyncio.get_running_loop()
@@ -297,7 +310,13 @@ class MCPCore:
                 if record.result.done():
                     self._calls.pop(record.result, None)
 
-    def _start_call(self, record: MCPBridgeCall, factory: Callable, admit: Callable, owner: TaskOwner | None) -> None:
+    def _start_call(
+        self,
+        record: MCPBridgeCall,
+        factory: Callable,
+        admit: Callable,
+        owner: TaskOwner | None
+        ) -> None:
         gate = asyncio.get_running_loop().create_future()
 
         async def invoke() -> Any:
@@ -337,7 +356,11 @@ class MCPCore:
                 record.cancel_sent = True
                 task.cancel()
 
-    def _finish_call(self, record: MCPBridgeCall, task: asyncio.Task[Any]) -> None:
+    def _finish_call(
+        self,
+        record: MCPBridgeCall,
+        task: asyncio.Task[Any]
+        ) -> None:
         if task.cancelled():
             error: BaseException | None = ApplicationStoppingError("MCP request was cancelled by its owner")
             value = None
@@ -831,7 +854,11 @@ _MCP_INJECTION_PATTERNS = [
 ]
 
 
-def _scan_mcp_description(server_name: str, tool_name: str, description: str) -> list[str]:
+def _scan_mcp_description(
+    server_name: str,
+    tool_name: str,
+    description: str
+    ) -> list[str]:
     """Scan an MCP tool description for prompt injection patterns.
 
     Returns a list of finding strings (empty = clean).
@@ -981,7 +1008,12 @@ class SamplingHandler:
 
     _STOP_REASON_MAP = {"stop": "endTurn", "length": "maxTokens", "tool_calls": "toolUse"}
 
-    def __init__(self, server: MCPServerTask, config: dict, call_llm: Callable | None = None):
+    def __init__(
+        self,
+        server: MCPServerTask,
+        config: dict,
+        call_llm: Callable | None = None
+        ):
         self._server = server
         self.server_name = server.name
         self._call_llm = call_llm
@@ -1107,7 +1139,11 @@ class SamplingHandler:
 
     # -- Response building ---------------------------------------------------
 
-    def _build_tool_use_result(self, choice, response):
+    def _build_tool_use_result(
+        self,
+        choice,
+        response
+        ):
         """Build a CreateMessageResultWithTools from an LLM tool_calls response."""
         self.metrics["tool_use_count"] += 1
 
@@ -1164,7 +1200,11 @@ class SamplingHandler:
             stopReason="toolUse",
         )
 
-    def _build_text_result(self, choice, response):
+    def _build_text_result(
+        self,
+        choice,
+        response
+        ):
         """Build a CreateMessageResult from a normal text response."""
         self._tool_loop_count = 0  # reset on text response
         response_text = choice.message.content or ""
@@ -1196,13 +1236,21 @@ class SamplingHandler:
 
     # -- Main callback -------------------------------------------------------
 
-    async def __call__(self, context, params):
+    async def __call__(
+        self,
+        context,
+        params
+        ):
         try:
             return await self._server.request(lambda: self._sample(context, params))
         except ApplicationStoppingError:
             return self._error("MCP sampling is closed")
 
-    async def _sample(self, context, params):
+    async def _sample(
+        self,
+        context,
+        params
+        ):
         """Sampling callback invoked by the MCP SDK.
 
         Conforms to ``SamplingFnT`` protocol.  Returns
@@ -1370,7 +1418,11 @@ class MCPServerTask:
         "initialize_result",
     )
 
-    def __init__(self, name: str, core: MCPCore):
+    def __init__(
+        self,
+        name: str,
+        core: MCPCore
+        ):
         self.name = name
         self.core = core
         self.session: ClientSession | None = None
@@ -1834,7 +1886,11 @@ class MCPServerTask:
         finally:
             self._ready.set()
 
-    async def start(self, config: dict, timeout: float | None = None) -> None:
+    async def start(
+        self,
+        config: dict,
+        timeout: float | None = None
+        ) -> None:
         """Start the connection task and wait for readiness within *timeout*.
 
         The wait is bounded without cancelling the connection task: the caller
@@ -2052,8 +2108,8 @@ def _handle_auth_error_and_retry(
     server_name: str,
     exc: BaseException,
     retry_call,
-    op_description: str,
-):
+    op_description: str
+    ):
     """Attempt auth recovery and one retry; return None to fall through.
 
     Called by the 5 MCP tool handlers when ``session.<op>()`` raises an
@@ -2193,8 +2249,8 @@ def _handle_session_expired_and_retry(
     server_name: str,
     exc: BaseException,
     retry_call,
-    op_description: str,
-):
+    op_description: str
+    ):
     """Trigger a transport reconnect and retry once on session expiry.
 
     Unlike :func:`_handle_auth_error_and_retry`, this does **not** call
@@ -2254,9 +2310,12 @@ def _handle_session_expired_and_retry(
 
 
 def _run_on_mcp_loop(
-    core: MCPCore, factory: Callable[[], Coroutine[Any, Any, Any]],
-    timeout: float = 30, *, server: MCPServerTask | None = None,
-) -> Any:
+    core: MCPCore,
+    factory: Callable[[], Coroutine[Any, Any, Any]],
+    timeout: float = 30,
+    *,
+    server: MCPServerTask | None = None
+    ) -> Any:
     return core.call(
         factory, timeout=timeout,
         owner=None if server is None else server._requests,
@@ -2308,10 +2367,14 @@ class MCPTool(BaseTool):
     """Bridge an MCP operation into the shared invocation lifecycle."""
 
     def __init__(
-        self, *, name: str, toolset: str, schema: dict[str, Any],
+        self,
+        *,
+        name: str,
+        toolset: str,
+        schema: dict[str, Any],
         operation: Callable[[dict[str, Any]], dict[str, Any]],
-        check_fn: Callable[[], bool],
-    ) -> None:
+        check_fn: Callable[[], bool]
+        ) -> None:
         super().__init__(
             name=name, toolset=toolset, schema=schema,
             description=schema["description"], check_fn=check_fn,
@@ -2323,7 +2386,12 @@ class MCPTool(BaseTool):
         return ToolHandlerResult(result=self._operation(execution.arguments))
 
 
-def _make_tool_handler(core: MCPCore, server_name: str, tool_name: str, tool_timeout: float):
+def _make_tool_handler(
+    core: MCPCore,
+    server_name: str,
+    tool_name: str,
+    tool_timeout: float
+    ):
     """Return a sync MCP operation used by MCPTool on the Registry's executor."""
 
     def _handler(args: dict, **_kwargs) -> dict:
@@ -2468,7 +2536,11 @@ def _make_tool_handler(core: MCPCore, server_name: str, tool_name: str, tool_tim
     return _handler
 
 
-def _make_list_resources_handler(core: MCPCore, server_name: str, tool_timeout: float):
+def _make_list_resources_handler(
+    core: MCPCore,
+    server_name: str,
+    tool_timeout: float
+    ):
     """Return a sync handler that lists resources from an MCP server."""
 
     def _handler(_args: dict, **_kwargs) -> dict:
@@ -2525,7 +2597,11 @@ def _make_list_resources_handler(core: MCPCore, server_name: str, tool_timeout: 
     return _handler
 
 
-def _make_read_resource_handler(core: MCPCore, server_name: str, tool_timeout: float):
+def _make_read_resource_handler(
+    core: MCPCore,
+    server_name: str,
+    tool_timeout: float
+    ):
     """Return a sync handler that reads a resource by URI from an MCP server."""
 
     def _handler(args: dict, **_kwargs) -> dict:
@@ -2585,7 +2661,11 @@ def _make_read_resource_handler(core: MCPCore, server_name: str, tool_timeout: f
     return _handler
 
 
-def _make_list_prompts_handler(core: MCPCore, server_name: str, tool_timeout: float):
+def _make_list_prompts_handler(
+    core: MCPCore,
+    server_name: str,
+    tool_timeout: float
+    ):
     """Return a sync handler that lists prompts from an MCP server."""
 
     def _handler(_args: dict, **_kwargs) -> dict:
@@ -2649,7 +2729,11 @@ def _make_list_prompts_handler(core: MCPCore, server_name: str, tool_timeout: fl
     return _handler
 
 
-def _make_get_prompt_handler(core: MCPCore, server_name: str, tool_timeout: float):
+def _make_get_prompt_handler(
+    core: MCPCore,
+    server_name: str,
+    tool_timeout: float
+    ):
     """Return a sync handler that gets a prompt by name from an MCP server."""
 
     def _handler(args: dict, **_kwargs) -> dict:
@@ -2885,7 +2969,11 @@ _UTILITY_CAPABILITY_ATTRS = {
 }
 
 
-def _select_utility_schemas(server_name: str, server: MCPServerTask, config: dict) -> list[dict]:
+def _select_utility_schemas(
+    server_name: str,
+    server: MCPServerTask,
+    config: dict
+    ) -> list[dict]:
     """Select utility schemas based on config and server capabilities."""
     tools_filter = config.get("tools") or {}
     resources_enabled = as_bool(tools_filter.get("resources"), default=True)
@@ -2928,7 +3016,11 @@ def _existing_tool_names(core: MCPCore) -> list[str]:
     return names
 
 
-def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> list[str]:
+def _register_server_tools(
+    name: str,
+    server: MCPServerTask,
+    config: dict
+    ) -> list[str]:
     """Register tools from an already-connected server into the registry.
 
     Handles include/exclude filtering and utility tools. Toolset resolution
@@ -3036,8 +3128,10 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
 
 
 async def _discover_and_register_server(
-    name: str, config: dict, core: MCPCore,
-) -> list[str]:
+    name: str,
+    config: dict,
+    core: MCPCore
+    ) -> list[str]:
     """Connect to a single MCP server, discover tools, and register them.
 
     Returns list of registered tool names.
@@ -3072,7 +3166,11 @@ async def _discover_and_register_server(
     return registered_names
 
 
-async def _start_server_isolated(name: str, config: dict, core: MCPCore) -> bool:
+async def _start_server_isolated(
+    name: str,
+    config: dict,
+    core: MCPCore
+    ) -> bool:
     """Connect one server; only its own failure is contained.
 
     A misconfigured or unreachable server must not abort startup or tear down

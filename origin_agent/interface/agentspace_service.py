@@ -78,23 +78,36 @@ class IAgentspaceService(AsyncSystem, ABC):
         relative_path: str,
         content: str,
         expected_version: str | None,
-        operation_id: str = "",
-    ) -> AgentspaceFileSnapshot:
+        operation_id: str = ""
+        ) -> AgentspaceFileSnapshot:
         """Write one version-checked Agentspace file."""
         ...
 
     @abstractmethod
-    def create_directory(self, relative_path: str, operation_id: str = "") -> AgentspaceEntry:
+    def create_directory(
+        self,
+        relative_path: str,
+        operation_id: str = ""
+        ) -> AgentspaceEntry:
         """Create one Agentspace directory without overwriting."""
         ...
 
     @abstractmethod
-    def rename_path(self, relative_path: str, new_name: str, operation_id: str = "") -> tuple[str, str]:
+    def rename_path(
+        self,
+        relative_path: str,
+        new_name: str,
+        operation_id: str = ""
+        ) -> tuple[str, str]:
         """Rename one Agentspace path without replacing its target."""
         ...
 
     @abstractmethod
-    def move_to_trash(self, relative_path: str, operation_id: str = "") -> AgentspaceTrashEntry:
+    def move_to_trash(
+        self,
+        relative_path: str,
+        operation_id: str = ""
+        ) -> AgentspaceTrashEntry:
         """Move one user-owned Agentspace path into the trash store."""
         ...
 
@@ -104,12 +117,20 @@ class IAgentspaceService(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def restore_trash(self, entry_id: str, operation_id: str = "") -> tuple[AgentspaceTrashEntry, str]:
+    def restore_trash(
+        self,
+        entry_id: str,
+        operation_id: str = ""
+        ) -> tuple[AgentspaceTrashEntry, str]:
         """Restore one trash entry without replacing an existing target."""
         ...
 
     @abstractmethod
-    def purge_trash(self, entry_id: str, operation_id: str = "") -> None:
+    def purge_trash(
+        self,
+        entry_id: str,
+        operation_id: str = ""
+        ) -> None:
         """Permanently remove one trash entry."""
         ...
 
@@ -122,8 +143,8 @@ class IAgentspaceService(AsyncSystem, ABC):
     def agent_access(
         self,
         owner: AgentspaceLockOwner,
-        paths: list[tuple[str, bool]],
-    ) -> ContextManager[None]:
+        paths: list[tuple[str, bool]]
+        ) -> ContextManager[None]:
         """Acquire reply-scoped locks for explicit ws paths."""
         ...
 
@@ -134,8 +155,8 @@ class IAgentspaceService(AsyncSystem, ABC):
         session_id: str,
         character_name: str,
         logical_path: str,
-        recursive: bool = False,
-    ) -> None:
+        recursive: bool = False
+        ) -> None:
         """Acquire one explicit Agentspace lock for a reply round."""
         ...
 
@@ -164,8 +185,8 @@ class IAgentspaceService(AsyncSystem, ABC):
         self,
         operation: str,
         path: str,
-        old_path: str | None = None,
-    ) -> None:
+        old_path: str | None = None
+        ) -> None:
         """Record a successful user-visible Agentspace change."""
         ...
 

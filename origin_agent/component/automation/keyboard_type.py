@@ -230,7 +230,11 @@ def _get_focus_hwnd(hwnd: int) -> int:
     return hwnd
 
 
-def _post_chars(hwnd: int, text: str, interval: float) -> None:
+def _post_chars(
+    hwnd: int,
+    text: str,
+    interval: float
+    ) -> None:
     """通过 PostMessage 逐字符发送 WM_CHAR。
 
     wParam 为字符的 Unicode 码点，覆盖 ASCII 和 CJK。

@@ -136,7 +136,11 @@ class ShellTextNormalizer:
         self._cursor = 0
         return line + "\n"
 
-    def _apply_csi(self, final: str, raw_params: str) -> None:
+    def _apply_csi(
+        self,
+        final: str,
+        raw_params: str
+        ) -> None:
         params = raw_params.lstrip("?")
         values: list[int] = []
         for item in params.split(";") if params else []:

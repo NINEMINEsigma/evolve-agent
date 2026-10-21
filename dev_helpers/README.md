@@ -2,6 +2,17 @@
 
 本目录服务于开发者与开发助手AI，不属于 origin仓库，不会派生到运行时仓库。脚本可配置导入路径，复用 origin仓库数据模型与无启动副作用的库接口，以及只读 third库；这与直接启动 origin仓库应用不同，不允许导入/执行 `run.py`、`config.py`、应用入口或创建 Application，也不读取运行时仓库代码。导入依赖前禁写Python字节码，避免在源码目录生成 `__pycache__`。
 
+## 函数签名重排
+
+`reformat_signatures.py` 对 `origin_agent/` 全部 Python 源码执行一次性格式化：凡形参（含 `self`）达到 3 个的函数签名，改为每参数一行、右括号悬空缩进的风格（样板见 `origin_agent/system/session_visual_resources.py` 的 `get_state`）。签名内的行内注释、参数前的独立注释行、裸 `*` / `/` 分隔符均原位保留；重排后逐文件用 `ast.parse()` 自检，解析失败则跳过该文件不写回。命令（`--dry-run` 只报告不写入）：
+
+```powershell
+python dev_helpers/reformat_signatures.py --dry-run
+python dev_helpers/reformat_signatures.py
+```
+
+脚本只重排函数头，不改函数体；已核对 123 个文件、688 处签名重排前后 AST（忽略行号）完全一致。该脚本不导入项目模块、不启动应用。
+
 ## History辅助读取
 
 `read_history.py` 复用 `third/easysave.raw_load()`、`origin_agent/entity/typeref.py::make_config()`、正式 `History` / 媒体类型和 `History_Version`，读取指定 `.es`（或显式指定的 `.es.bak`），还原真正的项目 `History` 实例，再生成媒体占位JSON。辅助代码仅负责展示：通过 BaseModel公开迭代接口保留当前模型字段与嵌套类型，不复制模型字段表，不重写 easysave引用/容器/枚举协议。依赖项目现有Python环境（包含Pydantic），不是纯标准库脚本。

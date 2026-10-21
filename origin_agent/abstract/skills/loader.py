@@ -36,8 +36,8 @@ def load_skill(
     preprocess: bool = True,
     inline_shell: bool = False,
     inline_shell_timeout: int = 10,
-    template_vars: dict[str, str] | None = None,
-) -> SkillPayload:
+    template_vars: dict[str, str] | None = None
+    ) -> SkillPayload:
     """Load a skill by name or path.
 
     Args:
@@ -125,8 +125,8 @@ def list_skills(
     skills_dir: Path | None = None,
     external_dirs: list[Path] | None = None,
     category: str | None = None,
-    disabled: list[str] | None = None,
-) -> list[SkillInfo]:
+    disabled: list[str] | None = None
+    ) -> list[SkillInfo]:
     """List all available skills with minimal metadata.
 
     Args:
@@ -211,8 +211,10 @@ def list_skills(
 
 
 def _resolve_skill_path(
-    name_or_path: str, skills_dir: Path, external_dirs: list[Path]
-) -> Path|None:
+    name_or_path: str,
+    skills_dir: Path,
+    external_dirs: list[Path]
+    ) -> Path|None:
     """Resolve a skill name or path to a SKILL.md file."""
     p = Path(name_or_path).expanduser()
 
@@ -291,8 +293,10 @@ def _default_template_vars(task_id: str | None = None) -> dict[str, str]:
 
 
 def _substitute_template_vars(
-    content: str, skill_dir: Path | None, vars: dict[str, str]
-) -> str:
+    content: str,
+    skill_dir: Path | None,
+    vars: dict[str, str]
+    ) -> str:
     """Replace ``{{ var_name }}`` placeholders with values from *vars*.
 
     Supports:
@@ -316,8 +320,10 @@ def _substitute_template_vars(
 
 
 def _expand_inline_shell(
-    content: str, skill_dir: Path | None, timeout: int = 10
-) -> str:
+    content: str,
+    skill_dir: Path | None,
+    timeout: int = 10
+    ) -> str:
     """Execute ``{{ shell command }}`` blocks and replace with output.
 
     WARNING: This executes arbitrary shell commands. Only enable when

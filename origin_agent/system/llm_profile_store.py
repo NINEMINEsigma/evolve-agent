@@ -192,8 +192,8 @@ class LLMProfileStore(ILLMProfileStore):
     def set_global_modality_profile(
         self,
         media_type: Literal["image", "audio", "video"],
-        profile: LLMProfile | None,
-    ) -> None:
+        profile: LLMProfile | None
+        ) -> None:
         """设置指定媒体类型的全局回退 Profile 引用并持久化。"""
         with self._lock:
             if profile is not None and not any(
@@ -223,8 +223,8 @@ class LLMProfileStore(ILLMProfileStore):
     def is_global_modality_profile(
         self,
         profile: LLMProfile,
-        media_type: Literal["image", "audio", "video"],
-    ) -> bool:
+        media_type: Literal["image", "audio", "video"]
+        ) -> bool:
         """返回 Profile 是否是指定媒体类型的全局回退 Profile。"""
         return self.get_global_modality_profile(media_type) is profile
 
@@ -333,8 +333,8 @@ class LLMProfileStore(ILLMProfileStore):
     def update_profile(
         self,
         original_name: str,
-        payload: LLMProfilePayload,
-    ) -> LLMProfile:
+        payload: LLMProfilePayload
+        ) -> LLMProfile:
         """原地更新 Profile；重命名不会替换实例身份。"""
         with self._lock:
             profile = self.get_profile(original_name)
@@ -387,8 +387,8 @@ class LLMProfileStore(ILLMProfileStore):
         self,
         profile: LLMProfile,
         *,
-        clear_global_selections: bool = False,
-    ) -> None:
+        clear_global_selections: bool = False
+        ) -> None:
         """确认目标实例没有被任何根对象引用。
 
         ``clear_global_selections=True`` 时仅忽略审批 Profile、全局元数据
@@ -436,8 +436,8 @@ class LLMProfileStore(ILLMProfileStore):
         self,
         name: str,
         *,
-        clear_global_selections: bool = False,
-    ) -> LLMProfile:
+        clear_global_selections: bool = False
+        ) -> LLMProfile:
         """移除未被其他根 Profile 引用的实例。
 
         ``clear_global_selections=True`` 时，在一次 Profile 文件保存中删除
@@ -538,8 +538,8 @@ class LLMProfileStore(ILLMProfileStore):
     def _assign_payload_in(
         profile: LLMProfile,
         payload: LLMProfilePayload,
-        profiles: list[LLMProfile],
-    ) -> None:
+        profiles: list[LLMProfile]
+        ) -> None:
         # 在指定列表内解析引用并立即赋值；用于候选图的验证性赋值。
         LLMProfileStore._apply_profile_fields(
             profile,
@@ -562,8 +562,8 @@ class LLMProfileStore(ILLMProfileStore):
         *,
         vision_image_profile: LLMProfile | None,
         audio_profile: LLMProfile | None,
-        vision_video_profile: LLMProfile | None,
-    ) -> None:
+        vision_video_profile: LLMProfile | None
+        ) -> None:
         """用已解析的引用与标量字段赋值到目标 Profile 实例。
 
         不再做任何名称查找；调用方负责在赋值前完成引用解析。

@@ -54,8 +54,8 @@ class IGatewaySystem(AsyncSystem, ABC):
         self,
         coro: Coroutine[Any, Any, WorkT],
         *,
-        name: str,
-    ) -> asyncio.Task[WorkT]:
+        name: str
+        ) -> asyncio.Task[WorkT]:
         """Register one route background coroutine with Gateway ownership."""
         ...
 

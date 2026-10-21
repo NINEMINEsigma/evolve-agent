@@ -26,7 +26,13 @@ from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwn
 logger = logging.getLogger(__name__)
 
 
-def _positive(value: Any, name: str, *, integer: bool = False, zero: bool = False) -> None:
+def _positive(
+    value: Any,
+    name: str,
+    *,
+    integer: bool = False,
+    zero: bool = False
+    ) -> None:
     if isinstance(value, bool) or not isinstance(value, int if integer else (int, float)):
         raise TypeError(f"{name} must be a number of the required type")
     if not math.isfinite(value) or (value < 0 if zero else value <= 0):

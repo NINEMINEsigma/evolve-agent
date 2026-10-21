@@ -207,7 +207,11 @@ class McpTokenStorage:
         agentspace/mcp-tokens/<server_name>.meta.json     -- oauth server metadata
     """
 
-    def __init__(self, server_name: str, token_dir: Path):
+    def __init__(
+        self,
+        server_name: str,
+        token_dir: Path
+        ):
         self._server_name = _safe_filename(server_name)
         self._token_dir = token_dir
 
@@ -345,7 +349,11 @@ def _make_callback_handler() -> tuple[type, dict]:
             self.end_headers()
             self.wfile.write(body.encode())
 
-        def log_message(self, fmt: str, *args: object) -> None:
+        def log_message(
+            self,
+            fmt: str,
+            *args: object
+            ) -> None:
             logger.debug("OAuth callback: %s", fmt % args)
 
     return _Handler, result
@@ -401,9 +409,11 @@ async def _redirect_handler(authorization_url: str, *, port: int | None = None) 
 
 
 async def _wait_for_callback(
-    *, port: int, timeout: float = _OAUTH_CALLBACK_TIMEOUT,
-    manager: MCPOAuthManager,
-) -> tuple[str, str | None]:
+    *,
+    port: int,
+    timeout: float = _OAUTH_CALLBACK_TIMEOUT,
+    manager: MCPOAuthManager
+    ) -> tuple[str, str | None]:
     """Await one owned listener and confirm native cleanup before release."""
     from .oauth_callback import OAuthCallbackServer
     from system.lifecycle import ApplicationStoppingError
@@ -512,8 +522,8 @@ def _build_client_metadata(cfg: dict) -> "OAuthClientMetadata":
 def _maybe_preregister_client(
     storage: "McpTokenStorage",
     cfg: dict,
-    client_metadata: "OAuthClientMetadata",
-) -> None:
+    client_metadata: "OAuthClientMetadata"
+    ) -> None:
     """If cfg has a pre-registered client_id, persist it to storage."""
     client_id = cfg.get("client_id")
     if not client_id:

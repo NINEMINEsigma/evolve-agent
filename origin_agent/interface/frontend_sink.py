@@ -33,7 +33,12 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         ...
 
     @abstractmethod
-    def register_ws(self, session_id: str, ws: WebSocket, token: str) -> None:
+    def register_ws(
+        self,
+        session_id: str,
+        ws: WebSocket,
+        token: str
+        ) -> None:
         """Register one frontend WebSocket connection."""
         ...
 
@@ -43,7 +48,13 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         ...
 
     @abstractmethod
-    async def close_session(self, session_id: str, *, code: int, reason: str) -> bool:
+    async def close_session(
+        self,
+        session_id: str,
+        *,
+        code: int,
+        reason: str
+        ) -> bool:
         """Invalidate and close one session connection."""
         ...
 
@@ -63,7 +74,12 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         ...
 
     @abstractmethod
-    async def broadcast_profile_change(self, operation: str, old_name: str, new_name: str | None) -> list[str]:
+    async def broadcast_profile_change(
+        self,
+        operation: str,
+        old_name: str,
+        new_name: str | None
+        ) -> list[str]:
         """Broadcast one LLM Profile change and return failed session IDs."""
         ...
 
@@ -88,7 +104,11 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         ...
 
     @abstractmethod
-    def is_session_occupied(self, session_id: str, token: str | None) -> bool:
+    def is_session_occupied(
+        self,
+        session_id: str,
+        token: str | None
+        ) -> bool:
         """Check whether a session is occupied by another connection token."""
         ...
 
@@ -98,12 +118,16 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         request_id: str,
         action: str,
         deny_reason: str | None = None,
-        denied_by: str = "user",
-    ) -> bool:
+        denied_by: str = "user"
+        ) -> bool:
         """Resolve one pending approval request."""
         ...
 
     @abstractmethod
-    def resolve_ask(self, request_id: str, answers: list[AskAnswerItem] | None = None) -> bool:
+    def resolve_ask(
+        self,
+        request_id: str,
+        answers: list[AskAnswerItem] | None = None
+        ) -> bool:
         """Resolve one pending question form."""
         ...

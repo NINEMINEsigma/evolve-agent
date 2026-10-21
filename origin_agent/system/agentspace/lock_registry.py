@@ -32,8 +32,8 @@ class AgentspaceLockRegistry:
     def __init__(
         self,
         event_hub: AgentspaceEventHub,
-        canonicalize: Callable[[str], AgentspacePathIdentity],
-    ) -> None:
+        canonicalize: Callable[[str], AgentspacePathIdentity]
+        ) -> None:
         self._event_hub = event_hub
         self._canonicalize = canonicalize
         self._lock = threading.RLock()
@@ -43,8 +43,8 @@ class AgentspaceLockRegistry:
         self,
         owner: AgentspaceLockOwner,
         logical_path: str,
-        recursive: bool,
-    ) -> AgentspaceLockInfo:
+        recursive: bool
+        ) -> AgentspaceLockInfo:
         identity = self._canonicalize(logical_path)
         changed = False
         with self._lock:
@@ -98,8 +98,8 @@ class AgentspaceLockRegistry:
     def matching(
         self,
         relative_path: str,
-        include_descendants: bool,
-    ) -> list[AgentspaceLockInfo]:
+        include_descendants: bool
+        ) -> list[AgentspaceLockInfo]:
         target = self._canonicalize(relative_path)
         matches: list[AgentspaceLockInfo] = []
         with self._lock:

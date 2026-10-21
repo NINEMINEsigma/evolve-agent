@@ -67,7 +67,13 @@ def _check_pyautogui() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _post_click(hwnd: int, x: int, y: int, button: str, clicks: int) -> bool:
+def _post_click(
+    hwnd: int,
+    x: int,
+    y: int,
+    button: str,
+    clicks: int
+    ) -> bool:
     """通过 PostMessage 向窗口发送鼠标点击消息（后台点击）。
 
     x, y 为窗口客户区坐标。窗口可被遮挡。

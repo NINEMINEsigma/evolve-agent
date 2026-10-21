@@ -30,7 +30,12 @@ class InputDeliveryBuffer(Generic[PayloadT]):
         self._persisted = 0
         self._ephemeral = 0
 
-    def accept(self, payload: PayloadT, *, ready: bool = True) -> int:
+    def accept(
+        self,
+        payload: PayloadT,
+        *,
+        ready: bool = True
+        ) -> int:
         with self._runtime.admission(), self._lock:
             if self._frozen:
                 raise ApplicationStoppingError("Input delivery has been frozen")
@@ -86,7 +91,11 @@ class InputDeliveryBuffer(Generic[PayloadT]):
                     record.reservation_id = reservation_id
             return result
 
-    def mark_appended(self, sequence: int, history_index: int) -> None:
+    def mark_appended(
+        self,
+        sequence: int,
+        history_index: int
+        ) -> None:
         with self._lock:
             record = self._records[sequence]
             if record.state is not InputDeliveryState.RESERVED or history_index < 0:
@@ -128,7 +137,11 @@ class InputDeliveryBuffer(Generic[PayloadT]):
                 del self._records[record.sequence]
                 self._ephemeral += 1
 
-    def accept_shutdown_transfer(self, sequence: int, payload: PayloadT) -> None:
+    def accept_shutdown_transfer(
+        self,
+        sequence: int,
+        payload: PayloadT
+        ) -> None:
         """只接受已存在的全局sequence；不开放普通接收或重新分配身份。"""
         with self._lock:
             if not self._frozen:
@@ -168,7 +181,11 @@ class InputDeliveryBuffer(Generic[PayloadT]):
 class ToolInputReservation:
     """每次工具结果独立预订输入，只认可绑定的真实消息对象。"""
 
-    def __init__(self, buffer: InputDeliveryBuffer[QueuedMessage], reservation_id: str) -> None:
+    def __init__(
+        self,
+        buffer: InputDeliveryBuffer[QueuedMessage],
+        reservation_id: str
+        ) -> None:
         self._buffer = buffer
         self.reservation_id = reservation_id
         self._items: list[InputDelivery[QueuedMessage]] = []
@@ -202,7 +219,11 @@ class ToolInputReservation:
             raise LifecycleFailure("Invalid tool result reservation binding")
         self._message = message
 
-    def mark_appended(self, message: ToolResultMessage, history_index: int) -> None:
+    def mark_appended(
+        self,
+        message: ToolResultMessage,
+        history_index: int
+        ) -> None:
         if self._released or self._message is not message:
             raise LifecycleFailure("Tool input commit does not match the bound message")
         for delivery in self._items:

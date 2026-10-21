@@ -88,7 +88,11 @@ class CronRouter(ICronRouter):
         if self._frozen:
             raise ApplicationStoppingError("Cron scheduling has been frozen")
 
-    def register(self, session_id: str, loop: BaseAgentLoop) -> None:
+    def register(
+        self,
+        session_id: str,
+        loop: BaseAgentLoop
+        ) -> None:
         with self.runtime.admission(), self._lock:
             self._require_open()
             self._routes[session_id] = loop
@@ -97,8 +101,14 @@ class CronRouter(ICronRouter):
         with self._lock:
             self._routes.pop(session_id, None)
 
-    def dispatch(self, session_id: str, task_id: str, name: str,
-                 exit_code: int, stdout_preview: str) -> bool:
+    def dispatch(
+        self,
+        session_id: str,
+        task_id: str,
+        name: str,
+        exit_code: int,
+        stdout_preview: str
+        ) -> bool:
         status = "completed" if exit_code == 0 else f"failed (exit={exit_code})"
         text = f"[cron-result] {name} ({task_id}) — {status}\n{stdout_preview}"
         try:
@@ -196,7 +206,12 @@ class CronRouter(ICronRouter):
                 timer.join(timeout=0)
                 self._timers.remove(timer)
 
-    def _arm(self, task: _CronTask, *, immediate: bool = False) -> None:
+    def _arm(
+        self,
+        task: _CronTask,
+        *,
+        immediate: bool = False
+        ) -> None:
         try:
             with self.runtime.admission(), self._lock:
                 self._require_open()
@@ -358,9 +373,18 @@ class CronRouter(ICronRouter):
             self._routes.clear()
             self._tasks.clear()
 
-    def schedule_task(self, *, session_id: str, name: str, schedule_type: str,
-                      schedule_value: str, command: list[str], cwd: str,
-                      is_wait: bool = False, wait_message: str = "") -> dict[str, Any]:
+    def schedule_task(
+        self,
+        *,
+        session_id: str,
+        name: str,
+        schedule_type: str,
+        schedule_value: str,
+        command: list[str],
+        cwd: str,
+        is_wait: bool = False,
+        wait_message: str = ""
+        ) -> dict[str, Any]:
         next_run = self._next_run(schedule_type, schedule_value)
         tid = uuid.uuid4().hex[:12]
         task = _CronTask(task_id=tid, session_id=session_id, name=name or f"cron-{tid}",
@@ -389,7 +413,11 @@ class CronRouter(ICronRouter):
                 "schedule_type": schedule_type, "schedule_value": schedule_value,
                 "next_run": _iso_time(next_run), "log_path": task.log_path}
 
-    def reschedule_task(self, session_id: str, task_id: str) -> dict[str, Any]:
+    def reschedule_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, Any]:
         with self._lock:
             source = self._tasks.get(session_id, {}).get(task_id)
             if source is None:
@@ -413,7 +441,11 @@ class CronRouter(ICronRouter):
             self._save_all_tasks()
         return len(tasks)
 
-    def migrate_session_cron_jobs(self, old_sid: str, new_sid: str) -> int:
+    def migrate_session_cron_jobs(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> int:
         with self.runtime.admission(), self._lock:
             self._require_open()
             source = self._tasks.get(old_sid, {})
@@ -439,7 +471,11 @@ class CronRouter(ICronRouter):
         with self._lock:
             return [_build_task_info(task) for task in self._tasks.get(session_id, {}).values()]
 
-    def trigger_cron_task(self, session_id: str, task_id: str) -> dict[str, Any]:
+    def trigger_cron_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, Any]:
         with self.runtime.admission(), self._lock:
             self._require_open()
             task = self._tasks.get(session_id, {}).get(task_id)
@@ -449,7 +485,11 @@ class CronRouter(ICronRouter):
         return {"success": True, "task_id": task_id, "name": task.name,
                 "message": f"Triggered: {task.name or task_id}"}
 
-    def cancel_cron_task(self, session_id: str, task_id: str) -> dict[str, Any]:
+    def cancel_cron_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, Any]:
         with self._lock:
             task = self._tasks.get(session_id, {}).pop(task_id, None)
             if task is None:

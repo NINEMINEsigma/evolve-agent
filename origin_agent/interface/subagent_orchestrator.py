@@ -47,8 +47,8 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         initial_prompt: str,
         user_name: str,
         message_type: str,
-        history_path: str | None = None,
-    ) -> SubAgentLaunchResult:
+        history_path: str | None = None
+        ) -> SubAgentLaunchResult:
         """Launch one persistent sub-agent under a parent session."""
         ...
 
@@ -58,8 +58,8 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         parent_session_id: str,
         session_id: str,
         message: str,
-        co_recipients: list[str] | None = None,
-    ) -> SubAgentChatResult:
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         """Deliver a direct user message to a sub-agent."""
         ...
 
@@ -71,8 +71,8 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         message: str,
         user_name: str,
         message_type: str,
-        co_recipients: list[str] | None = None,
-    ) -> SubAgentChatResult:
+        co_recipients: list[str] | None = None
+        ) -> SubAgentChatResult:
         """Deliver a parent-Agent message to a sub-agent."""
         ...
 
@@ -81,13 +81,17 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         self,
         parent_session_id: str,
         session_id: str,
-        decisions: list[Decision],
-    ) -> SubAgentApprovalResult:
+        decisions: list[Decision]
+        ) -> SubAgentApprovalResult:
         """Apply parent-Agent approval decisions to pending sub-agent tools."""
         ...
 
     @abstractmethod
-    async def stop(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
+    async def stop(
+        self,
+        parent_session_id: str,
+        session_id: str
+        ) -> SubAgentStopResult:
         """Stop a persistent sub-agent and save its final history."""
         ...
 
@@ -96,13 +100,17 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         self,
         parent_session_id: str,
         prompt: str,
-        profile: LLMProfile,
-    ) -> SubAgentLaunchResult:
+        profile: LLMProfile
+        ) -> SubAgentLaunchResult:
         """Launch one non-persistent task Agent from a Profile snapshot."""
         ...
 
     @abstractmethod
-    async def stop_taskagent(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
+    async def stop_taskagent(
+        self,
+        parent_session_id: str,
+        session_id: str
+        ) -> SubAgentStopResult:
         """Stop a non-persistent task Agent without saving history."""
         ...
 
@@ -126,8 +134,8 @@ class ISubAgentOrchestrator(AsyncSystem, ABC):
         self,
         parent_session_id: str,
         session_id: str,
-        message: QueuedMessage,
-    ) -> int:
+        message: QueuedMessage
+        ) -> int:
         """Queue one accepted user input for a sub-agent."""
         ...
 

@@ -227,8 +227,8 @@ class AgentspaceService(IAgentspaceService):
         path: str,
         *,
         allow_root: bool,
-        allow_internal_trash: bool,
-    ) -> str:
+        allow_internal_trash: bool
+        ) -> str:
         if not isinstance(path, str):
             raise AgentspaceInvalidPathError("路径必须是字符串。")
         raw = path
@@ -259,8 +259,8 @@ class AgentspaceService(IAgentspaceService):
         path: str,
         *,
         allow_root: bool = False,
-        allow_internal_trash: bool = False,
-    ) -> tuple[str, Path]:
+        allow_internal_trash: bool = False
+        ) -> tuple[str, Path]:
         normalized = self._normalize(
             path,
             allow_root=allow_root,
@@ -320,7 +320,11 @@ class AgentspaceService(IAgentspaceService):
         except UnicodeDecodeError:
             return hashlib.sha256(raw).hexdigest()
 
-    def _snapshot_from_path(self, relative_path: str, real: Path) -> AgentspaceFileSnapshot:
+    def _snapshot_from_path(
+        self,
+        relative_path: str,
+        real: Path
+        ) -> AgentspaceFileSnapshot:
         if not real.exists():
             raise AgentspaceNotFoundError("文件不存在。", path=relative_path)
         if not real.is_file():
@@ -356,8 +360,8 @@ class AgentspaceService(IAgentspaceService):
         operation_id: str | None = None,
         version: str | None = None,
         source: AgentspaceEventSource = AgentspaceEventSource.SERVICE,
-        message: str | None = None,
-    ) -> None:
+        message: str | None = None
+        ) -> None:
         self.event_hub.publish_threadsafe(
             AgentspaceEvent(
                 kind=kind,
@@ -413,8 +417,8 @@ class AgentspaceService(IAgentspaceService):
         relative_path: str,
         content: str,
         expected_version: str | None,
-        operation_id: str = "",
-    ) -> AgentspaceFileSnapshot:
+        operation_id: str = ""
+        ) -> AgentspaceFileSnapshot:
         normalized, target = self._resolve_user_path(relative_path)
         operation_id = operation_id or uuid.uuid4().hex
         with self.operation_gate.user_operation([normalized]):
@@ -498,8 +502,8 @@ class AgentspaceService(IAgentspaceService):
     def create_directory(
         self,
         relative_path: str,
-        operation_id: str = "",
-    ) -> AgentspaceEntry:
+        operation_id: str = ""
+        ) -> AgentspaceEntry:
         normalized, target = self._resolve_user_path(relative_path)
         operation_id = operation_id or uuid.uuid4().hex
         with self.operation_gate.user_operation([normalized]):
@@ -528,8 +532,8 @@ class AgentspaceService(IAgentspaceService):
         self,
         relative_path: str,
         new_name: str,
-        operation_id: str = "",
-    ) -> tuple[str, str]:
+        operation_id: str = ""
+        ) -> tuple[str, str]:
         normalized, source = self._resolve_user_path(relative_path)
         if (
             not new_name
@@ -577,8 +581,8 @@ class AgentspaceService(IAgentspaceService):
     def move_to_trash(
         self,
         relative_path: str,
-        operation_id: str = "",
-    ) -> AgentspaceTrashEntry:
+        operation_id: str = ""
+        ) -> AgentspaceTrashEntry:
         normalized, source = self._resolve_user_path(relative_path)
         if not source.exists():
             raise AgentspaceNotFoundError("要删除的路径不存在。", path=normalized)
@@ -610,8 +614,8 @@ class AgentspaceService(IAgentspaceService):
     def restore_trash(
         self,
         entry_id: str,
-        operation_id: str = "",
-    ) -> tuple[AgentspaceTrashEntry, str]:
+        operation_id: str = ""
+        ) -> tuple[AgentspaceTrashEntry, str]:
         _entry, expected_target = self.trash_store.preview_restore(entry_id)
         operation_id = operation_id or uuid.uuid4().hex
         with self.operation_gate.user_operation(
@@ -640,7 +644,11 @@ class AgentspaceService(IAgentspaceService):
         )
         return entry, restored_path
 
-    def purge_trash(self, entry_id: str, operation_id: str = "") -> None:
+    def purge_trash(
+        self,
+        entry_id: str,
+        operation_id: str = ""
+        ) -> None:
         operation_id = operation_id or uuid.uuid4().hex
         with self.operation_gate.user_operation(
             [AGENTSPACE_TRASH_DIR_NAME],
@@ -673,8 +681,8 @@ class AgentspaceService(IAgentspaceService):
     def agent_access(
         self,
         owner: AgentspaceLockOwner,
-        paths: list[tuple[str, bool]],
-    ) -> Iterator[None]:
+        paths: list[tuple[str, bool]]
+        ) -> Iterator[None]:
         ws_paths = [item for item in paths if item[0].startswith("ws:")]
         if not ws_paths:
             yield
@@ -688,8 +696,8 @@ class AgentspaceService(IAgentspaceService):
         session_id: str,
         character_name: str,
         logical_path: str,
-        recursive: bool = False,
-    ) -> None:
+        recursive: bool = False
+        ) -> None:
         owner = AgentspaceLockOwner(
             owner_id=owner_id,
             session_id=session_id,
@@ -715,8 +723,8 @@ class AgentspaceService(IAgentspaceService):
         self,
         operation: str,
         path: str,
-        old_path: str | None = None,
-    ) -> None:
+        old_path: str | None = None
+        ) -> None:
         with self._pending_lock:
             if operation == "rename" and old_path:
                 self._pending_changes.pop(old_path, None)

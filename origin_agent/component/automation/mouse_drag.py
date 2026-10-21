@@ -62,13 +62,15 @@ def _check_pyautogui() -> bool:
 
 def _post_drag(
     hwnd: int,
-    x1: int, y1: int,
-    x2: int, y2: int,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
     button: str,
     steps: int,
     interval: float,
-    hold: float,
-) -> None:
+    hold: float
+    ) -> None:
     """通过 PostMessage 向窗口发送鼠标拖拽消息序列（后台拖拽）。
 
     在起点按下按键，沿直线路径发送 steps 个 WM_MOUSEMOVE，

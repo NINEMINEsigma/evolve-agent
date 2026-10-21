@@ -59,7 +59,11 @@ def check_port_available(host: str, port: int) -> bool:
 class _GatewayUvicornServer(uvicorn.Server):
     """禁用自身信号处理并在真实 startup 完成后报告就绪。"""
 
-    def __init__(self, config: uvicorn.Config, ready: GatewayReadyTracker) -> None:
+    def __init__(
+        self,
+        config: uvicorn.Config,
+        ready: GatewayReadyTracker
+        ) -> None:
         super().__init__(config)
         self._ready_tracker = ready
 
@@ -121,7 +125,12 @@ class GatewaySystem(IGatewaySystem):
             raise LifecycleFailure("GatewaySystem has not been awakened")
         return self._owner
 
-    def spawn_work(self, coro: Coroutine[Any, Any, WorkT], *, name: str) -> asyncio.Task[WorkT]:
+    def spawn_work(
+        self,
+        coro: Coroutine[Any, Any, WorkT],
+        *,
+        name: str
+        ) -> asyncio.Task[WorkT]:
         """登记路由启动的后台任务；输入登记必须在创建本任务之前完成。"""
         return self.task_owner.create(coro, name=name)
 

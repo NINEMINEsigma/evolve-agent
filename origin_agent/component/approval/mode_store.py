@@ -70,8 +70,8 @@ class ApprovalModeStore:
     def _persist_mode_unlocked(
         self,
         session_id: str,
-        mode: ApprovalMode,
-    ) -> None:
+        mode: ApprovalMode
+        ) -> None:
         path = self._mode_path(session_id)
         state = SessionApprovalModeState(mode=mode)
         save(SESSION_APPROVAL_MODE_ES_KEY, make_config(path), state)
@@ -79,8 +79,8 @@ class ApprovalModeStore:
     def _persist_best_effort_unlocked(
         self,
         session_id: str,
-        mode: ApprovalMode,
-    ) -> None:
+        mode: ApprovalMode
+        ) -> None:
         try:
             self._persist_mode_unlocked(session_id, mode)
         except Exception:
@@ -110,8 +110,8 @@ class ApprovalModeStore:
     def set_mode(
         self,
         session_id: str,
-        mode: ApprovalMode,
-    ) -> ApprovalMode:
+        mode: ApprovalMode
+        ) -> ApprovalMode:
         """先更新内存模式，再尽力原子写入磁盘。"""
         self._validate_session_id(session_id)
         actual = mode if isinstance(mode, ApprovalMode) else ApprovalMode(mode)

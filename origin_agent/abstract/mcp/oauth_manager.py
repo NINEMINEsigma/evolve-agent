@@ -75,7 +75,12 @@ def _make_oauth_provider_class(manager: "MCPOAuthManager") -> type | None:
         (``src/utils/auth.ts:1320``, CC-1096 / GH#24317).
         """
 
-        def __init__(self, *args: object, server_name: str = "", **kwargs: object):
+        def __init__(
+            self,
+            *args: object,
+            server_name: str = "",
+            **kwargs: object
+            ):
             super().__init__(*args, **kwargs)
             self._server_name = server_name
 
@@ -285,8 +290,8 @@ class MCPOAuthManager:
         self,
         server_name: str,
         server_url: str,
-        oauth_config: dict | None,
-    ) -> OAuthClientProvider | None:
+        oauth_config: dict | None
+        ) -> OAuthClientProvider | None:
         """Return a cached OAuth provider for ``server_name`` or build one.
 
         Idempotent: repeat calls with the same name return the same instance.
@@ -320,8 +325,8 @@ class MCPOAuthManager:
     def _build_provider(
         self,
         server_name: str,
-        entry: MCPOAuthProviderEntry,
-    ) -> OAuthClientProvider | None:
+        entry: MCPOAuthProviderEntry
+        ) -> OAuthClientProvider | None:
         """Build the underlying OAuth provider.
 
         Constructs :class:`McpOAuthProvider` directly using the helpers
@@ -443,8 +448,8 @@ class MCPOAuthManager:
     async def handle_401(
         self,
         server_name: str,
-        failed_access_token: str | None = None,
-    ) -> bool:
+        failed_access_token: str | None = None
+        ) -> bool:
         """Handle a 401 from a tool call, deduplicated across concurrent callers.
 
         Returns:

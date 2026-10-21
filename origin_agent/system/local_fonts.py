@@ -14,7 +14,12 @@ from entity.constant import (
 class LocalFontAccessError(ValueError):
     """已识别的字体读取拒绝；携带稳定 code 与 HTTP status，不含物理路径。"""
 
-    def __init__(self, code: str, message: str, status: int) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status: int
+        ) -> None:
         super().__init__(message)
         self.code = code
         self.status = status

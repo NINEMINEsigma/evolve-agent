@@ -8,7 +8,13 @@ from typing import Any
 class AgentspaceError(Exception):
     code = "agentspace_error"
 
-    def __init__(self, message: str, *, path: str | None = None, **details: Any) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        **details: Any
+        ) -> None:
         super().__init__(message)
         self.message = message
         self.path = path
@@ -46,8 +52,8 @@ class AgentspaceVersionConflictError(AgentspaceError):
         message: str,
         *,
         path: str,
-        current_version: str | None,
-    ) -> None:
+        current_version: str | None
+        ) -> None:
         super().__init__(
             message,
             path=path,
@@ -59,7 +65,13 @@ class AgentspaceVersionConflictError(AgentspaceError):
 class AgentspaceLockedError(AgentspaceError):
     code = "path_locked"
 
-    def __init__(self, message: str, *, path: str, locks: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str,
+        locks: list[dict[str, Any]]
+        ) -> None:
         super().__init__(message, path=path, locks=locks)
         self.locks = locks
 

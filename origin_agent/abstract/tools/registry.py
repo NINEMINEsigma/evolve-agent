@@ -147,7 +147,11 @@ class ToolRegistry(IToolRegistry):
         """返回 toolset 可用性检查的稳定快照。"""
         return self._snapshot_state()[1]
 
-    def _evaluate_toolset_check(self, toolset: str, check: Callable | None) -> bool:
+    def _evaluate_toolset_check(
+        self,
+        toolset: str,
+        check: Callable | None
+        ) -> bool:
         """运行 toolset 检查，缺失或失败时视为可用。"""
         if not check:
             return True
@@ -185,7 +189,12 @@ class ToolRegistry(IToolRegistry):
             cutoff_tool_call_id=cutoff_tool_call_id,
         )
 
-    def register_tool(self, tool: BaseTool, *, replace: bool = False) -> None:
+    def register_tool(
+        self,
+        tool: BaseTool,
+        *,
+        replace: bool = False
+        ) -> None:
         """Atomically index the actual tool object, without a metadata mirror."""
         with self._lock:
             existing = self._tools.get(tool.name)
@@ -232,8 +241,8 @@ class ToolRegistry(IToolRegistry):
         self,
         scope: ToolAvailability,
         tool_names: set[str] | None = None,
-        quiet: bool = False,
-    ) -> list[dict]:
+        quiet: bool = False
+        ) -> list[dict]:
         """返回指定 availability 范围的工具的 OpenAI 格式 schema。"""
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
@@ -304,7 +313,11 @@ class ToolRegistry(IToolRegistry):
 
     # -- toolset 别名支持 ---------------------------------------------
 
-    def register_toolset_alias(self, alias: str, toolset: str) -> None:
+    def register_toolset_alias(
+        self,
+        alias: str,
+        toolset: str
+        ) -> None:
         """注册规范 toolset 名称的显式别名。"""
         with self._lock:
             existing: str | None = self._toolset_aliases.get(alias)
@@ -328,7 +341,12 @@ class ToolRegistry(IToolRegistry):
 
     # -- 工具集元数据 --------------------------------------------------
 
-    def register_toolset(self, toolset: BaseToolSet, *, merge: bool = False) -> None:
+    def register_toolset(
+        self,
+        toolset: BaseToolSet,
+        *,
+        merge: bool = False
+        ) -> None:
         """Preheat one declaration and register its tools or merge its metadata."""
         with self._lock:
             if toolset in self._preheated_toolsets:
@@ -404,8 +422,8 @@ class ToolRegistry(IToolRegistry):
     def get_definitions(
         self,
         tool_names: set[str],
-        quiet: bool = False,
-    ) -> list[dict]:
+        quiet: bool = False
+        ) -> list[dict]:
         """返回请求工具名称的 OpenAI 格式 tool schema。"""
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
@@ -444,8 +462,8 @@ class ToolRegistry(IToolRegistry):
         self,
         scope: ToolAvailability,
         loaded_toolsets: set[str],
-        quiet: bool = False,
-    ) -> list[dict]:
+        quiet: bool = False
+        ) -> list[dict]:
         """返回已加载工具集中符合 scope 和 check_fn 的工具 schema。"""
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
@@ -491,8 +509,8 @@ class ToolRegistry(IToolRegistry):
     def get_toolset_catalog(
         self,
         scope: ToolAvailability,
-        loaded_toolsets: set[str],
-    ) -> list[dict]:
+        loaded_toolsets: set[str]
+        ) -> list[dict]:
         """返回按当前 Loop scope 和 check_fn 过滤后的工具集目录。"""
         entries: list[BaseTool] = self._snapshot_entries()
         check_results: dict[Callable, bool] = {}
@@ -578,7 +596,12 @@ class ToolRegistry(IToolRegistry):
         if changed is not None:
             self.runtime.loop.call_soon_threadsafe(changed.set)
 
-    def _release_sync(self, record: SyncToolCallRecord, *, cancelled: bool) -> None:
+    def _release_sync(
+        self,
+        record: SyncToolCallRecord,
+        *,
+        cancelled: bool
+        ) -> None:
         with self._sync_calls_lock:
             record.request_released = True
             record.cancelled_while_running = cancelled and not record.future.done()
@@ -808,8 +831,8 @@ class ToolRegistry(IToolRegistry):
     def get_max_result_size(
         self,
         name: str,
-        default: int | None = None,
-    ) -> int:
+        default: int | None = None
+        ) -> int:
         """返回每个工具的最大结果大小，或 *default*（或全局默认值）。"""
         entry: BaseTool | None = self.get_tool(name)
         if entry and entry.max_result_size_chars is not None:

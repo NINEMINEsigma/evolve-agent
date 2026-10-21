@@ -304,8 +304,11 @@ class LSPManager(ILSPManager):
     # -- 查询方法 --------------------------------------------------
 
     async def references(
-        self, logical_path: str, line: int, column: int
-    ) -> list[LSPReference]:
+        self,
+        logical_path: str,
+        line: int,
+        column: int
+        ) -> list[LSPReference]:
         self._require_running()
         sandbox = self.sandbox
         if not self.is_ready():
@@ -329,8 +332,11 @@ class LSPManager(ILSPManager):
         return refs
 
     async def definition(
-        self, logical_path: str, line: int, column: int
-    ) -> LSPDefinition | None:
+        self,
+        logical_path: str,
+        line: int,
+        column: int
+        ) -> LSPDefinition | None:
         self._require_running()
         sandbox = self.sandbox
         if not self.is_ready():
@@ -413,7 +419,11 @@ class LSPManager(ILSPManager):
 
     # -- didChange + diagnostics 附加 (供 filesystem.py 调用) -----------
 
-    def notify_did_change(self, logical_path: str, content: str) -> None:
+    def notify_did_change(
+        self,
+        logical_path: str,
+        content: str
+        ) -> None:
         """通知 LSP 文件内容已变更。
 
         如果 LSP 未启动或文件不在 workspace 范围内，静默忽略。
@@ -466,7 +476,11 @@ class LSPManager(ILSPManager):
     def _path_to_uri(self, path: Path) -> str:
         return path.as_uri()
 
-    def _resolve_to_uri(self, logical_path: str, sandbox: ISandbox) -> str | None:
+    def _resolve_to_uri(
+        self,
+        logical_path: str,
+        sandbox: ISandbox
+        ) -> str | None:
         try:
             resolved = sandbox.resolve_read(logical_path)
             if not self.is_in_workspace(resolved.real):
@@ -475,7 +489,11 @@ class LSPManager(ILSPManager):
         except SandboxError:
             return None
 
-    def _uri_to_logical(self, uri: str, sandbox: ISandbox) -> str | None:
+    def _uri_to_logical(
+        self,
+        uri: str,
+        sandbox: ISandbox
+        ) -> str | None:
         """将 file URI 反向映射为逻辑路径。"""
         if not uri.startswith("file://"):
             return None
@@ -501,7 +519,11 @@ class LSPManager(ILSPManager):
                 continue
         return None
 
-    def _send_request(self, method: str, params: dict) -> int:
+    def _send_request(
+        self,
+        method: str,
+        params: dict
+        ) -> int:
         """发送 JSON-RPC 请求，返回 msg_id。"""
         msg_id = self._next_id
         self._next_id += 1
@@ -521,7 +543,11 @@ class LSPManager(ILSPManager):
         self._write_message(message)
         return msg_id
 
-    async def _request(self, method: str, params: dict) -> Any:
+    async def _request(
+        self,
+        method: str,
+        params: dict
+        ) -> Any:
         """发送请求并在线程池中同步等待响应（带超时）。"""
         self._require_running()
         with self._lock:
@@ -555,7 +581,11 @@ class LSPManager(ILSPManager):
         task.add_done_callback(self._observe_waiter)
         return await asyncio.shield(task)
 
-    def _notify(self, method: str, params: dict) -> None:
+    def _notify(
+        self,
+        method: str,
+        params: dict
+        ) -> None:
         """发送 JSON-RPC 通知（无 id，无响应）。"""
         message = {
             "jsonrpc": "2.0",
@@ -763,7 +793,13 @@ class LSPManager(ILSPManager):
         # 发送 initialized 通知
         self._notify("initialized", {})
 
-    def _request_sync(self, method: str, params: dict, *, timeout: float) -> dict | None:
+    def _request_sync(
+        self,
+        method: str,
+        params: dict,
+        *,
+        timeout: float
+        ) -> dict | None:
         """启动线程等待唯一 reader 的结果，不另建事件循环或第二个读者。"""
         with self._lock:
             if self._admission_closed.is_set():
@@ -864,7 +900,11 @@ class LSPManager(ILSPManager):
 
     # -- LSP 响应转换 ----------------------------------------------
 
-    def _location_to_reference(self, loc: dict, sandbox: ISandbox) -> LSPReference | None:
+    def _location_to_reference(
+        self,
+        loc: dict,
+        sandbox: ISandbox
+        ) -> LSPReference | None:
         uri = loc.get("uri", "")
         rng = loc.get("range", {})
         start = rng.get("start", {})
@@ -888,7 +928,11 @@ class LSPManager(ILSPManager):
             preview=preview,
         )
 
-    def _location_to_definition(self, loc: dict, sandbox: ISandbox) -> LSPDefinition | None:
+    def _location_to_definition(
+        self,
+        loc: dict,
+        sandbox: ISandbox
+        ) -> LSPDefinition | None:
         # LocationLink 格式有 targetUri/targetRange；Location 格式有 uri/range
         uri = loc.get("uri") or loc.get("targetUri", "")
         rng = loc.get("range") or loc.get("targetRange", {})

@@ -16,8 +16,8 @@ async def request_user_confirm(
     args: dict,
     reason: str,
     content: str,
-    extra_context: str | None = None,
-) -> ApprovalResult:
+    extra_context: str | None = None
+    ) -> ApprovalResult:
     """按会话模式分流到审批 Profile 或前端人工审批。"""
     from component.approval.handsfree import _handsfree_confirm, is_handsfree_mode
 

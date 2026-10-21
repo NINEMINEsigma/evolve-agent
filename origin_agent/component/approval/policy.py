@@ -12,8 +12,8 @@ from entity.puretype import ApprovalMode, ApprovalPolicy, ToolDangerLevel
 def needs_approval(
     policy: ApprovalPolicy,
     danger_level: ToolDangerLevel,
-    approval_mode: ApprovalMode,
-) -> bool:
+    approval_mode: ApprovalMode
+    ) -> bool:
     """判断工具是否需要审批。
 
     根据审批模式选择对应的 requires 集合，返回 danger_level 是否在该集合中。

@@ -77,8 +77,8 @@ class AgentProfile:
         tools: list[dict],
         llm_client: BaseLLMClient | None,
         config: AgentConfig,
-        llm_profile: LLMProfile | None = None,
-    ) -> None:
+        llm_profile: LLMProfile | None = None
+        ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
@@ -105,8 +105,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         agents: dict[str, AgentProfile],
         sink: IAgentSink,
         main_agent_name: str,
-        history_store_dir: Path | None = None,
-    ) -> None:
+        history_store_dir: Path | None = None
+        ) -> None:
         super().__init__(app, session_id)
         self._history: History = history
         self._agents: dict[str, AgentProfile] = agents
@@ -161,12 +161,15 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         return dict(self._agents)
 
     async def append_user_message(
-        self, content: Any, *, display_content: Any | None = None,
+        self,
+        content: Any,
+        *,
+        display_content: Any | None = None,
         visible_characters: list[str] | None = None,
         response_characters: list[str] | None = None,
         client_message_id: str | None = None,
-        **kwargs,
-    ) -> int:
+        **kwargs
+        ) -> int:
         """追加用户消息到 History 并回显到前端。"""
         _visible = visible_characters if visible_characters else self._agent_names
         hooks_context, fixator_context = self._collect_hooks_context()
@@ -419,8 +422,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         response_characters: list[str] | None = None,
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
-        **kwargs,
-    ) -> str:
+        **kwargs
+        ) -> str:
         """处理用户消息入口；整个串行级联共享一次主会话活动。"""
         self._cancel_event.clear()
         self._disgust_event.clear()
@@ -684,8 +687,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self,
         response_characters: list[str],
         *,
-        activity_id: str,
-    ) -> None:
+        activity_id: str
+        ) -> None:
         """串行动态队列级联调度。
 
         按原始 response_characters 顺序初始化动态队列，严格串行执行：
@@ -914,8 +917,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         character_name: str,
         *,
         activity_id: str,
-        is_final_round: bool = False,
-    ) -> WorkerResult:
+        is_final_round: bool = False
+        ) -> WorkerResult:
         """启动单个 Agent 的 tool loop + JSON 输出。
 
         委托给 MultiAgentWorker 执行完整的 LLM → tool_calls → tool_result → 循环。
@@ -1037,8 +1040,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     def _aggregate_worker_usage(
         self,
         worker: MultiAgentWorker,
-        result: WorkerResult | None = None,
-    ) -> None:
+        result: WorkerResult | None = None
+        ) -> None:
         """将 worker 的 token 消耗聚合到 loop 级累计值，并持久化、推送前端。"""
         total_token_usage = result.total_token_usage if result is not None else worker.total_token_usage
         last_prompt_tokens = result.last_prompt_tokens if result is not None else worker.last_prompt_tokens

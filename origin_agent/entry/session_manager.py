@@ -52,8 +52,8 @@ class LoopSessionManager:
     def __init__(
         self,
         loop: ParentAgentLoop,
-        history_store_dir: Path | None = None,
-    ) -> None:
+        history_store_dir: Path | None = None
+        ) -> None:
         self._loop = loop
         self._history_store_dir: Path | None = history_store_dir
 
@@ -103,8 +103,10 @@ class LoopSessionManager:
     # ------------------------------------------------------------------
 
     def _transfer_session_runtime_resources(
-        self, old_sid: str, new_sid: str,
-    ) -> SessionRuntimeResourceTransferResult:
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> SessionRuntimeResourceTransferResult:
         """将旧会话的运行态资源迁移到继承会话。"""
         self._loop.last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
@@ -209,8 +211,8 @@ class LoopSessionManager:
     async def rotate_session_for_continuation(
         self,
         session_id: str,
-        move_last_user_message: bool = False,
-    ) -> str:
+        move_last_user_message: bool = False
+        ) -> str:
         """确保摘要后旋转会话；失败时完整恢复临时分离的用户消息。"""
         sm = self._loop.session_manager
         if sm is None:
@@ -299,7 +301,11 @@ class LoopSessionManager:
         )
         return new_sid
 
-    def _build_inherited_context(self, old_sid: str, summary: str) -> str:
+    def _build_inherited_context(
+        self,
+        old_sid: str,
+        summary: str
+        ) -> str:
         """为继承会话构建初始上下文消息。"""
         return (
             read_template("session_inherit.txt")
@@ -320,8 +326,8 @@ async def terminate_and_rotate_session(
     session_manager: SessionManager,
     metadata_service: SessionMetadataService,
     loop_meta: LoopMeta | None = None,
-    current_character_agent: str = "",
-) -> str:
+    current_character_agent: str = ""
+    ) -> str:
     """确保摘要并完整初始化延续会话后，才归档旧会话。"""
     from entity.constant import INHERIT_LAST_ROUNDS, USER_CHARACTER_NAME
     from entry.agent_support.history_summary import extract_last_rounds, messages_to_text

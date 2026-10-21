@@ -261,8 +261,8 @@ class SessionManager:
         self,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
-        session_id: str | None = None,
-    ) -> str:
+        session_id: str | None = None
+        ) -> str:
         import time
         sid: str = session_id if session_id else uuid.uuid4().hex[:12]
         now: float = time.time()
@@ -287,7 +287,11 @@ class SessionManager:
         logger.debug("Session created | id=%s parents=%s", sid, effective_parents)
         return sid
 
-    def archive(self, sid: str, continuation_sid: str | None = None) -> None:
+    def archive(
+        self,
+        sid: str,
+        continuation_sid: str | None = None
+        ) -> None:
         """将会话标记为已归档，不可再对话。"""
         if sid in self._sessions:
             self._sessions[sid].status = SessionStatus.archived
@@ -314,8 +318,8 @@ class SessionManager:
         parent_sid: str | None = None,
         parents: list[str] | None = None,
         role: Role = Role.SYSTEM,
-        loop_meta: LoopMeta | None = None,
-    ) -> str:
+        loop_meta: LoopMeta | None = None
+        ) -> str:
         """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
         new_sid: str = self.create(parent_sid=parent_sid, parents=parents)
         # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
@@ -324,7 +328,12 @@ class SessionManager:
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role.value)
         return new_sid
 
-    def update_loop_type(self, sid: str, loop_type: Loop, agents: list[str] | None = None) -> None:
+    def update_loop_type(
+        self,
+        sid: str,
+        loop_type: Loop,
+        agents: list[str] | None = None
+        ) -> None:
         """更新 session 的 loop 类型和 agents 列表，同步写入内存和磁盘索引。"""
         if sid in self._sessions:
             self._sessions[sid].loop_type = loop_type
@@ -372,7 +381,11 @@ class SessionManager:
                 self._write_index(entries)
         logger.warning("Session removed from index only (incompatible format) | id=%s", sid)
 
-    def update_title(self, sid: str, title: str) -> None:
+    def update_title(
+        self,
+        sid: str,
+        title: str
+        ) -> None:
         """更新内存和磁盘中 session 的标题。"""
         logger.info("Update title | session=%s title=%s", sid, title)
         if sid in self._sessions:
@@ -503,7 +516,11 @@ class SessionManager:
                 self._write_tags(list(self._tags))
         return changed
 
-    def set_session_tags(self, sid: str, tags: list[str]) -> list[str]:
+    def set_session_tags(
+        self,
+        sid: str,
+        tags: list[str]
+        ) -> list[str]:
         """更新会话标签并同步全局标签。返回最终有效的标签列表。"""
         valid = [t for t in tags if self.validate_tag(t)]
         if sid in self._sessions:

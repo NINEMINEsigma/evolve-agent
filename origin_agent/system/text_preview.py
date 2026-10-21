@@ -7,8 +7,8 @@ def truncate_lf_lines(
     text: str,
     *,
     max_line_chars: int,
-    marker: str,
-) -> tuple[str, list[int]]:
+    marker: str
+    ) -> tuple[str, list[int]]:
     """按 Unicode 码点截断各行正文，返回展示文本及相对 0-indexed 截断行索引。
 
     仅 LF 分行；保留 LF/CRLF 和末尾换行，孤立 CR 仍按正文计数。

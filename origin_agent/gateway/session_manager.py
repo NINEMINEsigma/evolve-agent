@@ -129,11 +129,13 @@ class SessionManager(ISessionManager):
         return self._chat_sm.get_all()
 
     def create_with_context(
-        self, context: str, parent_sid: str | None = None,
+        self,
+        context: str,
+        parent_sid: str | None = None,
         parents: list[str] | None = None,
         role: Role = Role.USER,
-        loop_meta: LoopMeta | None = None,
-    ) -> str:
+        loop_meta: LoopMeta | None = None
+        ) -> str:
         session_id = self._chat_sm.create_with_context(
             context, parent_sid=parent_sid, parents=parents,
             role=role, loop_meta=loop_meta,
@@ -141,11 +143,19 @@ class SessionManager(ISessionManager):
         self._app.get_system(IApprovalSystem).mode_store.initialize_session(session_id)
         return session_id
 
-    def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
+    def archive(
+        self,
+        session_id: str,
+        continuation_sid: str | None = None
+        ) -> None:
         logger.info("Archive session | session=%s continuation=%s", session_id, continuation_sid)
         self._chat_sm.archive(session_id, continuation_sid=continuation_sid)
 
-    def set_session_tags(self, session_id: str, tags: list[str]) -> None:
+    def set_session_tags(
+        self,
+        session_id: str,
+        tags: list[str]
+        ) -> None:
         logger.info("Set session tags | session=%s tags=%s", session_id, tags)
         self._chat_sm.set_session_tags(session_id, tags)
 
@@ -156,7 +166,11 @@ class SessionManager(ISessionManager):
         """返回指定 session 的客户端信息，不存在时返回 None。"""
         return self._client_infos.get(session_id)
 
-    def set_client_info(self, session_id: str, info: ClientInfo) -> None:
+    def set_client_info(
+        self,
+        session_id: str,
+        info: ClientInfo
+        ) -> None:
         """更新指定 session 的客户端信息。"""
         self._client_infos[session_id] = info
         logger.info("Client info updated | session=%s ip=%s device=%s",
@@ -169,8 +183,8 @@ class SessionManager(ISessionManager):
         self,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
-        session_id: str | None = None,
-    ) -> str:
+        session_id: str | None = None
+        ) -> str:
         """创建新 session，并将审批模式显式初始化为手动模式。"""
         new_session_id = self._chat_sm.create(
             parent_sid=parent_sid,
@@ -190,7 +204,11 @@ class SessionManager(ISessionManager):
         """仅从索引移除 session，不删除磁盘目录。"""
         self._chat_sm.remove_from_index(session_id)
 
-    def update_title(self, session_id: str, title: str) -> None:
+    def update_title(
+        self,
+        session_id: str,
+        title: str
+        ) -> None:
         """更新内存和磁盘中 session 的标题。"""
         self._chat_sm.update_title(session_id, title)
 
@@ -275,8 +293,10 @@ class SessionManager(ISessionManager):
                 self._runtime.record_failure(error)
 
     def accept_shutdown_feedback(
-        self, parent_session_id: str, items: list[SubAgentFeedbackDelivery],
-    ) -> None:
+        self,
+        parent_session_id: str,
+        items: list[SubAgentFeedbackDelivery]
+        ) -> None:
         if not self._inputs_frozen or asyncio.get_running_loop() is not self._runtime.loop:
             raise LifecycleFailure("Shutdown feedback requires the frozen owning loop")
         managed = self._loops.get(parent_session_id)
@@ -324,8 +344,8 @@ class SessionManager(ISessionManager):
     def replace_idle_loops_using_profile(
         self,
         source_profile: LLMProfile,
-        replacement_profile: LLMProfile | None,
-    ) -> tuple[list[str], list[str]]:
+        replacement_profile: LLMProfile | None
+        ) -> tuple[list[str], list[str]]:
         """只切换当前空闲且正在使用源 Profile 的主会话。"""
         from interface.llm_profile_store import ILLMProfileStore
         switched: list[str] = []
@@ -348,8 +368,8 @@ class SessionManager(ISessionManager):
         self,
         session_id: str,
         frontend_sink: IFrontendSink,
-        history_store_dir: Path | None = None,
-    ) -> IMainSessionLoop:
+        history_store_dir: Path | None = None
+        ) -> IMainSessionLoop:
         """为 session 创建或复用 loop 实例。
 
         若已有活跃的 loop 实例则直接返回（WebSocket 重连场景，
@@ -395,8 +415,8 @@ class SessionManager(ISessionManager):
         self,
         session_id: str,
         frontend_sink: IFrontendSink,
-        history_store_dir: Path | None = None,
-    ) -> IMainSessionLoop:
+        history_store_dir: Path | None = None
+        ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from interface.runtime_system import IRuntimeSystem
         from abstract.llm.loader import create_llm_client
@@ -518,8 +538,8 @@ class SessionManager(ISessionManager):
         self,
         session_id: str,
         frontend_sink: IFrontendSink,
-        history_store_dir: Path | None = None,
-    ) -> IMainSessionLoop:
+        history_store_dir: Path | None = None
+        ) -> IMainSessionLoop:
         """创建 ColloquyLoop 实例。"""
         from entry.colloquy_loop import ColloquyLoop
 
@@ -582,7 +602,11 @@ class SessionManager(ISessionManager):
             self._app.get_system(ICronRouter).unregister(session_id)
         logger.info("Session runtime deleted | session=%s", session_id)
 
-    async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
+    async def replace_loop(
+        self,
+        session_id: str,
+        new_loop: IMainSessionLoop
+        ) -> None:
         """将 session 的当前 loop 替换为 new_loop。
 
         旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
@@ -684,7 +708,11 @@ class SessionManager(ISessionManager):
             if error is not None:
                 self._runtime.record_failure(error)
 
-    def rotate_session(self, old_sid: str, new_sid: str) -> None:
+    def rotate_session(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""
         loop = self._loops.pop(old_sid, None)
         if loop is not None:

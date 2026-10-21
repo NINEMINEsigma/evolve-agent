@@ -72,8 +72,8 @@ def _message_size(message: BaseMessage) -> int:
 def detect_compressible_chains(
     messages: list[BaseMessage],
     min_chars: int = TOOL_CHAIN_COMPRESS_MIN_CHARS,
-    excluded_tool_call_ids: set[str] | None = None,
-) -> list[ToolChainSpan]:
+    excluded_tool_call_ids: set[str] | None = None
+    ) -> list[ToolChainSpan]:
     """检测消息列表中所有可压缩工具链，返回半开区间列表。
 
     可压缩条件：

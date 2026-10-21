@@ -36,7 +36,11 @@ class HistoryPersistenceError(LifecycleFailure):
     并让该错误继续传播，不被转换为成功的应用关闭。
     """
 
-    def __init__(self, session_id: str, cause: BaseException) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        cause: BaseException
+        ) -> None:
         super().__init__(
             f"Failed to persist history for session {session_id}: {cause}"
         )
@@ -68,11 +72,19 @@ class SessionStore:
         # 旧单文件（仅兼容读取，不再写入）
         return self.session_dir(session_id) / "tool_resources.json"
 
-    def partition_path(self, session_id: str, partition: str) -> Path:
+    def partition_path(
+        self,
+        session_id: str,
+        partition: str
+        ) -> Path:
         """返回指定资源分区的独立文件路径。"""
         return self.session_dir(session_id) / self._PARTITION_FILES[partition]
 
-    def read_partition(self, session_id: str, partition: str) -> dict[str, Any]:
+    def read_partition(
+        self,
+        session_id: str,
+        partition: str
+        ) -> dict[str, Any]:
         """读单个分区；分区文件不存在时回退读旧单文件 tool_resources.json 对应键。
 
         必须逐分区判断文件存在（不能"任一分区存在就整体走分区"），
@@ -90,7 +102,12 @@ class SessionStore:
                 return value if isinstance(value, dict) else {}
         return {}
 
-    def write_partition(self, session_id: str, partition: str, values: dict[str, Any]) -> None:
+    def write_partition(
+        self,
+        session_id: str,
+        partition: str,
+        values: dict[str, Any]
+        ) -> None:
         """原子写单个资源分区文件（write_text_atomic 自动建目录）。"""
         path = self.partition_path(session_id, partition)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +126,11 @@ class SessionStore:
         data.remove_unpaired_tool_calls()
         return data
 
-    def write_history(self, session_id: str, history: History) -> None:
+    def write_history(
+        self,
+        session_id: str,
+        history: History
+        ) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。
 
         失败时抛 ``HistoryPersistenceError``（继承 ``LifecycleFailure``），
@@ -123,7 +144,11 @@ class SessionStore:
             logger.exception("Failed to save history for session %s: %s", session_id, exc)
             raise HistoryPersistenceError(session_id, exc) from exc
 
-    def write_token_usage(self, session_id: str, record: TokenUsageRecord) -> None:
+    def write_token_usage(
+        self,
+        session_id: str,
+        record: TokenUsageRecord
+        ) -> None:
         payload = record.model_dump_json()
         write_text_atomic(self.token_usage_path(session_id), payload)
 
@@ -140,7 +165,11 @@ class SessionStore:
             return ""
         return path.read_text(encoding="utf-8").strip()
 
-    def write_summary(self, session_id: str, summary: str) -> None:
+    def write_summary(
+        self,
+        session_id: str,
+        summary: str
+        ) -> None:
         write_text_atomic(self.summary_path(session_id), summary)
 
     def read_tool_resources(self, session_id: str) -> dict[str, Any]:
@@ -150,13 +179,22 @@ class SessionStore:
             "clipboard_display": self.read_partition(session_id, "clipboard_display"),
         }
 
-    def write_tool_resources(self, session_id: str, resources: dict[str, Any]) -> None:
+    def write_tool_resources(
+        self,
+        session_id: str,
+        resources: dict[str, Any]
+        ) -> None:
         """按分区逐个写（会话轮转迁移用，签名保持兼容）。"""
         for partition, values in resources.items():
             if partition in self._PARTITION_FILES:
                 self.write_partition(session_id, partition, values)
 
-    def update_tool_resources(self, session_id: str, partition: str, values: dict[str, Any]) -> None:
+    def update_tool_resources(
+        self,
+        session_id: str,
+        partition: str,
+        values: dict[str, Any]
+        ) -> None:
         """单分区整体覆盖写（工具模块调用点），不再读-改-写整文件。"""
         self.write_partition(session_id, partition, values)
 
@@ -174,7 +212,11 @@ class SessionStore:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
 
-    def write_message_metrics(self, session_id: str, metrics: dict[str, dict[str, Any]]) -> None:
+    def write_message_metrics(
+        self,
+        session_id: str,
+        metrics: dict[str, dict[str, Any]]
+        ) -> None:
         """原子写入消息计时元信息。"""
         path = self.message_metrics_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +282,11 @@ class SessionStore:
             json.dumps({"profile_name": profile_name}, ensure_ascii=False, indent=2),
         )
 
-    def write_active_profile_name(self, session_id: str, profile_name: str) -> None:
+    def write_active_profile_name(
+        self,
+        session_id: str,
+        profile_name: str
+        ) -> None:
         """写入会话级名称，并同步更新全局最近使用名称。"""
         self._write_profile_name_pointer(
             self.active_profile_name_path(session_id), profile_name,
@@ -287,8 +333,8 @@ class SessionStore:
     def replace_profile_name_pointers(
         self,
         old_name: str,
-        new_name: str | None,
-    ) -> list[Path]:
+        new_name: str | None
+        ) -> list[Path]:
         """把所有新格式指针中的旧名称替换为目标名称。"""
         replacement = new_name or ""
         changed: list[Path] = []
@@ -299,7 +345,11 @@ class SessionStore:
                 changed.append(path)
         return changed
 
-    def copy_active_profile_name(self, old_session_id: str, new_session_id: str) -> None:
+    def copy_active_profile_name(
+        self,
+        old_session_id: str,
+        new_session_id: str
+        ) -> None:
         """将来源会话的名称指针复制给延续会话。"""
         profile_name = self.read_active_profile_name(old_session_id)
         if profile_name is None:
@@ -335,7 +385,11 @@ class SessionStore:
             )
             return [DEFAULT_LOADED_TOOLSET]
 
-    def write_loaded_toolsets(self, session_id: str, toolsets: list[str]) -> None:
+    def write_loaded_toolsets(
+        self,
+        session_id: str,
+        toolsets: list[str]
+        ) -> None:
         """原子写入会话已加载的工具集名称列表。"""
         path = self.loaded_toolsets_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,7 +398,11 @@ class SessionStore:
             json.dumps(sorted(set(toolsets)), ensure_ascii=False, indent=2),
         )
 
-    def copy_loaded_toolsets(self, old_session_id: str, new_session_id: str) -> None:
+    def copy_loaded_toolsets(
+        self,
+        old_session_id: str,
+        new_session_id: str
+        ) -> None:
         """将来源会话的加载工具集列表复制给延续会话。"""
         toolsets = self.read_loaded_toolsets(old_session_id)
         self.write_loaded_toolsets(new_session_id, toolsets)

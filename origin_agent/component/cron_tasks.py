@@ -15,7 +15,11 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 # ── cron 解析器（标准库实现，纯函数）──────────────────────────
 
 
-def parse_cron_field(field: str, min_val: int, max_val: int) -> set[int]:
+def parse_cron_field(
+    field: str,
+    min_val: int,
+    max_val: int
+    ) -> set[int]:
     """解析单个 cron 字段，返回允许值的集合。
 
     支持的语法::

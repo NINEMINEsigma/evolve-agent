@@ -192,11 +192,11 @@ def build_system_prompt(
     fix_fork_path: str = "",
     fix_log_path: str = "",
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
-    runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
-    profile: LLMProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
-    session_id: str = "",                           # 当前会话 ID，注入 base.txt 的 {{session_id}} 占位符
-    loaded_toolsets: set[str] | None = None,        # 会话已加载工具集名称集合
-) -> list[str]:
+    runtime_ctx: RuntimeContext | None = None, # 运行时配置：注入 base.txt 占位符
+    profile: LLMProfile | None = None, # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
+    session_id: str = "", # 当前会话 ID，注入 base.txt 的 {{session_id}} 占位符
+    loaded_toolsets: set[str] | None = None # 会话已加载工具集名称集合
+    ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
     参数

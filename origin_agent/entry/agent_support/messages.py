@@ -76,7 +76,12 @@ def load_message_hooks(hooks_dir: Path, logger: logging.Logger) -> list[dict]:
     return hooks
 
 
-def _call_hook_with_runtime_ctx(fn, session_id: str, workspace: str, runtime_ctx: "RuntimeContext | None"):
+def _call_hook_with_runtime_ctx(
+    fn,
+    session_id: str,
+    workspace: str,
+    runtime_ctx: "RuntimeContext | None"
+    ):
     """调用 hook 函数，优先传入 runtime_ctx；旧签名不兼容时回退到两参数调用。"""
     try:
         return fn(session_id=session_id, workspace=workspace, runtime_ctx=runtime_ctx)
@@ -91,8 +96,8 @@ def _collect_hook_parts(
     hooks: list[dict],
     session_id: str,
     workspace: str,
-    runtime_ctx: "RuntimeContext | None" = None,
-) -> tuple[list[str], list[str]]:
+    runtime_ctx: "RuntimeContext | None" = None
+    ) -> tuple[list[str], list[str]]:
     """分别收集 hook_message（非持久化）和 hook_fixator（持久化）的原始片段。"""
     hooks_parts: list[str] = []
     fixator_parts: list[str] = []
@@ -118,8 +123,8 @@ def collect_all_hooks_context(
     hooks: list[dict],
     session_id: str,
     workspace: str,
-    runtime_ctx: "RuntimeContext | None" = None,
-) -> tuple[str, str]:
+    runtime_ctx: "RuntimeContext | None" = None
+    ) -> tuple[str, str]:
     """一次性收集 custom_hooks 的 hooks_context 和 fixator_context。
 
     只遍历 hooks 一次，避免重复调用同一个 hook 的 tag_fn 导致状态/计时器紊乱。
@@ -140,8 +145,8 @@ def build_agent_system_prompt(
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     profile: LLMProfile | None = None,
     session_id: str = "",
-    loaded_toolsets: set[str] | None = None,
-) -> list[str]:
+    loaded_toolsets: set[str] | None = None
+    ) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
         mode=ctx.mode,
@@ -193,8 +198,8 @@ def collect_skill_prompts(skills_dir: Path | None = None) -> list[str]:
 def build_full_history_messages(
     system_prompts: list[str],
     history: History,
-    current_character_agent: str,
-) -> list[BaseMessage]:
+    current_character_agent: str
+    ) -> list[BaseMessage]:
     """构建包含 system prompts 和完整历史的消息列表。
 
     假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过

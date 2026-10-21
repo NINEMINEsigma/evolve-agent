@@ -112,8 +112,8 @@ def _parse_dict_body(
     start: int,
     end: int,
     target: dict[str, Any],
-    base_indent: int,
-) -> int:
+    base_indent: int
+    ) -> int:
     """Parse lines[start:end] as key-value pairs into *target*.
 
     Returns the index of the first line not consumed.
@@ -172,8 +172,8 @@ def _parse_list_block(
     start: int,
     end: int,
     target: list[Any],
-    base_indent: int,
-) -> int:
+    base_indent: int
+    ) -> int:
     """Parse a block list starting at *start* into *target*.
 
     Supports:
@@ -239,8 +239,8 @@ def _parse_multiline_value(
     end: int,
     target: dict[str, Any],
     key: str,
-    indicator: str,
-) -> int:
+    indicator: str
+    ) -> int:
     """Parse a multi-line string value starting at *start*.
 
     ``indicator`` is ``""`` (indented block), ``"|"`` (literal), or ``">"`` (folded).
@@ -287,8 +287,11 @@ def _parse_multiline_value(
 
 
 def _collect_multiline_body(
-    lines: list[str], start: int, end: int, min_indent: int
-) -> list[str]:
+    lines: list[str],
+    start: int,
+    end: int,
+    min_indent: int
+    ) -> list[str]:
     """Collect continuation lines indented at least *min_indent*."""
     collected: list[str] = []
     i = start

@@ -146,8 +146,8 @@ def _compare_dirs(
     path_filter: str,
     pattern: str,
     context_lines: int,
-    max_files: int,
-) -> dict:
+    max_files: int
+    ) -> dict:
     """对比两个目录的文件并返回 unified diff 结果。
 
     参数

@@ -42,8 +42,8 @@ class IShellManager(AsyncSystem, ABC):
         character_name: str,
         shell_type: str,
         cwd: str,
-        command: str,
-    ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
+        command: str
+        ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
         """Create an owned Shell and execute its first command."""
         ...
 
@@ -55,8 +55,8 @@ class IShellManager(AsyncSystem, ABC):
         shell_id: str,
         offset: int,
         limit: int,
-        wait_timeout: float,
-    ) -> ShellOutputSlice:
+        wait_timeout: float
+        ) -> ShellOutputSlice:
         """Read a bounded output slice from an owned Shell."""
         ...
 
@@ -66,8 +66,8 @@ class IShellManager(AsyncSystem, ABC):
         owner_session_id: str,
         character_name: str,
         shell_id: str,
-        text: str,
-    ) -> ShellOutputSlice:
+        text: str
+        ) -> ShellOutputSlice:
         """Write one logical line and return its resulting output slice."""
         ...
 
@@ -76,8 +76,8 @@ class IShellManager(AsyncSystem, ABC):
         self,
         owner_session_id: str,
         character_name: str,
-        shell_id: str,
-    ) -> ShellOutputSlice:
+        shell_id: str
+        ) -> ShellOutputSlice:
         """Send an interrupt signal to an owned Shell."""
         ...
 
@@ -86,8 +86,8 @@ class IShellManager(AsyncSystem, ABC):
         self,
         owner_session_id: str,
         character_name: str,
-        shell_id: str,
-    ) -> ShellInfo:
+        shell_id: str
+        ) -> ShellInfo:
         """Stop one owned Shell and return its terminal metadata."""
         ...
 
@@ -97,12 +97,20 @@ class IShellManager(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def stop_shell_for_user(self, session_id: str, shell_id: str) -> ShellInfo:
+    async def stop_shell_for_user(
+        self,
+        session_id: str,
+        shell_id: str
+        ) -> ShellInfo:
         """Stop one Shell through the user-facing ownership boundary."""
         ...
 
     @abstractmethod
-    def migrate_session(self, old_session_id: str, new_session_id: str) -> int:
+    def migrate_session(
+        self,
+        old_session_id: str,
+        new_session_id: str
+        ) -> int:
         """Move Shell ownership aliases during session rotation."""
         ...
 

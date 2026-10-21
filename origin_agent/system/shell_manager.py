@@ -64,8 +64,8 @@ class _ShellSession:
         character_name: str,
         shell_type: str,
         cwd: str,
-        event_loop: asyncio.AbstractEventLoop,
-    ) -> None:
+        event_loop: asyncio.AbstractEventLoop
+        ) -> None:
         now = time.time()
         self.shell_id = shell_id
         self.pty = pty
@@ -160,8 +160,8 @@ class _ShellSession:
     def mark_exited(
         self,
         error: str | None = None,
-        termination: str | None = None,
-    ) -> None:
+        termination: str | None = None
+        ) -> None:
         exit_code = self.exit_status()
         with self.lock:
             self.running = False
@@ -198,8 +198,8 @@ class _ShellSession:
         self,
         offset: int,
         limit: int,
-        wait_reason: str,
-    ) -> ShellOutputSlice:
+        wait_reason: str
+        ) -> ShellOutputSlice:
         with self.lock:
             if offset > self.total_chars:
                 raise ShellError(
@@ -235,8 +235,10 @@ def _tracked_operation(
     """登记整个业务操作，关闭时同时覆盖锁等待和原生调用等待。"""
     @wraps(method)
     async def invoke(
-        self: ShellManager, *args: ShellParams.args, **kwargs: ShellParams.kwargs,
-    ) -> ShellResult:
+        self: ShellManager,
+        *args: ShellParams.args,
+        **kwargs: ShellParams.kwargs
+        ) -> ShellResult:
         task = asyncio.current_task()
         if task is None:
             raise LifecycleFailure("Shell operation requires an asyncio task")
@@ -290,8 +292,8 @@ class ShellManager(IShellManager):
         self,
         fn: Callable[..., ShellResult],
         *args: Any,
-        report_failure: bool = True,
-    ) -> ShellResult:
+        report_failure: bool = True
+        ) -> ShellResult:
         task = asyncio.create_task(asyncio.to_thread(fn, *args), name="shell-native-call")
         self._native_tasks.add(task)
         try:
@@ -308,8 +310,8 @@ class ShellManager(IShellManager):
         self,
         task: asyncio.Task[Any],
         *,
-        report_failure: bool = True,
-    ) -> None:
+        report_failure: bool = True
+        ) -> None:
         self._native_tasks.discard(task)
         if task.cancelled():
             if report_failure:
@@ -348,8 +350,8 @@ class ShellManager(IShellManager):
         character_name: str,
         shell_type: str,
         cwd: str,
-        command: str,
-    ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
+        command: str
+        ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
         with self._registry_lock:
             if self._admission_closed:
                 raise ShellError("Shell admission has been closed")
@@ -476,8 +478,8 @@ class ShellManager(IShellManager):
         shell_id: str,
         offset: int,
         limit: int,
-        wait_timeout: float,
-    ) -> ShellOutputSlice:
+        wait_timeout: float
+        ) -> ShellOutputSlice:
         if offset < 0:
             raise ShellError("offset must be >= 0")
         if not 1 <= limit <= SHELL_READ_MAX_CHARS:
@@ -510,8 +512,8 @@ class ShellManager(IShellManager):
         owner_session_id: str,
         character_name: str,
         shell_id: str,
-        text: str,
-    ) -> ShellOutputSlice:
+        text: str
+        ) -> ShellOutputSlice:
         self._validate_line(text, allow_empty=True, field="text")
         state = self._get_owned(owner_session_id, character_name, shell_id)
         async with state.operation_lock:
@@ -531,8 +533,8 @@ class ShellManager(IShellManager):
         self,
         owner_session_id: str,
         character_name: str,
-        shell_id: str,
-    ) -> ShellOutputSlice:
+        shell_id: str
+        ) -> ShellOutputSlice:
         state = self._get_owned(owner_session_id, character_name, shell_id)
         async with state.operation_lock:
             self._require_running(state)
@@ -555,8 +557,8 @@ class ShellManager(IShellManager):
         self,
         owner_session_id: str,
         character_name: str,
-        shell_id: str,
-    ) -> ShellInfo:
+        shell_id: str
+        ) -> ShellInfo:
         state = self._get_owned(owner_session_id, character_name, shell_id)
         await self._remove_and_stop(state)
         return state.info()
@@ -576,8 +578,8 @@ class ShellManager(IShellManager):
     async def stop_shell_for_user(
         self,
         session_id: str,
-        shell_id: str,
-    ) -> ShellInfo:
+        shell_id: str
+        ) -> ShellInfo:
         with self._registry_lock:
             state = self._shells.get(shell_id)
             if state is None or state.session_id != session_id:
@@ -585,7 +587,11 @@ class ShellManager(IShellManager):
         await self._remove_and_stop(state)
         return state.info()
 
-    def migrate_session(self, old_session_id: str, new_session_id: str) -> int:
+    def migrate_session(
+        self,
+        old_session_id: str,
+        new_session_id: str
+        ) -> int:
         if not old_session_id or not new_session_id:
             raise ShellError("old and new session IDs are required")
         if old_session_id == new_session_id:
@@ -759,8 +765,8 @@ class ShellManager(IShellManager):
         limit: int,
         timeout: float,
         *,
-        wait_for_quiet: bool,
-    ) -> ShellOutputSlice:
+        wait_for_quiet: bool
+        ) -> ShellOutputSlice:
         hard_deadline = time.monotonic() + timeout
         while True:
             with state.lock:
@@ -807,7 +813,11 @@ class ShellManager(IShellManager):
             except asyncio.TimeoutError:
                 continue
 
-    async def _write_line(self, state: _ShellSession, text: str) -> None:
+    async def _write_line(
+        self,
+        state: _ShellSession,
+        text: str
+        ) -> None:
         self._require_running(state)
         try:
             await self._native_call(self._write_line_blocking, state, text)
@@ -934,8 +944,8 @@ class ShellManager(IShellManager):
         self,
         owner_session_id: str,
         character_name: str,
-        shell_id: str,
-    ) -> _ShellSession:
+        shell_id: str
+        ) -> _ShellSession:
         self._validate_owner(owner_session_id, character_name)
         if not shell_id:
             raise ShellAccessError("Shell not found")
@@ -1035,7 +1045,12 @@ class ShellManager(IShellManager):
             raise ShellError("character_name is required")
 
     @staticmethod
-    def _validate_line(text: str, *, allow_empty: bool, field: str) -> None:
+    def _validate_line(
+        text: str,
+        *,
+        allow_empty: bool,
+        field: str
+        ) -> None:
         if not isinstance(text, str):
             raise ShellError(f"{field} must be a string")
         if not allow_empty and not text:

@@ -297,7 +297,11 @@ def _handle_recall_session(args: dict[str, Any]) -> dict:
     # ── 第二遍：各通道独立产出名次表 ──
     query_lower = query.lower()
 
-    def _boolean_ranks(units: list[dict], key_fn, pred) -> dict[Any, int]:
+    def _boolean_ranks(
+        units: list[dict],
+        key_fn,
+        pred
+        ) -> dict[Any, int]:
         """布尔通道：命中即名次 0（共享头部）。"""
         return {key_fn(u): 0 for u in units if pred(u)}
 

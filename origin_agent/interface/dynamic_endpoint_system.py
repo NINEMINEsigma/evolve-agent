@@ -45,8 +45,8 @@ class IDynamicEndpointSystem(AsyncSystem, ABC):
     def list_session_endpoints(
         self,
         session_id: str,
-        agent_name: str | None = None,
-    ) -> list[dict[str, str | float]]:
+        agent_name: str | None = None
+        ) -> list[dict[str, str | float]]:
         """List endpoints belonging to one session and optional Agent."""
         ...
 
@@ -55,8 +55,8 @@ class IDynamicEndpointSystem(AsyncSystem, ABC):
         self,
         session_id: str,
         agent_name: str,
-        name: str,
-    ) -> DynamicEndpointInfo:
+        name: str
+        ) -> DynamicEndpointInfo:
         """Register and persist one endpoint."""
         ...
 
@@ -66,7 +66,11 @@ class IDynamicEndpointSystem(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def migrate_session_endpoints(self, old_sid: str, new_sid: str) -> int:
+    def migrate_session_endpoints(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> int:
         """Move all endpoint ownership from one session to another."""
         ...
 

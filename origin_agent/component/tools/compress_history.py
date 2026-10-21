@@ -48,7 +48,12 @@ class _PendingHistoryCompression:
     也不属于 ``entity.puretype``（不引入消息依赖）。
     """
 
-    def __init__(self, *, summary: str, keep_start_idx: int) -> None:
+    def __init__(
+        self,
+        *,
+        summary: str,
+        keep_start_idx: int
+        ) -> None:
         self.summary = summary
         self.keep_start_idx = keep_start_idx
 

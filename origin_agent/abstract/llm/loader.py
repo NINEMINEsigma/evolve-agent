@@ -38,8 +38,8 @@ def _ensure_namespace_package() -> None:
 def create_llm_client(
     name: str,
     runtime_context: RuntimeContext,
-    profile: LLMProfile | None = None,
-) -> BaseLLMClient:
+    profile: LLMProfile | None = None
+    ) -> BaseLLMClient:
     """加载并构造名为 *name* 的 LLM 客户端。
 
     Args:

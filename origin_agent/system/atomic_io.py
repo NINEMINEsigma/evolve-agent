@@ -84,8 +84,8 @@ def write_text_atomic(
     content: str,
     *,
     tmp_suffix: str = ".tmp",
-    encoding: str = "utf-8",
-) -> None:
+    encoding: str = "utf-8"
+    ) -> None:
     """原子写入文本内容到 path。
 
     先写入同目录下的临时文件，再原子替换到目标文件。
@@ -102,8 +102,8 @@ def create_text_exclusive(
     path: _PathT,
     content: str,
     *,
-    encoding: str = "utf-8",
-) -> None:
+    encoding: str = "utf-8"
+    ) -> None:
     """独占创建文本文件；目标已存在时绝不覆盖。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

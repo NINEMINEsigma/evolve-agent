@@ -89,7 +89,11 @@ class SessionFileChangeStore:
                 or not isinstance(actor.character_name, str) or not actor.character_name):
             raise ValueError("File change actor requires a session and character")
 
-    def _validate_data(self, data: SessionFileChangesData, expected_session_id: str) -> None:
+    def _validate_data(
+        self,
+        data: SessionFileChangesData,
+        expected_session_id: str
+        ) -> None:
         if not isinstance(data, SessionFileChangesData) or data.session_id != expected_session_id:
             raise TypeError("File changes root belongs to a different session or type")
         if type(data.revision) is not int or data.revision < 0 or not isinstance(data.entries, dict):
@@ -173,9 +177,12 @@ class SessionFileChangeStore:
         return data
 
     def _apply_operation(
-        self, candidate: SessionFileChangesData, actor: SessionFileChangeActor,
-        operation: SessionFileChangeOperation, completed_at: str,
-    ) -> None:
+        self,
+        candidate: SessionFileChangesData,
+        actor: SessionFileChangeActor,
+        operation: SessionFileChangeOperation,
+        completed_at: str
+        ) -> None:
         path = self._normalize_path(operation.path)
         source = self._normalize_path(operation.source_path) if operation.source_path is not None else None
         destination = self._normalize_path(operation.destination_path) if operation.destination_path is not None else None
@@ -217,9 +224,13 @@ class SessionFileChangeStore:
             )
 
     def record_success(
-        self, session_id: str, actor: SessionFileChangeActor,
-        operation: SessionFileChangeOperation, *, is_cancelled: Callable[[], bool],
-    ) -> bool:
+        self,
+        session_id: str,
+        actor: SessionFileChangeActor,
+        operation: SessionFileChangeOperation,
+        *,
+        is_cancelled: Callable[[], bool]
+        ) -> bool:
         try:
             with self._session_lock(session_id):
                 if session_id in self._closed_sessions or is_cancelled():
@@ -263,9 +274,12 @@ class SessionFileChangeStore:
             return self._summary(self._load_unlocked(session_id))
 
     def get_page(
-        self, session_id: str, *, offset: int = 0,
-        limit: int = SESSION_FILE_CHANGES_DEFAULT_LIMIT,
-    ) -> SessionFileChangesPage:
+        self,
+        session_id: str,
+        *,
+        offset: int = 0,
+        limit: int = SESSION_FILE_CHANGES_DEFAULT_LIMIT
+        ) -> SessionFileChangesPage:
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= SESSION_FILE_CHANGES_MAX_LIMIT:
             raise ValueError("Invalid file changes pagination")
         with self._session_lock(session_id):
@@ -278,8 +292,11 @@ class SessionFileChangeStore:
             )
 
     def block_session(
-        self, session_id: str, *, timeout: float = SESSION_FILE_CHANGES_DELETE_LOCK_TIMEOUT_SECONDS,
-    ) -> None:
+        self,
+        session_id: str,
+        *,
+        timeout: float = SESSION_FILE_CHANGES_DELETE_LOCK_TIMEOUT_SECONDS
+        ) -> None:
         lock = self._session_lock(session_id)
         if not lock.acquire(timeout=timeout):
             raise SessionFileChangesBusyError("Session file changes are still being committed")

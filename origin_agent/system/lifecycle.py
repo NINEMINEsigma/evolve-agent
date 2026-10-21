@@ -52,8 +52,8 @@ class TaskOwner:
     def __init__(
         self,
         owner_name: str,
-        on_failure: Callable[[BaseException], None],
-    ) -> None:
+        on_failure: Callable[[BaseException], None]
+        ) -> None:
         self._owner_name = owner_name
         self._on_failure = on_failure
         self._records: dict[asyncio.Task[Any], ManagedTaskRecord] = {}
@@ -106,8 +106,8 @@ class TaskOwner:
         self,
         coro: Coroutine[Any, Any, TaskResultT],
         *,
-        name: str,
-    ) -> asyncio.Task[TaskResultT]:
+        name: str
+        ) -> asyncio.Task[TaskResultT]:
         """创建后台任务；有请求等待方时必须使用 run_request。"""
         try:
             loop = self._check_loop()
@@ -304,7 +304,11 @@ class TaskOwner:
             record.timeout_error = failure
             self._report(failure)
 
-    def _cleanup_done(self, record: ManagedTaskRecord, task: asyncio.Task[None]) -> None:
+    def _cleanup_done(
+        self,
+        record: ManagedTaskRecord,
+        task: asyncio.Task[None]
+        ) -> None:
         if task.cancelled():
             self._report(LifecycleFailure("Task cancellation cleanup was itself cancelled"))
         else:
@@ -320,8 +324,8 @@ class TaskOwner:
         *,
         name: str,
         admission: Callable[[], ContextManager[None]],
-        cancel_timeout: float = SYSTEM_QUIESCE_TIMEOUT_SECONDS,
-    ) -> TaskResultT:
+        cancel_timeout: float = SYSTEM_QUIESCE_TIMEOUT_SECONDS
+        ) -> TaskResultT:
         """等待完整请求；结果交还调用方，取消后的真实任务仍由本实例持有。"""
         loop = self._check_loop()
         waiter = asyncio.current_task()

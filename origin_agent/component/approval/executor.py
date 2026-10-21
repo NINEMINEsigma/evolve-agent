@@ -53,8 +53,8 @@ async def execute_with_approval(
     session_id: str,
     *,
     sink: "IAgentSink",
-    hooks_context: str = "",
-) -> ApprovalOutcome:
+    hooks_context: str = ""
+    ) -> ApprovalOutcome:
     """统一的工具审批流程。
 
     封装 dangerous/write 判断、白名单检查、脱手/正常两种审批模式、

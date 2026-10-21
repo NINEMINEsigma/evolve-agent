@@ -54,7 +54,12 @@ class IToolRegistry(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def register_tool(self, tool: BaseTool, *, replace: bool = False) -> None:
+    def register_tool(
+        self,
+        tool: BaseTool,
+        *,
+        replace: bool = False
+        ) -> None:
         """Register one tool object atomically."""
         ...
 
@@ -83,8 +88,8 @@ class IToolRegistry(AsyncSystem, ABC):
         self,
         scope: ToolAvailability,
         tool_names: set[str] | None = None,
-        quiet: bool = False,
-    ) -> list[ToolPayload]:
+        quiet: bool = False
+        ) -> list[ToolPayload]:
         """Build schemas filtered by availability and runtime checks."""
         ...
 
@@ -114,7 +119,11 @@ class IToolRegistry(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def register_toolset_alias(self, alias: str, toolset: str) -> None:
+    def register_toolset_alias(
+        self,
+        alias: str,
+        toolset: str
+        ) -> None:
         """Register one explicit toolset alias."""
         ...
 
@@ -129,7 +138,12 @@ class IToolRegistry(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def register_toolset(self, toolset: BaseToolSet, *, merge: bool = False) -> None:
+    def register_toolset(
+        self,
+        toolset: BaseToolSet,
+        *,
+        merge: bool = False
+        ) -> None:
         """Preheat and register one toolset declaration."""
         ...
 
@@ -149,7 +163,11 @@ class IToolRegistry(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def get_definitions(self, tool_names: set[str], quiet: bool = False) -> list[ToolPayload]:
+    def get_definitions(
+        self,
+        tool_names: set[str],
+        quiet: bool = False
+        ) -> list[ToolPayload]:
         """Build schemas for the requested tool names."""
         ...
 
@@ -158,8 +176,8 @@ class IToolRegistry(AsyncSystem, ABC):
         self,
         scope: ToolAvailability,
         loaded_toolsets: set[str],
-        quiet: bool = False,
-    ) -> list[ToolPayload]:
+        quiet: bool = False
+        ) -> list[ToolPayload]:
         """Build schemas filtered by loaded toolsets and availability."""
         ...
 
@@ -167,8 +185,8 @@ class IToolRegistry(AsyncSystem, ABC):
     def get_toolset_catalog(
         self,
         scope: ToolAvailability,
-        loaded_toolsets: set[str],
-    ) -> list[ToolPayload]:
+        loaded_toolsets: set[str]
+        ) -> list[ToolPayload]:
         """Build the visible toolset catalog for one Agent scope."""
         ...
 
@@ -203,7 +221,11 @@ class IToolRegistry(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def get_max_result_size(self, name: str, default: int | None = None) -> int:
+    def get_max_result_size(
+        self,
+        name: str,
+        default: int | None = None
+        ) -> int:
         """Return the configured result-size limit for one tool."""
         ...
 

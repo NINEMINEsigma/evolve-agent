@@ -101,8 +101,8 @@ class StreamConsumer:
         llm: BaseLLMClient | None,
         sink: IAgentSink,
         character_name: str,
-        cancel_event: asyncio.Event,
-    ) -> None:
+        cancel_event: asyncio.Event
+        ) -> None:
         self._llm = llm
         self._sink = sink
         self._character_name = character_name
@@ -126,8 +126,8 @@ class StreamConsumer:
         stream_id: str,
         *,
         last_user_message: CharacterConversationMessage | None = None,
-        on_first_chunk: Callable[[str], Awaitable[None]] | None = None,
-    ) -> LLMResponse:
+        on_first_chunk: Callable[[str], Awaitable[None]] | None = None
+        ) -> LLMResponse:
         """消费流式响应，返回聚合后的 LLMResponse。"""
         llm = self._llm
         if llm is None:

@@ -63,8 +63,10 @@ class ColloquyLoop(ParentAgentLoop):
     # ========================================================================
 
     async def _check_over_limit_before_process(
-        self, sid: str, move_last_user_message: bool,
-    ) -> str:
+        self,
+        sid: str,
+        move_last_user_message: bool
+        ) -> str:
         """process_message 入口处的超限检查：超限时滑动窗口压缩，返回原 sid。
 
         滑窗路径不使用 move_last_user_message；它只影响父类旋转路径。

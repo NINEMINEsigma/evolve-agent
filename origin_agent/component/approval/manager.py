@@ -11,7 +11,11 @@ from system.llm_profile_store import LLMProfileStore
 class ApprovalBackendManager:
     """不自行创建全局入口，生命周期由 ApprovalSystem 管理。"""
 
-    def __init__(self, ctx: RuntimeContext, llm_profile_store: LLMProfileStore) -> None:
+    def __init__(
+        self,
+        ctx: RuntimeContext,
+        llm_profile_store: LLMProfileStore
+        ) -> None:
         self._llm_profile_store = llm_profile_store
         self._backend = ProfileApprovalBackend(ctx, llm_profile_store)
 

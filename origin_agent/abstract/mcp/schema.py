@@ -98,8 +98,8 @@ def _rewrite_local_ref(value: str) -> str:
 def _emit(
     diagnostic: Callable[[str, str], None],
     path: str,
-    code: str,
-) -> None:
+    code: str
+    ) -> None:
     """发送不含原始 schema 值的结构诊断。"""
     try:
         diagnostic(path, code)
@@ -113,8 +113,8 @@ def _normalize_bare_schema_string(
     path: str,
     diagnostic: Callable[[str, str], None],
     *,
-    for_additional_properties: bool = False,
-) -> dict[str, Any] | bool:
+    for_additional_properties: bool = False
+    ) -> dict[str, Any] | bool:
     """把 schema 位置的裸字符串转换为合法 schema。"""
     if value in _SCHEMA_STRING_TYPES:
         _emit(diagnostic, path, "bare_schema_type_string")
@@ -138,8 +138,8 @@ def _normalize_bare_schema_string(
 def _normalize_schema_map(
     value: Any,
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> dict[Any, Any]:
+    diagnostic: Callable[[str, str], None]
+    ) -> dict[Any, Any]:
     """规范化属性/定义映射的每个值，不规范化映射表本身。"""
     if not isinstance(value, dict):
         _emit(diagnostic, path, "invalid_schema_mapping")
@@ -155,8 +155,8 @@ def _normalize_schema_map(
 def _normalize_schema_list(
     value: Any,
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> list[Any]:
+    diagnostic: Callable[[str, str], None]
+    ) -> list[Any]:
     """规范化组合关键字或 tuple-style 数组 schema 的成员。"""
     if not isinstance(value, list):
         _emit(diagnostic, path, "invalid_schema_list")
@@ -170,8 +170,8 @@ def _normalize_schema_list(
 def _normalize_additional_properties(
     value: Any,
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> Any:
+    diagnostic: Callable[[str, str], None]
+    ) -> Any:
     """规范化 additionalProperties，同时保留布尔值语义。"""
     if isinstance(value, bool):
         return value
@@ -194,8 +194,8 @@ def _normalize_additional_properties(
 def _normalize_dependencies(
     value: Any,
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> Any:
+    diagnostic: Callable[[str, str], None]
+    ) -> Any:
     """处理 draft-07 dependencies 的“数组或 schema”双重形态。"""
     if not isinstance(value, dict):
         return copy.deepcopy(value)
@@ -214,8 +214,8 @@ def _normalize_dependencies(
 def _finalize_object_shape(
     node: dict[str, Any],
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> dict[str, Any]:
+    diagnostic: Callable[[str, str], None]
+    ) -> dict[str, Any]:
     """补齐 object 结构并清理当前节点范围内的 required。"""
     if node.get("type") != "object":
         return node
@@ -249,8 +249,8 @@ def _finalize_object_shape(
 def _collapse_nullable_union(
     node: dict[str, Any],
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> dict[str, Any]:
+    diagnostic: Callable[[str, str], None]
+    ) -> dict[str, Any]:
     """保留现有兼容行为，折叠只有一个非 null 分支的 union。"""
     for keyword in ("anyOf", "oneOf"):
         variants = node.get(keyword)
@@ -287,8 +287,8 @@ def _collapse_nullable_union(
 def _normalize_schema_node(
     node: Any,
     path: str,
-    diagnostic: Callable[[str, str], None],
-) -> Any:
+    diagnostic: Callable[[str, str], None]
+    ) -> Any:
     """在已知 schema 位置规范化一个节点。"""
     if isinstance(node, bool):
         # Boolean schema 是 JSON Schema 的合法形态，嵌套时保持原值。

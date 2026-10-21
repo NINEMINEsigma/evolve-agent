@@ -79,8 +79,8 @@ def _match_single(
     template: "MatLike",
     threshold: float,
     roi: list[int] | None,
-    method: int,
-) -> dict:
+    method: int
+    ) -> dict:
     """对单张模板执行匹配，返回 matched / match_count / matches / best。"""
     import cv2
     import numpy as np
@@ -222,7 +222,12 @@ def _handle_template_match(args: dict[str, Any]) -> dict:
     )
 
 
-def _nms(matches: list[dict], tw: int, th: int, overlap_thresh: float = 0.5) -> list[dict]:
+def _nms(
+    matches: list[dict],
+    tw: int,
+    th: int,
+    overlap_thresh: float = 0.5
+    ) -> list[dict]:
     """简化版非极大值抑制，合并重叠的匹配框。
 
     按 score 降序排列，逐个保留，删除与已保留框重叠超过阈值的后续框。

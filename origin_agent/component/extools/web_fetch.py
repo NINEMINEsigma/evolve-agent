@@ -40,7 +40,11 @@ class _HTMLToTextParser(HTMLParser):
         self._parts: list[str] = []
         self._skip: bool = False
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]]
+        ) -> None:
         if tag in ("script", "style", "noscript"):
             self._skip = True
 

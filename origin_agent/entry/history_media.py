@@ -33,7 +33,11 @@ class HistoryMediaConflictError(ValueError):
 
 
 class HistoryMediaPreviewError(ValueError):
-    def __init__(self, message: str, status_code: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int
+        ) -> None:
         if status_code not in (400, 415):
             raise ValueError("Invalid media preview error status")
         super().__init__(message)
@@ -187,8 +191,13 @@ def project_media_item(occurrence: HistoryMediaOccurrence) -> SessionMediaItem:
 
 
 def project_history_media(
-    history: History, session_id: str, *, offset: int, limit: int, editable: bool,
-) -> SessionMediaListResponse:
+    history: History,
+    session_id: str,
+    *,
+    offset: int,
+    limit: int,
+    editable: bool
+    ) -> SessionMediaListResponse:
     if offset < 0 or limit < 1:
         raise ValueError("Invalid History media page")
     items: list[SessionMediaItem] = []
@@ -229,8 +238,10 @@ def project_history_media(
 
 
 def build_media_history_candidate(
-    history: History, occurrence: HistoryMediaOccurrence, replacement: MediaBlock,
-) -> History:
+    history: History,
+    occurrence: HistoryMediaOccurrence,
+    replacement: MediaBlock
+    ) -> History:
     content = occurrence.message.content
     if not isinstance(content, list):
         raise TypeError("History media message must have block content")

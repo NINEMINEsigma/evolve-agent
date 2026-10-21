@@ -104,8 +104,11 @@ def _iter_tool_paths(directory: Path) -> Iterator[Path]:
 
 
 def _register_module(
-    module_name: str, *, registry: IToolRegistry, loaded_modules: set[str],
-) -> None:
+    module_name: str,
+    *,
+    registry: IToolRegistry,
+    loaded_modules: set[str]
+    ) -> None:
     if module_name in loaded_modules:
         raise LifecycleFailure(f"Tool module already registered in this discovery: {module_name}")
     # 动态插件边界只读取固定 TOOLSET 属性，不做签名内省或全局注册表注入。
@@ -119,8 +122,12 @@ def _register_module(
 
 
 def _discover_tools(
-    tools_path: Path, package_prefix: str, *, registry: IToolRegistry, loaded_modules: set[str],
-) -> list[str]:
+    tools_path: Path,
+    package_prefix: str,
+    *,
+    registry: IToolRegistry,
+    loaded_modules: set[str]
+    ) -> list[str]:
     registered: list[str] = []
     for path in _iter_tool_paths(tools_path):
         if not _module_declares_toolset(path):
@@ -133,8 +140,11 @@ def _discover_tools(
 
 
 def discover_builtin_tools(
-    tools_dir: str, package_prefix: str, *, registry: IToolRegistry,
-) -> list[str]:
+    tools_dir: str,
+    package_prefix: str,
+    *,
+    registry: IToolRegistry
+    ) -> list[str]:
     """Import and register object declarations in path order; failures propagate."""
     return _discover_tools(
         Path(tools_dir).resolve(), package_prefix, registry=registry, loaded_modules=set(),

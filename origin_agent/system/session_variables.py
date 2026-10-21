@@ -30,7 +30,13 @@ from system.sandbox import Sandbox, SandboxError
 
 
 class SessionVariableError(RuntimeError):
-    def __init__(self, message: str, *, code: str, logical_path: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        logical_path: str = ""
+        ) -> None:
         super().__init__(message)
         self.code = code
         self.logical_path = logical_path
@@ -45,12 +51,22 @@ class SessionVariableAccessError(SessionVariableError):
 
 
 class SessionVariableLimitError(SessionVariableError):
-    def __init__(self, message: str, *, logical_path: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        logical_path: str = ""
+        ) -> None:
         super().__init__(message, code="pool_limit_exceeded", logical_path=logical_path)
 
 
 class SessionVariableConflictError(SessionVariableError):
-    def __init__(self, message: str, *, logical_path: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        logical_path: str = ""
+        ) -> None:
         super().__init__(message, code="pool_conflict", logical_path=logical_path)
 
 
@@ -73,7 +89,12 @@ class SessionVariableScanBudget(BaseModel):
                 f"Scan exceeded {constants.SESSION_VARIABLE_SCAN_BUDGET_SECONDS} seconds; reduce the pool size."
             )
 
-    def consume_read(self, size: int, *, verification: bool) -> None:
+    def consume_read(
+        self,
+        size: int,
+        *,
+        verification: bool
+        ) -> None:
         if size < 0:
             raise ValueError("Read size cannot be negative")
         self.read_bytes += size
@@ -95,10 +116,12 @@ class SessionVariableScanBudget(BaseModel):
 
 
 def _issue(
-    path: str, code: str, *,
+    path: str,
+    code: str,
+    *,
     kind: Literal["value", "metadata", "constraint", "path"] = "value",
-    key: str | None = None,
-) -> SessionVariableIssue:
+    key: str | None = None
+    ) -> SessionVariableIssue:
     return SessionVariableIssue(
         path=path, kind=kind, code=code,
         message=constants.SESSION_VARIABLE_ISSUE_MESSAGES[code], key=key,
@@ -141,7 +164,12 @@ class SessionVariableService:
             raise SessionVariableInputError("Invalid session ID", code="invalid_session_id")
         return f"{Namespace.WS.value}:{SESSIONS_DIR_NAME}/{session_id}/{constants.SESSION_VARIABLES_DIR_NAME}"
 
-    def _checked_path(self, logical: str, *, write: bool = False) -> Path:
+    def _checked_path(
+        self,
+        logical: str,
+        *,
+        write: bool = False
+        ) -> Path:
         try:
             if write:
                 self._sandbox.resolve_write(logical)
@@ -191,9 +219,12 @@ class SessionVariableService:
 
     @staticmethod
     def _version(
-        root_exists: bool, nodes: Sequence[SessionVariableSnapshotNode],
-        issues: Sequence[SessionVariableIssue] = (), *, scan_complete: bool = True,
-    ) -> str:
+        root_exists: bool,
+        nodes: Sequence[SessionVariableSnapshotNode],
+        issues: Sequence[SessionVariableIssue] = (),
+        *,
+        scan_complete: bool = True
+        ) -> str:
         digest = hashlib.sha256(b"present" if root_exists else b"missing")
         digest.update(json.dumps([scan_complete, [(issue.path, issue.code) for issue in issues]],
                                  ensure_ascii=False).encode("utf-8"))
@@ -206,9 +237,14 @@ class SessionVariableService:
         return digest.hexdigest()
 
     def _read_node(
-        self, source: str, relative: str, budget: SessionVariableScanBudget, *,
-        verification: bool, register_access: Callable[[str], ContextManager[None]] | None,
-    ) -> SessionVariableSnapshotNode:
+        self,
+        source: str,
+        relative: str,
+        budget: SessionVariableScanBudget,
+        *,
+        verification: bool,
+        register_access: Callable[[str], ContextManager[None]] | None
+        ) -> SessionVariableSnapshotNode:
         logical = source + "/" + relative
         node = SessionVariableSnapshotNode(relative_path=relative, is_directory=False)
         try:
@@ -250,10 +286,14 @@ class SessionVariableService:
         return node
 
     def _scan_tree(
-        self, session_id: str, *, strict_paths: bool, budget: SessionVariableScanBudget,
+        self,
+        session_id: str,
+        *,
+        strict_paths: bool,
+        budget: SessionVariableScanBudget,
         verification: bool = False,
-        register_access: Callable[[str], ContextManager[None]] | None = None,
-    ) -> SessionVariableSourceSnapshot:
+        register_access: Callable[[str], ContextManager[None]] | None = None
+        ) -> SessionVariableSourceSnapshot:
         budget.check_time()
         source = self.source_path(session_id)
         try:
@@ -358,9 +398,12 @@ class SessionVariableService:
                 and math.isfinite(value) and abs(value) <= constants.SESSION_VARIABLE_SAFE_NUMBER_MAX)
 
     def _parse_metadata(
-        self, raw_metadata: dict[str, str] | None, *,
-        kind: Literal["number", "string", "invalid"], metadata_path: str,
-    ) -> tuple[SessionVariableMetadata, list[SessionVariableIssue]]:
+        self,
+        raw_metadata: dict[str, str] | None,
+        *,
+        kind: Literal["number", "string", "invalid"],
+        metadata_path: str
+        ) -> tuple[SessionVariableMetadata, list[SessionVariableIssue]]:
         raw = raw_metadata or {}
         issues: list[SessionVariableIssue] = []
         label = raw.get(constants.SESSION_VARIABLE_META_LABEL, "").strip()
@@ -427,10 +470,13 @@ class SessionVariableService:
                                        max=maximum, integer=integer, percent=percent, display=display), issues
 
     def _parse_entry(
-        self, relative_path: str, value_content: bytes | None,
-        metadata_content: bytes | None, source_path: str,
-        file_issues: list[SessionVariableIssue],
-    ) -> SessionVariableEntry:
+        self,
+        relative_path: str,
+        value_content: bytes | None,
+        metadata_content: bytes | None,
+        source_path: str,
+        file_issues: list[SessionVariableIssue]
+        ) -> SessionVariableEntry:
         path = source_path + "/" + relative_path
         metadata_path = path + META_FILE_SUFFIX
         issues = list(file_issues)
@@ -524,9 +570,11 @@ class SessionVariableService:
         return False
 
     def read_pool(
-        self, session_id: str, *,
-        register_access: Callable[[str], ContextManager[None]] | None = None,
-    ) -> SessionVariablePoolResponse:
+        self,
+        session_id: str,
+        *,
+        register_access: Callable[[str], ContextManager[None]] | None = None
+        ) -> SessionVariablePoolResponse:
         source = self.source_path(session_id)
         budget = _new_budget()
         try:
@@ -616,7 +664,11 @@ class SessionVariableService:
                     raise SessionVariableConflictError("Parent path is not a directory", logical_path=current)
             self._checked_path(current, write=True)
 
-    def _remove_owned_target(self, logical_path: str, expected_identity: SessionVariableDirectoryIdentity) -> None:
+    def _remove_owned_target(
+        self,
+        logical_path: str,
+        expected_identity: SessionVariableDirectoryIdentity
+        ) -> None:
         def check_owner() -> Path:
             root = self._checked_path(logical_path, write=True)
             info = root.lstat()
@@ -649,7 +701,11 @@ class SessionVariableService:
             raise SessionVariableCleanupFailure("Failed to remove incomplete variable target") from exc
 
     @contextmanager
-    def install_inheritance(self, data: SessionVariableInheritanceData, target_session_id: str) -> Iterator[None]:
+    def install_inheritance(
+        self,
+        data: SessionVariableInheritanceData,
+        target_session_id: str
+        ) -> Iterator[None]:
         logical = self.source_path(target_session_id)
         self._check_tree_limits(data.target_nodes)
         if not any(source.root_exists for source in data.sources):

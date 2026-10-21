@@ -116,8 +116,8 @@ class MultiAgentWorker:
         activity_id: str,
         max_context_tokens: int = 0,
         max_output_tokens: int = 0,
-        llm_profile: LLMProfile | None = None,
-    ) -> None:
+        llm_profile: LLMProfile | None = None
+        ) -> None:
         self.character_name: str = character_name
         self._system_prompts: list[str] = system_prompts
         self._messages: list[BaseMessage] = history
@@ -623,8 +623,8 @@ class MultiAgentWorker:
         raw_text: str = "",
         reasoning: str | None = None,
         stream_id: str = "",
-        collected_metrics: list[tuple[str, int, MessageMetrics]] | None = None,
-    ) -> WorkerResult:
+        collected_metrics: list[tuple[str, int, MessageMetrics]] | None = None
+        ) -> WorkerResult:
         """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
         stream_id = stream_id or f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_error"
@@ -651,7 +651,11 @@ class MultiAgentWorker:
             collected_metrics=collected_metrics or self._collected_metrics,
         )
 
-    async def _emit_text(self, text: str, stream_id: str = "") -> None:
+    async def _emit_text(
+        self,
+        text: str,
+        stream_id: str = ""
+        ) -> None:
         """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
 
         错误兜底推送，独立于桥接层主路径；正常流式路径统一走 StreamConsumer。

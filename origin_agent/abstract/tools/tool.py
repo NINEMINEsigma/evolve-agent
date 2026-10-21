@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 class ToolHandlerResult:
     """Keep the public result separate from private invocation state."""
 
-    def __init__(self, result: dict[str, Any], state: Any = None) -> None:
+    def __init__(
+        self,
+        result: dict[str, Any],
+        state: Any = None
+        ) -> None:
         self.result = result
         self.state = state
 
@@ -34,8 +38,8 @@ class ToolPostprocessEffect:
         loop_replaced: bool = False,
         evolution_requested: bool = False,
         completion_message: str | None = None,
-        system_message: str | None = None,
-    ) -> None:
+        system_message: str | None = None
+        ) -> None:
         self.suppress_tool_result_event = suppress_tool_result_event
         self.discarded_tool_call_ids = discarded_tool_call_ids
         self.replacement_result = replacement_result
@@ -55,8 +59,8 @@ class ToolExecution:
         tool: BaseTool,
         arguments: dict[str, Any],
         context: ToolContext,
-        tool_call_id: str,
-    ) -> None:
+        tool_call_id: str
+        ) -> None:
         self.tool = tool
         self.arguments = arguments
         self.context = context
@@ -101,8 +105,8 @@ class BaseTool(ABC):
         resets_turn_counter: bool = False,
         accepts_following_calls: bool = True,
         check_fn: Callable[[], bool] | None = None,
-        requires_env: tuple[str, ...] = (),
-    ) -> None:
+        requires_env: tuple[str, ...] = ()
+        ) -> None:
         self.name = name
         self.toolset = toolset
         self.schema = schema
@@ -148,8 +152,8 @@ class BaseToolSet:
         usage_guide: str = "",
         loaded_by_default: bool = False,
         check_fn: Callable[[], bool] | None = None,
-        requires_env: tuple[str, ...] = (),
-    ) -> None:
+        requires_env: tuple[str, ...] = ()
+        ) -> None:
         self.name = name
         self.tools = tuple(tools)
         self.description = description

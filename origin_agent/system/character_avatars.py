@@ -46,8 +46,8 @@ def avatar_files_url(logical_path: str) -> str:
 def _validated_avatar_entry(
     name: str,
     declared_path: str,
-    sandbox: Sandbox,
-) -> CharacterAvatarEntry:
+    sandbox: Sandbox
+    ) -> CharacterAvatarEntry:
     """对已声明的 [avatar] 路径执行 resolve_read / is_file / 大小三重校验并产出条目。"""
     path = declared_path.strip()
     if not path:
@@ -121,8 +121,10 @@ def collect_character_avatars(
 
 
 def _load_character_avatar_entry(
-    name: str, directory_path: str, sandbox: Sandbox
-) -> CharacterAvatarEntry:
+    name: str,
+    directory_path: str,
+    sandbox: Sandbox
+    ) -> CharacterAvatarEntry:
     """读取单个角色目录的 profile.md.meta 并解析 [avatar] 单键。
 
     只做头像轻量扫描：不读取 profile.md 正文，不解析 [profile] 与

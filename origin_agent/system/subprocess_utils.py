@@ -115,8 +115,8 @@ def completed_process_from_bytes(
     args: Sequence[str] | str,
     returncode: int | None,
     stdout: bytes | str | None,
-    stderr: bytes | str | None,
-) -> subprocess.CompletedProcess[str]:
+    stderr: bytes | str | None
+    ) -> subprocess.CompletedProcess[str]:
     """把 bytes 输出转换为文本版 CompletedProcess。"""
     return subprocess.CompletedProcess(
         args=args,
@@ -133,8 +133,8 @@ def run_text(
     env: Mapping[str, str] | None = None,
     stderr_to_stdout: bool = False,
     force_utf8_python: bool = True,
-    **kwargs: Any,
-) -> subprocess.CompletedProcess[str]:
+    **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
     """以 bytes 模式运行子进程，并返回安全解码后的文本结果。"""
     merged_env = build_subprocess_env(env, force_utf8_python=force_utf8_python)
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
@@ -234,8 +234,10 @@ class SubprocessRunner(ISubprocessRunner):
                 self._idle.set()
 
     def _register_process(
-        self, session_id: str, proc: subprocess.Popen | asyncio.subprocess.Process,
-    ) -> bool:
+        self,
+        session_id: str,
+        proc: subprocess.Popen | asyncio.subprocess.Process
+        ) -> bool:
         with self._procs_lock:
             self._active_procs.setdefault(session_id, []).append(proc)
             self._idle.clear()
@@ -245,8 +247,10 @@ class SubprocessRunner(ISubprocessRunner):
         return closed or self.runtime.state != ApplicationState.RUNNING
 
     def _forget_process(
-        self, session_id: str, proc: subprocess.Popen | asyncio.subprocess.Process,
-    ) -> None:
+        self,
+        session_id: str,
+        proc: subprocess.Popen | asyncio.subprocess.Process
+        ) -> None:
         with self._procs_lock:
             processes = self._active_procs[session_id]
             processes.remove(proc)
@@ -305,8 +309,11 @@ class SubprocessRunner(ISubprocessRunner):
             raise BaseExceptionGroup("Subprocess cleanup failed", failures)
 
     async def _spawn_async(
-        self, args: list[str], popen_kwargs: dict, session_id: str,
-    ) -> asyncio.subprocess.Process:
+        self,
+        args: list[str],
+        popen_kwargs: dict,
+        session_id: str
+        ) -> asyncio.subprocess.Process:
         """由实际创建任务登记进程，调用方取消不会遗漏已创建的进程。"""
         async def spawn() -> asyncio.subprocess.Process:
             proc = await asyncio.create_subprocess_exec(*args, **popen_kwargs)
@@ -354,8 +361,11 @@ class SubprocessRunner(ISubprocessRunner):
 
     @contextmanager
     def _sync_process(
-        self, args: list[str], popen_kwargs: dict, session_id: str,
-    ) -> Iterator[subprocess.Popen]:
+        self,
+        args: list[str],
+        popen_kwargs: dict,
+        session_id: str
+        ) -> Iterator[subprocess.Popen]:
         operation = self._begin_operation()
         proc: subprocess.Popen | None = None
         try:
@@ -383,8 +393,11 @@ class SubprocessRunner(ISubprocessRunner):
 
     @asynccontextmanager
     async def _async_process(
-        self, args: list[str], popen_kwargs: dict, session_id: str,
-    ) -> AsyncIterator[asyncio.subprocess.Process]:
+        self,
+        args: list[str],
+        popen_kwargs: dict,
+        session_id: str
+        ) -> AsyncIterator[asyncio.subprocess.Process]:
         operation = self._begin_operation()
         proc: asyncio.subprocess.Process | None = None
         try:
@@ -414,8 +427,8 @@ class SubprocessRunner(ISubprocessRunner):
         cwd: str,
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess[str]:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess[str]:
         """以沙盒化工作目录运行子进程（同步阻塞）。
 
         *args* — 命令 + 参数（调用方已做命名空间路径检查）。
@@ -461,8 +474,8 @@ class SubprocessRunner(ISubprocessRunner):
         cwd: str,
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess[str]:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess[str]:
         """以沙盒化工作目录运行子进程（真异步，事件循环不阻塞）。
 
         与 ``run()`` 语义相同，但使用 ``asyncio.create_subprocess_exec`` +
@@ -511,8 +524,8 @@ class SubprocessRunner(ISubprocessRunner):
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
         session_id: str = "",
-        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
-    ) -> ProcessLineStreamResult:
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES
+        ) -> ProcessLineStreamResult:
         """以逐行 stdout 回调方式运行子进程，并允许调用方提前终止。
 
         ``on_stdout_line`` 返回 ``False`` 时表示调用方已取得足够输出，

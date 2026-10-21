@@ -84,9 +84,10 @@ class BaseMessage(BaseModel):
     content: str|dict[str, Any]|list[MessageBlock] = Field(description="The content of the message")
     role: Role = Field(description="The role of the message")
 
-    def as_content(self, 
+    def as_content(
+        self,
         # 当前作为运行中的agent的角色
-        current_character_agent:str, 
+        current_character_agent: str,
         **kwargs
         ) -> MessageContent|None:
         '''
@@ -147,9 +148,10 @@ class CharacterMessage(BaseMessage):
 
 
 class CharacterSystemMessage(CharacterMessage):
-    def as_content(self,
+    def as_content(
+        self,
         # 当前作为运行中的agent的角色
-        current_character_agent:str, 
+        current_character_agent: str,
         **kwargs
         ) -> str|list[dict[str, Any]]|None:
         '''
@@ -246,7 +248,7 @@ class CharacterConversationMessage(CharacterMessage):
     def as_content(
         self,
         # 当前作为运行中的agent的角色
-        current_character_agent:str, 
+        current_character_agent: str,
         is_last_user_message: bool = False,
         **kwargs
         ) -> MessageContent|None:
@@ -320,8 +322,8 @@ class ToolResultMessage(CharacterMessage):
         cls,
         tool_call_id: str,
         character_name: str,
-        result: dict[str, Any],
-    ) -> "ToolResultMessage":
+        result: dict[str, Any]
+        ) -> "ToolResultMessage":
         """从工具返回结果构造 ToolResultMessage, 自动识别 _image 并生成 content blocks. """
         from entry.agent_support.multimodal import tool_result_to_content
         return cls(
@@ -392,7 +394,11 @@ class History(BaseModel):
             self.update_last_user_message()
             return len(self.messages) - 1
 
-    def insert_message(self, message: BaseMessage, index: int) -> bool:
+    def insert_message(
+        self,
+        message: BaseMessage,
+        index: int
+        ) -> bool:
         with self._io_locker:
             if index < 0 or index > len(self.messages):
                 return False
@@ -526,7 +532,11 @@ class History(BaseModel):
         with self._io_locker:
             return iter(list(self.messages))
 
-    def set_message(self, index: int, message: BaseMessage) -> None:
+    def set_message(
+        self,
+        index: int,
+        message: BaseMessage
+        ) -> None:
         """替换指定索引的消息. """
         with self._io_locker:
             if index < 0 or index >= len(self.messages):
@@ -534,7 +544,12 @@ class History(BaseModel):
             self.messages[index] = message
             self.update_last_user_message()
 
-    def replace_range(self, start: int, end: int, replacements: list[BaseMessage]) -> None:
+    def replace_range(
+        self,
+        start: int,
+        end: int,
+        replacements: list[BaseMessage]
+        ) -> None:
         """用 replacements 整体替换半开区间 [start, end) 的消息.
 
         调用方负责保持 tool_calls/tool_result 配对完整；本方法不做配对校验.

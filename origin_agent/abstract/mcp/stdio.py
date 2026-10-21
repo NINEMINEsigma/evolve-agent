@@ -37,9 +37,11 @@ from system.lifecycle import LifecycleFailure
 
 class MCPStdioTransport:
     def __init__(
-        self, params: StdioServerParameters, errlog: IO[str],
-        on_failure: Callable[[BaseException], None],
-    ) -> None:
+        self,
+        params: StdioServerParameters,
+        errlog: IO[str],
+        on_failure: Callable[[BaseException], None]
+        ) -> None:
         self._params = params
         self._errlog = errlog
         self._on_failure = on_failure

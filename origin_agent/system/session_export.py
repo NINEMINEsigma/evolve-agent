@@ -67,21 +67,33 @@ logger = logging.getLogger(__name__)
 class SessionExportInputError(SessionExportError):
     """请求结构、路径或来源无效。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str
+        ) -> None:
         super().__init__(code, message, 400)
 
 
 class SessionExportNotFoundError(SessionExportError):
     """会话不存在、删除中或目标资源缺失。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str
+        ) -> None:
         super().__init__(code, message, 404)
 
 
 class SessionExportNotReadyError(SessionExportError):
     """会话存在但 Loop 未恢复、身份不匹配或已归档不可导出。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str
+        ) -> None:
         super().__init__(code, message, 409)
 
 
@@ -152,7 +164,11 @@ class _CapacityTicket:
 class _SourceUnavailable(Exception):
     """线程侧资源不可用信号；由 status 与 code 承载结果。"""
 
-    def __init__(self, status: Literal["missing", "denied", "too_large"], code: str) -> None:
+    def __init__(
+        self,
+        status: Literal["missing", "denied", "too_large"],
+        code: str
+        ) -> None:
         super().__init__(code)
         self.status = status
         self.code = code
@@ -185,10 +201,14 @@ def _file_stat_signature(info: os.stat_result) -> tuple[int, int, int, int, int,
 
 
 def _assert_read_unchanged(
-    kind: str, source_ref: str,
-    path_before: os.stat_result, handle_before: os.stat_result,
-    handle_after: os.stat_result, path_after: os.stat_result, total: int,
-) -> None:
+    kind: str,
+    source_ref: str,
+    path_before: os.stat_result,
+    handle_before: os.stat_result,
+    handle_after: os.stat_result,
+    path_after: os.stat_result,
+    total: int
+    ) -> None:
     """独立复核路径和打开句柄；保留字节数和后续 SHA-256 复核。"""
     reason = None
     if _file_stat_signature(path_before) != _file_stat_signature(path_after):
@@ -237,8 +257,8 @@ class SessionExportService:
         runtime: IRuntimeSystem,
         sessions: ISessionManager,
         sandbox: ISandbox,
-        visuals: SessionVisualResourceService,
-    ) -> None:
+        visuals: SessionVisualResourceService
+        ) -> None:
         self._runtime = runtime
         self._sessions = sessions
         self._sandbox = sandbox
@@ -276,7 +296,12 @@ class SessionExportService:
         with self._capacity_lock:
             self._resource_in_use -= 1
 
-    async def _run_sync(self, fn: Callable[[threading.Event, float], ExportWorkT], deadline: float, ticket: _CapacityTicket) -> ExportWorkT:
+    async def _run_sync(
+        self,
+        fn: Callable[[threading.Event, float], ExportWorkT],
+        deadline: float,
+        ticket: _CapacityTicket
+        ) -> ExportWorkT:
         """在线程池执行同步函数；容量由工作线程 finally 释放，取消时不提前释放。"""
         loop = asyncio.get_running_loop()
         cancel = threading.Event()
@@ -346,7 +371,12 @@ class SessionExportService:
             raise SessionExportBusyError()
         return info, loop
 
-    def _check_guard(self, loop: IMainSessionLoop, instance_id: str, epoch: int) -> None:
+    def _check_guard(
+        self,
+        loop: IMainSessionLoop,
+        instance_id: str,
+        epoch: int
+        ) -> None:
         self._require_running()
         _, current = self._confirm_session(loop.loop.session_id)
         if current is not loop or loop.loop.get_session_export_guard() != (instance_id, epoch):
@@ -359,7 +389,12 @@ class SessionExportService:
 
     # -- metrics --------------------------------------------------------
 
-    def _read_metrics(self, session_id: str, cancel: threading.Event, deadline: float) -> tuple[dict[int, MessageMetrics], str]:
+    def _read_metrics(
+        self,
+        session_id: str,
+        cancel: threading.Event,
+        deadline: float
+        ) -> tuple[dict[int, MessageMetrics], str]:
         """严格、有界读取同一次 metrics 字节快照，缺失与空文件不同。"""
         from entity.constant import SESSION_EXPORT_HISTORY_MAX_BYTES
         store = SessionStore(self._runtime.context.workspace / SESSIONS_DIR_NAME)
@@ -414,7 +449,12 @@ class SessionExportService:
 
     # -- 视觉状态 -------------------------------------------------------
 
-    def _visual_entries(self, session_id: str, cancel: threading.Event, deadline: float) -> tuple[list[SessionExportVisualEntry], str]:
+    def _visual_entries(
+        self,
+        session_id: str,
+        cancel: threading.Event,
+        deadline: float
+        ) -> tuple[list[SessionExportVisualEntry], str]:
         """源配置与入口原字节都参与复核，不依赖只覆盖stage入口的旧version。"""
         entries: list[SessionExportVisualEntry] = []
         evidence: list[object] = []
@@ -523,9 +563,13 @@ class SessionExportService:
         return resolved.real, _guess_media_type(resolved.real), _digest_text("sandbox", str(resolved.real))
 
     def _read_source(
-        self, source: SessionExportResourceSource, cancel: threading.Event, deadline: float,
-        *, keep_content: bool,
-    ) -> tuple[str, bytes | None, str | None, str | None, str | None, int | None]:
+        self,
+        source: SessionExportResourceSource,
+        cancel: threading.Event,
+        deadline: float,
+        *,
+        keep_content: bool
+        ) -> tuple[str, bytes | None, str | None, str | None, str | None, int | None]:
         """读取精确文件；返回 (status, content, mime, digest, identity, size)。"""
         def check() -> None:
             if cancel.is_set():
@@ -605,9 +649,13 @@ class SessionExportService:
         return "saved", content, mime, digest.hexdigest(), identity, total
 
     def _read_or_unavailable(
-        self, source: SessionExportResourceSource, cancel: threading.Event, deadline: float,
-        *, keep_content: bool,
-    ) -> SessionExportResourceRead:
+        self,
+        source: SessionExportResourceSource,
+        cancel: threading.Event,
+        deadline: float,
+        *,
+        keep_content: bool
+        ) -> SessionExportResourceRead:
         try:
             status, content, mime, digest, identity, size = self._read_source(
                 source, cancel, deadline, keep_content=keep_content,
@@ -743,8 +791,10 @@ class SessionExportService:
             ticket.release()
 
     async def read_resource(
-        self, session_id: str, request: SessionExportResourceRequest,
-    ) -> SessionExportResourceRead:
+        self,
+        session_id: str,
+        request: SessionExportResourceRequest
+        ) -> SessionExportResourceRead:
         """按 stamp 精确读取单个资源；已识别不可用返回带 proof 的结果。"""
         logger.debug("session export resource start session=%s kind=%s", session_id, request.source.kind)
         self._require_running()
@@ -772,8 +822,10 @@ class SessionExportService:
             ticket.release()
 
     async def verify(
-        self, session_id: str, request: SessionExportVerifyRequest,
-    ) -> SessionExportVerifyResponse:
+        self,
+        session_id: str,
+        request: SessionExportVerifyRequest
+        ) -> SessionExportVerifyResponse:
         """复核 History/均量元数据/视觉与每项资源 proof，最后再做 guard 检查。"""
         logger.info("session export verify start session=%s resources=%s", session_id, len(request.resources))
         self._require_running()

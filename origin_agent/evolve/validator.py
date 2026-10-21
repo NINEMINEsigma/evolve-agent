@@ -77,8 +77,8 @@ def validate_directory(
     dir_path: Path,
     *,
     deep: bool = False,
-    timeout: int = 15,
-) -> list[dict[str, Any]]:
+    timeout: int = 15
+    ) -> list[dict[str, Any]]:
     """验证目录中所有 .py 文件。
 
     *deep=False* — 仅语法检查（快速，覆盖大多数问题）。

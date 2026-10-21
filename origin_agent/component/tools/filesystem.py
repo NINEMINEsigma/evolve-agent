@@ -86,8 +86,8 @@ def _mcs() -> IModalityCapabilitySystem:
 def _read_meta_fields(
     path: str,
     is_directory: bool,
-    context: ToolContext | None = None,
-) -> dict[str, dict[str, str] | str]:
+    context: ToolContext | None = None
+    ) -> dict[str, dict[str, str] | str]:
     """读取已校验目标的同级元数据；缺失省略字段，失败不影响正文。"""
     namespace, relative = path.split(":", 1)
     # 原目标已经过 resolve_read 校验；这里只统一分隔符和当前目录写法，
@@ -148,8 +148,10 @@ def _track_agentspace_access(
 
 
 def _record_created_directories(
-    recorder: FileChangeRecorder, tool_name: str, paths: list[str],
-) -> None:
+    recorder: FileChangeRecorder,
+    tool_name: str,
+    paths: list[str]
+    ) -> None:
     for path in paths:
         recorder.record(SessionFileChangeOperation(
             tool_name=tool_name, operation="create", path=path, kind="directory",
@@ -943,8 +945,10 @@ def _handle_delete(execution: ToolExecution) -> dict:
 
 
 def _find_ranges(
-    content: str, start_marker: str, end_marker: str,
-) -> list[tuple[int, int]]:
+    content: str,
+    start_marker: str,
+    end_marker: str
+    ) -> list[tuple[int, int]]:
     """扫描 content 中所有 start_marker..end_marker 区间（含标记本身）。
 
     返回 [(start_idx, end_idx), ...]，其中 start_idx 是 start_marker 的起始位置，

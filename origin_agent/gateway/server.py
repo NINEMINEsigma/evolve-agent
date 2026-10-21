@@ -467,10 +467,11 @@ async def get_session_file_changes_summary(session_id: str, response: Response) 
 
 @router.get("/api/sessions/{session_id}/file-changes", response_model=SessionFileChangesPage)
 async def get_session_file_changes(
-    session_id: str, response: Response,
+    session_id: str,
+    response: Response,
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=SESSION_FILE_CHANGES_DEFAULT_LIMIT, ge=1, le=SESSION_FILE_CHANGES_MAX_LIMIT),
-) -> SessionFileChangesPage:
+    limit: int = Query(default=SESSION_FILE_CHANGES_DEFAULT_LIMIT, ge=1, le=SESSION_FILE_CHANGES_MAX_LIMIT)
+    ) -> SessionFileChangesPage:
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
 
@@ -767,8 +768,10 @@ async def http_disgust(session_id: str):
 
 @asynccontextmanager
 async def _file_changes_delete_scope(
-    session_id: str, manager: ISessionManager, store: SessionFileChangeStore,
-) -> AsyncIterator[None]:
+    session_id: str,
+    manager: ISessionManager,
+    store: SessionFileChangeStore
+    ) -> AsyncIterator[None]:
     # REQUEST 的 Owner 持有本作用域，取消后仍观察真实线程结果。
     block = asyncio.create_task(asyncio.to_thread(store.block_session, session_id))
     original: BaseException | None = None
@@ -880,7 +883,11 @@ async def _delete_session_impl(session_id: str):
 ExportHTTPResultT = TypeVar("ExportHTTPResultT")
 
 
-async def _run_export_http(req: Request, factory: Callable[[], Coroutine[Any, Any, ExportHTTPResultT]], name: str) -> ExportHTTPResultT:
+async def _run_export_http(
+    req: Request,
+    factory: Callable[[], Coroutine[Any, Any, ExportHTTPResultT]],
+    name: str
+    ) -> ExportHTTPResultT:
     """HTTP 断开取消等待方，实际业务和线程收尾继续由 Gateway Owner 持有。"""
     from entity.constant import SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
     gateway = _gateway()
@@ -1042,8 +1049,8 @@ async def get_session_history_skeleton(session_id: str, start_index: int = 0):
 async def get_session_history_page(
     session_id: str,
     start_index: int = 0,
-    limit: int = SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
-):
+    limit: int = SESSION_HISTORY_PAGE_DEFAULT_LIMIT
+    ):
     """按 History 消息索引范围返回完整前端内容行。"""
     if start_index < 0:
         raise HTTPException(status_code=400, detail="start_index must be >= 0")
@@ -1094,9 +1101,11 @@ def _validate_media_id(media_id: str) -> None:
 
 @router.get("/api/sessions/{session_id}/history/media")
 async def get_session_media(
-    session_id: str, response: Response,
-    offset: int = SESSION_MEDIA_DEFAULT_OFFSET, limit: int = SESSION_MEDIA_DEFAULT_LIMIT,
-) -> SessionMediaListResponse:
+    session_id: str,
+    response: Response,
+    offset: int = SESSION_MEDIA_DEFAULT_OFFSET,
+    limit: int = SESSION_MEDIA_DEFAULT_LIMIT
+    ) -> SessionMediaListResponse:
     if offset < 0 or limit < 1 or limit > SESSION_MEDIA_MAX_LIMIT:
         raise HTTPException(status_code=400, detail="Invalid media page range")
     loop = _require_media_loop(session_id, writable=False)
@@ -1112,8 +1121,11 @@ async def get_session_media(
 
 @router.put("/api/sessions/{session_id}/history/media/{media_id}")
 async def update_session_media(
-    session_id: str, media_id: str, req: Request, response: Response,
-) -> SessionMediaUpdateResponse:
+    session_id: str,
+    media_id: str,
+    req: Request,
+    response: Response
+    ) -> SessionMediaUpdateResponse:
     _admit_business_http()
     _validate_media_id(media_id)
     payload = await _parse_request_model(req, SessionMediaUpdateRequest)
@@ -1155,7 +1167,11 @@ async def get_session_media_content(session_id: str, media_id: str) -> Response:
 
 
 @router.put("/api/sessions/{session_id}/messages/{message_index}")
-async def update_session_message(session_id: str, message_index: int, req: Request):
+async def update_session_message(
+    session_id: str,
+    message_index: int,
+    req: Request
+    ):
     """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
     _admit_business_http()
     logger.info("Edit message request | session=%s index=%d", session_id, message_index)
@@ -1735,8 +1751,8 @@ async def dynamic_endpoint_handler(
     session_id: str,
     agent_name: str,
     endpoint_name: str,
-    req: Request,
-):
+    req: Request
+    ):
     """动态端点回调 — 向指定会话中的指定 agent 投递仅自身可见的系统消息。
 
     agent 通过 ``RegisterDynamicEndpoint`` 工具注册端点后，在消息气泡中
@@ -1964,7 +1980,11 @@ async def file_picker():
 
 @router.get(STATIC_FILE_HTTP_PREFIX + "/{namespace}/{file_path:path}")
 @router.head(STATIC_FILE_HTTP_PREFIX + "/{namespace}/{file_path:path}")
-def serve_workspace_file(namespace: str, file_path: str, request: Request):
+def serve_workspace_file(
+    namespace: str,
+    file_path: str,
+    request: Request
+    ):
     """在线程池解析视觉入口；最终 HEAD 响应独立校验来源并返回版本。"""
     from system.application import Application
     from system.sandbox import SandboxError
@@ -2097,7 +2117,11 @@ async def download_workspace_file(namespace: str, file_path: str):
 
 
 @router.get(DIR_ZIP_HTTP_PREFIX + "/{namespace}/{file_path:path}")
-def download_dir_zip(namespace: str, file_path: str, request: Request):
+def download_dir_zip(
+    namespace: str,
+    file_path: str,
+    request: Request
+    ):
     """将沙盒命名空间下的整个目录打包为 zip 后下载。
 
     URL 格式: /zip/{namespace}/{file_path}
@@ -3074,8 +3098,8 @@ async def _send_approval_mode_state(ws: WebSocket, session_id: str) -> None:
 async def _send_agentspace_ws_event(
     ws: WebSocket,
     session_id: str,
-    event: AgentspaceEvent,
-) -> None:
+    event: AgentspaceEvent
+    ) -> None:
     """通过聊天 WebSocket 发送 typed Agentspace 事件。"""
     await ws.send_text(
         Message(

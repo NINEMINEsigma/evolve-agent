@@ -71,8 +71,10 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
             return self._endpoints.get(endpoint_name)
 
     def list_session_endpoints(
-        self, session_id: str, agent_name: str | None = None,
-    ) -> list[dict[str, Any]]:
+        self,
+        session_id: str,
+        agent_name: str | None = None
+        ) -> list[dict[str, Any]]:
         ctx = self.runtime.context
         with self._lock:
             return [
@@ -92,8 +94,11 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
             ]
 
     def register_endpoint(
-        self, session_id: str, agent_name: str, name: str,
-    ) -> DynamicEndpointInfo:
+        self,
+        session_id: str,
+        agent_name: str,
+        name: str
+        ) -> DynamicEndpointInfo:
         with self.runtime.admission(), self._lock:
             self._require_open()
             for info in self._endpoints.values():
@@ -124,7 +129,11 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
             self._delete_endpoint_on_disk_locked(name)
             return info
 
-    def migrate_session_endpoints(self, old_sid: str, new_sid: str) -> int:
+    def migrate_session_endpoints(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> int:
         with self.runtime.admission(), self._lock:
             self._require_open()
             count = 0

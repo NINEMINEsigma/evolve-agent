@@ -95,12 +95,20 @@ class ISessionMetadataService(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def generate_tags(self, session_id: str, existing_tags: list[str]) -> list[str]:
+    async def generate_tags(
+        self,
+        session_id: str,
+        existing_tags: list[str]
+        ) -> list[str]:
         """Generate session tags from existing tags and session history."""
         ...
 
     @abstractmethod
-    async def generate_summary(self, session_id: str, history: History | None = None) -> str:
+    async def generate_summary(
+        self,
+        session_id: str,
+        history: History | None = None
+        ) -> str:
         """Generate a summary for the supplied or persisted session history."""
         ...
 
@@ -115,11 +123,19 @@ class ISessionMetadataService(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def generate_tool_chain_summary(self, session_id: str, chain_text: str) -> str:
+    async def generate_tool_chain_summary(
+        self,
+        session_id: str,
+        chain_text: str
+        ) -> str:
         """Generate a compact summary for one complete tool chain."""
         ...
 
     @abstractmethod
-    def maybe_generate_first_title(self, session_id: str, text: str) -> None:
+    def maybe_generate_first_title(
+        self,
+        session_id: str,
+        text: str
+        ) -> None:
         """Schedule first-message title generation without blocking the route."""
         ...

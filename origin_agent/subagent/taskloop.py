@@ -78,7 +78,12 @@ class TaskAgentLoop(SubAgentLoop):
             )
         ]
 
-    async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
+    async def run(
+        self,
+        initial_prompt: str,
+        user_name: str,
+        message_type: str
+        ) -> None:
         """taskagent 主循环 — 纯文本回复即终止。"""
         from system.application import Application
         _cron = Application.current().get_system(ICronRouter)

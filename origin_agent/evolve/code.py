@@ -32,8 +32,8 @@ def finalize_evolution(
     ctx: ToolContext,
     *,
     deep: bool = True,
-    compile_timeout: int = SUBPROCESS_TIMEOUT_DEFAULT,
-) -> dict:
+    compile_timeout: int = SUBPROCESS_TIMEOUT_DEFAULT
+    ) -> dict:
     """验证 fork 目录；通过后仅在本次工具调用上登记进化意图。
 
     实际的关闭请求由所属 Loop 在本工具结果严格保存后发出（D6）；

@@ -9,8 +9,8 @@ from entity.puretype import Role, ToolCallRequest
 def interrupted_tool_result(
     tool_call: ToolCallRequest,
     character_name: str,
-    phase: str,
-) -> ToolResultMessage:
+    phase: str
+    ) -> ToolResultMessage:
     """Build a paired result for an accepted tool call that did not execute."""
     return ToolResultMessage(
         role=Role.TOOL,
@@ -29,8 +29,8 @@ def collect_unexecuted_tool_results(
     accepted_tool_calls: list[ToolCallRequest],
     executed_tool_call_ids: set[str],
     character_name: str,
-    phase: str,
-) -> list[ToolResultMessage]:
+    phase: str
+    ) -> list[ToolResultMessage]:
     """Return interruption results for accepted calls without a stored result."""
     stored_ids: set[str] = set()
     declared_ids: set[str] = set()

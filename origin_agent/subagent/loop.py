@@ -75,7 +75,12 @@ current_subagent_loop: ContextVar[Any] = ContextVar("current_subagent_loop")
 SUB_MESSAGE_SEPARATOR = "[Sub Session Message]"
 
 
-def format_user_message(user_name: str, message_type: str, content: str, co_recipients: list[str] | None = None) -> str:
+def format_user_message(
+    user_name: str,
+    message_type: str,
+    content: str,
+    co_recipients: list[str] | None = None
+    ) -> str:
     """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
     from system.templates import read_template
 
@@ -127,8 +132,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         on_message: Callable[[dict[str, Any]], None],
         parent_session_id: str = "",
         parent_character_agent: str = "",
-        name: str = "",
-    ) -> None:
+        name: str = ""
+        ) -> None:
         from system.application import Application
         app = Application.current()
         super().__init__(app, session_id)
@@ -269,7 +274,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         logger.warning("SubAgent context limit reached | session=%s", self.session_id)
         self.append_feedback("[system] Context limit reached. Sub-agent may lose context.")
 
-    async def append_user_message(self, content: Any, *, display_content: Any | None = None, **kwargs: Any) -> int:
+    async def append_user_message(
+        self,
+        content: Any,
+        *,
+        display_content: Any | None = None,
+        **kwargs: Any
+        ) -> int:
         """把用户消息加入子 Agent 历史并返回索引。"""
         msg = CharacterConversationMessage(
             role=Role.USER,
@@ -285,7 +296,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
         **kwargs
-    ) -> str:
+        ) -> str:
         """子 Agent 不通过此路径接收消息；使用 inject_parent_message() + run() 替代。"""
         raise NotImplementedError(
             "SubAgentLoop does not support process_message(). "
@@ -345,11 +356,19 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._outbox_event.set()
         self.set_paused()
 
-    def emit_event(self, role: str, **fields: Any) -> None:
+    def emit_event(
+        self,
+        role: str,
+        **fields: Any
+        ) -> None:
         """向前端推送一条结构化事件（公共接口）。"""
         self._emit(role, **fields)
 
-    def _emit(self, role: str, **fields: Any) -> None:
+    def _emit(
+        self,
+        role: str,
+        **fields: Any
+        ) -> None:
         """向前端推送一条结构化事件。
 
         ``role`` 取值：``user`` / ``assistant`` / ``reasoning`` / ``tool_call`` /
@@ -382,7 +401,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         approval_mode = get_approval_mode(self._parent_session_id)
         return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, approval_mode)
 
-    def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
+    def _is_auto_approved_tool(
+        self,
+        name: str,
+        args: dict
+        ) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
         try:
             from component.approval.allowlist import is_allowed
@@ -391,7 +414,12 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             logger.warning("Failed to check approval allowlist for subagent tool=%s", name, exc_info=True)
             return False
 
-    async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
+    async def run(
+        self,
+        initial_prompt: str,
+        user_name: str,
+        message_type: str
+        ) -> None:
         """子 Agent 主循环。"""
         # 注册到 CronRouter，使 cron 结果能投递到 inbox
         from system.application import Application
@@ -597,7 +625,12 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             # SP-5 D4 R1：唤醒 waiter 做终结检查并 break（防永久悬挂）
             self._outbox_event.set()
 
-    def enqueue_inbox_message(self, message: UserMessage, *, from_parent: bool) -> int:
+    def enqueue_inbox_message(
+        self,
+        message: UserMessage,
+        *,
+        from_parent: bool
+        ) -> int:
         self._last_message_from_parent = from_parent
         seq = self._inbox.put(message)
         # 唤醒 run() 空闲等待点（纯文本轮结束后 await _wake_event）：
@@ -612,8 +645,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         message_type: str,
         co_recipients: list[str] | None = None,
         *,
-        character_name: str | None = None,
-    ) -> int:
+        character_name: str | None = None
+        ) -> int:
         """父 Agent 或用户直接发送来的消息，投递到已记录的收件箱。"""
         self._last_message_from_parent = (message_type != "user_direct")
         content = format_user_message(user_name, message_type, text, co_recipients)
@@ -1113,7 +1146,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             for d in self._get_effective_tool_definitions()
         } - {""}
 
-    def _maybe_record_tool_failure(self, tool_name: str, content: str) -> None:
+    def _maybe_record_tool_failure(
+        self,
+        tool_name: str,
+        content: str
+        ) -> None:
         """检测工具失败并写入 outbox，让父 Agent 在下一次 [subagent-result] 中收到。
 
         工具结果约定为 JSON ``{"success": bool, ...}``；当 ``success`` 为 false
@@ -1154,7 +1191,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             summary = summary[:max_len] + "...(truncated)"
         self.append_feedback(f"[tool-failure] {tool_name}: {summary}")
 
-    def _make_tool_msg(self, tool_call_id: str, content: Any) -> PreparedToolResult:
+    def _make_tool_msg(
+        self,
+        tool_call_id: str,
+        content: Any
+        ) -> PreparedToolResult:
         return PreparedToolResult(message=ToolResultMessage.from_result(
             tool_call_id=tool_call_id,
             character_name=self.current_character_agent,

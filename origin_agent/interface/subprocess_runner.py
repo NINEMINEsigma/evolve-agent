@@ -43,8 +43,8 @@ class ISubprocessRunner(AsyncSystem, ABC):
         cwd: str,
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess[str]:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess[str]:
         """Run a blocking subprocess with session ownership."""
         ...
 
@@ -56,8 +56,8 @@ class ISubprocessRunner(AsyncSystem, ABC):
         cwd: str,
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
-        session_id: str = "",
-    ) -> subprocess.CompletedProcess[str]:
+        session_id: str = ""
+        ) -> subprocess.CompletedProcess[str]:
         """Run a subprocess asynchronously without blocking the event loop."""
         ...
 
@@ -71,8 +71,8 @@ class ISubprocessRunner(AsyncSystem, ABC):
         timeout: float | None = None,
         extra_env: dict[str, str] | None = None,
         session_id: str = "",
-        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
-    ) -> ProcessLineStreamResult:
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES
+        ) -> ProcessLineStreamResult:
         """Consume subprocess stdout line by line with bounded stderr."""
         ...
 

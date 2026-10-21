@@ -36,7 +36,11 @@ class ICronRouter(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def register(self, session_id: str, loop: BaseAgentLoop) -> None:
+    def register(
+        self,
+        session_id: str,
+        loop: BaseAgentLoop
+        ) -> None:
         """Register a session loop as a cron result destination."""
         ...
 
@@ -52,8 +56,8 @@ class ICronRouter(AsyncSystem, ABC):
         task_id: str,
         name: str,
         exit_code: int,
-        stdout_preview: str,
-    ) -> bool:
+        stdout_preview: str
+        ) -> bool:
         """Deliver one cron result to a session when admission is open."""
         ...
 
@@ -83,13 +87,17 @@ class ICronRouter(AsyncSystem, ABC):
         command: list[str],
         cwd: str,
         is_wait: bool = False,
-        wait_message: str = "",
-    ) -> dict[str, str | bool | None]:
+        wait_message: str = ""
+        ) -> dict[str, str | bool | None]:
         """Create, persist and arm one scheduled task."""
         ...
 
     @abstractmethod
-    def reschedule_task(self, session_id: str, task_id: str) -> dict[str, str | bool | None]:
+    def reschedule_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, str | bool | None]:
         """Clone one task configuration into a newly scheduled task."""
         ...
 
@@ -99,7 +107,11 @@ class ICronRouter(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def migrate_session_cron_jobs(self, old_sid: str, new_sid: str) -> int:
+    def migrate_session_cron_jobs(
+        self,
+        old_sid: str,
+        new_sid: str
+        ) -> int:
         """Move cron jobs from one session to another."""
         ...
 
@@ -109,11 +121,19 @@ class ICronRouter(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    def trigger_cron_task(self, session_id: str, task_id: str) -> dict[str, str | bool]:
+    def trigger_cron_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, str | bool]:
         """Trigger one persisted task immediately."""
         ...
 
     @abstractmethod
-    def cancel_cron_task(self, session_id: str, task_id: str) -> dict[str, str | bool]:
+    def cancel_cron_task(
+        self,
+        session_id: str,
+        task_id: str
+        ) -> dict[str, str | bool]:
         """Cancel and persist one scheduled task."""
         ...

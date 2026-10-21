@@ -64,7 +64,11 @@ def _s():
     return Application.current().get_system(ISandbox)
 
 
-def parse_bool_arg(args: dict[str, Any], name: str, default: bool = False) -> bool:
+def parse_bool_arg(
+    args: dict[str, Any],
+    name: str,
+    default: bool = False
+    ) -> bool:
     value = args.get(name, default)
     if isinstance(value, bool):
         return value
@@ -134,7 +138,11 @@ def resolve_bundled_ripgrep() -> Path:
     return rg_path
 
 
-def _logical_result_path(namespace: str, root: Path, file_path: Path) -> str:
+def _logical_result_path(
+    namespace: str,
+    root: Path,
+    file_path: Path
+    ) -> str:
     namespace_root = _s().namespace_bases().get(namespace, root)
     rel = file_path.resolve().relative_to(namespace_root.resolve()).as_posix()
     return f"{namespace}:{rel}" if rel else f"{namespace}:"
@@ -247,14 +255,25 @@ def _iter_python_files(root: Path, *, full_scan: bool) -> Iterator[Path]:
                 yield entry
 
 
-def _matches_glob(relative_path: str, name: str, pattern: str) -> bool:
+def _matches_glob(
+    relative_path: str,
+    name: str,
+    pattern: str
+    ) -> bool:
     normalized = relative_path.replace("\\", "/")
     if "/" in pattern or "**" in pattern:
         return PurePosixPath(normalized).match(pattern)
     return fnmatch.fnmatchcase(name, pattern) or fnmatch.fnmatchcase(normalized, pattern)
 
 
-def _write_overflow_log(kind: str, path: str, pattern: str, rows: list[str], *, total_count: int | None = None) -> str:
+def _write_overflow_log(
+    kind: str,
+    path: str,
+    pattern: str,
+    rows: list[str],
+    *,
+    total_count: int | None = None
+    ) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     log_name = f"{SEARCH_OVERFLOW_LOG_DIR}/{kind}_{timestamp}.log"
     content = (
@@ -277,8 +296,8 @@ def _finish_files_result(
     exhaustive: bool,
     path: str,
     pattern: str,
-    warning: str | None = None,
-) -> dict[str, Any]:
+    warning: str | None = None
+    ) -> dict[str, Any]:
     result = tool_result(
         matches=matches[:limit],
         count=total_count if exhaustive else len(matches[:limit]),
@@ -309,8 +328,8 @@ def _finish_grep_result(
     literal: bool,
     path: str,
     pattern: str,
-    warning: str | None = None,
-) -> dict[str, Any]:
+    warning: str | None = None
+    ) -> dict[str, Any]:
     result = tool_result(
         matches=matches[:limit],
         count=total_count if exhaustive else len(matches[:limit]),
@@ -348,8 +367,8 @@ async def _run_ripgrep_files(
     limit: int,
     full_scan: bool,
     exhaustive: bool,
-    session_id: str,
-) -> tuple[list[str], int, bool]:
+    session_id: str
+    ) -> tuple[list[str], int, bool]:
     args = [
         str(rg),
         "--files",
@@ -448,8 +467,8 @@ async def _run_ripgrep_grep(
     exhaustive: bool,
     literal: bool,
     session_id: str,
-    single_target: str | None,
-) -> tuple[list[dict[str, Any]], int, bool]:
+    single_target: str | None
+    ) -> tuple[list[dict[str, Any]], int, bool]:
     args = [
         str(rg),
         "--json",
@@ -537,8 +556,8 @@ def _python_search_files(
     pattern: str,
     limit: int,
     full_scan: bool,
-    exhaustive: bool,
-) -> tuple[list[str], int, bool]:
+    exhaustive: bool
+    ) -> tuple[list[str], int, bool]:
     matches: list[str] = []
     truncated = False
     for file_path in _iter_python_files(root, full_scan=full_scan):
@@ -565,8 +584,8 @@ def _python_grep(
     full_scan: bool,
     exhaustive: bool,
     literal: bool,
-    single_file: bool,
-) -> tuple[list[dict[str, Any]], int, bool]:
+    single_file: bool
+    ) -> tuple[list[dict[str, Any]], int, bool]:
     regex = None if literal else re.compile(pattern)
     files = [root] if single_file else _iter_python_files(root, full_scan=full_scan)
     matches: list[dict[str, Any]] = []

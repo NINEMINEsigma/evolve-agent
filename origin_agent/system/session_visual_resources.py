@@ -67,12 +67,20 @@ class SessionVisualResourceService:
     def _join(directory: str, name: str) -> str:
         return directory + ("" if directory.endswith(":") else "/") + name
 
-    def source_path(self, session_id: str, kind: SessionVisualKind) -> str:
+    def source_path(
+        self,
+        session_id: str,
+        kind: SessionVisualKind
+        ) -> str:
         if not self._valid_session_id(session_id):
             raise SessionVisualResourceError("会话标识无效")
         return f"ws:{SESSIONS_DIR_NAME}/{session_id}/{SESSION_VISUAL_LAYOUT[kind.value][0]}"
 
-    def metadata_path(self, session_id: str, kind: SessionVisualKind) -> str:
+    def metadata_path(
+        self,
+        session_id: str,
+        kind: SessionVisualKind
+        ) -> str:
         return self.source_path(session_id, kind) + META_FILE_SUFFIX
 
     def entry_name(self, kind: SessionVisualKind) -> str:
@@ -93,7 +101,11 @@ class SessionVisualResourceService:
                 return SessionVisualSource(session_id=parts[1], kind=kind)
         return None
 
-    def _read_metadata(self, session_id: str, kind: SessionVisualKind) -> tuple[dict[str, str] | None, str | None]:
+    def _read_metadata(
+        self,
+        session_id: str,
+        kind: SessionVisualKind
+        ) -> tuple[dict[str, str] | None, str | None]:
         logical = self.metadata_path(session_id, kind)
         try:
             resolved = self._sandbox.resolve_read(logical)
@@ -109,7 +121,11 @@ class SessionVisualResourceService:
         except (SandboxError, OSError, ValueError):
             return None, "元数据无法读取或未通过沙盒校验"
 
-    def _check_entry(self, directory: str, entry: str) -> ResolvedPath:
+    def _check_entry(
+        self,
+        directory: str,
+        entry: str
+        ) -> ResolvedPath:
         root = self._sandbox.resolve_read(directory)
         if not root.real.is_dir():
             raise SessionVisualResourceError("目标目录不存在或不是目录")
@@ -122,9 +138,13 @@ class SessionVisualResourceService:
         return resolved
 
     def resolve_from_metadata(
-        self, session_id: str, kind: SessionVisualKind,
-        metadata: dict[str, str] | None, *, metadata_error: str | None = None,
-    ) -> SessionVisualResourceState:
+        self,
+        session_id: str,
+        kind: SessionVisualKind,
+        metadata: dict[str, str] | None,
+        *,
+        metadata_error: str | None = None
+        ) -> SessionVisualResourceState:
         source = self.source_path(session_id, kind)
         entry = self.entry_name(kind)
         effective = source
@@ -165,7 +185,11 @@ class SessionVisualResourceService:
             state.entry_url = self.build_entry_url(state)
         return state
 
-    def get_state(self, session_id: str, kind: SessionVisualKind) -> SessionVisualResourceState:
+    def get_state(
+        self,
+        session_id: str,
+        kind: SessionVisualKind
+        ) -> SessionVisualResourceState:
         metadata, error = self._read_metadata(session_id, kind)
         return self.resolve_from_metadata(session_id, kind, metadata, metadata_error=error)
 
@@ -179,7 +203,12 @@ class SessionVisualResourceService:
     def build_entry_logical_path(self, state: SessionVisualResourceState) -> str:
         return self._join(state.effective_path, state.entry_name)
 
-    def build_entry_url(self, state: SessionVisualResourceState, *, source: SessionVisualSource | None = None) -> str:
+    def build_entry_url(
+        self,
+        state: SessionVisualResourceState,
+        *,
+        source: SessionVisualSource | None = None
+        ) -> str:
         namespace, relative = self.build_entry_logical_path(state).split(":", 1)
         path = "/".join(quote(part, safe="") for part in relative.split("/"))
         query = {VISUAL_RAW_PARAM: VISUAL_QUERY_ENABLED}
@@ -191,7 +220,11 @@ class SessionVisualResourceService:
             })
         return f"{STATIC_FILE_HTTP_PREFIX}/{quote(namespace, safe='')}/{path}?{urlencode(query)}"
 
-    def resolve_entry(self, session_id: str, kind: SessionVisualKind) -> tuple[SessionVisualResourceState, ResolvedPath]:
+    def resolve_entry(
+        self,
+        session_id: str,
+        kind: SessionVisualKind
+        ) -> tuple[SessionVisualResourceState, ResolvedPath]:
         state = self.get_state(session_id, kind)
         if state.status != SessionVisualStatus.ready:
             raise SessionVisualResourceError("视觉入口不存在")

@@ -72,7 +72,11 @@ class ToolAllowlistStore:
         except Exception as exc:
             logger.exception("Failed to save tool allowlist: %s", exc)
 
-    def is_allowed(self, tool_name: str, args: dict[str, Any]) -> bool:
+    def is_allowed(
+        self,
+        tool_name: str,
+        args: dict[str, Any]
+        ) -> bool:
         normalized = normalize_args(args)
         with self._lock:
             return any(
@@ -80,7 +84,11 @@ class ToolAllowlistStore:
                 for entry in self._load_store()
             )
 
-    def add_allowed(self, tool_name: str, args: dict[str, Any]) -> None:
+    def add_allowed(
+        self,
+        tool_name: str,
+        args: dict[str, Any]
+        ) -> None:
         normalized = normalize_args(args)
         with self._lock:
             entries = self._load_store()
