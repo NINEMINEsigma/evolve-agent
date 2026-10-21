@@ -134,6 +134,7 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 - **机制**：`save(key, path, data)` 用 BFS 遍历对象图，为每个对象记录 `type_token = "module, ClassName"`；`load(key, path)` 会 import 该类并用 `model_construct()` 重建真正的实例（BaseModel / list / dict / Enum 等），而非裸 dict。
 - **直接存 BaseModel 实例**：不要在 `save()` 前先 `.model_dump()` 把 BaseModel 降级为 dict —— 这会丢失类型信息，使存储层退化为普通 dict。直接传 `list[LLMProfile]`、`list[Message]` 等给 `save()` 即可，类型由 easysave 保留。参考 `system/session_store.py`、`system/llm_profile_store.py::save_profiles`。
 - **load() 返回即类型实例**：对新格式文件直接复用，无需再 `model_validate`；为兼容旧版误存的 dict 文件，加载侧可用 `isinstance` 短路 + `model_validate` 兜底（见 `load_profiles`）。
+- **持久化数据结构变更必须升级 easysave key**：凡是持久化文件的数据结构发生变更（包括字段、嵌套类型、引用关系或存储语义变化），必须迭代 `easysave.save()` / `load()` 使用的 key；不得沿用旧 key 覆盖新格式。读取前必须使用 `contains(key, path)` 确认目标 key 存在，再调用 `load()`；文件存在但对应 key 不存在时，必须按明确的缺失版本/迁移策略处理，不能硬读并让 `load()` 因 key 缺失报错，也不能把未知格式伪装成空数据。
 
 ## 类定义规范
 
