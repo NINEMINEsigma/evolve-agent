@@ -144,6 +144,8 @@ class MCPCore:
         self.runtime = runtime
         self.lock = threading.RLock()
         self.servers: dict[str, MCPServerTask] = {}
+        # 单 server 连接失败只跳过该 server；失败摘要按名称保留供状态查询与重连复位。
+        self.server_failures: dict[str, str] = {}
         self.server_error_counts: dict[str, int] = {}
         self.server_breaker_opened_at: dict[str, float] = {}
         self.mcp_loop: asyncio.AbstractEventLoop | None = None
@@ -366,10 +368,16 @@ class MCPCore:
         async with lock:
             with self.setup_admission():
                 pass
+            pending = {
+                name: config for name, config in servers.items()
+                if config.get("enabled", True) and name not in self.servers
+            }
             async with asyncio.TaskGroup() as group:
-                for name, config in servers.items():
-                    if config.get("enabled", True) and name not in self.servers:
-                        group.create_task(_discover_and_register_server(name, config, self))
+                for name, config in pending.items():
+                    group.create_task(
+                        _start_server_isolated(name, config, self),
+                        name=f"mcp-register-{name}",
+                    )
             return _existing_tool_names(self)
 
     def refresh(self, servers: dict[str, dict]) -> dict[str, Any]:
@@ -392,6 +400,9 @@ class MCPCore:
                     await self.servers[name].shutdown()
                     with self.lock:
                         del self.servers[name]
+                        self.server_failures.pop(name, None)
+                        self.server_error_counts.pop(name, None)
+                        self.server_breaker_opened_at.pop(name, None)
                     removed.append(name)
             for name, value in enabled.items():
                 with self.admission():
@@ -399,23 +410,11 @@ class MCPCore:
                 if name in self.servers:
                     _reset_server_error(self, name)
                     continue
-                try:
-                    await _discover_and_register_server(name, value, self)
-                except Exception as error:
-                    if requires_lifecycle_propagation(error):
-                        raise
-                    server = self.servers.get(name)
-                    if server is not None:
-                        await server.shutdown()
-                        with self.lock:
-                            del self.servers[name]
-                    # 仅明确外部连接失败保留运行期failed结果；配置/逻辑错误传播。
-                    if not _is_retryable_transport_error(error) and not _is_auth_error(error):
-                        raise
-                    failed.append(name)
-                else:
+                if await _start_server_isolated(name, value, self):
                     added.append(name)
                     _reset_server_error(self, name)
+                else:
+                    failed.append(name)
             return {"refreshed": True, "removed": removed, "added": added,
                     "failed": failed, "status": self.status()}
 
@@ -770,6 +769,35 @@ def _exc_str(exc: BaseException) -> str:
     """
     text = str(exc).strip()
     return text if text else repr(exc)
+
+
+def _failure_leaf(error: BaseException) -> BaseException:
+    """Return the first non-group cause of a nested ``TaskGroup`` failure."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return error
+
+
+def _failure_summary(error: BaseException) -> str:
+    """Return one sanitized line describing a skipped MCP server failure.
+
+    Nested ``TaskGroup`` frames are collapsed to their leaf cause so one bad
+    server logs one line instead of the whole transport traceback.
+    """
+    leaf = _failure_leaf(error)
+    return _sanitize_error(f"{type(leaf).__name__}: {_exc_str(leaf)}")
+
+
+def _failure_hint(error: BaseException) -> str:
+    """Return an operator hint for the common reasons a server is skipped."""
+    leaf = _failure_leaf(error)
+    if _is_auth_error(leaf):
+        return "authorization rejected; check the credentials or complete the OAuth flow"
+    if isinstance(leaf, TimeoutError):
+        return "connection timed out; check the endpoint or raise connect_timeout"
+    if _is_retryable_transport_error(leaf):
+        return "endpoint unreachable; check the host, port and transport"
+    return "fix the server entry in mcp_config.json or disable it"
 
 
 # ---------------------------------------------------------------------------
@@ -1806,10 +1834,22 @@ class MCPServerTask:
         finally:
             self._ready.set()
 
-    async def start(self, config: dict) -> None:
+    async def start(self, config: dict, timeout: float | None = None) -> None:
+        """Start the connection task and wait for readiness within *timeout*.
+
+        The wait is bounded without cancelling the connection task: the caller
+        still owns it and performs the single expected cancellation during
+        cleanup, so a slow endpoint is skipped instead of being reported as an
+        unrequested cancellation of a background task.
+        """
         self._task = self._connection_owner.create(self.run(config), name=f"mcp-server-{self.name}")
         self._task.add_done_callback(self._connection_ended)
-        await self._ready.wait()
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout=timeout)
+        except TimeoutError:
+            raise TimeoutError(
+                f"MCP server '{self.name}' did not become ready within {timeout} second(s)"
+            ) from None
         if self._error is not None:
             raise self._error
         if self.session is None:
@@ -3008,8 +3048,7 @@ async def _discover_and_register_server(
             raise LifecycleFailure(f"MCP server already exists: {name}")
         core.servers[name] = server
     try:
-        async with asyncio.timeout(config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)):
-            await server.start(config)
+        await server.start(config, timeout=config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT))
         with core.setup_admission():
             registered_names = _register_server_tools(name, server, config)
             server._registered_tool_names = list(registered_names)
@@ -3031,6 +3070,34 @@ async def _discover_and_register_server(
         ", ".join(registered_names),
     )
     return registered_names
+
+
+async def _start_server_isolated(name: str, config: dict, core: MCPCore) -> bool:
+    """Connect one server; only its own failure is contained.
+
+    A misconfigured or unreachable server must not abort startup or tear down
+    the servers that did connect. Lifecycle errors keep propagating because
+    application shutdown and cancellation have to be able to interrupt this
+    work; every other failure is logged, recorded, and skipped.
+    """
+    try:
+        await _discover_and_register_server(name, config, core)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as error:
+        if requires_lifecycle_propagation(error):
+            raise
+        summary = _failure_summary(error)
+        with core.lock:
+            core.server_failures[name] = summary
+        logger.error(
+            "MCP server '%s' could not be started and was skipped: %s (%s)",
+            name, summary, _failure_hint(error),
+        )
+        return False
+    with core.lock:
+        core.server_failures.pop(name, None)
+    return True
 
 
 # ---------------------------------------------------------------------------
