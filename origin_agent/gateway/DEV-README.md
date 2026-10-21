@@ -40,7 +40,7 @@ gateway/
 
 ## 会话离线导出
 
-`GatewaySystem.session_exports`持有无History缓存的`SessionExportService`叶服务，不新增AsyncSystem。它只读当前已恢复且空闲的主会话，包括已打开归档会话；使用公开隔离捕获/guard、线程侧正式History投影及确定性摘要，精确读取Sandbox文件和严格字体路径，不读取活动history.es、不补媒体身份、不写会话、不调用模型。
+`GatewaySystem.session_exports`持有无History缓存的`SessionExportService`叶服务，不新增AsyncSystem。Gateway通过`IRuntimeSystem`、`ISessionManager`、`ISandbox`接口槽位注入其运行时依赖；它只读当前已恢复且空闲的主会话，包括已打开归档会话；使用公开隔离捕获/guard、线程侧正式History投影及确定性摘要，精确读取Sandbox文件和严格字体路径，不读取活动history.es、不补媒体身份、不写会话、不调用模型。
 
 三个typed POST接口为`/api/sessions/{id}/export/snapshot`、`/export/resource`、`/export/verify`。资源成功为二进制+Content-Length/X-Export-Digest/X-Export-Identity；明确缺失/拒绝/单文件超限返回detail.code/source/proof并与会话404区分。快照按96MiB上限在线程侧增量编码；资源/复核请求主体在解析前有界读取。无效400、会话缺失404、忙碌/变化409、全局超限413、容量429、停止503；未知错误直接传播，不返回空History。HTTP断开取消等待方，TaskOwner继续持有实际线程收尾，容量不提前释放。
 

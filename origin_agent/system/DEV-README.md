@@ -199,7 +199,7 @@ Move在一次revision中更新源和目的两行，源为deleted、目的按历�
 
 ## 会话离线导出叶服务
 
-`system/session_export.py::SessionExportService`由GatewaySystem唯一持有，注入RuntimeSystem、SessionManager、Sandbox、既有SessionVisualResourceService；无长期导出job或History缓存，不新增System。重操作1路、资源读取2路，达到容量立即429；独立线程池的工作在真实结束后释放容量，取消不会让线程失去所有权，Gateway退出关闭线程池。
+`system/session_export.py::SessionExportService`由GatewaySystem唯一持有，经`IRuntimeSystem`、`ISessionManager`、`ISandbox`接口注入运行时依赖，并接收既有SessionVisualResourceService；无长期导出job或History缓存，不新增System。重操作1路、资源读取2路，达到容量立即429；独立线程池的工作在真实结束后释放容量，取消不会让线程失去所有权，Gateway退出关闭线程池。
 
 capture使用Loop公开分段隔离输入，线程读取严格metrics并计算完整摘要/展示投影；保存原metrics字节状态以区分缺失和空文件，损坏明确拒绝。视觉签名覆盖源meta原字节、源目录身份、有效逻辑目标及入口实际内容/身份；不把stage旧version当成全部素材签名，也不枚举打包整个有效目录。configured/availability区分未配置、入口缺失、配置损坏和权限问题。
 

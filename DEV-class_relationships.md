@@ -1498,7 +1498,7 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 `entity/puretype/session_export.py` 新增消息前的导出请求/响应、预算、视觉状态和资源校验凭据；`entity/puretype_after/session_export.py::SessionExportHistorySource` 持有 `tuple[BaseMessage, ...]`，属于消息后纯类型，由后期包单独导出，不反向导入前期包。常量集中在 `entity/constant/session_export.py`，无运行时实例、方法、持久化或 typeref 变化。
 
-当前已接入完整源码链路：`BaseAgentLoop` 的导出身份/epoch、公开只读guard和协作捕获入口；`entry/session_export.py` 的隔离复制及线程摘要/投影；`GatewaySystem` 新增 `_session_exports: SessionExportService | None` 和公开 `session_exports`，叶服务通过已注入的SessionManager/Sandbox/视觉解析器读取，不新增AsyncSystem或Application镜像。导出请求登记在Gateway的TaskOwner，HTTP断开取消等待方，实际线程结束后才释放容量；叶服务的有界线程池在Gateway退出时关闭。没有新History存储格式或恢复Loop副作用。
+当前已接入完整源码链路：`BaseAgentLoop` 的导出身份/epoch、公开只读guard和协作捕获入口；`entry/session_export.py` 的隔离复制及线程摘要/投影；`GatewaySystem` 新增 `_session_exports: SessionExportService | None` 和公开 `session_exports`，叶服务通过`IRuntimeSystem`、`ISessionManager`、`ISandbox`接口取得运行时依赖，并读取视觉解析器，不新增AsyncSystem或Application镜像。导出请求登记在Gateway的TaskOwner，HTTP断开取消等待方，实际线程结束后才释放容量；叶服务的有界线程池在Gateway退出时关闭。没有新History存储格式或恢复Loop副作用。
 
 前端 `MessageRenderEnvironment` 为默认live提供原有行为、为offline提供表内资源/隔离HTML适配；`EmbeddedToolMessages` 的显示偏好由 `MessageItem` 经工具卡片显式传入，离线默认全显示，独立阅读器不导入聊天store。`scopeSessionChatCss` 共享作用域规则；独立viewer构建和前后端接口已接通，尚未运行构建/应用/断网验收，不能以静态阅读替代用户验收。服务端保证不同工具请求 ID 绝对唯一，未增加重复ID拒绝策略。
 

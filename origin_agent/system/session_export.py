@@ -46,16 +46,17 @@ from system.file_metadata import MetaFormatError, parse_meta_content
 from system.local_fonts import (
     LocalFontAccessError, local_font_mime_type, resolve_local_font,
 )
-from system.sandbox import ResolvedPath, Sandbox, SandboxError
+from system.sandbox import ResolvedPath, SandboxError
 from system.session_store import SessionStore
 from system.session_visual_resources import (
     SessionVisualResourceError, SessionVisualResourceService,
 )
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from interface.session_manager import ISessionManager
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
-    from gateway.session_manager import SessionManager
-    from system.runtime import RuntimeSystem
 
 ExportWorkT = TypeVar("ExportWorkT")
 
@@ -233,9 +234,9 @@ class SessionExportService:
 
     def __init__(
         self,
-        runtime: "RuntimeSystem",
-        sessions: "SessionManager",
-        sandbox: Sandbox,
+        runtime: IRuntimeSystem,
+        sessions: ISessionManager,
+        sandbox: ISandbox,
         visuals: SessionVisualResourceService,
     ) -> None:
         self._runtime = runtime
