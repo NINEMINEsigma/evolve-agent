@@ -1,20 +1,21 @@
 import type { ChatMessage, EmbeddedToolMessage } from "../types";
 import MessageBody from "./MessageBody";
-import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { isMessageVisible } from "../features/chat/messageVisibility";
 
 interface EmbeddedToolMessagesProps {
   messages: EmbeddedToolMessage[];
   onImageClick: (src: string) => void;
   onUserHeightMutation?: () => void;
+  /** system 角色用户消息显示开关；由调用方显式传入，避免离线注入运行时 store。 */
+  showSystemUserMessages?: boolean;
 }
 
 export default function EmbeddedToolMessages({
   messages,
   onImageClick,
   onUserHeightMutation,
+  showSystemUserMessages = true,
 }: EmbeddedToolMessagesProps) {
-  const showSystemUserMessages = useChatRuntimeStore((state) => state.showSystemUserMessages);
   const visibleMessages = messages
     .map((message, index) => ({ message, index }))
     .filter(({ message }) => isMessageVisible(message.role, message.character_name, showSystemUserMessages));

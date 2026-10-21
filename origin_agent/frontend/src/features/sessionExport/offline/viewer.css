@@ -1,0 +1,233 @@
+/*
+ * 离线阅读器样式（独立 viewer.css，由 offline/main.tsx 导入）。
+ *
+ * 复用正式聊天样式契约（.chat-area 公开选择器、data-chat-scope 属性）与
+ * 基础变量，但不打包导航栏/输入栏等全应用布局。舞台层作为固定视口背景，
+ * 不随长历史变成长条。
+ *
+ * 该文件只包含布局/定位，不覆盖正式的消息视觉规则。
+ */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #0b0b0f;
+  color: #e6e6ec;
+  font-family: "Inter", "Segoe UI Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.offline-root {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.offline-fatal {
+  margin: 48px auto;
+  max-width: 640px;
+  padding: 16px 20px;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  color: #ef4444;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 舞台层：固定视口背景，鼠标穿透 ── */
+.offline-stage-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.offline-stage-frame iframe {
+  width: 100%;
+  height: 100vh !important;
+  pointer-events: none;
+}
+
+/* ── 顶部信息栏：标题/ID/标签/捕获时间/开关/缺失清单 ── */
+.offline-header {
+  position: relative;
+  z-index: 10;
+  padding: 14px 20px;
+  background: rgba(19, 19, 25, 0.86);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.offline-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.offline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: #9a9aa8;
+}
+
+.offline-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.offline-controls {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #9a9aa8;
+}
+
+.offline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ── 缺失/兼容性清单 ── */
+.offline-issues {
+  margin-top: 10px;
+}
+
+.offline-issues-toggle {
+  border: 1px solid rgba(255, 204, 0, 0.4);
+  background: rgba(255, 204, 0, 0.08);
+  color: #ffcc00;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.offline-issues-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #9a9aa8;
+}
+
+.offline-issue {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+}
+
+.offline-issue-code {
+  color: #ffcc00;
+  font-family: monospace;
+}
+
+.offline-issue-detail {
+  color: #5c5c6a;
+  overflow-wrap: anywhere;
+}
+
+/* ── 聊天区：复用公开契约，仅补充离线布局 ── */
+.offline-chat-area {
+  position: relative;
+  z-index: 10;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0 0 120px;
+  --chat-message-inline-inset: 20px;
+}
+
+.offline-chat-content {
+  position: relative;
+  max-width: 980px;
+  margin: 0 auto;
+  padding-top: 16px;
+}
+
+/* ── HTML 气泡 / 占位 ── */
+.offline-html-placeholder {
+  margin: 0.5em 0;
+}
+
+.offline-html-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #9a9aa8;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.offline-html-frame {
+  margin: 0.5em 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.offline-frame-placeholder {
+  margin: 0.5em 0;
+  padding: 10px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #5c5c6a;
+  font-size: 12px;
+}
+
+/* ── Mermaid 离线降级 ── */
+.mermaid-offline-fallback {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+.mermaid-offline-warning {
+  color: #ffcc00;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.mermaid-source {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: #9a9aa8;
+}
+
+html, body, #root { height: auto; min-height: 100%; }
+.offline-chat-area { overflow: visible; min-height: auto; }
+.offline-header pre, .offline-html-frame pre { max-height: 32rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.offline-issue-source, .offline-link-url, .offline-download-url { overflow-wrap: anywhere; }
+.offline-stage-frame { height: 100vh; margin: 0; border: 0; }
+
+.mermaid-offline-detail {
+  margin-top: 6px;
+  color: #5c5c6a;
+  font-size: 11px;
+}

@@ -8,6 +8,10 @@ import MarkdownRenderer from "./primitives/MarkdownRenderer";
 import { renderToolResult } from "./ToolResultRenderer";
 import DiffBlock from "./DiffBlock";
 import { extractPartialStringField } from "../utils/partialJson";
+import {
+  useMessageRenderEnvironment,
+  type MessageResourceResolver,
+} from "./primitives/MessageRenderEnvironment";
 
 function formatReasoningDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
@@ -29,12 +33,29 @@ function formatDuration(ms: number): string {
   return `${secs}s`;
 }
 
+// 缺省解析器：live 语义为原样使用引用。
+const identityResolver: MessageResourceResolver = (raw) => raw;
+
 function renderBlocksContent(
   content: MessageContent,
   roleClass: string,
   messageId: string,
-  onImageClick: (src: string) => void
+  onImageClick: (src: string) => void,
+  resolveResource: MessageResourceResolver = identityResolver,
+  offlineLabel?: string,
 ) {
+  // offlineLabel 提供时表示离线环境：解析失败显示占位，绝不回落在线引用。
+  const resolveOrPlaceholder = (raw: string, kind: "image" | "audio" | "video"): string | null => {
+    const resolved = resolveResource(raw, kind);
+    if (resolved != null) return resolved;
+    return offlineLabel ? null : raw;
+  };
+  const placeholder = (key: string, kind: string) => (
+    <span key={key} className="offline-resource-placeholder" data-offline-resource={kind}>
+      {offlineLabel}
+    </span>
+  );
+
   if (typeof content === "string") {
     return <pre className={`message-text message-text-${roleClass}`}>{content}</pre>;
   }
@@ -52,7 +73,8 @@ function renderBlocksContent(
             );
           }
           if (block.type === "image_url") {
-            const src = block.image_url.url;
+            const src = resolveOrPlaceholder(block.image_url.url, "image");
+            if (!src) return placeholder(`${messageId}-img-${idx}`, "image");
             return (
               <a
                 key={`${messageId}-img-${idx}`}
@@ -65,19 +87,23 @@ function renderBlocksContent(
             );
           }
           if (block.type === "input_audio") {
-            const dataUrl = block.input_audio.data.startsWith("data:")
+            const dataUrl = block.input_audio.data.startsWith("data:") || block.input_audio.data.startsWith("export-asset:")
               ? block.input_audio.data
               : `data:audio/${block.input_audio.format};base64,${block.input_audio.data}`;
+            const src = resolveOrPlaceholder(dataUrl, "audio");
+            if (!src) return placeholder(`${messageId}-audio-${idx}`, "audio");
             return (
               <div key={`${messageId}-audio-${idx}`} className="message-audio">
-                <audio controls src={dataUrl} className="message-audio-player" />
+                <audio controls src={src} className="message-audio-player" />
               </div>
             );
           }
           if (block.type === "video_url") {
+            const src = resolveOrPlaceholder(block.video_url.url, "video");
+            if (!src) return placeholder(`${messageId}-video-${idx}`, "video");
             return (
               <div key={`${messageId}-video-${idx}`} className="message-video">
-                <video controls src={block.video_url.url} className="message-video-player" />
+                <video controls src={src} className="message-video-player" />
               </div>
             );
           }
@@ -117,8 +143,12 @@ interface MessageBodyProps {
 }
 
 export default function MessageBody({ message, streaming, rawToolJson = false, onImageClick, onUserHeightMutation }: MessageBodyProps) {
+  const environment = useMessageRenderEnvironment();
   const m = message;
   const textContent = contentToText(m.content);
+  const offlineLabel = environment.mode === "offline"
+    ? (environment.labels?.resourceUnavailable ?? "resource unavailable offline")
+    : undefined;
 
   const reasoningLabel = useMemo(() => {
     if (m.reasoningDuration != null) {
@@ -144,7 +174,7 @@ export default function MessageBody({ message, streaming, rawToolJson = false, o
         {typeof m.content === "string" ? (
           <MarkdownRenderer content={textContent} streaming={streaming} onImageClick={onImageClick} />
         ) : (
-          renderBlocksContent(m.content, m.role, m.id, onImageClick)
+          renderBlocksContent(m.content, m.role, m.id, onImageClick, environment.resolveResource, offlineLabel)
         )}
         {!streaming && (m.contentDuration != null || (m.tokensPerSecond != null && m.tokensPerSecond > 0)) && (
           <div className="message-metrics" style={{ display: "flex", gap: "0.75rem", fontSize: "0.75rem", color: "var(--text-secondary, #888)", marginTop: "0.25rem" }}>
@@ -183,7 +213,7 @@ export default function MessageBody({ message, streaming, rawToolJson = false, o
   if (m.role === "user") {
     return (
       <>
-        {renderBlocksContent(m.content, m.role, m.id, onImageClick)}
+        {renderBlocksContent(m.content, m.role, m.id, onImageClick, environment.resolveResource, offlineLabel)}
         <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
       </>
     );
@@ -213,7 +243,7 @@ export default function MessageBody({ message, streaming, rawToolJson = false, o
     const contentStr = typeof m.content === "string" ? m.content : "";
     try {
       const parsed = JSON.parse(contentStr);
-      const specialized = rawToolJson ? null : renderToolResult(m.toolName, parsed, onImageClick);
+      const specialized = rawToolJson ? null : renderToolResult(m.toolName, parsed, onImageClick, environment.resolveResource, environment.labels?.resourceUnavailable);
       if (specialized) {
         return (
           <>
@@ -236,11 +266,11 @@ export default function MessageBody({ message, streaming, rawToolJson = false, o
       );
     } catch {
       // parse 失败：纯文本 fallback
-      return renderBlocksContent(m.content, m.role, m.id, onImageClick);
+      return renderBlocksContent(m.content, m.role, m.id, onImageClick, environment.resolveResource, offlineLabel);
     }
   }
 
-  return renderBlocksContent(m.content, m.role, m.id, onImageClick);
+  return renderBlocksContent(m.content, m.role, m.id, onImageClick, environment.resolveResource, offlineLabel);
 }
 
 export { renderBlocksContent };

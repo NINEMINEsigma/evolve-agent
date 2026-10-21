@@ -197,6 +197,16 @@ Sandbox.copy/copy_folder/move新增真实目的ResolvedPath返回，消费shutil
 
 Move在一次revision中更新源和目的两行，源为deleted、目的按历史决定created/modified；Copy只更新目的。加载校验允许deleted条目存在，删除后重建不能把历史路径误判为首次新增。前端完整树只在同一revision的全部可见分页取得后替换，半页结果不渲染。
 
+## 会话离线导出叶服务
+
+`system/session_export.py::SessionExportService`由GatewaySystem唯一持有，注入RuntimeSystem、SessionManager、Sandbox、既有SessionVisualResourceService；无长期导出job或History缓存，不新增System。重操作1路、资源读取2路，达到容量立即429；独立线程池的工作在真实结束后释放容量，取消不会让线程失去所有权，Gateway退出关闭线程池。
+
+capture使用Loop公开分段隔离输入，线程读取严格metrics并计算完整摘要/展示投影；保存原metrics字节状态以区分缺失和空文件，损坏明确拒绝。视觉签名覆盖源meta原字节、源目录身份、有效逻辑目标及入口实际内容/身份；不把stage旧version当成全部素材签名，也不枚举打包整个有效目录。configured/availability区分未配置、入口缺失、配置损坏和权限问题。
+
+资源只按明确逻辑文件或已有字体规则读取，原路径组件及最终映射拒绝symlink/junction/reparse；读取前后身份/mtime/ctime/size和SHA参与proof。Windows下路径stat/lstat与文件描述符fstat的字段可能具有不同表示/精度，禁止直接交叉全量比较；metrics和资源共用同一校验入口，分别比较同来源的路径前后状态、同句柄前后状态及实际读取字节数，非Windows平台另检查打开身份。原路径映射/reparse和最终SHA/proof复核保持，检查失败以WARNING记录kind、脱敏source_ref、reason和数值签名，不输出物理路径或内容。已保存文件在verify变化则整体409，不伪装缺媒体成功；明确初始缺失/权限拒绝/单文件超限才资源级降级。读取、编码和复核均有独立字节/时间预算，最终guard与会话存在性/空闲状态复检，不宣称跨文件原子事务。
+
+`system/local_fonts.py`的`resolve_local_font`和MIME函数复用既有在线规则，strict_reparse仅用于导出，不改变在线字体权限口径。新增纯字段类型按消息依赖位于puretype/puretype_after，带校验器的资源读取结果留在业务模块；不加入easysave/typeref，不写workspace、不调用模型。源码已接入，未运行构建、校验或应用。
+
 ## 验证约束
 
 本次迁移未由开发助手AI运行测试、类型检查、Lint、构建或应用。只做源文件读取和定向差异审阅；正式运行验证由用户在完整迁移完成后执行。

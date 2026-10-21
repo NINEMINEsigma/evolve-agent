@@ -148,6 +148,7 @@ _SIGNATURE_SOURCES = [
     "tsconfig.app.json",
     "tsconfig.node.json",
     "vite.config.ts",
+    "vite.export.config.ts",
     "index.html",
 ]
 
@@ -254,7 +255,15 @@ def _build_frontend(force: bool = False) -> bool:
             current_sig = _compute_frontend_signature(frontend_dir)
             stored_sig = _read_build_signature(frontend_dir)
             dist_index = frontend_dir / "dist" / "index.html"
-            if stored_sig and current_sig == stored_sig and dist_index.is_file():
+            viewer_js = frontend_dir / "dist" / "export" / "viewer.js"
+            viewer_css = frontend_dir / "dist" / "export" / "viewer.css"
+            if (
+                stored_sig
+                and current_sig == stored_sig
+                and dist_index.is_file()
+                and viewer_js.is_file()
+                and viewer_css.is_file()
+            ):
                 logger.info("Frontend build up-to-date, skipping (%s source files matched)", frontend_dir)
                 return True
         except Exception:

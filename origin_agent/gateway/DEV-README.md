@@ -38,6 +38,16 @@ gateway/
 
 主队列先同步登记InputDelivery再安排消费者，Parent/Multi逐项APPENDED/PERSISTED后回显；Loop替换保留旧回复与工具结果提交，记录原sequence转交新队列。`SubAgentOrchestrator` 已作为 framework `AsyncSystem` 迁移，Gateway及工具调用统一经 `Application.current().get_system(ISubAgentOrchestrator)` 取得；它不再由 `main.py` 注入启动用 Loop。子会话输入登记、反馈关闭交接和普通子Agent最终保存由该System持有；Gateway USER_MESSAGE 在后台任务之前的多目标接收/ready准备已由 S21 完成，Application 最终装配由 P22 完成。
 
+## 会话离线导出
+
+`GatewaySystem.session_exports`持有无History缓存的`SessionExportService`叶服务，不新增AsyncSystem。它只读当前已恢复且空闲的主会话，包括已打开归档会话；使用公开隔离捕获/guard、线程侧正式History投影及确定性摘要，精确读取Sandbox文件和严格字体路径，不读取活动history.es、不补媒体身份、不写会话、不调用模型。
+
+三个typed POST接口为`/api/sessions/{id}/export/snapshot`、`/export/resource`、`/export/verify`。资源成功为二进制+Content-Length/X-Export-Digest/X-Export-Identity；明确缺失/拒绝/单文件超限返回detail.code/source/proof并与会话404区分。快照按96MiB上限在线程侧增量编码；资源/复核请求主体在解析前有界读取。无效400、会话缺失404、忙碌/变化409、全局超限413、容量429、停止503；未知错误直接传播，不返回空History。HTTP断开取消等待方，TaskOwner继续持有实际线程收尾，容量不提前释放。
+
+`GET /api/session-export/viewer/{asset_name}`仅接受viewer.js/viewer.css两个构建产物，缺失503、未知404、no-store/nosniff，不依赖SPA兜底。三个导出路由必须与新前端同步；旧后端没有这些POST路由时可能由GET兜底产生405，刷新前端不能补齐后端。视觉HEAD 404仍表示未部署资源，不把它转换成导出失败。
+
+`system/local_fonts.py`抽取既有字体路径/MIME校验供在线路由和导出复用；在线行为保留，导出额外拒绝reparse。用户已有审批/History/WS协议及System拓扑保持不变。当前仅完成源码/差异审阅，未运行校验、构建或应用，人工验收见任务文件。
+
 ## MessageRouter
 
 ### `gateway/message_router.py`
@@ -87,7 +97,7 @@ WS /ws/chat?resume=<sid>
 - `server_info`：服务端信息。
 - `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式。前端不持久化该值。
 - `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。轮次后推送（`MessageRouter._send_history_sync`）的 `agents` 按会话当前注册 Loop 计算，不按轮次所属 Loop：ExitMultiAgent 退役 MultiAgentLoop 后，其最后一轮的轮次后推送若沿用退役 Loop 会把已清空的 agents 重新覆盖为过期列表，导致前端主徽章停留在多Agent配色。
-- `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，折叠日志按 `AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS` 时间窗限流并携带窗口累计 dropped；转发 task 登记在 `GatewaySystem.task_owner`，连接断开时经 `TaskOwner.cancel` 预期取消（禁止裸 `task.cancel()`，否则 Owner 会按 RV11 判定为未授权取消并报生命周期失败）并注销订阅；自动旋转复用同一物理连接和订阅。单事件发送超过 `AGENTSPACE_WS_SEND_TIMEOUT_SECONDS` 时抛哨兵异常 `AgentspaceSendTimeout`，done_callback 先经 `TaskOwner.mark_expected_failure` 标记例常预期失败（不触发应用失败关闭）再以 1011 断连驱逐慢消费者连接；该标记回调的注册顺序必须先于 `task_owner.track`（标记先于结算读取）。
+- `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，折叠日志按 `AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS` 时间窗限流并携带窗口累计 dropped；转发 task 登记在 `GatewaySystem.task_owner`，连接断开时经 `TaskOwner.cancel` 预期取消（禁止裸 `task.cancel()`，否则 Owner 会按 RV11 判定为未授权取消并报生命周期失败）并注销订阅；自动旋转复用同一物理连接和订阅。单事件发送超过 `AGENTSPACE_WS_SEND_TIMEOUT_SECONDS` 时抛哨兵异常 `AgentspaceSendTimeout`，done_callback 先经 `TaskOwner.mark_expected_failure` 标记例常预期失败（不触发应用失败关闭）再以 1011 断连驱逐慢消费者连接；该标记回调的注册顺序必须先于 `task_owner.track`（标记先于结算读取）。连接级终止分两类哨兵：`AgentspaceSendTimeout`（慢消费者，客户端仍在线但接收不过来，标记预期失败后以 1011 驱逐）与 `AgentspaceConnectionClosed`（对端已断开，由发送回调在状态预检或收到 `WebSocketDisconnect`/`ConnectionResetError`/`BrokenPipeError` 时抛出，close 帧已发出后的 `RuntimeError` 仅在连接确已断开时归类，标记预期失败后不再发送关闭帧）。两类哨兵均只终止当前连接、不触发应用失败关闭；订阅与连接登记由 `ws_chat` 的 finally 统一回收。done_callback 内判定顺序不可交换：必须先判 `requires_connection_eviction` 再判 `is_connection_termination`，因为 `AgentspaceSendTimeout` 同时满足两者，顺序颠倒会让慢消费者被静默收尾而失去 1011 驱逐能力。发送回调同时用于 `attach_agentspace_events` 的初始事件阶段，故 `ws_chat` 的外层断连分支必须同时捕获 `WebSocketDisconnect` 与 `AgentspaceConnectionClosed`。
 
 ### 上行消息类型
 

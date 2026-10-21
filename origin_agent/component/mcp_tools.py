@@ -21,7 +21,9 @@ connected servers:
 
 No parameters. Returns a JSON object with keys:
 ``refreshed`` (bool), ``removed`` (list), ``added`` (list),
-``failed`` (list), ``status`` (list of server status dicts).
+``failed`` (list of server names that could not be used), ``status`` (list of
+server status dicts, where skipped servers carry an ``error`` field), and
+``errors`` (mapping of server name to failure summary).
 
 Use this after editing ``mcp_config.json`` to add, remove, or re-enable
 MCP servers without restarting the agent.""",

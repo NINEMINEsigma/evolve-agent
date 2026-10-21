@@ -6,5 +6,6 @@ package. Each phase explicitly exports its own types without a shared facade.
 """
 
 from .session import ToolChainReplacement
+from .session_export import SessionExportHistorySource
 
-__all__ = ["ToolChainReplacement"]
+__all__ = ["ToolChainReplacement", "SessionExportHistorySource"]

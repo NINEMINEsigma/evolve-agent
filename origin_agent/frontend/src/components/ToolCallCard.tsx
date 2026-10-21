@@ -4,12 +4,15 @@ import MessageBody from "./MessageBody";
 import MessageAttachments from "./MessageAttachments";
 import EmbeddedToolMessages from "./EmbeddedToolMessages";
 import { toolCardSummary } from "../features/chat/toolCards";
+import { useMessageRenderEnvironment } from "./primitives/MessageRenderEnvironment";
 
 interface ToolCallCardProps {
   message: ChatMessage;
   onImageClick: (src: string) => void;
   onToggleCollapse: (id: string) => void;
   onUserHeightMutation?: () => void;
+  /** system 角色用户消息显示开关；由调用方显式传入，避免离线注入运行时 store。 */
+  showSystemUserMessages?: boolean;
 }
 
 export default function ToolCallCard({
@@ -17,7 +20,9 @@ export default function ToolCallCard({
   onImageClick,
   onToggleCollapse,
   onUserHeightMutation,
+  showSystemUserMessages = true,
 }: ToolCallCardProps) {
+  const environment = useMessageRenderEnvironment();
   const [rawToolJson, setRawToolJson] = useState(false);
   const card = message.toolCard;
   if (!card) return null;
@@ -87,9 +92,10 @@ export default function ToolCallCard({
                     messages={card.result.embeddedMessages}
                     onImageClick={onImageClick}
                     onUserHeightMutation={onUserHeightMutation}
+                    showSystemUserMessages={showSystemUserMessages}
                   />
                 )}
-                <MessageAttachments message={resultMessage} onImageClick={onImageClick} />
+                <MessageAttachments message={resultMessage} onImageClick={onImageClick} resolveResource={environment.resolveResource} />
                 {card.result.toolCallMeta && (
                   <div className="tool-call-meta">
                     申请 {card.result.toolCallMeta.application_time}

@@ -71,9 +71,9 @@ export function useGlobalTooltip() {
     };
 
     const onMouseEnter = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target) return;
-      const host = target.closest("[data-tooltip]") as HTMLElement | null;
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const host = target.closest<HTMLElement>("[data-tooltip]");
       if (!host) return;
       const tooltipText = host.getAttribute("data-tooltip");
       if (!tooltipText) return;
@@ -81,10 +81,9 @@ export function useGlobalTooltip() {
     };
 
     const onMouseLeave = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const related = e.relatedTarget as Node | null;
-      // relatedTarget 为 null 说明鼠标离开了视口，直接隐藏
-      if (!related) {
+      const target = e.target;
+      const related = e.relatedTarget;
+      if (!(target instanceof Element) || !(related instanceof Node)) {
         hideTooltip();
         return;
       }

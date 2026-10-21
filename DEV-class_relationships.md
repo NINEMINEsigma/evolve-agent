@@ -27,6 +27,10 @@ classDiagram
         +get_session_history_skeleton()
         +get_session_history_page()
         +get_session_history_resources()
+        +get_session_export_guard()
+        +capture_session_export_source()
+        #_session_export_instance_id
+        #_session_export_epoch
         +edit_session_message()
         +delete_session_messages()
         +delete_single_message()
@@ -813,6 +817,7 @@ classDiagram
 | 字段 | 定义类 | 类型 | 说明 |
 |---|---|---|---|
 | `_client` | `EmptyResponseRetryClient` | `BaseLLMClient` | 正式加载器创建的底层Provider客户端；计数、流式有效输出标记、待交付usage/finish均为单次调用局部状态，不新增Loop字段或外部protected访问 |
+| `_session_export_instance_id` / `_session_export_epoch` | `BaseAgentLoop` | `str` / `int` | 只读导出使用的非持久化实例身份和变更代际；保存、新活动、会话切换及历史加载/重置边界更新，不改变 History 存储 |
 | `_inbox` | `BaseAgentLoop` | `Inbox` | 收件箱；子类通过 `self._inbox` 访问属合法继承 |
 | `_cancel_event` | `BaseAgentLoop` | `asyncio.Event` | 取消/中断信号；`ToolContext.is_interrupted` 读取 `loop._cancel_event` |
 | `_message_hooks_cache` | `BaseAgentLoop` | `list[dict] \| None` | hook 缓存 |
@@ -1192,7 +1197,7 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 `SubAgentOrchestrator` 与 `_OrchestratorContext` 的 `launch()`、`chat()`、`approve()`、`stop()`、`get_snapshot()` 统一返回 `entity/puretype/subagent.py` 中的 BaseModel。`SubAgentSnapshot`、`SubAgentUpdate` 共同定义状态、反馈、待审批调用和交互标志；`ListSubAgents`、Gateway 和消息路由通过属性读取。工具结果和 WebSocket/HTTP 仍在传输边界序列化，避免 `info.get(...)`、嵌套字典键漂移和 `tool_result(**result)` 的隐式字段耦合。
 
 
-`abstract/mcp/system.py::MCPSystem` 依赖 `RuntimeSystem` 与 `ToolRegistry`，持有 `abstract.mcp.client::MCPCore`；服务器表、断路器、专用 loop/thread、stdio 进程、stderr 句柄和 OAuth Manager 均由 Core 唯一持有。`MCPServerTask` 的连接请求经 `TaskOwner` 管理，取消不丢 Future；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄，Windows Job 通过 SDK `_job_object` 显式绑定。OAuth 认证任务、回调 HTTP 线程和 401 dedup 均由 `MCPOAuthManager` 收口，`close_admission` 主动停止回调线程，`aclose` 经 shield 等待真实 join。2026-10-09 独立静态复核确认无阻塞级缺陷，S19 已补齐。
+`abstract/mcp/system.py::MCPSystem` 依赖 `RuntimeSystem` 与 `ToolRegistry`，持有 `abstract.mcp.client::MCPCore`；服务器表、断路器、专用 loop/thread、stdio 进程、stderr 句柄和 OAuth Manager 均由 Core 唯一持有。单 server 的配置校验失败、连接超时或认证失败（如 401）只记录错误日志并按名称保留摘要，跳过该 server 的工具注册，不再中止应用启动，也不影响其他已连通 server；`MCPSystem.status()` 附加 `error` 字段暴露这些被跳过的 server，`MCPRefresh` 结果的 `failed`/`errors` 同步列出。`MCPServerTask` 的连接请求经 `TaskOwner` 管理，取消不丢 Future；stdio 进程由 `MCPStdioTransport` 直接持有真实句柄，Windows Job 通过 SDK `_job_object` 显式绑定。OAuth 认证任务、回调 HTTP 线程和 401 dedup 均由 `MCPOAuthManager` 收口，`close_admission` 主动停止回调线程，`aclose` 经 shield 等待真实 join。2026-10-09 独立静态复核确认无阻塞级缺陷，S19 已补齐。
 
 `SubAgentOrchestrator` 现继承 framework `AsyncSystem`，通过依赖声明取得 `RuntimeSystem`、`SessionManager` 及子Agent业务System；`_OrchestratorContext` 只保存 `SessionManager`，不保存启动用父Loop。`Inbox` 使用 `InputDeliveryBuffer[InboxMessage]`，初始prompt与父消息共用sequence；反馈使用 `SubAgentFeedbackDelivery`，正常投递和关闭交接分别确认，普通子Agent停止先等待运行任务再刷新并保存，TaskAgent不保存。
 
@@ -1407,6 +1412,7 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 本次未新增 Application/AsyncSystem、Agent Loop protected 字段、跨类私有访问、后端接口、依赖或存储版本；通用自动重连策略不变，漏通知且数量未下降的恢复问题明确延期。源码已按 PLAN v2.1 实施并定向静态审阅，未运行类型检查、构建或应用，用户验收仍待完成。
 
+
 ### 对象工具与四阶段执行迁移（2026-10-15，权威）
 
 > 本节按 `.tasks/2026-10-14_3_oop-tool-lifecycle.md` 的计划 v8 记录当前源码契约；本节与文末顺序均为追加，未改写本文件其余历史章节。前文继承关系图、字段归属表 `_toolsets` 行与 S10/S20 两节描述迁移前实现，已在该节顶部统一标注。
@@ -1488,6 +1494,14 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 一次激活的文件修改Tab在完整可见分页全部到达且revision一致后才替换目录树；目录节点只读可折叠，文件节点按display_state使用绿色/黄色/隐藏规则。目录目标不产生可见条目，操作总数仍包括隐藏删除；无可见文件时Tab禁用或显示空态。
 
+### 会话离线导出基础纯类型（2026-10-15，尚未接入）
+
+`entity/puretype/session_export.py` 新增消息前的导出请求/响应、预算、视觉状态和资源校验凭据；`entity/puretype_after/session_export.py::SessionExportHistorySource` 持有 `tuple[BaseMessage, ...]`，属于消息后纯类型，由后期包单独导出，不反向导入前期包。常量集中在 `entity/constant/session_export.py`，无运行时实例、方法、持久化或 typeref 变化。
+
+当前已接入完整源码链路：`BaseAgentLoop` 的导出身份/epoch、公开只读guard和协作捕获入口；`entry/session_export.py` 的隔离复制及线程摘要/投影；`GatewaySystem` 新增 `_session_exports: SessionExportService | None` 和公开 `session_exports`，叶服务通过已注入的SessionManager/Sandbox/视觉解析器读取，不新增AsyncSystem或Application镜像。导出请求登记在Gateway的TaskOwner，HTTP断开取消等待方，实际线程结束后才释放容量；叶服务的有界线程池在Gateway退出时关闭。没有新History存储格式或恢复Loop副作用。
+
+前端 `MessageRenderEnvironment` 为默认live提供原有行为、为offline提供表内资源/隔离HTML适配；`EmbeddedToolMessages` 的显示偏好由 `MessageItem` 经工具卡片显式传入，离线默认全显示，独立阅读器不导入聊天store。`scopeSessionChatCss` 共享作用域规则；独立viewer构建和前后端接口已接通，尚未运行构建/应用/断网验收，不能以静态阅读替代用户验收。服务端保证不同工具请求 ID 绝对唯一，未增加重复ID拒绝策略。
+
 ### System 接口槽位关系（2026-10-20）
 
 20 个 framework System 的稳定依赖节点是 `origin_agent/interface/` 中的 `I...` 接口，而不是具体实现类。Application 保存接口槽位顺序，并以配对的具体实例注册到对应槽位；依赖图校验、`has_system()`、`unregister()` 和关闭路径都以接口类型为准。具体实现必须继承其接口，接口层不得反向导入具体 System。
@@ -1501,5 +1515,6 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 此前的方案让 `IFrontendSink` 与 `entry.AgentSink` 各自独立声明同一批事件方法，两者之间没有类型关系：`FrontendSink` 必须多重继承两个不相干的 ABC，且从 System 槽位取出的 `IFrontendSink` 实例在静态类型上不能传给任何声明 `AgentSink` 的参数，只能靠 `cast` 压制，两份契约还会各自漂移。改为接口层单一声明后，`IFrontendSink` 是 `IAgentSink` 的子类型，槽位实例可直接向下传递，所有 `cast` 已移除；新增事件方法只需修改 `IAgentSink` 一处。
 
 所有 sink 参数与返回类型统一为 `IAgentSink`（`BaseAgentLoop.sink`、`BaseAgentLoop.get_sink`、`ParentAgentLoop`、`MultiAgentLoop`、`MultiAgentWorker`、`StreamConsumer`、`StreamHistoryLink`、`ToolExecution.accept_tool_batch`、`ToolPostprocessor`、`execute_with_approval`），只有 System 槽位查询使用 `IFrontendSink`。
+
 
 
