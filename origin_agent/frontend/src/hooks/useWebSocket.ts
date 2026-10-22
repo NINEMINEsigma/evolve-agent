@@ -32,6 +32,7 @@ import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/cha
 import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
 import { publishChatAgentspaceEvent } from "../services/chatAgentspaceEventBus";
+import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
 import { clientDiagnosticFrame, routeChatTransportMessage } from "./chatTransportRouting";
 import { decodeShellInfo } from "../services/shellResourcesApi";
 import { useMainSessionActivityPolling } from "../features/chat/useMainSessionActivityPolling";

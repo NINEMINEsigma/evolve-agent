@@ -127,11 +127,11 @@ function logicalPath(value: unknown): string {
   if (separator <= 0) invalid("File change path requires a namespace");
   const namespace = raw.slice(0, separator).trim();
   if (!namespace || /[/\\\x00\r\n]/.test(namespace)) invalid("Invalid file change namespace");
-  const relative = raw.slice(separator + 1).replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  const relative = raw.slice(separator + 1).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (relative === "" || relative === ".") return `${namespace}:`;
   if (relative.includes("\x00")) invalid("Invalid file change relative path");
   const segments = relative.split("/");
-  if (segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment.includes(":"))) {
+  if (segments.some((segment: string) => segment === "" || segment === "." || segment === ".." || segment.includes(":"))) {
     invalid("Non-canonical file change relative path");
   }
   return `${namespace}:${segments.join("/")}`;
