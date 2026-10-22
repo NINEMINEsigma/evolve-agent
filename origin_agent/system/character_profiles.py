@@ -16,8 +16,8 @@ from __future__ import annotations
 import logging
 
 from entity.puretype import CharacterProfileEntry, CharacterProfilesResponse
-from system.sandbox import Sandbox
-from system.llm_profile_store import LLMProfileStore
+from interface.sandbox import ISandbox
+from interface.llm_profile_store import ILLMProfileStore
 from subagent.profile import CharacterProfileResolver
 
 # 防御性声明：discover() 已捕获目录级/条目级异常进 error 字段，
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def collect_character_profiles(
-    sandbox: Sandbox, profile_store: LLMProfileStore
+    sandbox: ISandbox, profile_store: ILLMProfileStore
 ) -> CharacterProfilesResponse:
     """实时扫描全部角色档案并映射为脱敏响应模型。"""
     resolver = CharacterProfileResolver(sandbox, profile_store)

@@ -22,12 +22,12 @@ from typing import Any
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
-from system.lsp import LSPManager
+from interface.lsp_manager import ILSPManager
 
 logger = logging.getLogger(__name__)
 
 
-def _lsp() -> LSPManager:
+def _lsp() -> ILSPManager:
     return Application.current().get_system(ILSPManager)
 
 

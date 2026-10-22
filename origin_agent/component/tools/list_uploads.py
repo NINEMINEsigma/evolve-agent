@@ -17,12 +17,13 @@ from typing import Any, Dict, List
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN, UPLOADS_WS_PREFIX
-from system.sandbox import Sandbox, SandboxError
+from interface.sandbox import ISandbox
+from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 
 
-def _s() -> Sandbox:
+def _s() -> ISandbox:
     from system.application import Application
     return Application.current().get_system(ISandbox)
 

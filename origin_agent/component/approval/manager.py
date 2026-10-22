@@ -5,7 +5,7 @@ from __future__ import annotations
 from component.approval.backend import ApprovalBackend, ProfileApprovalBackend
 from entity.puretype import ApprovalProfileState
 from system.context import RuntimeContext
-from system.llm_profile_store import LLMProfileStore
+from interface.llm_profile_store import ILLMProfileStore
 
 
 class ApprovalBackendManager:
@@ -14,7 +14,7 @@ class ApprovalBackendManager:
     def __init__(
         self,
         ctx: RuntimeContext,
-        llm_profile_store: LLMProfileStore
+        llm_profile_store: ILLMProfileStore
         ) -> None:
         self._llm_profile_store = llm_profile_store
         self._backend = ProfileApprovalBackend(ctx, llm_profile_store)

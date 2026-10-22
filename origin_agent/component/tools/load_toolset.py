@@ -10,7 +10,6 @@ from interface.tool_registry import IToolRegistry
 
 from typing import TYPE_CHECKING, Any
 
-from abstract.tools.registry import ToolRegistry
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
@@ -18,10 +17,9 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 
-def _get_registry():
+def _get_registry() -> IToolRegistry:
     """运行期取得唯一 ToolRegistry System 实例。"""
     from system.application import Application
-    from abstract.tools.registry import ToolRegistry
     return Application.current().get_system(IToolRegistry)
 
 
@@ -68,7 +66,7 @@ def _handle_load_toolset(args: dict[str, Any], context: ToolContext | None = Non
     return tool_result(loaded=loaded, results=results)
 
 
-def _build_load_toolset_description(registry: ToolRegistry | None = None) -> str:
+def _build_load_toolset_description(registry: IToolRegistry | None = None) -> str:
     """构建 LoadToolset 的描述，包含当前已注册的工具集名称列表。"""
     base = """Load toolsets into the current session so their tools become available in subsequent LLM requests.
 

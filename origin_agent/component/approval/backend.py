@@ -13,7 +13,7 @@ from entity.puretype import LLMProfile
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
     from system.context import RuntimeContext
-    from system.llm_profile_store import LLMProfileStore
+    from interface.llm_profile_store import ILLMProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class ProfileApprovalBackend(ApprovalBackend):
     def __init__(
         self,
         ctx: RuntimeContext,
-        llm_profile_store: LLMProfileStore
+        llm_profile_store: ILLMProfileStore
         ) -> None:
         self._ctx = ctx
         self._llm_profile_store = llm_profile_store

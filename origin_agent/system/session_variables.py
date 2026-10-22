@@ -26,7 +26,8 @@ from entity.puretype import (
 )
 from system.file_metadata import MetaFormatError, parse_meta_content
 from system.lifecycle import LifecycleFailure
-from system.sandbox import Sandbox, SandboxError
+from interface.sandbox import ISandbox
+from system.sandbox import SandboxError
 
 
 class SessionVariableError(RuntimeError):
@@ -154,7 +155,7 @@ def _new_budget() -> SessionVariableScanBudget:
 class SessionVariableService:
     """由 AgentspaceService 持有的无缓存叶服务；不创建后台工作。"""
 
-    def __init__(self, sandbox: Sandbox) -> None:
+    def __init__(self, sandbox: ISandbox) -> None:
         self._sandbox = sandbox
 
     def source_path(self, session_id: str) -> str:

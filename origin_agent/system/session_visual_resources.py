@@ -21,7 +21,8 @@ from entity.puretype import (
     SessionVisualSource, SessionVisualStatus,
 )
 from system.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import ResolvedPath, Sandbox, SandboxError
+from system.sandbox import ResolvedPath, SandboxError
+from interface.sandbox import ISandbox
 
 
 class SessionVisualResourceError(ValueError):
@@ -35,7 +36,7 @@ class SessionVisualVersionUnavailable(SessionVisualResourceError):
 class SessionVisualResourceService:
     """由 Application 持有，无会话缓存、额外 watcher 或持久化副作用。"""
 
-    def __init__(self, sandbox: Sandbox) -> None:
+    def __init__(self, sandbox: ISandbox) -> None:
         self._sandbox = sandbox
 
     @staticmethod

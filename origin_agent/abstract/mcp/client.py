@@ -119,9 +119,9 @@ from .schema import normalize_mcp_input_schema as _normalize_schema
 
 if TYPE_CHECKING:
     from mcp import ClientSession
-    from abstract.tools.registry import ToolRegistry
+    from interface.tool_registry import IToolRegistry
     from system.context import RuntimeContext
-    from system.runtime import RuntimeSystem
+    from interface.runtime_system import IRuntimeSystem
     from .oauth_manager import MCPOAuthManager
     from .stdio import MCPStdioTransport
     from mcp.types import InitializeResult
@@ -141,8 +141,8 @@ class MCPCore:
     def __init__(
         self,
         ctx: RuntimeContext,
-        registry: ToolRegistry,
-        runtime: RuntimeSystem
+        registry: IToolRegistry,
+        runtime: IRuntimeSystem
         ) -> None:
         self.context = ctx
         self.registry = registry

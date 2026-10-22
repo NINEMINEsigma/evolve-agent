@@ -47,7 +47,7 @@ from abstract.tools.tool import (
 from entry.base_agent_loop import ToolContext
 from entity.puretype import ToolAvailability, ToolDangerLevel, DynamicEndpointInfo
 from system.application import Application
-from component.dynamic_endpoints import DynamicEndpointSystem
+from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 # ── System适配入口 ─────────────────────────────────────────
 
-def _endpoint_system() -> DynamicEndpointSystem:
+def _endpoint_system() -> IDynamicEndpointSystem:
     return Application.current().get_system(IDynamicEndpointSystem)
 
 

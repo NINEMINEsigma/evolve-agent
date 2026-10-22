@@ -25,8 +25,9 @@ from entity.constant import (
 )
 from entity.puretype import CharacterAvatarEntry, CharacterAvatarsResponse
 from system.file_metadata import MetaFormatError, parse_meta_content
-from system.runtime import RuntimeSystem
-from system.sandbox import Sandbox, SandboxError
+from interface.runtime_system import IRuntimeSystem
+from interface.sandbox import ISandbox
+from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def avatar_files_url(logical_path: str) -> str:
 def _validated_avatar_entry(
     name: str,
     declared_path: str,
-    sandbox: Sandbox
+    sandbox: ISandbox
     ) -> CharacterAvatarEntry:
     """对已声明的 [avatar] 路径执行 resolve_read / is_file / 大小三重校验并产出条目。"""
     path = declared_path.strip()
@@ -73,7 +74,7 @@ def _validated_avatar_entry(
 
 
 def collect_main_agent_avatar(
-    sandbox: Sandbox, runtime: RuntimeSystem
+    sandbox: ISandbox, runtime: IRuntimeSystem
 ) -> CharacterAvatarEntry:
     """读 ws:SOUL.md.meta 的 [avatar]；meta 缺失/解析失败按无头像条目返回（带 error）。"""
     name = runtime.main_agent_character_name
@@ -95,7 +96,7 @@ def collect_main_agent_avatar(
 
 
 def collect_character_avatars(
-    sandbox: Sandbox, runtime: RuntimeSystem
+    sandbox: ISandbox, runtime: IRuntimeSystem
 ) -> CharacterAvatarsResponse:
     """轻量扫描 ws:characters/roleplay/ 与 ws:characters/task/，逐目录产出条目。"""
     main_entry = collect_main_agent_avatar(sandbox, runtime)
@@ -123,7 +124,7 @@ def collect_character_avatars(
 def _load_character_avatar_entry(
     name: str,
     directory_path: str,
-    sandbox: Sandbox
+    sandbox: ISandbox
     ) -> CharacterAvatarEntry:
     """读取单个角色目录的 profile.md.meta 并解析 [avatar] 单键。
 

@@ -16,7 +16,7 @@ import logging
 
 from abstract.tools.registry import tool_result, tool_error
 from evolve.validator import validate_directory, summary
-from system.sandbox import Sandbox
+from interface.sandbox import ISandbox
 from system.templates import read_template
 from typing import Any, TYPE_CHECKING
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def finalize_evolution(
-    sandbox: Sandbox,
+    sandbox: ISandbox,
     ctx: ToolContext,
     *,
     deep: bool = True,

@@ -12,7 +12,7 @@ from entity.constant import InputDeliveryState
 from entity.puretype import InputDelivery, QueuedMessage, ShutdownInputReport
 from entity.messages import ToolResultMessage
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.runtime import RuntimeSystem
+from interface.runtime_system import IRuntimeSystem
 
 PayloadT = TypeVar("PayloadT", bound=BaseModel)
 
@@ -20,7 +20,7 @@ PayloadT = TypeVar("PayloadT", bound=BaseModel)
 class InputDeliveryBuffer(Generic[PayloadT]):
     """唯一记录表；记录对象保留原payload身份，不按文本或id数字去重。"""
 
-    def __init__(self, runtime: RuntimeSystem) -> None:
+    def __init__(self, runtime: IRuntimeSystem) -> None:
         self._runtime = runtime
         self._lock = threading.RLock()
         self._records: dict[int, InputDelivery[PayloadT]] = {}

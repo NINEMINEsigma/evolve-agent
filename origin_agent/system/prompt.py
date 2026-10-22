@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
-from system.sandbox import Sandbox
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
@@ -119,7 +118,7 @@ def _read_if_exists(path: Path) -> str:
         return ""
 
 
-def build_dynamic_sandbox_spaces_block(sandbox: Sandbox) -> str:
+def build_dynamic_sandbox_spaces_block(sandbox: ISandbox) -> str:
     """构建 fast 模式全局动态沙盒空间的结构化提示词块。"""
     entries = sandbox.list_dynamic_spaces_with_availability()
     if not entries:

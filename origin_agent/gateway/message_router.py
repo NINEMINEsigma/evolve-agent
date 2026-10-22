@@ -68,10 +68,6 @@ if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
     from entry.multi_agent_loop import MultiAgentLoop
     from entry.base_agent_loop import IMainSessionLoop
-    from gateway.session_manager import SessionManager
-    from subagent.orchestrator import SubAgentOrchestrator
-
-from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +93,7 @@ def _observe_background_interrupt(task: asyncio.Task) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _get_sm() -> SessionManager | None:
+def _get_sm() -> ISessionManager | None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().get_system(ISessionManager)
@@ -129,10 +125,9 @@ def _extract_text(content: Any) -> str:
     return str(content or "")
 
 
-def get_subagent_orchestrator() -> SubAgentOrchestrator | None:
+def get_subagent_orchestrator() -> ISubAgentOrchestrator | None:
     """返回 SubAgentOrchestrator 单例。"""
     from system.application import Application
-    from subagent.orchestrator import SubAgentOrchestrator
     return Application.current().get_system(ISubAgentOrchestrator)
 
 

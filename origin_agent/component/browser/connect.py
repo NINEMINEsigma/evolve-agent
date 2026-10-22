@@ -13,7 +13,6 @@ from typing import Any
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
-from component.browser.system import BrowserSystem
 from entity.constant import CDP_ENDPOINT_DEFAULT, EDGE_DEBUG_GUIDE
 from entity.puretype import ToolDangerLevel
 from system.application import Application
@@ -22,7 +21,7 @@ from system.lifecycle import requires_lifecycle_propagation
 logger = logging.getLogger(__name__)
 
 
-def _browser_system() -> BrowserSystem:
+def _browser_system() -> IBrowserSystem:
     return Application.current().get_system(IBrowserSystem)
 
 

@@ -27,7 +27,6 @@ from abstract.tools.tool import (
     tool_error,
     tool_result,
 )
-from component.cron_router import CronRouter
 from component.cron_tasks import next_cron_time
 from entity.puretype import ToolDangerLevel
 from entity.constant import CRON_MIN_INTERVAL_SECONDS
@@ -36,7 +35,7 @@ from entity.constant import CRON_MIN_INTERVAL_SECONDS
 # ── CronRouter 获取辅助 ──────────────────────────────────────
 
 
-def _get_cr() -> CronRouter:
+def _get_cr() -> ICronRouter:
     """获取 Application 的 CronRouter 实例。"""
     from system.application import Application
     return Application.current().get_system(ICronRouter)

@@ -104,7 +104,7 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.application import Application
     from interface.agent_sink import IAgentSink
-    from gateway.session_manager import SessionManager
+    from interface.session_manager import ISessionManager
     from entry.tool_post_dispatch import PreparedToolResult, ResultFieldInjector
     from entry.session_message_queue import SessionMessageQueue
 
@@ -137,7 +137,7 @@ class Inbox:
     但每条输入先登记全局 sequence，再由消费方确认 History 状态。
     """
 
-    def __init__(self, runtime: "RuntimeSystem") -> None:
+    def __init__(self, runtime: IRuntimeSystem) -> None:
         from entry.input_delivery import InputDeliveryBuffer
 
         self._buffer = InputDeliveryBuffer[InboxMessage](runtime)
@@ -407,7 +407,7 @@ class BaseAgentLoop(ABC):
         self._token_record: TokenUsageRecord = TokenUsageRecord()
         # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
         # 仅主会话 loop 使用，子 Agent loop 保持 None
-        self._session_manager: SessionManager | None = None
+        self._session_manager: ISessionManager | None = None
         # 活跃 LLM 配置覆盖（前端切换后设置，None 表示使用启动配置）
         self._active_llm_profile: LLMProfile | None = None
         # 处理中标志：子类在 process_message 主体内置位/复位；
@@ -491,12 +491,12 @@ class BaseAgentLoop(ABC):
         """返回当前活跃的 LLM 配置（前端切换后），未切换时返回 None。"""
         return self._active_llm_profile
 
-    def set_session_manager(self, manager: SessionManager) -> None:
+    def set_session_manager(self, manager: ISessionManager) -> None:
         """注入 gateway SessionManager，用于旋转/归档等操作。"""
         self._session_manager = manager
 
     @property
-    def session_manager(self) -> SessionManager | None:
+    def session_manager(self) -> ISessionManager | None:
         """返回当前 loop 关联的 gateway SessionManager（未注入时为 None）。"""
         return self._session_manager
 
@@ -767,7 +767,7 @@ class BaseAgentLoop(ABC):
         def assert_unchanged() -> None:
             if self._history_failure is not None:
                 raise self._history_failure
-            self.app.get_system(RuntimeSystem).require_running()
+            self.app.get_system(IRuntimeSystem).require_running()
             if (self.get_session_export_guard() != guard or self.session_id != session_id
                     or self._history is not history):
                 actual_guard = self.get_session_export_guard()
@@ -1529,7 +1529,6 @@ class BaseAgentLoop(ABC):
 
     async def merge_sessions(self, sources: list[str]) -> SessionMergeResult:
         """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""
-        from system.runtime import RuntimeSystem
         sm = self.session_manager
         if sm is None:
             return SessionMergeResult(merged=False, error="session manager not available")
@@ -1692,7 +1691,6 @@ class BaseAgentLoop(ABC):
 
     def _get_workspace(self) -> str:
         """返回当前 loop 使用的 workspace 路径。"""
-        from system.runtime import RuntimeSystem
         return str(self.app.get_system(IRuntimeSystem).context.workspace)
 
     def _collect_hooks_context(
@@ -1708,7 +1706,6 @@ class BaseAgentLoop(ABC):
         sid = session_id or self.session_id
         hooks = self._load_message_hooks()
         workspace = self._get_workspace()
-        from system.runtime import RuntimeSystem
         return collect_all_hooks_context(
             hooks=hooks,
             session_id=sid,

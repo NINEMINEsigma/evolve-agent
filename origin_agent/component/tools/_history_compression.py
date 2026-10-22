@@ -18,14 +18,14 @@ from entry.agent_support.tool_chain_compress import (
 )
 
 if TYPE_CHECKING:
-    from system.session_metadata import SessionMetadataService
+    from interface.session_metadata_service import ISessionMetadataService
 
 
 async def prepare_tool_chain_replacements(
     messages: list[BaseMessage],
     *,
     session_id: str,
-    metadata_service: SessionMetadataService,
+    metadata_service: ISessionMetadataService,
     start_index: int = 0,
     excluded_tool_call_ids: set[str] | None = None
     ) -> list[ToolChainReplacement]:

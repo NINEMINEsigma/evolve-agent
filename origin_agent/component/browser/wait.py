@@ -14,7 +14,6 @@ from typing import Any
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from component.browser import _connection
-from component.browser.system import BrowserSystem
 from entity.puretype import ToolDangerLevel
 from system.application import Application
 from system.lifecycle import requires_lifecycle_propagation
@@ -34,7 +33,7 @@ _VALID_STATES: tuple[str, ...] = ("attached", "detached", "visible", "hidden")
 _DEFAULT_TIMEOUT_MS: int = 2000
 
 
-def _browser_system() -> BrowserSystem:
+def _browser_system() -> IBrowserSystem:
     return Application.current().get_system(IBrowserSystem)
 
 

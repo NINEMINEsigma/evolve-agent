@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from interface.shell_manager import IShellManager
-
 from typing import TYPE_CHECKING, Any
 
 from abstract.tools.tool import (
@@ -17,14 +16,15 @@ from entity.constant import (
     SHELL_WAIT_TIMEOUT_SECONDS,
 )
 from entity.puretype import ToolAvailability, ToolDangerLevel
-from system.shell_manager import ShellAccessError, ShellError, ShellManager
+from system.shell_manager import ShellAccessError, ShellError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 
 def _shell_available() -> bool:
-    return ShellManager.is_available()
+    from system.application import Application
+    return Application.current().get_system(IShellManager).is_available()
 
 
 def _context_identity(context: ToolContext | None) -> tuple[str, str]:

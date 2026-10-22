@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from abstract.tools.registry import ToolRegistry
+from interface.tool_registry import IToolRegistry
 from abstract.tools.tool import BaseToolSet
 
 
@@ -146,7 +146,7 @@ Task agent dispatch conventions:
 )
 
 
-def register_builtin_toolset_descriptions(registry: ToolRegistry) -> None:
+def register_builtin_toolset_descriptions(registry: IToolRegistry) -> None:
     """Merge the fixed metadata objects after all built-in tool declarations."""
     for toolset in BUILTIN_TOOLSETS:
         registry.register_toolset(toolset, merge=True)

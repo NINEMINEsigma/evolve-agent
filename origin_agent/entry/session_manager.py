@@ -31,9 +31,9 @@ from system.session_store import SessionStore
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
-    from gateway.session_manager import SessionManager
+    from interface.session_manager import ISessionManager
+    from interface.session_metadata_service import ISessionMetadataService
     from entity.puretype import LoopMeta
-    from system.session_metadata import SessionMetadataService
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,6 @@ class LoopSessionManager:
             )
 
         warnings: list[str] = []
-        from system.session_metadata import SessionMetadataService
         metadata_service = self._loop.app.get_system(ISessionMetadataService)
         try:
             await metadata_service.ensure_summary(session_id)
@@ -243,7 +242,6 @@ class LoopSessionManager:
             )
 
         try:
-            from system.session_metadata import SessionMetadataService
             new_sid = await terminate_and_rotate_session(
                 session_id=session_id,
                 session_store=self._loop.session_store,
@@ -281,7 +279,6 @@ class LoopSessionManager:
             )
 
         try:
-            from system.session_metadata import SessionMetadataService
             tags = await self._loop.app.get_system(ISessionMetadataService).generate_tags(
                 session_id,
                 sm.get_all_tags(),
@@ -323,8 +320,8 @@ async def terminate_and_rotate_session(
     *,
     session_id: str,
     session_store: SessionStore | None,
-    session_manager: SessionManager,
-    metadata_service: SessionMetadataService,
+    session_manager: ISessionManager,
+    metadata_service: ISessionMetadataService,
     loop_meta: LoopMeta | None = None,
     current_character_agent: str = ""
     ) -> str:
