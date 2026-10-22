@@ -7,7 +7,9 @@
 3. 父子会话簇（主链遍历 + 多父合并标注）
 4. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
 
-所有数据通过 Application.current().get_system(SessionManager).get(sid) 获取 SessionInfo。
+所有数据通过 Application.current().get_system(ISessionManager).get(sid) 获取 SessionInfo。
+Application 只注册接口槽位（ISessionManager / IAgentspaceService），
+用具体实现类查询会抛 RuntimeError，因此这里一律按接口取系统。
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gateway.session_manager import SessionManager
+    from interface.session_manager import ISessionManager
     from entity.puretype import SessionInfo
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ def hook_tag_name(**kwargs) -> str:
     return "session_meta"
 
 
-def _get_session_title(sid: str, sm: SessionManager) -> str:
+def _get_session_title(sid: str, sm: ISessionManager) -> str:
     """获取会话标题，colloquy 会话强制返回 '随意聊聊'。"""
     from entity.constant import COLLOQUY_SESSION_ID
     if sid == COLLOQUY_SESSION_ID:
@@ -41,7 +43,7 @@ def _get_session_title(sid: str, sm: SessionManager) -> str:
 
 def _collect_merge_sources(
     info: SessionInfo | None,
-    sm: SessionManager,
+    sm: ISessionManager,
     visited: set[str],
 ) -> str:
     """收集 parents[1:] 的额外父会话标题，返回内联标注文本。
@@ -64,7 +66,7 @@ def _collect_merge_sources(
 
 def _build_cluster_tree(
     session_id: str,
-    sm: SessionManager,
+    sm: ISessionManager,
     visited: set[str] | None = None,
 ) -> list[tuple[str, int, bool]]:
     """
@@ -217,8 +219,8 @@ def _format_visual_resources(session_id: str) -> str:
     """格式化服务端解析的三项会话视觉资源状态。"""
     try:
         from system.application import Application
-        from system.agentspace import AgentspaceService
-        resources = Application.current().get_system(AgentspaceService).visual_resources.get_all_states(session_id)
+        from interface.agentspace_service import IAgentspaceService
+        resources = Application.current().get_system(IAgentspaceService).visual_resources.get_all_states(session_id)
         payload = {}
         for name, state in (
             ("stage", resources.stage),
@@ -244,8 +246,8 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         from system.application import Application
         from entity.constant import COLLOQUY_SESSION_ID
 
-        from gateway.session_manager import SessionManager
-        sm = Application.current().get_system(SessionManager)
+        from interface.session_manager import ISessionManager
+        sm = Application.current().get_system(ISessionManager)
         info = sm.get(session_id)
         if info is None:
             return ""

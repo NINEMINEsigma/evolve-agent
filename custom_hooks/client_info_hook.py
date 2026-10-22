@@ -23,10 +23,11 @@ def hook_fixator(session_id: str = "", workspace: str = "", **kwargs) -> str:
     try:
         from system.application import Application
         from entity.puretype import ClientInfo
-        from gateway.session_manager import SessionManager
-        sm = Application.current().get_system(SessionManager)
+        from interface.session_manager import ISessionManager
+        sm = Application.current().get_system(ISessionManager)
         current: ClientInfo | None = sm.get_client_info(session_id)
     except Exception:
+        logger.debug("Failed to read client info", exc_info=True)
         return ""
     if current is None:
         return ""

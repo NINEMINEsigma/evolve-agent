@@ -10,7 +10,14 @@ User changes in agentspace:
 - modified: path/to/file
 - created: path/to/new
 <|im_agentspace_changes_end|>
+
+内部导入全部放在函数体内：hook 以 spec_from_file_location 动态加载，
+模块级导入会在 sys.path 尚未注入 agent 根目录时导致整个文件加载失败。
 """
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def hook_tag_name(**kwargs) -> str:
@@ -18,20 +25,16 @@ def hook_tag_name(**kwargs) -> str:
 
 
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
-    """读取并清空 agentspace 操作日志，返回变更摘要。
+    """取出并清空 agentspace 待提交的变更摘要。
 
-    调用 gateway.server._flush_pending_changes() 将内存中的操作日志
-    写入文件并清空，同时返回格式化的变更摘要。
-
-    无变更时返回空字符串。
+    直接查询 IAgentspaceService 的唯一业务服务，不修改 sys.path，
+    也不经 gateway 的兼容层。无变更时返回空字符串。
     """
     try:
-        import sys
-        sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
-        from gateway.server import _flush_pending_changes
-        result = _flush_pending_changes()
-        if result is None:
-            return ""
-        return result
+        from system.application import Application
+        from interface.agentspace_service import IAgentspaceService
+        result = Application.current().get_system(IAgentspaceService).flush_pending_changes()
+        return result or ""
     except Exception:
+        logger.debug("agentspace_changes_hook failed", exc_info=True)
         return ""

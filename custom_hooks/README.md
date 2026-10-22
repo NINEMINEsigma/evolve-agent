@@ -39,8 +39,9 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
 ## 后续如何运行
 
 - 启动时，`origin_agent/entry/agent_support/messages.py` 会自动扫描 `custom_hooks/*.py` 并加载所有合法 hook。
-- 新增、修改或删除 hook 后，需要**重启**进程才能生效。
+- 新增、修改或删除 hook 后，需要**重启**进程才能生效（加载结果按 loop 实例缓存在进程内存中）。
 - 不需要手动注册，也不需要修改核心源码。
+- 加载失败以 ERROR 级别记录文件名；单轮收集失败以 WARNING 级别记录对应 tag。
 
 ---
 
@@ -108,7 +109,6 @@ def hook_fixator(session_id: str = "", workspace: str = "", **kwargs) -> str:
             return "This is the first message after the program started."
     return ""
 
-
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     cache_path = Path(workspace) / "session_cache" / session_id / "turn_cache.json"
     now = datetime.now()
@@ -157,14 +157,59 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
 
 ### 导入内部模块
 
-hook 脚本执行时位于 `origin_agent` 的运行时环境中，因此可以直接导入内部模块获取常量或类型：
+hook 脚本以 `importlib.util.spec_from_file_location` 动态加载，加载时机不一定在
+`sys.path` 注入 agent 根目录之后。因此 **内部模块的运行时导入必须写在函数体内**，
+不能放在文件顶部：
 
 ```python
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT
-from system.context import RuntimeContext
+def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
+    from entity.constant import UPLOAD_FILENAME_TIME_FORMAT
+    from system.application import Application
+    from interface.session_manager import ISessionManager
+    ...
+```
+
+写在文件顶部的内部运行时导入会让整个文件加载失败（`ModuleNotFoundError`），
+该 hook 从此不再出现在上下文里，且只有一条加载失败日志。
+
+**类型注解例外**：只为标注类型而导入的类可以放在 `TYPE_CHECKING` 块里，
+运行时不会执行，因此不破坏动态加载：
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from system.context import RuntimeContext
+
+
+def hook_message(
+    session_id: str = "",
+    workspace: str = "",
+    runtime_ctx: "RuntimeContext | None" = None,
+    **kwargs,
+) -> str:
+    ...
 ```
 
 注意：这会让 hook 与 `origin_agent` 源码耦合。如果源码路径或接口变更，hook 也需要同步更新。
+
+### 查询运行时系统必须用接口槽位
+
+`Application` 只按接口注册系统，例如 `ISessionManager`、`IAgentspaceService`。
+用具体实现类查询（如 `get_system(SessionManager)`、`get_system(AgentspaceService)`）
+会抛 `RuntimeError: System ... is not registered`，导致该 hook 每一轮都静默返回空串：
+
+```python
+from interface.session_manager import ISessionManager
+sm = Application.current().get_system(ISessionManager)   # 正确
+```
+
+### 路径基准
+
+`hook_message(session_id, workspace, ...)` 的 `workspace` 是 `RuntimeContext.workspace`，
+即 `workspace/` 根目录（不是 `workspace/agentspace/`）。启动标记 `flag.json` 与
+会话缓存目录 `session_cache/` 都在该根目录下；读写这些文件时要允许文件缺失，
+否则一次 `FileNotFoundError` 会让整块上下文被丢弃。
 
 ---
 
@@ -175,3 +220,4 @@ from system.context import RuntimeContext
 - hook 异常会被调用方捕获并记录日志，但建议关键路径自行处理异常，避免某一轮上下文丢失。
 - 如果需要持久化状态，建议放在 `workspace/session_cache/` 下，避免污染仓库源码。
 - 修改 hook 后需要重启进程才能生效。
+- 内部模块导入必须写在函数体内，且运行时系统一律按接口槽位（`ISessionManager` 等）查询。

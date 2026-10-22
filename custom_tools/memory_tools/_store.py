@@ -42,12 +42,13 @@ def save_all_memory(path: str | Path, data: dict[str, dict[str, str]]) -> None:
 def get_parent_ids(session_id: str) -> list[str]:
     """通过 Application 单例获取父会话 ID 列表。
 
+    Application 只注册接口槽位，必须按 ISessionManager 查询。
     任何异常或不可用时返回空列表。
     """
-    from gateway.session_manager import SessionManager
+    from interface.session_manager import ISessionManager
     from system.application import Application
     try:
-        sm = Application.current().get_system(SessionManager)
+        sm = Application.current().get_system(ISessionManager)
     except Exception:
         return []
     info = sm.get(session_id)

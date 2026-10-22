@@ -71,7 +71,7 @@ def load_message_hooks(hooks_dir: Path, logger: logging.Logger) -> list[dict]:
             else:
                 logger.info("Skipping %s: missing hook_tag_name or hook_message/hook_fixator", fpath.name)
         except Exception:
-            logger.warning("Failed to load message hook %s", fpath, exc_info=True)
+            logger.error("Failed to load message hook %s", fpath, exc_info=True)
     logger.info("Total message hooks loaded: %d", len(hooks))
     return hooks
 
@@ -82,14 +82,17 @@ def _call_hook_with_runtime_ctx(
     workspace: str,
     runtime_ctx: "RuntimeContext | None"
     ):
-    """调用 hook 函数，优先传入 runtime_ctx；旧签名不兼容时回退到两参数调用。"""
+    """调用 hook 函数，优先传入 runtime_ctx；旧签名不兼容时回退到两参数调用。
+
+    只有参数绑定失败（异常直接抛在调用处，没有更深的帧）才回退，
+    避免 hook 内部自身抛出的 TypeError 触发二次执行、重复推进缓存与计时状态。
+    """
     try:
         return fn(session_id=session_id, workspace=workspace, runtime_ctx=runtime_ctx)
     except TypeError as exc:
-        msg = str(exc)
-        if "unexpected keyword argument" in msg or "got an unexpected keyword argument" in msg:
-            return fn(session_id, workspace)
-        raise
+        if exc.__traceback__ is not None and exc.__traceback__.tb_next is not None:
+            raise
+        return fn(session_id, workspace)
 
 
 def _collect_hook_parts(
@@ -102,6 +105,7 @@ def _collect_hook_parts(
     hooks_parts: list[str] = []
     fixator_parts: list[str] = []
     for hook in hooks:
+        tag = ""
         try:
             tag = _call_hook_with_runtime_ctx(hook["tag_fn"], session_id, workspace, runtime_ctx)
             if not tag:
@@ -115,7 +119,7 @@ def _collect_hook_parts(
                 if fix:
                     fixator_parts.append(f"<|im_{tag}_fixator_start|>{fix}<|im_{tag}_fixator_end|>")
         except Exception:
-            logger.warning("Failed to collect hook context", exc_info=True)
+            logger.warning("Failed to collect hook context | tag=%s", tag or "<unknown>", exc_info=True)
     return hooks_parts, fixator_parts
 
 

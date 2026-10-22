@@ -299,7 +299,9 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 - `build_full_history_messages()`：组装 system prompt + hooks 上下文 + 历史消息。
 - `collect_all_hooks_context()`：收集所有 custom_hooks 的上下文块。
-- `load_message_hooks()`：加载 hooks 定义。
+- `load_message_hooks()`：加载 hooks 定义。hook 以 `spec_from_file_location` 动态加载，能否成功取决于加载时 `sys.path` 是否已含 agent 根目录；失败以 ERROR 级别记录文件路径，结果按 loop 实例缓存到进程结束。
+- `_call_hook_with_runtime_ctx()`：优先以 `session_id` / `workspace` / `runtime_ctx` 关键字调用；只有参数绑定失败（TypeError 无更深帧）才回退两参数调用，hook 内部自抛的 TypeError 直接上抛，避免重复执行并重复推进缓存/计时状态。
+- 单轮收集失败以 WARNING 级别记录对应 `tag`；`workspace` 参数是 `RuntimeContext.workspace`（`workspace/` 根目录），不是 agentspace。
 - `build_agent_system_prompt()`：为子 Agent / 多 Agent 构建系统提示词。
 
 ### `history_summary.py`
