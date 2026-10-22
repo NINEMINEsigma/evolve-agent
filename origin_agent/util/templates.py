@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from system.pathutils import get_templates_dir
+from util.pathutils import get_templates_dir
 
 logger = logging.getLogger(__name__)
 

@@ -145,7 +145,7 @@ async def _handsfree_confirm(
         _approval_profile.model if _approval_profile else None,
     )
 
-    from system.pathutils import get_templates_dir
+    from util.pathutils import get_templates_dir
 
     # 获取工具的参数 schema，使审批模型能理解每个参数的类型、描述、
     # 默认值和是否必填，从而区分"必需信息缺失"与"可选参数省略"。

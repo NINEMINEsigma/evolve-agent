@@ -39,7 +39,8 @@ from entity.constant import (
     ALL_AGENTS_CHARACTER_REF_NAME,
     DYNAMIC_SANDBOX_MANAGEMENT_TOOL_NAMES,
 )
-from system.templates import get_templates_dir, render_multi_agent_prompt
+from util.pathutils import get_templates_dir
+from util.templates import render_multi_agent_prompt
 from system.session_store import SessionStore
 from system.lifecycle import ApplicationStoppingError, requires_lifecycle_propagation
 from system.prompt import (

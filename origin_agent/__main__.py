@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from system.pathutils import get_agent_dir, find_repo_root
+from util.pathutils import get_agent_dir, find_repo_root
 from entity.constant import Namespace
 
 # 确保 agent 自身目录在 sys.path 最前面，使
@@ -36,8 +36,8 @@ if str(_THIRD_DIR) not in sys.path:
 
 from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
-from system.convert import as_bool
-from system.pkgmgr import detect_package_manager
+from util.convert import as_bool
+from util.pkgmgr import detect_package_manager
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ def _build_frontend(force: bool = False) -> bool:
     """在前端目录中运行 ``<pkg_mgr> install && <pkg_mgr> run build``。
 
     包管理器优先 pnpm，pnpm 不存在时回退 npm（由
-    ``system.pkgmgr.detect_package_manager`` 检测）。
+    ``util.pkgmgr.detect_package_manager`` 检测）。
 
     前端位于 *AGENT_DIR* 下（例如 ``origin_agent/frontend/`` 或
     ``workspace/fast_agent_space/frontend/``）。构建输出写入

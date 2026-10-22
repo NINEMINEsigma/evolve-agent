@@ -46,7 +46,7 @@ gateway/
 
 `GET /api/session-export/viewer/{asset_name}`仅接受viewer.js/viewer.css两个构建产物，缺失503、未知404、no-store/nosniff，不依赖SPA兜底。三个导出路由必须与新前端同步；旧后端没有这些POST路由时可能由GET兜底产生405，刷新前端不能补齐后端。视觉HEAD 404仍表示未部署资源，不把它转换成导出失败。
 
-`system/local_fonts.py`抽取既有字体路径/MIME校验供在线路由和导出复用；在线行为保留，导出额外拒绝reparse。用户已有审批/History/WS协议及System拓扑保持不变。当前仅完成源码/差异审阅，未运行校验、构建或应用，人工验收见任务文件。
+`util/local_fonts.py`抽取既有字体路径/MIME校验供在线路由和导出复用；在线行为保留，导出额外拒绝reparse。用户已有审批/History/WS协议及System拓扑保持不变。当前仅完成源码/差异审阅，未运行校验、构建或应用，人工验收见任务文件。
 
 ## MessageRouter
 

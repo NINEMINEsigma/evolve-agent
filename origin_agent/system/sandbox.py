@@ -47,13 +47,13 @@ from entity.puretype import (
     DynamicSandboxSpaceData,
     ProcessLineStreamResult,
 )
-from system.atomic_io import replace_atomic
+from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
-from system.pathutils import find_repo_root
+from util.pathutils import find_repo_root
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.subprocess_runner import ISubprocessRunner
-from system.text_codec import decode_text, split_lf_lines
+from util.text_codec import decode_text, split_lf_lines
 
 from pydantic import BaseModel, ConfigDict
 

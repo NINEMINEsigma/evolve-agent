@@ -117,7 +117,7 @@ LSP工具与文件修改后的诊断附加统一通过 `Application.current().ge
 
 `Read` 的可选参数 `max_line_chars` 默认 1000，只接受大于等于 1 的整数；可以显式提高或降低，没有关闭值或额外硬上限。handler 在路径解析之前校验所有分支的参数：bool、浮点数（包括 1000.0）、字符串、null、0、负数、数组和对象均返回 `max_line_chars must be a positive integer`。只有省略参数才使用默认值；合法值在目录和媒体分支中忽略，不影响它们的返回结构。
 
-文本先按 `offset`/`limit` 分页，再由 `system/text_preview.py::truncate_lf_lines` 逐行处理展示内容。函数没有 I/O，只复用 `system.text_codec` 的 LF 分行/行尾处理，不改变 `Sandbox.read()` 的原文读取和内部 `limit=0` 路径。正文按 Python str 的 Unicode 码点计数，不按字节或字素簇计数；空格、制表符及孤立 CR 计入，LF/CRLF 行尾不计入，组合字符或 ZWJ 序列可能在边界处被切开。
+文本先按 `offset`/`limit` 分页，再由 `util/text_preview.py::truncate_lf_lines` 逐行处理展示内容。函数没有 I/O，只复用 `util.text_codec` 的 LF 分行/行尾处理，不改变 `Sandbox.read()` 的原文读取和内部 `limit=0` 路径。正文按 Python str 的 Unicode 码点计数，不按字节或字素簇计数；空格、制表符及孤立 CR 计入，LF/CRLF 行尾不计入，组合字符或 ZWJ 序列可能在边界处被切开。
 
 超限行保留前 N 个码点，附加 ` ... [truncated]`（含前导空格），再接原行尾；标识和行尾不占 N 的额度。未超限行保持原文，不插入行号、不折行、不补末尾换行；仅 LF 分行，保留原有 LF/CRLF。成功文本结果增加：
 
@@ -136,7 +136,7 @@ LSP工具与文件修改后的诊断附加统一通过 `Application.current().ge
 仅 `Read` 支持自动附带元数据文件：目标完整名称追加 `.meta`，例如 `ws:a.md` 对应 `ws:a.md.meta`，`ws:docs` 对应同级 `ws:docs.meta`，不是目录内部的 `.meta`。命名空间根目录（含等价当前目录写法或指向根目录的别名）不附带元数据；显式读取后缀为 `.meta` 的目标不继续嵌套。后缀识别不区分大小写，自动查找统一追加小写 `.meta`。
 
 - 目录列表隐藏后缀匹配且为文件的条目，保留同后缀目录；`count` 为过滤后数量。`Sandbox.list_dir`、SearchFiles、Grep、Agentspace 文件树和写入/移动/删除工具不变。
-- `system/file_metadata.py::parse_meta_content(content)` 是不执行 I/O 的共享解析入口。独立成行的 `[key]` 开始字段，键名不 trim、区分大小写，不允许空/纯空白键或键内方括号、CR、LF。标记行外侧没有空白；LF/CRLF 为行界，孤立 CR 仍是内容。
+- `util/file_metadata.py::parse_meta_content(content)` 是不执行 I/O 的共享解析入口。独立成行的 `[key]` 开始字段，键名不 trim、区分大小写，不允许空/纯空白键或键内方括号、CR、LF。标记行外侧没有空白；LF/CRLF 为行界，孤立 CR 仍是内容。
 - 每个值一直延续到下一个键标记或文件末尾，缩进、空行、CRLF、孤立 CR 与末尾换行原样保留。独立的 `[text]` 是新键，不提供转义语法。
 - 空文件或全空白文件得到 `{}`；无值键得到空字符串。重复键、非法的整行方括号标记、首个键前的非空文字抛带行号的 `MetaFormatError`，不返回部分解析字典。
 - 文本、图片、音频、视频和目录成功结果均可包含普通 `meta` 字段：正常为 `dict[str, str]`，缺失省略，读取/登记/解析失败为错误字符串，不影响原目标结果；不同于内部工具统计字段 `_meta`。

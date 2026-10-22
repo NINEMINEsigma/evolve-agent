@@ -26,7 +26,7 @@ from entity.puretype import (
     SessionRuntimeResourceTransferResult,
     SessionTerminationResult,
 )
-from system.templates import read_template
+from util.templates import read_template
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:

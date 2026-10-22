@@ -485,7 +485,7 @@ def _build_resume_messages(
         messages.append(converted)
 
     # User resume prompt via entity + formatter
-    from system.templates import read_template
+    from util.templates import read_template
     from entity.messages import BaseMessage as EntityMsg
     user_entity = EntityMsg(
         role=Role.USER,

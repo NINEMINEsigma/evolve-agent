@@ -22,7 +22,7 @@ from entity.constant import (
 from easysave import save, load, contains
 from entity.typeref import make_config
 
-from system.atomic_io import write_text_atomic
+from util.atomic_io import write_text_atomic
 from system.lifecycle import LifecycleFailure
 
 logger = logging.getLogger(__name__)

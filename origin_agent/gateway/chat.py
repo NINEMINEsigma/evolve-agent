@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 
-from system.atomic_io import write_text_atomic
+from util.atomic_io import write_text_atomic
 from entity.puretype import LoopMeta, Role, SessionInfo, SessionStatus, Loop
 
 logger = logging.getLogger(__name__)

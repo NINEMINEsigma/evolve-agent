@@ -20,7 +20,7 @@ from entity.puretype import (
     SessionVisualKind, SessionVisualResourceState, SessionVisualResources,
     SessionVisualSource, SessionVisualStatus,
 )
-from system.file_metadata import MetaFormatError, parse_meta_content
+from util.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import ResolvedPath, SandboxError
 from interface.sandbox import ISandbox
 

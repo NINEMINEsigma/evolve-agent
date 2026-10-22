@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Mapping, TYPE_CHECKING
 
-from system.templates import render_multi_agent_prompt
+from util.templates import render_multi_agent_prompt
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import AgentConfig, CharacterProfile, LLMProfile
 from entry.agent_support.messages import (

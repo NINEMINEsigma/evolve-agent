@@ -44,7 +44,7 @@ from entity.puretype import (
     QueuedMessage,
 )
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.templates import read_template
+from util.templates import read_template
 from interface.frontend_sink import IFrontendSink
 from interface.approval_system import IApprovalSystem
 from interface.agentspace_service import IAgentspaceService

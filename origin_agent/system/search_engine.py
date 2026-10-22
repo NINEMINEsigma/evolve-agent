@@ -32,11 +32,11 @@ from entity.constant import (
     SEARCH_RIPGREP_WINDOWS_X64_RELATIVE_PATH,
     SEARCH_TEXT_EXTENSIONS,
 )
-from system.pathutils import get_agent_dir
+from util.pathutils import get_agent_dir
 from interface.sandbox import ISandbox
 from system.sandbox import SandboxError
 from system.subprocess_utils import safe_decode
-from system.text_codec import strip_lf_line_ending
+from util.text_codec import strip_lf_line_ending
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext

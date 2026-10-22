@@ -1100,7 +1100,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         summary: str
         ) -> str:
         """为继承会话构建初始上下文消息。"""
-        from system.templates import read_template
+        from util.templates import read_template
         return (
             read_template("session_inherit.txt")
             .replace("{{old_sid}}", old_sid)

@@ -24,7 +24,7 @@ from entity.constant import (
     STATIC_FILE_HTTP_PREFIX,
 )
 from entity.puretype import CharacterAvatarEntry, CharacterAvatarsResponse
-from system.file_metadata import MetaFormatError, parse_meta_content
+from util.file_metadata import MetaFormatError, parse_meta_content
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from system.sandbox import SandboxError

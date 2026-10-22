@@ -97,7 +97,8 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 | `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由、桌面自动化（`automation/`）、浏览器控制（`browser/`） | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
 | `abstract/` | 抽象层：LLM 客户端、对象工具注册表（`BaseTool`/`BaseToolSet` 工具集元数据与渐进式加载）、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
-| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、路径工具、会话存储、模板、LSP（`lsp.py`）、转换工具 | 见下文 |
+| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、会话存储、生命周期、业务提示词组装与 LSP（`lsp.py`） | [system/DEV-README.md](origin_agent/system/DEV-README.md) |
+| `util/` | 前置辅助模块：路径、模板读取、文本/元数据解析、转换、日志、包管理器检测与原子文件操作 | [util/DEV-README.md](origin_agent/util/DEV-README.md) |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
 | `entity/` | 常量与消息体系：`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
 | `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
@@ -284,13 +285,8 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/lifecycle.py`：`TaskOwner.create/track` 负责后台任务，`run_request` 负责有明确结果等待方的请求。`cancel` 登记预期取消并复用固定截止；`is_idle` 同时要求任务结束和交接完成，取消后仍运行的任务不能从所有权记录中移除。原生线程/子进程仍由各 System 持有真实资源，不由异步包装任务的结束替代。
 - `system/context.py`：`RuntimeContext`（`BaseModel`，不可变运行时配置）。全局 `set_runtime_context`/`get_runtime_context` 单例入口已删除；配置唯一真相来源由 `RuntimeSystem` 持有，经 `app.get_system(IRuntimeSystem).context` 取得。
 - `system/sandbox.py`：`Sandbox` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem` 与 `SubprocessRunner`），无参构造，`virtual_awake` 取得依赖并加载动态空间；由 Application 在 P22 装配后经 `app.get_system(ISandbox)` 取得。路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；`Sandbox.read()` 按 UTF-8、系统编码和 Windows 常见编码自动探测，返回准确原文，分页只按 LF 定位原文行片段，保留 CRLF、孤立 CR 与末尾换行；工具 `Read` 在其上独立应用正文单行展示截断，未截断内容保持原文。编辑和 LSP 使用的 `limit=0` 路径仍返回完整解码原文。`write()` / `append()` 禁用平台换行转换，按传入文本原样写入 UTF-8，避免 Windows 上 `PatchEdit` 写回时给已有 CRLF 增加一个 CR；`PatchEdit` 按原文匹配与替换，已有异常换行不自动修复。动态配置位于 workspace 根且由唯一 Sandbox 实例持有。动态沙盒空间 Tab 通过 Gateway REST 复用该单例。所有调用方（包括内置文件工具与自定义扩展）统一经 `app.get_system(ISandbox)` 取得，不再从 `filesystem._s` 跨工具引用或 `Application.current().sandbox` 旧属性获取。
-- `system/text_preview.py`：无 I/O 的 `truncate_lf_lines` 纯函数，由 Read 在原文分页统计后调用。Read 新参数 `max_line_chars` 默认 1000，仅允许正整数且可显式提高、不能关闭；按 Unicode 码点保留每行前 N 个正文字符，超限附加 ` ... [truncated]`（含前导空格），标识及 LF/CRLF 行尾不占额度，孤立 CR 仍按正文计数。成功文本结果附带 `max_line_chars`、`truncated`、`truncated_lines`（原文件绝对 0-indexed 行索引）；原行数和分页不变，`remaining=0` 仍可有截断。标识不是原文，PatchEdit 使用前需检查截断状态，必要时提高有限上限重读。自动附带 meta、目录和媒体不应用此展示策略，内部完整读取不变；这不是总输出预算或全文件解码内存限制。
-- `system/file_metadata.py`：Read 的元数据文件纯文本解析器，`parse_meta_content(content)` 按独立的 `[key]` 行解析一层字符串字典，保留值的原始空白和换行；非法/重复键及前导非空文字抛带行号的 `MetaFormatError`。`component/tools/filesystem.py` 负责通过 Sandbox 读取目标完整名称追加 `.meta` 的同级文件，目录也使用同级 `目录名.meta`；命名空间根目录不附带，显式 `.meta` 不继续嵌套。成功时结果附加 `meta` 字典，缺失省略，元数据访问/解析失败附加错误字符串而保留原结果。会话视觉源目录的 `redirect` 由 `system/session_visual_resources.py` 单层消费，Read 只在 `meta.redirect` 中报告错误，不跟随目标。目录列表隐藏 `.meta` 文件（后缀不区分大小写，保留同后缀目录），其他文件工具与前端文件树不变。自动附带的元数据完整读取不受正文分页或单行字符限制影响；显式 Read `.meta` 目标则按文本正文分页及截断，但不继续查找 `.meta.meta`。ws: 元数据文件沿用回复轮次文件接触登记；当前不自动维护文件。
 - `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等）；活动 LLM Profile 仅以 `{"profile_name": ...}` 名称指针保存。旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到会话 v1 格式。`history.es` 通过 easysave 的安全写入事务保存：同目录临时文件、刷新/同步、原子替换和前置备份；残留 `.bak` 会阻断后续保存并要求人工处理，读取侧不自动恢复损坏文件。
-- `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
-- `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
-- `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。
-- `system/pathutils.py` / `system/atomic_io.py`：路径与原子 IO 工具。
+- `system/prompt.py`：依赖运行时配置与业务服务的 System Prompt 组装；模板读取与渲染由 `util/templates.py` 提供，本次不迁移业务组装模块。
 - `system/subprocess_utils.py`：`SubprocessRunner` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`），是内部子进程同步/异步执行、活动进程登记与中断终止的唯一所有者；提供 `close_admission()`/`terminate_all()`/`wait_idle()` 关闭接口，由 Application 在 P22 装配后经 `app.get_system(ISubprocessRunner)` 取得。代码验证、搜索、LSP 等基础设施继续复用。`build_subprocess_env` 为显式参数纯函数，无隐式全局配置读取。
 - `StartShell` 在 Windows 上启动 powershell/pwsh 时使用 `-NoProfile`，并通过启动阶段内部 `-Command` 优先尝试移除 PSReadLine，失败时回退为关闭预测；第一阶段不提供历史、预测和方向键等行编辑能力。Agent 依赖显式的 `EVOLVE_PYTHON` 与 namespace 环境变量。
 - Shell 单行输入通过 ConPTY 发送单独的 CR（`\r`）作为 Enter，不发送 CRLF；未换行提示符作为待提交逻辑行，在最后原始输出静默 0.4 秒后提交并立即返回，因此 InterruptShell 和 ReadShell 不必等待 30 秒硬截止。
@@ -301,6 +297,23 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `component/browser/system.py`：`BrowserSystem` 已迁移为依赖RuntimeSystem的AsyncSystem，持有唯一Playwright/CDP连接、端点和全部自有无头进程；可选浏览器仍按需启动。请求与清理分别持有，原生进程确认退出后才回收句柄，用户自有浏览器不被终止。`_connection.py`只保留无状态函数，main.py重复清理已移除。
 - `system/lsp.py`：`LSPManager` 已迁移为依赖 RuntimeSystem/Sandbox 的 AsyncSystem，工具和文件诊断附加通过 `get_system(ILSPManager)` 取得实例。唤醒不启动 pyright，按需 start 保持；启动握手与正常响应共用唯一 reader，复用 Runtime 主 loop。最终关闭在线程中等待进程和 reader/stderr 退出，失败保留资源并传播；旧模块 getter/cleanup 与 main.py 重复清理已移除。
 - `system/modality_capability.py`：`ModalityCapabilitySystem` 已迁移为依赖 RuntimeSystem/LLMProfileStore 的 AsyncSystem，独占探测锁、媒体及缓存路径。探测与转发请求由 TaskOwner 管理，六路子探针使用 TaskGroup 完整收尾；HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式由客户端转换、流式回退经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/网络/超时不写入不支持缓存。有状态调用经 get_system，纯媒体构造和显式引用解析保持函数。多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`resolve_modality_reference_profile()` 按活动 Profile 对应引用优先、全局图片/音频/视频回退引用次之解析目标；`forward_modality_to_ref_profile()` 只将明确的模态/Provider 请求失败转换为转发错误，其他异常继续抛出）。`build_media_content_block()` 提供不附加 prompt 的共享单媒体块构造入口。多模态预检调用（`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker`）纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`）时终止本轮并把配置指引持久化展示给前端，provider 错误降级为用户可见错误。
+
+### util/
+
+前置辅助模块仅依赖标准库、第三方库、已核实无反向业务依赖的 entity/interface 子模块及同包辅助模块；不依赖具体 System、Agent Loop 或业务实现。当前十个模块的项目内依赖只有 `entity.constant`、`util.pathutils` 和 `util.text_codec`，`util/__init__.py` 保持为空，不做聚合导入或运行时初始化。消息层模板依赖为 `entity.messages → util.templates → util.pathutils`，渲染时再引用 `entity.constant`，不反向导入消息类或类型映射。
+
+- `util/pathutils.py`：项目根、当前代码副本根和模板路径；同级目录迁移保持 `__file__` 相对深度与路径算法。
+- `util/templates.py`：模板读取与多Agent占位符渲染，模板缺失和读取失败的处理不变；需要模板目录的调用方直接从 `util.pathutils` 导入。
+- `util/text_codec.py`：编码探测、解码和 LF 分行/行尾处理，原文及编辑契约不变。
+- `util/text_preview.py`：无 I/O 的 `truncate_lf_lines` 纯函数，由 Read 在原文分页统计后调用。Read 新参数 `max_line_chars` 默认 1000，仅允许正整数且可显式提高、不能关闭；按 Unicode 码点保留每行前 N 个正文字符，超限附加 ` ... [truncated]`（含前导空格），标识及 LF/CRLF 行尾不占额度，孤立 CR 仍按正文计数。成功文本结果附带 `max_line_chars`、`truncated`、`truncated_lines`（原文件绝对 0-indexed 行索引）；原行数和分页不变，`remaining=0` 仍可有截断。标识不是原文，PatchEdit 使用前需检查截断状态，必要时提高有限上限重读。自动附带 meta、目录和媒体不应用此展示策略，内部完整读取不变；这不是总输出预算或全文件解码内存限制。
+- `util/file_metadata.py`：Read 的元数据文件纯文本解析器，`parse_meta_content(content)` 按独立的 `[key]` 行解析一层字符串字典，保留值的原始空白和换行；非法/重复键及前导非空文字抛带行号的 `MetaFormatError`。`component/tools/filesystem.py` 负责通过 Sandbox 读取目标完整名称追加 `.meta` 的同级文件，目录也使用同级 `目录名.meta`；命名空间根目录不附带，显式 `.meta` 不继续嵌套。成功时结果附加 `meta` 字典，缺失省略，元数据访问/解析失败附加错误字符串而保留原结果。会话视觉源目录的 `redirect` 由 `system/session_visual_resources.py` 单层消费，Read 只在 `meta.redirect` 中报告错误，不跟随目标。目录列表隐藏 `.meta` 文件（后缀不区分大小写，保留同后缀目录），其他文件工具与前端文件树不变。自动附带的元数据完整读取不受正文分页或单行字符限制影响；显式 Read `.meta` 目标则按文本正文分页及截断，但不继续查找 `.meta.meta`。ws: 元数据文件沿用回复轮次文件接触登记；当前不自动维护文件。
+- `util/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
+- `util/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程；原策略不随迁移改变。
+- `util/local_fonts.py`：在线路由与离线导出的共享字体路径/MIME校验，导出额外拒绝 reparse，在线权限口径不变。
+- `util/pkgmgr.py`：包管理器检测，优先 pnpm，回退 npm，Windows 返回显式 `.cmd` 名称。
+- `util/atomic_io.py`：原子替换、独占创建及无覆盖文件/目录操作；Windows 显式导入该模块时仍绑定 kernel32 DLL，其他辅助模块不因包入口顺带加载它。
+
+原 system 下十模块已移除，不保留旧路径转发。用户须完整部署新模块与所有调用方，再重启对应运行进程；合并复制不保证清除目标侧旧文件。预置技能源更新不会覆盖已有 `skills/`，需由用户定向同步对应脚本并保留其他修改。开发助手AI不操作运行时副本或已生成技能。本次仅完成源码和只读静态审阅，未运行校验、构建、实际导入或应用；持久化类型、easysave key 与 System 装配均未改变。详细约束见 [util/DEV-README.md](origin_agent/util/DEV-README.md)。
 
 ### `evolve/`
 

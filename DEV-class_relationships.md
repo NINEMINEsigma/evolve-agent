@@ -1516,5 +1516,16 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 所有 sink 参数与返回类型统一为 `IAgentSink`（`BaseAgentLoop.sink`、`BaseAgentLoop.get_sink`、`ParentAgentLoop`、`MultiAgentLoop`、`MultiAgentWorker`、`StreamConsumer`、`StreamHistoryLink`、`ToolExecution.accept_tool_batch`、`ToolPostprocessor`、`execute_with_approval`），只有 System 槽位查询使用 `IFrontendSink`。
 
+### 前置辅助模块迁移（2026-10-22）
+
+`pathutils`、`templates`、`text_codec`、`text_preview`、`convert`、`error_utils`、`file_metadata`、`local_fonts`、`pkgmgr`、`atomic_io` 十个整文件由 system 移至同级 `origin_agent/util/`，原路径不保留兼容转发。准入标准是无需 Application 装配、没有具体业务实现依赖；模块可带专用异常和平台绑定，不等于无 I/O 纯函数。System、叶服务、生命周期工具类及业务提示词组装不在本次迁移范围。
+
+消息层依赖改为 `entity.messages → util.templates → util.pathutils`；模板渲染函数内部只再引用 `entity.constant`，常量包不反向依赖消息类或业务实现。`util/__init__.py` 保持为空，避免聚合导入扩大初始化范围；`atomic_io` 在 Windows 的显式模块导入仍会绑定 kernel32 DLL。调用方直接依赖 `util.pathutils.get_templates_dir`，不经模板读取模块间接取得路径函数。
+
+函数签名、默认值、返回值、专用异常继承和业务错误策略保持不变；异常生产方与捕获方同批引用 util 中同一个定义。日志对象名自然随定义模块变化。没有新增 System、运行时类、Agent Loop protected 字段或跨类私有访问，不改 20 个接口槽位、装配与资源所有权；正式持久化模型、typeref 映射和 easysave key 均不变。
+
+完整部署后应由用户重启对应进程再验收，避免旧模块/异常类对象残留；运行时副本合并复制及已生成技能不由本次源码编辑自动清理或覆盖。当前仅源码实施与只读静态审阅，未运行校验、实际导入、构建或应用，运行验收由用户执行。
+
+
 
 

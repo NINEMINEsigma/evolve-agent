@@ -46,10 +46,10 @@ from entity.constant import (
     WRITE_FILE_MAX_CHARS,
     WRITE_FILE_TRUNCATION_TAIL,
 )
-from system.file_metadata import MetaFormatError, parse_meta_content
+from util.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import Access, SandboxError
-from system.text_codec import split_lf_lines
-from system.text_preview import truncate_lf_lines
+from util.text_codec import split_lf_lines
+from util.text_preview import truncate_lf_lines
 from pathlib import Path
 
 if TYPE_CHECKING:

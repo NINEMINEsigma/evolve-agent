@@ -1,6 +1,6 @@
 """无 I/O 的文本展示辅助函数，不改变原文读取和编辑契约。"""
 
-from system.text_codec import split_lf_lines, strip_lf_line_ending
+from util.text_codec import split_lf_lines, strip_lf_line_ending
 
 
 def truncate_lf_lines(

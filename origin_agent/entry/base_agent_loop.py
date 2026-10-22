@@ -1542,7 +1542,7 @@ class BaseAgentLoop(ABC):
             extract_last_rounds,
         )
         from system.session_metadata import SessionMetadataError
-        from system.templates import read_template
+        from util.templates import read_template
 
         summaries: list[tuple[str, str]] = []
         for source_id in sources:

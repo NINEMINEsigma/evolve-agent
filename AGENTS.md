@@ -92,7 +92,7 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 提升、重启。**备份与提升均为 `copytree(dirs_exist_ok=True)` 合并覆盖，不再先 rmtree**（避免前端 `node_modules`/`dist` 重新下载安装；目标侧独有旧文件残留）。各阶段（backup/swap/complete）追加写入 `workspace/logs/evolution.status` 供前端展示。
   - 其他 → 进入 fallback：`.fallback` 缺失时先从 origin 补齐，仍无 `__main__.py` 则退出；否则运行 `.fallback/__main__.py --mode fallback --fix_fork <fast> --fix <logs/fast_agent_runtime_error.log>` 修复。修复成功（退出码 0）回到循环重启 fast，失败则退出（日志见 `logs/fallback_agent_runtime_error.log`）。
 - 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志，`asyncio.run` 结束后解除关闭硬截止）→ `main.py::App`（创建唯一 Application、平台信号处理、等待关闭、退出码映射）→ `system/application.py::Application`（继承 `AsyncArchitecture` 的进程级单例；`start()` 按固定拓扑顺序注册 20 个 AsyncSystem 并在全部唤醒后开放输入，`shutdown()` 统一执行业务停止、History 提交与逆拓扑注销，`Application.current()` 访问）。
-- 前端在 agent 目录内由 `_build_frontend()` 用 `<pkg_mgr> install && <pkg_mgr> run build`（`CI=true`，包管理器优先 pnpm 回退 npm，由 `system/pkgmgr.py` 检测）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过，`--frontend_force_build` 可强制重建。
+- 前端在 agent 目录内由 `_build_frontend()` 用 `<pkg_mgr> install && <pkg_mgr> run build`（`CI=true`，包管理器优先 pnpm 回退 npm，由 `util/pkgmgr.py` 检测）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过，`--frontend_force_build` 可强制重建。
 
 ## 沙盒命名空间（system/sandbox.py）
 
@@ -162,4 +162,4 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 
 ## Windows 细节
 
-- Python 命令是 `python`（非 python3）；原生可执行文件调用 `pnpm.cmd` 或 `npm.cmd`（由 `system/pkgmgr.py` 检测，优先 pnpm）；进程树终止用 `taskkill /T /F`；沙盒子进程用 `CREATE_NEW_PROCESS_GROUP`；`add_signal_handler` 不可用，回退 `signal.signal`。
+- Python 命令是 `python`（非 python3）；原生可执行文件调用 `pnpm.cmd` 或 `npm.cmd`（由 `util/pkgmgr.py` 检测，优先 pnpm）；进程树终止用 `taskkill /T /F`；沙盒子进程用 `CREATE_NEW_PROCESS_GROUP`；`add_signal_handler` 不可用，回退 `signal.signal`。

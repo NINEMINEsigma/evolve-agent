@@ -1,5 +1,11 @@
 # system/ — 基础设施与异步生命周期
 
+## 前置辅助模块边界（2026-10-22）
+
+`pathutils`、`templates`、`text_codec`、`text_preview`、`convert`、`error_utils`、`file_metadata`、`local_fonts`、`pkgmgr`、`atomic_io` 十个整文件已迁入同级 `util/`，原路径不保留转发；模块地图和依赖约束见 [util/DEV-README.md](../util/DEV-README.md)。System、叶服务、RuntimeContext、TaskOwner、ShellTextNormalizer 及业务组装模块仍留在本包，20 个 System 的装配和资源所有权不变。
+
+`prompt.py`、角色数据组装与搜索仍依赖具体业务实现，本次只更新其辅助模块导入，不作为前置辅助模块迁移。`util/__init__.py` 保持为空；`atomic_io` 的 Windows DLL 绑定仅随该模块的显式导入发生。函数契约、错误策略与持久化格式保持；只做源码和静态审阅，未运行校验、构建或应用。
+
 ## 迁移状态
 
 本包已按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md` 完成 framework 迁移：20 个 AsyncSystem（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem）由 `Application.start()` 按固定拓扑顺序串行注册，先用 graphlib 校验依赖图；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`Application.shutdown()` 是唯一关闭协调任务：先冻结输入并停止生成，子会话输入与反馈交接后主/多会话按 sequence 只落 History 并严格写盘，随后结束 SSE/WS 与 uvicorn，最后按装配逆序注销；必要写盘或资源释放失败合并上抛（退出码 1，绝不返回进化成功 -1）。S16/S17 的 InputDelivery、退役 Loop 与反馈交接、S21 的 Gateway 接收登记均已接入。上述均为源码实施与定向静态审阅结果，尚未运行验证。
@@ -205,7 +211,7 @@ capture使用Loop公开分段隔离输入，线程读取严格metrics并计算�
 
 资源只按明确逻辑文件或已有字体规则读取，原路径组件及最终映射拒绝symlink/junction/reparse；读取前后身份/mtime/ctime/size和SHA参与proof。Windows下路径stat/lstat与文件描述符fstat的字段可能具有不同表示/精度，禁止直接交叉全量比较；metrics和资源共用同一校验入口，分别比较同来源的路径前后状态、同句柄前后状态及实际读取字节数，非Windows平台另检查打开身份。原路径映射/reparse和最终SHA/proof复核保持，检查失败以WARNING记录kind、脱敏source_ref、reason和数值签名，不输出物理路径或内容。已保存文件在verify变化则整体409，不伪装缺媒体成功；明确初始缺失/权限拒绝/单文件超限才资源级降级。读取、编码和复核均有独立字节/时间预算，最终guard与会话存在性/空闲状态复检，不宣称跨文件原子事务。
 
-`system/local_fonts.py`的`resolve_local_font`和MIME函数复用既有在线规则，strict_reparse仅用于导出，不改变在线字体权限口径。新增纯字段类型按消息依赖位于puretype/puretype_after，带校验器的资源读取结果留在业务模块；不加入easysave/typeref，不写workspace、不调用模型。源码已接入，未运行构建、校验或应用。
+`util/local_fonts.py`的`resolve_local_font`和MIME函数复用既有在线规则，strict_reparse仅用于导出，不改变在线字体权限口径。新增纯字段类型按消息依赖位于puretype/puretype_after，带校验器的资源读取结果留在业务模块；不加入easysave/typeref，不写workspace、不调用模型。源码已接入，未运行构建、校验或应用。
 
 ## 验证约束
 

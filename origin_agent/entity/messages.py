@@ -8,7 +8,7 @@ from entity.puretype import (
     SessionMessageDeletionResult,
 )
 from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME, AUDIO_FORMAT_MIME_SUBTYPE
-from system.templates import read_template
+from util.templates import read_template
 from threading import Lock
 
 logger = logging.getLogger(__name__)

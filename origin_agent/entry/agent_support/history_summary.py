@@ -15,7 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 from entity.puretype import Role
 from entity.messages import BaseMessage
-from system.templates import read_template
+from util.templates import read_template
 from entity.constant import SUMMARY_INPUT_MAX_CHARS, INHERIT_LAST_ROUNDS, TOOL_RESULT_PREVIEW_CHARS, META_EXTRACTOR_CHARACTER
 
 if TYPE_CHECKING:

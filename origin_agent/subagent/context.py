@@ -53,7 +53,7 @@ async def build_subagent_context(
     parent_ctx: RuntimeContext
     ) -> SubRuntimeContext:
     """从动态角色档案构建普通子Agent运行时上下文。"""
-    from system.templates import read_template
+    from util.templates import read_template
 
     if profile.error is not None or profile.llm_profile is None:
         raise ValueError(
@@ -112,5 +112,5 @@ async def build_taskagent_context(
 
 def _default_system_prompt() -> str:
     """从模板文件读取内置默认系统提示词。"""
-    from system.templates import read_template
+    from util.templates import read_template
     return read_template("subagent/subagent_system.txt")

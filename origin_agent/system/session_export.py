@@ -42,8 +42,8 @@ from entry.session_export import (
     SessionExportBusyError, SessionExportChangedError, SessionExportError,
     SessionExportLimitError, SessionExportTimeoutError, export_history_digest, project_export_history,
 )
-from system.file_metadata import MetaFormatError, parse_meta_content
-from system.local_fonts import (
+from util.file_metadata import MetaFormatError, parse_meta_content
+from util.local_fonts import (
     LocalFontAccessError, local_font_mime_type, resolve_local_font,
 )
 from system.sandbox import ResolvedPath, SandboxError
@@ -557,7 +557,7 @@ class SessionExportService:
         base = bases.get(namespace)
         if base is None:
             raise SandboxError("Namespace is unavailable")
-        from system.local_fonts import reject_reparse_components
+        from util.local_fonts import reject_reparse_components
         reject_reparse_components((base / relative).absolute())
         self._assert_no_reparse(resolved, bases)
         return resolved.real, _guess_media_type(resolved.real), _digest_text("sandbox", str(resolved.real))

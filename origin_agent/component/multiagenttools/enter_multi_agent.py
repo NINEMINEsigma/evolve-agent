@@ -32,7 +32,7 @@ from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-from system.templates import get_templates_dir
+from util.pathutils import get_templates_dir
 from entry.multi_agent_loop import MultiAgentLoop
 
 logger = logging.getLogger(__name__)

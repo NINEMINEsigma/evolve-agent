@@ -422,7 +422,7 @@ class SessionManager(ISessionManager):
         from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
         from subagent.profile import CharacterProfileResolver
-        from system.templates import get_templates_dir
+        from util.pathutils import get_templates_dir
         from interface.tool_registry import IToolRegistry
         tool_registry = self._app.get_system(IToolRegistry)
         from system.session_store import SessionStore

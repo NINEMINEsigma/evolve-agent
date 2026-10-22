@@ -28,8 +28,8 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-from system.pathutils import find_repo_root
-from system.templates import read_template
+from util.pathutils import find_repo_root
+from util.templates import read_template
 from system.context import RuntimeContext
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile

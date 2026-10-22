@@ -23,7 +23,7 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.puretype import CronTaskInfo
-from system.atomic_io import write_text_atomic
+from util.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from interface.cron_router import ICronRouter
 from interface.runtime_system import IRuntimeSystem

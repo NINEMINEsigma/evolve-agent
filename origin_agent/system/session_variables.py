@@ -24,7 +24,7 @@ from entity.puretype import (
     SessionVariableIssue, SessionVariableMetadata, SessionVariablePoolResponse,
     SessionVariableSnapshotNode, SessionVariableSourceSnapshot,
 )
-from system.file_metadata import MetaFormatError, parse_meta_content
+from util.file_metadata import MetaFormatError, parse_meta_content
 from system.lifecycle import LifecycleFailure
 from interface.sandbox import ISandbox
 from system.sandbox import SandboxError

@@ -12,7 +12,7 @@ from framework import AsyncSystem
 
 from entity.constant import DYNAMIC_ENDPOINTS_STORE_FILENAME
 from entity.puretype import DynamicEndpointInfo
-from system.atomic_io import write_text_atomic
+from util.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.runtime_system import IRuntimeSystem

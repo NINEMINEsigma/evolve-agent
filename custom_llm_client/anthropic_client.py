@@ -504,7 +504,7 @@ def _build_resume_messages(
 
     messages.append({"role": "assistant", "content": assistant_content})
 
-    from system.templates import read_template
+    from util.templates import read_template
     messages.append({
         "role": "user",
         "content": [{"type": "text", "text": read_template("llm/stream_resume.txt")}],

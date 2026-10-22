@@ -32,3 +32,17 @@ def as_bool(value: object, default: bool = False) -> bool:
         return False
     logger.warning("expected a boolean-ish value, got %r; using default=%s", value, default)
     return default
+
+
+def as_int(value: object, default: int|None = None) -> int|None:
+    if isinstance(value, int):
+        return value
+    elif isinstance(value, bool):
+        return 1 if value else 0
+    try:
+        return int(str(value))
+    except (ValueError, TypeError):
+        if default is not None:
+            return default
+        logger.warning("cannot convert %r to %s", value, int)
+        return None

@@ -25,7 +25,7 @@ from entity.constant import (
 from entry.history_media import HistoryMediaOccurrence, project_media_item
 from interface.modality_capability_system import IModalityCapabilitySystem
 from interface.runtime_system import IRuntimeSystem
-from system.templates import read_template
+from util.templates import read_template
 from system.modality_capability import (
     resolve_active_model_base_url,
     wrap_forwarded_description,

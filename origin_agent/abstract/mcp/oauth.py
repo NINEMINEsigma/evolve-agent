@@ -53,7 +53,7 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
-from system.atomic_io import replace_atomic
+from util.atomic_io import replace_atomic
 
 # OAuth lifecycle constants from entity.constant
 from entity.constant.mcp_oauth import (

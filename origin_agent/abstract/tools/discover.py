@@ -22,7 +22,7 @@ from entity.constant import (
     TOOLSET_DECLARATION_NAME,
 )
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
-from system.pathutils import find_repo_root, get_agent_dir
+from util.pathutils import find_repo_root, get_agent_dir
 from interface.approval_system import IApprovalSystem
 from interface.agentspace_service import IAgentspaceService
 from interface.browser_system import IBrowserSystem

@@ -26,7 +26,7 @@ from entity.puretype import (
     AgentspaceTrashEntry,
     AgentspaceTrashState,
 )
-from system.atomic_io import (
+from util.atomic_io import (
     move_file_no_replace,
     move_tree_no_replace,
     write_text_atomic,

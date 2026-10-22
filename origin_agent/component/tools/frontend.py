@@ -18,7 +18,7 @@ from typing import Any, Dict
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from entity.puretype import ToolAvailability
-from system.pkgmgr import detect_package_manager
+from util.pkgmgr import detect_package_manager
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)

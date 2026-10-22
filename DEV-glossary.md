@@ -19,6 +19,7 @@
 | 角色术语与实例名分层 | 文档默认用角色术语；实例名仅特指当前部署时使用 |
 | Role 不译 | 固定搭配，直指 `puretype.Role` 枚举（user/assistant/system/tool） |
 | 术语双锁定 | 中文规范称谓 + 英文锚点；prompt 模板使用规范英文形态 |
+| 前置辅助模块 | 英文锚点：pre-runtime utility module。`origin_agent/util/` 中无需 Application 装配即可导入和复用的辅助函数模块；项目内依赖限于已核实无反向业务依赖的 `entity/`、`interface/` 子模块及其他前置辅助模块。不依赖具体 System、Agent Loop 或业务实现，不拥有业务生命周期；不等于无 I/O 纯函数，也不要求早于全部 entity 模块统一导入。 |
 
 ---
 

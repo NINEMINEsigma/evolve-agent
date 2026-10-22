@@ -94,7 +94,7 @@ def _load_dummy_mp4_b64() -> str:
     经 API 验证可被接受。不能用更小的 MP4——部分 provider 对极短视频
     返回 400 "Invalid request parameters"。
     """
-    from system.templates import read_template
+    from util.templates import read_template
     b64 = read_template("probe/dummy_video_mp4.txt")
     if not b64:
         raise ValueError("The video probe template is empty")
@@ -231,7 +231,7 @@ def resolve_modality_reference_profile(
 
 
 def _media_description_prompt(media_type: ModalityType) -> str:
-    from system.templates import read_template
+    from util.templates import read_template
     return read_template(f"forwarded/forwarded_{media_type}_prompt.txt")
 
 
@@ -274,7 +274,7 @@ async def _forward_modality_to_ref_profile(
     Returns:
         被引用模型返回的描述文本
     """
-    from system.templates import read_template
+    from util.templates import read_template
 
     def _error_text(ref_profile_name: str, error_message: str) -> str:
         """构造转发错误文本（从模板加载并填充占位符）。"""
@@ -924,7 +924,7 @@ def _build_modality_prompt_block(
     if not profile.model:
         return ""
 
-    from system.templates import read_template
+    from util.templates import read_template
     template = read_template("modality_capability.txt")
     if not template:
         return ""

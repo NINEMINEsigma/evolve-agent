@@ -25,7 +25,7 @@ from entity.puretype.llm import (
     LLMProfileData,
     LLMProfilePayload,
 )
-from system.atomic_io import replace_atomic
+from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
 from system.lifecycle import LifecycleFailure
 from interface.llm_profile_store import ILLMProfileStore

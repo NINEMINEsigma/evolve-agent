@@ -32,7 +32,7 @@ def _read_main_agent_character_name_from_soul_meta(meta_path:Path) -> str:
     解析失败属于配置错误，仅记 warning 不阻断启动（Fail-Soft 仅限该边界）。
     """
     import logging
-    from system.file_metadata import MetaFormatError, parse_meta_content
+    from util.file_metadata import MetaFormatError, parse_meta_content
 
     logger = logging.getLogger(__name__)
     if not meta_path.is_file():

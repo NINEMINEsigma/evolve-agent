@@ -82,7 +82,7 @@ def format_user_message(
     co_recipients: list[str] | None = None
     ) -> str:
     """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
-    from system.templates import read_template
+    from util.templates import read_template
 
     template_map = {
         "direct": "subagent/user_message_direct.txt",

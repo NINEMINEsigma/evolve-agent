@@ -16,7 +16,7 @@ from entity.constant import (
     SUBAGENT_NAME_PATTERN,
 )
 from entity.puretype import AgentConfig, CharacterProfile
-from system.file_metadata import MetaFormatError, parse_meta_content
+from util.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import SandboxError
 from interface.llm_profile_store import ILLMProfileStore
 from interface.sandbox import ISandbox

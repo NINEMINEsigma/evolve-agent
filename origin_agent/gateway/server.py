@@ -2072,7 +2072,7 @@ async def serve_local_font(font_path: str):
     - 拒绝 .. 路径遍历
     - 响应头：Cache-Control: no-cache + Access-Control-Allow-Origin: *
     """
-    from system.local_fonts import resolve_local_font, LocalFontAccessError
+    from util.local_fonts import resolve_local_font, LocalFontAccessError
 
     try:
         font_file = resolve_local_font(font_path)

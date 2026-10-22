@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import defusedxml.minidom
-from origin_agent.system.pathutils import get_templates_dir
+from origin_agent.util.pathutils import get_templates_dir
 
 TEMPLATE_DIR = get_templates_dir()
 NS = {

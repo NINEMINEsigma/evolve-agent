@@ -96,7 +96,7 @@ from typing import IO, Any, Callable, Coroutine, TYPE_CHECKING
 from urllib.parse import urlparse
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult
-from system.convert import as_bool
+from util.convert import as_bool
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner,
     close_resources, requires_lifecycle_propagation,

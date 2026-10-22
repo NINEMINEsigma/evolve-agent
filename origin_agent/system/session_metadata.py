@@ -35,7 +35,7 @@ from interface.runtime_system import IRuntimeSystem
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
 from system.session_store import SessionStore
-from system.templates import read_template
+from util.templates import read_template
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient

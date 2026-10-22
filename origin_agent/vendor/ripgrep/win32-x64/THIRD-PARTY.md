@@ -20,7 +20,7 @@
 
 ## Usage in Evolve Agent
 
-`origin_agent/system/search_engine.py` resolves this binary at runtime through `system.pathutils.get_agent_dir()`, so the same relative path works after `run.py` copies `origin_agent/` into the fast仓库 or fallback仓库 runtime copy.
+`origin_agent/system/search_engine.py` resolves this binary at runtime through `util.pathutils.get_agent_dir()`, so the same relative path works after `run.py` copies `origin_agent/` into the fast仓库 or fallback仓库 runtime copy.
 
 If this binary is missing, blocked, corrupted, or fails its SHA-256 check, `SearchFiles` and `Grep` automatically fall back to the Python search engine and return `engine="python"` with a `warning` field.
 
