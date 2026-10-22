@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from entity.puretype.resource_cleanup import CleanupWarning
-from system.lifecycle import LifecycleFailure
+from system.lifecycle_errors import LifecycleFailure
 
 
 class ResourceCleanupTimeout(TimeoutError):

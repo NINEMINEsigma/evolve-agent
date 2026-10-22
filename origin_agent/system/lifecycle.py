@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ContextManager, TypeVar
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS, TaskOwnership
 from entity.puretype.lifecycle import ManagedTaskRecord
 from system.cleanup_errors import split_cleanup_timeouts
+from system.lifecycle_errors import LifecycleFailure
 
 if TYPE_CHECKING:
     from system.resource_cleanup import ResourceCleanupHandle
@@ -21,10 +22,6 @@ TaskResultT = TypeVar("TaskResultT")
 
 class ApplicationStoppingError(RuntimeError):
     """应用已停止接收新的业务工作。"""
-
-
-class LifecycleFailure(RuntimeError):
-    """生命周期约定被破坏或资源未在期限内结束。"""
 
 
 def contains_lifecycle_failure(error: BaseException) -> bool:
