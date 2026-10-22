@@ -103,6 +103,7 @@ class _ShellSession:
         self.base_offset = 0
         self.total_chars = 0
         self.last_output_monotonic = time.monotonic()
+        self.version = 0
         self.process_identity: OwnedProcessIdentity | None = None
         self.cleanup_handle: ResourceCleanupHandle | None = None
 

@@ -269,7 +269,9 @@ class SubprocessRunner(ISubprocessRunner):
         proc: subprocess.Popen | asyncio.subprocess.Process
         ) -> None:
         with self._procs_lock:
-            processes = self._active_procs[session_id]
+            processes = self._active_procs.get(session_id)
+            if processes is None or proc not in processes:
+                return
             processes.remove(proc)
             if not processes:
                 del self._active_procs[session_id]
