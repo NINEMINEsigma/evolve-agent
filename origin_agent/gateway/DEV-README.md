@@ -161,7 +161,7 @@ WS /ws/chat?resume=<sid>
 - RUNNING 之前与 STOPPING 之后，所有新业务 HTTP 入口经 `_admit_business_http()` 返回 503；`/health` 只报告状态、不创建 Loop，非服务状态返回 503。
 - WS 握手在 STARTING/RUNNING 期间允许（`admit_connection`），STOPPING 后以标准 1001 拒绝；已建立连接上的每条输入也经 `require_open_connection()` 检查，关闭时连接以 1001 结束。
 - 动态端点在登记队列消息成功后才回报 202；关闭中的拒绝返回 503。
-- 关闭顺序：先 `stop_accepting()` 封闭新输入（既有输出连接保留到 History 刷新完成），`cancel_background_work()` 取消自动标题/准备/恢复等路由后台任务，最后 `stop_server()` 结束 SSE/WS、置 `server.should_exit` 并等待 serve 任务结束。Gateway 是最后唤醒、首先资源注销的 System。
+- 关闭顺序：先 `stop_accepting()` 封闭新输入（既有输出连接保留到 History 刷新完成），`cancel_background_work()` 取消自动标题/准备/恢复等路由后台任务，最后 `stop_server()` 请求 uvicorn 退出。serve 或 socket 观察超时保留真实句柄并记录资源清理待完成，不提前丢弃任务，也不把该局部超时升级为全应用失败。Gateway 是最后唤醒、首先资源注销的 System。
 - uvicorn 由 GatewaySystem 子类 `_GatewayUvicornServer` 管理：禁用自身信号安装（App 统一处理信号），startup 成功后置 ready 事件；启动等待 ready、serve 提前结束与 30 秒超时三者竞速。
 
 ## HTTP 请求类型边界

@@ -33,7 +33,7 @@ import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
 import { publishChatAgentspaceEvent } from "../services/chatAgentspaceEventBus";
 import { clientDiagnosticFrame, routeChatTransportMessage } from "./chatTransportRouting";
-import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
+import { decodeShellInfo } from "../services/shellResourcesApi";
 import { useMainSessionActivityPolling } from "../features/chat/useMainSessionActivityPolling";
 import { useSubagentManager } from "./useSubagentManager";
 import { useUploadManager, type UploadManager } from "./useUploadManager";
@@ -60,14 +60,7 @@ function decodeSessionShells(payload: unknown, sessionId: string): ShellInfo[] {
   const value = objectValue(payload);
   const raw = value.shells;
   if (!Array.isArray(raw)) throw new Error("Shells payload is not an array");
-  return raw.map((entry) => {
-    const item = objectValue(entry);
-    if (item.session_id !== sessionId) throw new Error("Shell belongs to a different session");
-    if (typeof item.shell_id !== "string" || typeof item.running !== "boolean") {
-      throw new Error("Invalid shell entry");
-    }
-    return entry as ShellInfo;
-  });
+  return raw.map((entry) => decodeShellInfo(entry, sessionId));
 }
 
 /** Cron 列表：列表必须存在且为数组；should_schedule 为 boolean、next_run 为 string|null。 */

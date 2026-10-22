@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
+from typing import TYPE_CHECKING
 
 from entity.constant import ApplicationState, ShutdownReason
 from framework import AsyncSystem
 from system.context import RuntimeContext
+
+if TYPE_CHECKING:
+    from system.resource_cleanup import ResourceCleanupRegistry
 
 
 class IRuntimeSystem(AsyncSystem, ABC):
@@ -15,6 +19,12 @@ class IRuntimeSystem(AsyncSystem, ABC):
     Every other System reads lifecycle state through this slot; the concrete
     implementation owns the single process-level state machine and the failure set.
     """
+
+    @property
+    @abstractmethod
+    def cleanup(self) -> ResourceCleanupRegistry:
+        """Return the process-level external resource cleanup registry."""
+        ...
 
     @property
     @abstractmethod

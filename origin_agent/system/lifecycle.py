@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from typing import Any, ContextManager, TypeVar
+from typing import TYPE_CHECKING, Any, ContextManager, TypeVar
 
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS, TaskOwnership
 from entity.puretype.lifecycle import ManagedTaskRecord
+from system.cleanup_errors import split_cleanup_timeouts
+
+if TYPE_CHECKING:
+    from system.resource_cleanup import ResourceCleanupHandle
+
+logger = logging.getLogger(__name__)
 
 TaskResultT = TypeVar("TaskResultT")
 
@@ -52,11 +59,15 @@ class TaskOwner:
     def __init__(
         self,
         owner_name: str,
-        on_failure: Callable[[BaseException], None]
-        ) -> None:
+        on_failure: Callable[[BaseException], None],
+        *,
+        allow_cleanup_handoff: bool = False,
+    ) -> None:
         self._owner_name = owner_name
         self._on_failure = on_failure
+        self._allow_cleanup_handoff = allow_cleanup_handoff
         self._records: dict[asyncio.Task[Any], ManagedTaskRecord] = {}
+        self._cleanup_handles: dict[asyncio.Task[Any], ResourceCleanupHandle] = {}
         self._failures: list[BaseException] = []
         self._closing = False
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -89,11 +100,49 @@ class TaskOwner:
         self._settle_all()
         return not self._records
 
+    @property
+    def business_idle(self) -> bool:
+        """Ignore only records explicitly handed to resource cleanup."""
+        self._check_loop()
+        self._settle_all()
+        return all(record.cleanup_handle_id is not None for record in self._records.values())
+
+    def handoff_cleanup(self, task: asyncio.Task[Any], handle: ResourceCleanupHandle) -> None:
+        """Transfer one expected connection task to the cleanup registry.
+
+        The task itself must call this on its owner loop after business work
+        has finished. Later owner cancellation observes the handle and does not
+        cancel the task again.
+        """
+        from system.resource_cleanup import ResourceCleanupHandle
+
+        self._check_loop()
+        if not self._allow_cleanup_handoff:
+            raise LifecycleFailure(
+                f"Task owner {self._owner_name} does not allow cleanup handoff"
+            )
+        if asyncio.current_task() is not task:
+            raise LifecycleFailure("Cleanup handoff must be called by the owned task")
+        record = self._records.get(task)
+        if record is None or handle.task is not task or not isinstance(handle, ResourceCleanupHandle):
+            raise LifecycleFailure("Cleanup handoff requires the registered task and its handle")
+        if record.waiter is not None and not record.request_released:
+            raise LifecycleFailure("Cleanup handoff requires the request result to be released")
+        if record.cleanup_handle_id is not None or task in self._cleanup_handles:
+            raise LifecycleFailure("Cleanup handoff already exists for this task")
+        record.cleanup_handle_id = f"{handle.producer.producer_id}:{handle.resource_id}"
+        record.cleanup_handoff_cancel_count = task.cancelling()
+        self._cleanup_handles[task] = handle
+        self._changed.set()
+
     def _report(self, error: BaseException) -> None:
-        if any(existing is error for existing in self._failures):
+        _timeouts, remaining = split_cleanup_timeouts(error)
+        if remaining is None:
             return
-        self._failures.append(error)
-        self._on_failure(error)
+        if any(existing is remaining for existing in self._failures):
+            return
+        self._failures.append(remaining)
+        self._on_failure(remaining)
 
     def _register(self, record: ManagedTaskRecord) -> None:
         self._records[record.task] = record
@@ -172,14 +221,27 @@ class TaskOwner:
         if not task.done():
             return
         if task.cancelled():
-            if not record.expected_cancel and record.terminal_error is None:
+            if record.cleanup_handle_id is not None:
+                if task.cancelling() > record.cleanup_handoff_cancel_count:
+                    record.terminal_error = LifecycleFailure(
+                        f"Task {task.get_name()} received a new cancellation after cleanup handoff"
+                    )
+            elif not record.expected_cancel and record.terminal_error is None:
                 record.terminal_error = LifecycleFailure(
                     f"Task {task.get_name()} owned by {self._owner_name} cancelled without an owner request"
                 )
         elif record.terminal_error is None:
             error = task.exception()
             if error is not None:
-                if _only_cancellations(error):
+                _timeouts, remaining = split_cleanup_timeouts(error)
+                if remaining is None:
+                    error = None
+                else:
+                    error = remaining
+            if error is not None:
+                if record.cleanup_handle_id is not None:
+                    error = None
+                elif _only_cancellations(error):
                     if not record.expected_cancel:
                         record.terminal_error = LifecycleFailure(
                             f"Task {task.get_name()} ended with an unexpected cancellation group"
@@ -201,13 +263,14 @@ class TaskOwner:
             or abandoned
         )
         if (
-            record.expected_failure
+            error is not None
+            and record.expected_failure
             and record.ownership == TaskOwnership.BACKGROUND
             and not contains_lifecycle_failure(error)
         ):
             # 预期失败（如连接级驱逐）不上报所属 System，仅记录终局异常。
             should_report = False
-        if should_report and not record.terminal_reported:
+        if should_report and error is not None and not record.terminal_reported:
             record.terminal_reported = True
             self._report(error)
         self._retire(record)
@@ -246,6 +309,8 @@ class TaskOwner:
         record = self._records.get(task)
         if record is None:
             raise LifecycleFailure("Cannot cancel a task not registered with this owner")
+        if record.cleanup_handle_id is not None:
+            return False
         if task.done():
             self._settle(record)
             return False
@@ -437,6 +502,12 @@ async def close_resources(
         try:
             await action()
         except BaseException as exc:
-            failures.append(exc)
+            _timeouts, remaining = split_cleanup_timeouts(exc)
+            if _timeouts:
+                logger.warning(
+                    "Resource cleanup timeout observed during automatic resource close"
+                )
+            if remaining is not None:
+                failures.append(remaining)
     if failures:
         raise BaseExceptionGroup("Resource cleanup failed", failures)

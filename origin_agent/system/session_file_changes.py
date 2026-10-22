@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import threading
 
 from easysave import load, save
@@ -63,10 +63,12 @@ class SessionFileChangeStore:
         ):
             raise ValueError("Invalid file change namespace")
         relative = relative.replace("\\", "/").strip("/")
-        if ".." in relative.split("/") or ":" in relative or "\x00" in relative:
+        if relative in ("", "."):
+            return f"{namespace}:"
+        segments = [segment for segment in relative.split("/") if segment not in ("", ".")]
+        if ".." in segments or any(":" in segment or "\x00" in segment for segment in segments):
             raise ValueError("Invalid file change relative path")
-        relative = PurePosixPath(relative).as_posix()
-        return f"{namespace}:{'' if relative == '.' else relative}"
+        return f"{namespace}:{'/'.join(segments)}"
 
     def _comparison_key(self, logical_path: str) -> str:
         normalized = self._normalize_path(logical_path)

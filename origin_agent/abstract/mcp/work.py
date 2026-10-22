@@ -11,6 +11,7 @@ from typing import Any, TypeVar
 
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype.lifecycle import SyncToolCallRecord
+from system.cleanup_errors import split_cleanup_timeouts
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, contains_lifecycle_failure,
 )
@@ -54,15 +55,21 @@ class MCPThreadWork:
         return self._loop
 
     def _report(self, error: BaseException) -> None:
-        if not any(item is error for item in self._failures):
-            self._failures.append(error)
-            self._on_failure(error)
+        _timeouts, remaining = split_cleanup_timeouts(error)
+        if remaining is None:
+            return
+        if not any(item is remaining for item in self._failures):
+            self._failures.append(remaining)
+            self._on_failure(remaining)
 
     def _settle(self, record: SyncToolCallRecord) -> None:
         self._check_loop()
         future = record.future
         if future.done():
             error = future.exception()
+            if error is not None:
+                _timeouts, remaining = split_cleanup_timeouts(error)
+                error = remaining
             if error is not None and not record.failure_reported:
                 if record.cancelled_while_running and not _only_stopping(error):
                     record.failure_reported = True

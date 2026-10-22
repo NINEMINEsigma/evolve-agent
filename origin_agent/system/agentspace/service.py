@@ -141,7 +141,9 @@ class AgentspaceService(IAgentspaceService):
                 if exc is not failure:
                     failures.append(exc)
             try:
-                await asyncio.to_thread(self._watcher.stop)
+                await self.watcher.stop()
+            except TimeoutError:
+                logger.warning("Agentspace watcher cleanup is still pending")
             except BaseException as exc:
                 failures.append(exc)
             try:
@@ -766,7 +768,10 @@ class AgentspaceService(IAgentspaceService):
         failures: list[BaseException] = []
         # watcher 停止：取消 debounce timers、join 并确认退出，超时上抛。
         try:
-            await asyncio.to_thread(self.watcher.stop)
+            self.watcher.request_stop()
+            await self.watcher.stop()
+        except TimeoutError:
+            logger.warning("Agentspace watcher cleanup is still pending")
         except BaseException as exc:
             failures.append(exc)
         # EventHub 最终释放。

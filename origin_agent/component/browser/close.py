@@ -27,22 +27,21 @@ async def _handle_browser_close(args: dict[str, Any]) -> dict:
     endpoint: str = bs.current_endpoint()
 
     # 1. 断开 CDP 连接（不关闭有头浏览器），释放 playwright
-    await bs.teardown()
-
-    # 2. 终止无头浏览器进程（若有）：无头窗口不可见，用户无法手动关闭
-    headless_killed: int = await bs.cleanup_headless_browser()
-
+    connection = await bs.teardown()
+    headless = await bs.cleanup_headless_browser()
+    closed = connection.complete and headless.cleanup.complete
     logger.info(
-        "BrowserClose: CDP disconnected (endpoint=%s), headless processes killed=%d",
+        "BrowserClose: CDP disconnected (endpoint=%s), headless processes killed=%d pending=%s",
         endpoint,
-        headless_killed,
+        headless.killed,
+        not closed,
     )
-
     return tool_result(
-        closed=True,
-        cdp_disconnected=True,
-        headless_killed=headless_killed,
+        closed=closed,
+        cdp_disconnected=connection.complete,
+        headless_killed=headless.killed,
         endpoint=endpoint,
+        cleanup=headless.cleanup.model_dump(),
     )
 
 

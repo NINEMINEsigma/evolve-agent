@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from entity.constant import CDP_ENDPOINT_DEFAULT
+from entity.puretype.browser import HeadlessCleanupResult
+from entity.puretype.resource_cleanup import CleanupReport
 from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
@@ -40,7 +42,7 @@ class IBrowserSystem(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def teardown(self) -> None:
+    async def teardown(self) -> CleanupReport:
         """Release the current CDP and Playwright connections."""
         ...
 
@@ -50,8 +52,8 @@ class IBrowserSystem(AsyncSystem, ABC):
         ...
 
     @abstractmethod
-    async def cleanup_headless_browser(self) -> int:
-        """Terminate and reap all registered headless processes."""
+    async def cleanup_headless_browser(self) -> HeadlessCleanupResult:
+        """Terminate and reap registered application-owned headless processes."""
         ...
 
     @abstractmethod

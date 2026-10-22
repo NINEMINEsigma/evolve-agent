@@ -492,6 +492,20 @@ export interface DynamicEndpoint {
   created_at: number;
 }
 
+export interface CleanupWarning {
+  owner: string;
+  resource_id: string;
+  phase: string;
+  timeout_seconds: number;
+  message: string;
+}
+
+export interface CleanupReport {
+  complete: boolean;
+  pending_resources: string[];
+  warnings: CleanupWarning[];
+}
+
 export interface ShellInfo {
   shell_id: string;
   pid: number | null;
@@ -504,6 +518,13 @@ export interface ShellInfo {
   running: boolean;
   termination: "natural" | "forced" | "error" | null;
   exit_code: number | null;
+  cleanup?: CleanupReport | null;
+}
+
+export interface ShellStopResult {
+  stopped: boolean;
+  shell: ShellInfo;
+  cleanup: CleanupReport;
 }
 
 export interface CronTask {

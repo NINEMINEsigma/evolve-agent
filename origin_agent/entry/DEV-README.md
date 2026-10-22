@@ -376,3 +376,5 @@ ParentAgentLoop将最后用户消息按对象身份重连到请求副本，保�
 - `FrontendSink(IFrontendSink)` 与 `ParentAgentSink(IAgentSink)` 分别实现各自契约；`entry/agent_sink.py` 不再定义 `AgentSink`。
 
 因为 `IFrontendSink` 是 `IAgentSink` 的子类型，从 System 槽位取出的 sink 可以直接传给任何声明 `IAgentSink` 的 Loop、StreamConsumer 或审批执行器，不需要 `cast`。新增事件方法只改 `IAgentSink` 一处，两个实现和所有调用方同时生效。
+
+WebSocket 关闭观察超时保留原连接引用并记录资源清理待完成。`StreamConsumer` 接收 Runtime 持有的清理登记器，用于跟踪既有延迟关闭任务；Provider 自身的非超时关闭错误仍按原日志策略处理。

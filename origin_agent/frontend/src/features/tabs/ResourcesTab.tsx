@@ -4,6 +4,8 @@ import { STORAGE_KEYS } from "../../constants/storage";
 import { chatRuntimeController } from "../chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../chat/chatRuntimeStore";
 import type { TabRenderContext } from "./registry";
+import labels from "./resourceCleanupLabels.json";
+import { stopSessionShell } from "../../services/shellResourcesApi";
 
 /**
  * Resources tab: session resources, Shell sessions, Cron tasks and dynamic
@@ -102,16 +104,26 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
                     <div className="task-list-meta">目录: {shell.cwd}</div>
                     <div className="task-list-meta">启动: {new Date(shell.started_at * 1000).toLocaleString()}</div>
                     <div className="task-list-meta">最近活动: {new Date(shell.last_activity_at * 1000).toLocaleString()}</div>
+                    {shell.cleanup && !shell.cleanup.complete ? (
+                      <div className="task-list-meta">{labels.cleanupPending}</div>
+                    ) : null}
                     <div className="task-list-actions">
                       <button
                         className="task-list-action stop"
-                        onClick={() => fetch(`/api/sessions/${sessionId}/shells/${shell.shell_id}/stop`, { method: "POST" })
-                          .then((response) => {
-                            if (!response.ok) throw new Error(`Stop Shell failed: ${response.status}`);
-                            ws.setShells((previous) => previous.filter((item) => item.shell_id !== shell.shell_id));
-                          })
-                          .catch(() => {})}
-                      >停止</button>
+                        onClick={() => {
+                          void stopSessionShell(sessionId, shell.shell_id).then((result) => {
+                            if (result?.cleanup.complete) {
+                              ws.setShells((previous) => previous.filter((item) => item.shell_id !== shell.shell_id));
+                              return;
+                            }
+                            if (result) {
+                              ws.setShells((previous) => previous.map((item) => (
+                                item.shell_id === shell.shell_id ? result.shell : item
+                              )));
+                            }
+                          });
+                        }}
+                      >{shell.cleanup && !shell.cleanup.complete ? labels.refreshStatus : "停止"}</button>
                     </div>
                   </div>
                 ))

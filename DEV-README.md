@@ -406,6 +406,10 @@ BaseAgentLoop开关更新采用候选History先保存、成功后只改原媒体
 
 本功能仅完成正式源码与只读审阅，未运行校验、构建或应用验收。
 
+## 资源清理待完成（2026-10-22）
+
+外部资源清理超时不再单独请求全应用失败。`RuntimeSystem` 持有唯一 `ResourceCleanupRegistry`，资源所有者保留旧实例并继续收尾；明确的 `ResourceCleanupTimeout` 只记录诊断。持久化失败、内部逻辑错误、必要业务交接失败和 60 秒最终退出保护保持原策略。显式停止返回真实未完成状态，不宣称资源已经释放。
+
 ## System 接口槽位与装配约定（2026-10-20）
 
 Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的 `I...` 接口作为 framework 注册槽位。`Application._build_system_manifest()` 返回有序的「接口类型、实现实例」配对，启动时直接调用 `register(instance, system_type=interface_type)`；依赖声明、`get_system()` 查询、关闭编排和逆序注销均使用接口类型。Application 在注册前检查实现实例确实继承对应接口，接口重复、依赖缺失、拓扑错误和实现不匹配直接失败。

@@ -209,6 +209,12 @@ class Application(AsyncArchitecture):
     async def _unregister_systems(self) -> None:
         """按装配逆序逐一注销；失败节点仍被移除，错误合并保留。"""
         failures: list[BaseException] = []
+        runtime = self._runtime_ref
+        if runtime is not None:
+            try:
+                await runtime.cleanup.drain()
+            except BaseException as exc:
+                failures.append(exc)
         for system_type in reversed(self._registered_types):
             try:
                 removed = await self.unregister(system_type)

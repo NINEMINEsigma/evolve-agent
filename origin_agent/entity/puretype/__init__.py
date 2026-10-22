@@ -37,7 +37,9 @@ The original puretype.py module is split by responsibility:
                   HistoryRowLink, ClientDiagnosticKind, ClientDiagnosticPhase, ClientDiagnostic
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
     runtime     : SystemInfo, ClientInfo, ProcessLineStreamResult
-    shell       : ShellInfo, ShellOutputSlice
+    shell       : ShellInfo, ShellStopResult, ShellOutputSlice
+    resource_cleanup : CleanupWarning, CleanupReport
+    browser     : HeadlessCleanupResult
     sandbox     : DynamicSandboxSpace, DynamicSandboxSpaceData
     extools     : CronTaskInfo, DynamicEndpointInfo, DynamicEndpointRequest
     agentspace  : AgentspaceEntry/Event/FileSnapshot/Lock/Trash 与 REST 请求模型
@@ -237,9 +239,12 @@ from .runtime import (
     ClientInfo,
     ProcessLineStreamResult,
 )
+from .resource_cleanup import CleanupReport, CleanupWarning
+from .browser import HeadlessCleanupResult
 from .shell import (
     ShellInfo,
     ShellOutputSlice,
+    ShellStopResult,
 )
 from .sandbox import (
     DynamicSandboxSpace,
@@ -439,6 +444,10 @@ __all__ = [
     # shell
     "ShellInfo",
     "ShellOutputSlice",
+    "ShellStopResult",
+    "CleanupWarning",
+    "CleanupReport",
+    "HeadlessCleanupResult",
     # sandbox
     "DynamicSandboxSpace",
     "DynamicSandboxSpaceData",

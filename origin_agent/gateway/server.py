@@ -1711,12 +1711,12 @@ async def stop_shell_endpoint(session_id: str, shell_id: str):
 
     logger.info("Stop Shell from frontend | session=%s shell=%s", session_id, shell_id)
     try:
-        info = await Application.current().get_system(IShellManager).stop_shell_for_user(
+        result = await Application.current().get_system(IShellManager).stop_shell_for_user(
             session_id, shell_id,
         )
     except ShellAccessError as exc:
         raise HTTPException(status_code=404, detail={"code": "shell_not_found", "message": str(exc)}) from exc
-    return {"stopped": True, "shell": info}
+    return result
 
 
 @router.get("/api/sessions/{session_id}/cron-tasks")

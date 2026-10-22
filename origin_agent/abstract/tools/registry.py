@@ -27,6 +27,7 @@ from .tool import (
     BaseTool, BaseToolSet, ToolExecution,
     ToolHandlerResult, ToolPostprocessEffect,
 )
+from system.cleanup_errors import split_cleanup_timeouts
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner,
     close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
@@ -577,6 +578,9 @@ class ToolRegistry(IToolRegistry):
                 else:
                     error = future.exception()
                 if error is not None and not record.failure_reported:
+                    _timeouts, remaining = split_cleanup_timeouts(error)
+                    error = remaining
+                if error is not None and not record.failure_reported:
                     if contains_lifecycle_failure(error):
                         failure = error
                     elif record.cancelled_while_running and not isinstance(
@@ -947,10 +951,12 @@ class ToolRegistry(IToolRegistry):
         task = self._executor_shutdown_task
         done, _ = await asyncio.wait({task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
         if not done:
-            failure = LifecycleFailure("Tool executor threads did not finish shutdown")
-            self.runtime.record_failure(failure)
-            raise failure
-        task.result()
+            logger.warning("Tool executor cleanup is still pending")
+            return
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                raise error
         self._executor = None
 
     def _observe_executor_shutdown(self, task: asyncio.Task[None]) -> None:

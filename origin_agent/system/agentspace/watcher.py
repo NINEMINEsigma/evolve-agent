@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import threading
@@ -43,6 +44,19 @@ class AgentspaceWatcher:
         self._live_timers: set[threading.Timer] = set()
         self._timer_lock = threading.Lock()
         self._stopping = False
+        self._publish_lock = threading.RLock()
+
+    def request_stop(self) -> None:
+        """Close publication before native observer and timer threads exit."""
+        with self._publish_lock:
+            self._stopping = True
+
+    def is_stopped(self) -> bool:
+        observer = self._observer
+        observer_stopped = observer is None or not observer.is_alive()
+        with self._timer_lock:
+            timers_stopped = not any(timer.is_alive() for timer in self._live_timers)
+        return self._stopping and observer_stopped and timers_stopped
 
     def start(self, loop: Any) -> None:
         del loop  # EventHub 已绑定；参数保留为明确生命周期合同。
@@ -73,36 +87,23 @@ class AgentspaceWatcher:
         observer.schedule(Handler(), str(self._root), recursive=True)
         observer.start()
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
+        self.request_stop()
         with self._timer_lock:
-            self._stopping = True
             timers = tuple(self._live_timers)
             self._timers.clear()
         for timer in timers:
             timer.cancel()
-        failures: list[BaseException] = []
         observer = self._observer
         if observer is not None:
-            try:
-                observer.stop()
-                if observer.ident is not None:
-                    observer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
-                if observer.is_alive():
-                    raise LifecycleFailure("Agentspace observer did not stop")
-                self._observer = None
-            except BaseException as exc:
-                failures.append(exc)
+            observer.stop()
+        await asyncio.to_thread(self._join_native, observer, timers)
+
+    def _join_native(self, observer: Any, timers: tuple[threading.Timer, ...]) -> None:
+        if observer is not None and observer.ident is not None:
+            observer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
         for timer in timers:
-            try:
-                timer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
-                if timer.is_alive():
-                    raise LifecycleFailure("Agentspace debounce timer did not stop")
-                with self._timer_lock:
-                    self._live_timers.discard(timer)
-            except BaseException as exc:
-                failures.append(exc)
-        if failures:
-            raise BaseExceptionGroup("Agentspace watcher cleanup failed", failures)
+            timer.join(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
     def _relative(self, raw_path: str) -> str | None:
         try:

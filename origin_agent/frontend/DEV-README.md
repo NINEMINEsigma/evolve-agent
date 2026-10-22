@@ -440,6 +440,10 @@ Controller持有当前重载Promise与最新待同步计数；旧REST即使忽�
 | 元数据 | `[data-chat-scope="meta"]` |
 | 等待状态 | `[data-chat-scope="waiting"]` |
 
+## 资源清理状态展示
+
+资源 Tab 的 Shell 停止按钮使用 `services/shellResourcesApi.ts` 解码真实停止结果。cleanup 未完成时保留该行并显示“资源清理待完成”，不把 HTTP 200 当成释放成功。文案来自 `resourceCleanupLabels.json`，不新增弹窗或自动轮询。
+
 ## 构建与开发注意事项
 
 - 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`<pkg_mgr> install && <pkg_mgr> run build`（包管理器优先 pnpm，回退 npm），运行在 `workspace/fast_agent_space/frontend/` 副本中。

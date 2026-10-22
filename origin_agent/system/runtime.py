@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
+import logging
 import os
 import threading
 from pathlib import Path
@@ -21,8 +22,12 @@ from entity.constant import (
     SOUL_META_CHARACTER_NAME_KEY,
     ShutdownReason,
 )
+from system.cleanup_errors import split_cleanup_timeouts
 from system.context import RuntimeContext
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.resource_cleanup import ResourceCleanupRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _read_main_agent_character_name_from_soul_meta(meta_path:Path) -> str:
@@ -70,6 +75,7 @@ class RuntimeSystem(IRuntimeSystem):
         self._shutdown_event: asyncio.Event | None = None
         self._shutdown_reason: ShutdownReason | None = None
         self._failures: list[BaseException] = []
+        self._cleanup = ResourceCleanupRegistry(self.record_failure)
         self._input_sequence = 0
         self._shutdown_deadline: threading.Timer | None = None
         # 主Agent角色名：启动时从 SOUL.md.meta 读取一次；运行期由 RefreshIdentity 工具刷新。
@@ -90,6 +96,10 @@ class RuntimeSystem(IRuntimeSystem):
                 raise LifecycleFailure(f"Invalid runtime initialization state: {self._state}")
         # 启动时读取一次主Agent角色名（SOUL.md.meta），此后由 RefreshIdentity 工具按需刷新。
         self.refresh_main_agent_character_name()
+
+    @property
+    def cleanup(self) -> ResourceCleanupRegistry:
+        return self._cleanup
 
     @property
     def context(self) -> RuntimeContext:
@@ -189,9 +199,18 @@ class RuntimeSystem(IRuntimeSystem):
                 loop.call_soon_threadsafe(event.set)
 
     def record_failure(self, error: BaseException) -> None:
+        """Store only failures that are not explicit resource-cleanup timeouts."""
+        _timeouts, remaining = split_cleanup_timeouts(error)
+        if _timeouts:
+            logger.warning(
+                "Ignored %s explicit resource cleanup timeout(s) in failure reporting",
+                len(_timeouts),
+            )
+        if remaining is None:
+            return
         with self._lock:
-            if not any(existing is error for existing in self._failures):
-                self._failures.append(error)
+            if not any(existing is remaining for existing in self._failures):
+                self._failures.append(remaining)
             self.request_shutdown(ShutdownReason.FAILURE)
 
     def arm_shutdown_deadline(self) -> None:

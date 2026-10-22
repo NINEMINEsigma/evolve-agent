@@ -166,10 +166,11 @@ async def _handle_stop_shell(
             shell_id,
         )
         return tool_result(
-            stopped=True,
-            termination=info.termination,
-            exit_code=info.exit_code,
-            shell=info.model_dump(),
+            stopped=info.stopped,
+            termination=info.shell.termination,
+            exit_code=info.shell.exit_code,
+            shell=info.shell.model_dump(),
+            cleanup=info.cleanup.model_dump(),
         )
     except (ShellError, ShellAccessError) as exc:
         return tool_error(str(exc), shell_id=shell_id)

@@ -43,3 +43,6 @@ FFMPEG_DEFAULT_TIMEOUT: int = 300
 
 # 指数退避基数（秒）
 BACKOFF_BASE: float = 1.0
+
+# 外部资源清理状态探测间隔（秒）；只用于非阻塞观察，不构成新的清理总预算
+RESOURCE_CLEANUP_POLL_SECONDS: float = 0.1

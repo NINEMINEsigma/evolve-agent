@@ -47,9 +47,13 @@ RuntimeContext继续是不可变BaseModel；system.context不再提供模块级�
 
 System构造不取得外部资源；virtual_awake绑定主事件循环并进入STARTING。整个应用就绪后才允许mark_running，STOPPING不能被覆盖回RUNNING。
 
-admission同步区间用于同时校验运行状态和登记完整输入，不允许在其中await、访问磁盘或调用模型。request_shutdown在锁内封闭接收，通过call_soon_threadsafe设置主loop事件；record_failure保留原异常并请求失败关闭。
+admission同步区间用于同时校验运行状态和登记完整输入，不允许在其中await、访问磁盘或调用模型。request_shutdown在锁内封闭接收，通过call_soon_threadsafe设置主loop事件；record_failure先分离明确的资源清理超时，只保留其余失败并请求失败关闭。
 
-关闭硬截止由该实例持有的daemon Timer执行，超时只执行失败退出，不获取业务锁或日志锁。它不能在framework注销RuntimeSystem时提前取消；最终取消位置在后续App/asyncio.run外层接线。资源释放失败不能被报告为进化成功。
+关闭硬截止由该实例持有的daemon Timer执行，超时只执行失败退出，不获取业务锁或日志锁。它不能在framework注销RuntimeSystem时提前取消；最终取消位置在后续App/asyncio.run外层接线。资源清理待完成不能被报告为进化成功，也不能单独把正常退出改成失败。
+
+## 资源清理登记
+
+`system/resource_cleanup.py` 是 RuntimeSystem 持有的进程级叶对象。资源所有者在创建前取得 reservation，在释放时登记唯一真实任务。观察超时返回 `CleanupReport(complete=false)`，不取消真实清理，也不按异常文本猜测可恢复性。无法证明原始进程身份时禁止查杀，保留引用并保持未完成。
 
 ## SubprocessRunner
 
@@ -69,9 +73,9 @@ Sandbox为无参AsyncSystem，virtual_awake取得唯一RuntimeContext和Subproce
 
 业务操作从接收开始到锁等待、原生调用及结果返回均有任务归属；原生线程调用使用独立受跟踪的任务，取消外层协程不等于原生工作完成。创建中的PTY先登记状态，取消或关闭发生在创建期间也会回收最终结果。
 
-关闭先停止接收并中断活动操作，等待原生任务结束，再停止全部Shell。每个Shell只有一个受跟踪的关闭任务；成功完成后才从会话表移除。关闭错误保留并上抛，不把清空字典当作成功。
+关闭先停止接收并中断活动操作，等待仍会写业务状态的原生任务结束，再把纯资源释放交给清理登记器。每个 Shell 只有一个实际关闭任务；全部释放确认后才从会话表移除。显式停止返回 `ShellStopResult`，`stopped` 只能等于 `cleanup.complete`。
 
-先终止进程树、等待reader结束，再在原生操作锁内关闭PTY并确认线程已退出。reader或原生锁超时必须报告失败，禁止绕开锁强行并发close；native_closed只在实际close成功后设置。原有会话/角色所有权、旋转迁移和WebSocket断线不停止Shell的约定不变。
+先请求一次已授权的进程树终止，再在原生操作锁内关闭 PTY，然后等待 reader 退出。reader 或锁观察超时保持同一任务继续，不并发第二次 close，也不把清理超时升级为全应用失败。原有会话/角色所有权、旋转迁移和 WebSocket 断线不停止 Shell 的约定不变。
 
 已知待处理问题：2026-10-13会话终结及2026-10-16显式StopShell均观察到reader未在5秒内退出，沿既有生命周期失败策略导致应用关闭；本次工具对象化未修改该停止实现。`_stop_state_blocking()`的reader等待处已登记TODO，调查pywinpty/ConPTY读取唤醒及PTY释放顺序，根因尚未确认。当前仅记录复现，不吞清理失败、不取消真实线程退出确认、不扩大等待期限。
 

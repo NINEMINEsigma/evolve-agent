@@ -30,6 +30,8 @@ class ManagedTaskRecord(BaseModel):
     terminal_reported: bool = False
     expected_failure: bool = False
     timeout_error: BaseException | None = None
+    cleanup_handle_id: str | None = None
+    cleanup_handoff_cancel_count: int = 0
 
 
 class SyncToolCallRecord(BaseModel):

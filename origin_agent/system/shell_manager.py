@@ -7,12 +7,14 @@ import hashlib
 import logging
 import os
 import shutil
+import subprocess  # nosec
 import sys
 import threading
 import time
 import uuid
 from functools import wraps
-from typing import Any, Awaitable, Callable, Concatenate, ParamSpec, TypeVar
+from types import CoroutineType
+from typing import Any, Callable, Concatenate, ParamSpec, TypeVar
 
 from entity.constant import (
     ApplicationState,
@@ -31,14 +33,17 @@ from entity.constant import (
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.puretype import ShellInfo, ShellOutputSlice
+from entity.puretype.resource_cleanup import CleanupReport
+from entity.puretype.shell import ShellStopResult
 from framework import AsyncSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.process_termination import OwnedProcessIdentity
+from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.shell_manager import IShellManager
 from system.sandbox import SandboxError
 from system.shell_text import ShellTextNormalizer
-from system.subprocess_utils import _kill_proc_tree
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +103,8 @@ class _ShellSession:
         self.base_offset = 0
         self.total_chars = 0
         self.last_output_monotonic = time.monotonic()
-        self.version = 0
+        self.process_identity: OwnedProcessIdentity | None = None
+        self.cleanup_handle: ResourceCleanupHandle | None = None
 
     def signal_output(self) -> None:
         try:
@@ -192,6 +198,7 @@ class _ShellSession:
                 running=self.running,
                 exit_code=self.exit_code,
                 termination=self.termination,
+                cleanup=self.cleanup_handle.snapshot() if self.cleanup_handle is not None else None,
             )
 
     def output_slice(
@@ -230,8 +237,14 @@ ShellResult = TypeVar("ShellResult")
 
 
 def _tracked_operation(
-    method: Callable[Concatenate[ShellManager, ShellParams], Awaitable[ShellResult]],
-) -> Callable[Concatenate[ShellManager, ShellParams], Awaitable[ShellResult]]:
+    method: Callable[
+        Concatenate[ShellManager, ShellParams],
+        CoroutineType[Any, Any, ShellResult],
+    ],
+) -> Callable[
+    Concatenate[ShellManager, ShellParams],
+    CoroutineType[Any, Any, ShellResult],
+]:
     """登记整个业务操作，关闭时同时覆盖锁等待和原生调用等待。"""
     @wraps(method)
     async def invoke(
@@ -251,7 +264,7 @@ def _tracked_operation(
             return await method(self, *args, **kwargs)
         finally:
             self._operations.discard(task)
-    return invoke
+    return invoke  # type: ignore[return-value]
 
 
 class ShellManager(IShellManager):
@@ -277,10 +290,15 @@ class ShellManager(IShellManager):
         self._session_aliases: dict[str, str] = {}
         self._registry_lock = threading.RLock()
         self._admission_closed = False
+        self._cleanup_producer: CleanupProducer | None = None
 
     async def virtual_awake(self) -> None:
         self._runtime = self.get_system(IRuntimeSystem)
         self._sandbox = self.get_system(ISandbox)
+        self._cleanup_producer = self.runtime.cleanup.open_producer(
+            owner="ShellManager",
+            loop=asyncio.get_running_loop(),
+        )
 
     @property
     def runtime(self) -> IRuntimeSystem:
@@ -558,10 +576,11 @@ class ShellManager(IShellManager):
         owner_session_id: str,
         character_name: str,
         shell_id: str
-        ) -> ShellInfo:
+        ) -> ShellStopResult:
         state = self._get_owned(owner_session_id, character_name, shell_id)
-        await self._remove_and_stop(state)
-        return state.info()
+        report = await self._remove_and_stop(state)
+        info = state.info()
+        return ShellStopResult(stopped=report.complete, shell=info, cleanup=report)
 
     def list_shells(self, session_id: str) -> list[ShellInfo]:
         with self._registry_lock:
@@ -579,13 +598,13 @@ class ShellManager(IShellManager):
         self,
         session_id: str,
         shell_id: str
-        ) -> ShellInfo:
+        ) -> ShellStopResult:
         with self._registry_lock:
             state = self._shells.get(shell_id)
             if state is None or state.session_id != session_id:
                 raise ShellAccessError("Shell not found")
-        await self._remove_and_stop(state)
-        return state.info()
+        report = await self._remove_and_stop(state)
+        return ShellStopResult(stopped=report.complete, shell=state.info(), cleanup=report)
 
     def migrate_session(
         self,
@@ -624,8 +643,9 @@ class ShellManager(IShellManager):
         stopped = 0
         for state in states:
             try:
-                await self._remove_and_stop(state)
-                stopped += 1
+                report = await self._remove_and_stop(state)
+                if report.complete:
+                    stopped += 1
             except Exception:
                 logger.warning(
                     "Failed to stop Shell during session cleanup | shell=%s session=%s",
@@ -839,32 +859,40 @@ class ShellManager(IShellManager):
                 raise EOFError
             state.pty.sendintr()
 
-    async def _remove_and_stop(self, state: _ShellSession) -> None:
+    async def _remove_and_stop(self, state: _ShellSession) -> CleanupReport:
         state.closing.set()
         state.signal_output()
-        task = self._stop_tasks.get(state.shell_id)
-        if task is None:
-            if state.native_closed.is_set() and state.reader_exited.is_set():
-                return
+        if state.cleanup_handle is not None:
+            state.cleanup_handle.refresh_completion()
+            return await state.cleanup_handle.wait(timeout=SHELL_STOP_WAIT_SECONDS)
+        producer = self._cleanup_producer
+        if producer is None:
+            raise LifecycleFailure("Shell cleanup producer has not been opened")
+        reservation = producer.reserve()
+        identity = OwnedProcessIdentity.from_shell(state)
 
-            async def finish() -> None:
-                try:
-                    async with state.operation_lock:
-                        await self._native_call(
-                            self._stop_state_blocking,
-                            state,
-                            report_failure=False,
-                        )
-                        with self._registry_lock:
-                            self._shells.pop(state.shell_id, None)
-                except BaseException as exc:
-                    self._cleanup_failures.append(exc)
-                    raise
+        async def release() -> None:
+            await asyncio.to_thread(self._stop_state_blocking, state)
 
-            task = asyncio.create_task(finish(), name=f"shell-stop-{state.shell_id}")
-            self._stop_tasks[state.shell_id] = task
-            task.add_done_callback(self._stop_finished)
-        await asyncio.shield(task)
+        handle = self.runtime.cleanup.begin(
+            reservation,
+            resource_id=f"{state.shell_id}:{id(state)}",
+            phase="stop",
+            factory=release,
+            is_released=lambda: (
+                state.native_closed.is_set()
+                and state.reader_exited.is_set()
+                and (state.reader_thread is None or not state.reader_thread.is_alive())
+            ),
+            kill_authorized=identity is not None,
+        )
+        handle.retain(state)
+        state.cleanup_handle = handle
+        report = await handle.wait(timeout=SHELL_STOP_WAIT_SECONDS)
+        if report.complete:
+            with self._registry_lock:
+                self._shells.pop(state.shell_id, None)
+        return report
 
     def _stop_finished(self, task: asyncio.Task[None]) -> None:
         if not task.cancelled():
@@ -886,10 +914,17 @@ class ShellManager(IShellManager):
 
         failures: list[BaseException] = []
         if state.pid is not None:
-            try:
-                _kill_proc_tree(state.pid)
-            except BaseException as exc:
-                failures.append(exc)
+            identity = OwnedProcessIdentity.from_shell(state)
+            if identity is not None and identity.still_matches():
+                try:
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/T", "/F", "/PID", str(identity.pid)],
+                            capture_output=True,
+                            timeout=SHELL_STOP_WAIT_SECONDS,
+                        )
+                except BaseException as exc:
+                    failures.append(exc)
 
         reader = state.reader_thread
         if reader is None or reader.ident is None:

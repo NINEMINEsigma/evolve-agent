@@ -26,7 +26,11 @@ from entity.constant import (
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from entity.puretype import ProcessLineStreamResult
+from entity.puretype.resource_cleanup import CleanupWarning
+from system.cleanup_errors import ResourceCleanupTimeout, split_cleanup_timeouts
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
+from system.resource_cleanup import CleanupProducer, CleanupReservation, ResourceCleanupHandle
 from interface.runtime_system import IRuntimeSystem
 from interface.subprocess_runner import ISubprocessRunner
 
@@ -163,6 +167,8 @@ def run_text(
 def _kill_proc_tree(pid: int) -> None:
     """强制终止进程及其所有子孙进程。
 
+    禁止用于本任务资源清理。SubprocessRunner、ShellManager、BrowserSystem、
+    LSPManager 的新清理路径必须使用已证明身份的 terminate_owned_tree。
     Windows 使用 ``taskkill /T /F``。
     Unix 向进程组发送 SIGTERM。
     """
@@ -206,9 +212,20 @@ class SubprocessRunner(ISubprocessRunner):
         self._cleanup_failures: list[BaseException] = []
         self._admission_closed = False
         self._runtime: IRuntimeSystem | None = None
+        self._cleanup_producer: CleanupProducer | None = None
+        self._process_reservations: dict[
+            subprocess.Popen | asyncio.subprocess.Process, CleanupReservation
+        ] = {}
+        self._process_handles: dict[
+            subprocess.Popen | asyncio.subprocess.Process, ResourceCleanupHandle
+        ] = {}
 
     async def virtual_awake(self) -> None:
         self._runtime = self.get_system(IRuntimeSystem)
+        self._cleanup_producer = self.runtime.cleanup.open_producer(
+            owner="SubprocessRunner",
+            loop=asyncio.get_running_loop(),
+        )
 
     @property
     def runtime(self) -> IRuntimeSystem:
@@ -260,21 +277,93 @@ class SubprocessRunner(ISubprocessRunner):
                 self._idle.set()
 
     def _record_cleanup_failure(self, error: BaseException) -> None:
+        _timeouts, remaining = split_cleanup_timeouts(error)
+        if remaining is None:
+            return
         with self._procs_lock:
-            self._cleanup_failures.append(error)
-        self.runtime.record_failure(error)
+            self._cleanup_failures.append(remaining)
+        self.runtime.record_failure(remaining)
 
-    @staticmethod
-    def _reap_sync(proc: subprocess.Popen) -> None:
-        if proc.poll() is None:
-            _kill_proc_tree(proc.pid)
-            proc.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+    def _reserve_cleanup(self) -> CleanupReservation:
+        producer = self._cleanup_producer
+        if producer is None:
+            raise LifecycleFailure("Subprocess cleanup producer has not been opened")
+        return producer.reserve()
 
-    @staticmethod
-    async def _reap_async(proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is None:
-            await asyncio.to_thread(_kill_proc_tree, proc.pid)
-            await asyncio.wait_for(proc.wait(), SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+    def _process_key(
+        self,
+        proc: subprocess.Popen | asyncio.subprocess.Process,
+    ) -> str:
+        return f"{type(proc).__name__}:{id(proc)}:{proc.pid}"
+
+    def _process_released(
+        self,
+        proc: subprocess.Popen | asyncio.subprocess.Process,
+    ) -> bool:
+        if isinstance(proc, subprocess.Popen):
+            return proc.poll() is not None
+        return proc.returncode is not None
+
+    async def _release_registered_process(
+        self,
+        session_id: str,
+        proc: subprocess.Popen | asyncio.subprocess.Process,
+        reservation: CleanupReservation,
+    ) -> ResourceCleanupHandle:
+        identity = (
+            OwnedProcessIdentity.from_popen(proc)
+            if isinstance(proc, subprocess.Popen)
+            else OwnedProcessIdentity.from_asyncio(proc)
+        )
+
+        async def release() -> None:
+            if identity is None:
+                raise ResourceCleanupTimeout(CleanupWarning(
+                    owner="SubprocessRunner",
+                    resource_id=self._process_key(proc),
+                    phase="identity",
+                    timeout_seconds=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME,
+                    message="Owned subprocess identity could not be proven",
+                ))
+            if not self._process_released(proc):
+                await terminate_owned_tree(identity)
+            if isinstance(proc, subprocess.Popen):
+                await asyncio.to_thread(proc.wait)
+            else:
+                await proc.wait()
+
+        handle = self.runtime.cleanup.begin(
+            reservation,
+            resource_id=self._process_key(proc),
+            phase="terminate",
+            factory=release,
+            is_released=lambda: self._process_released(proc),
+            kill_authorized=identity is not None,
+        )
+        handle.retain(proc)
+        self._process_handles[proc] = handle
+        return handle
+
+    async def _observe_process_release(
+        self,
+        session_id: str,
+        proc: subprocess.Popen | asyncio.subprocess.Process,
+        reservation: CleanupReservation,
+    ) -> None:
+        handle = await self._release_registered_process(session_id, proc, reservation)
+        report = await handle.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
+        if report.complete:
+            self._forget_process(session_id, proc)
+            return
+        if self._process_released(proc):
+            return
+        raise ResourceCleanupTimeout(CleanupWarning(
+            owner="SubprocessRunner",
+            resource_id=handle.resource_id,
+            phase=handle.phase,
+            timeout_seconds=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME,
+            message="Subprocess resource cleanup is still pending",
+        ))
 
     def close_admission(self) -> None:
         with self._procs_lock:
@@ -283,28 +372,31 @@ class SubprocessRunner(ISubprocessRunner):
     async def terminate_all(self) -> None:
         """关闭接收并终止已登记进程；启动中的操作会在登记后自行终止。"""
         self.close_admission()
+        if self._cleanup_producer is not None:
+            self._cleanup_producer.close()
         with self._procs_lock:
             processes = [proc for bucket in self._active_procs.values() for proc in bucket]
-        failures: list[BaseException] = []
-        for proc in processes:
-            try:
-                if isinstance(proc, subprocess.Popen):
-                    await asyncio.to_thread(self._reap_sync, proc)
-                else:
-                    await self._reap_async(proc)
-            except BaseException as exc:
-                self._record_cleanup_failure(exc)
-                failures.append(exc)
-        if failures:
-            raise BaseExceptionGroup("Subprocess termination failed", failures)
+        handles = [
+            self._process_handles[proc]
+            for proc in processes
+            if proc in self._process_handles
+        ]
+        if handles:
+            await self.runtime.cleanup.wait_many(
+                handles,
+                timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME,
+            )
 
     async def wait_idle(self) -> None:
         self.close_admission()
         idle = await asyncio.to_thread(self._idle.wait, SYSTEM_QUIESCE_TIMEOUT_SECONDS)
         with self._procs_lock:
             failures = list(self._cleanup_failures)
-        if not idle:
+            pending = bool(self._process_handles) or bool(self._operations) or bool(self._spawning)
+        if not idle and (self._operations or self._spawning):
             failures.append(LifecycleFailure("Subprocess operations did not finish before the deadline"))
+        elif pending:
+            return
         if failures:
             raise BaseExceptionGroup("Subprocess cleanup failed", failures)
 
@@ -317,16 +409,11 @@ class SubprocessRunner(ISubprocessRunner):
         """由实际创建任务登记进程，调用方取消不会遗漏已创建的进程。"""
         async def spawn() -> asyncio.subprocess.Process:
             proc = await asyncio.create_subprocess_exec(*args, **popen_kwargs)
+            reservation = self._reserve_cleanup()
+            self._process_reservations[proc] = reservation
             closing = self._register_process(session_id, proc)
             if closing:
-                try:
-                    await self._reap_async(proc)
-                except BaseException as exc:
-                    self._record_cleanup_failure(exc)
-                    raise
-                finally:
-                    if proc.returncode is not None:
-                        self._forget_process(session_id, proc)
+                await self._observe_process_release(session_id, proc, reservation)
                 raise ApplicationStoppingError("Subprocess created while application was stopping")
             return proc
 
@@ -340,8 +427,8 @@ class SubprocessRunner(ISubprocessRunner):
         except asyncio.CancelledError as cancelled:
             try:
                 proc = await asyncio.shield(task)
-                await self._reap_async(proc)
-                self._forget_process(session_id, proc)
+                reservation = self._process_reservations[proc]
+                await self._observe_process_release(session_id, proc, reservation)
             except ApplicationStoppingError:
                 pass
             except BaseException as cleanup_error:
@@ -370,6 +457,8 @@ class SubprocessRunner(ISubprocessRunner):
         proc: subprocess.Popen | None = None
         try:
             proc = subprocess.Popen(args, **popen_kwargs)
+            reservation = self._reserve_cleanup()
+            self._process_reservations[proc] = reservation
             if self._register_process(session_id, proc):
                 raise ApplicationStoppingError("Subprocess created while application was stopping")
             yield proc
@@ -377,10 +466,10 @@ class SubprocessRunner(ISubprocessRunner):
             original = sys.exception()
             try:
                 if proc is not None:
-                    self._reap_sync(proc)
-                    for stream in (proc.stdout, proc.stderr, proc.stdin):
-                        if stream is not None:
-                            stream.close()
+                    reservation = self._process_reservations[proc]
+                    asyncio.get_running_loop().create_task(
+                        self._observe_process_release(session_id, proc, reservation)
+                    )
             except BaseException as cleanup_error:
                 self._record_cleanup_failure(cleanup_error)
                 if original is not None:
@@ -407,7 +496,8 @@ class SubprocessRunner(ISubprocessRunner):
             original = sys.exception()
             try:
                 if proc is not None:
-                    await self._reap_async(proc)
+                    reservation = self._process_reservations[proc]
+                    await self._observe_process_release(session_id, proc, reservation)
             except BaseException as cleanup_error:
                 self._record_cleanup_failure(cleanup_error)
                 if original is not None:
@@ -629,17 +719,36 @@ class SubprocessRunner(ISubprocessRunner):
                 processes = list(self._active_procs.get(session_id, ()))
             else:
                 processes = [proc for bucket in self._active_procs.values() for proc in bucket]
-        failures: list[BaseException] = []
         for proc in processes:
             alive = proc.poll() is None if isinstance(proc, subprocess.Popen) else proc.returncode is None
-            if alive:
-                try:
-                    _kill_proc_tree(proc.pid)
-                except BaseException as exc:
-                    self._record_cleanup_failure(exc)
-                    failures.append(exc)
-        if failures:
-            raise BaseExceptionGroup("Subprocess interruption failed", failures)
+            reservation = self._process_reservations.get(proc)
+            if not alive or reservation is None or proc in self._process_handles:
+                continue
+            identity = (
+                OwnedProcessIdentity.from_popen(proc)
+                if isinstance(proc, subprocess.Popen)
+                else OwnedProcessIdentity.from_asyncio(proc)
+            )
+
+            async def release(
+                target: subprocess.Popen | asyncio.subprocess.Process = proc,
+                owned: OwnedProcessIdentity | None = identity,
+            ) -> None:
+                if owned is not None and not self._process_released(target):
+                    await terminate_owned_tree(owned)
+                if isinstance(target, subprocess.Popen):
+                    await asyncio.to_thread(target.wait)
+                else:
+                    await target.wait()
+
+            self.runtime.cleanup.begin_threadsafe(
+                reservation,
+                resource_id=self._process_key(proc),
+                phase="terminate",
+                factory=release,
+                is_released=lambda target=proc: self._process_released(target),
+                kill_authorized=identity is not None,
+            )
 
     async def virtual_shotdown(self) -> None:
         """关闭：先禁止新进程，再终止所有活动进程并等待真正退出。

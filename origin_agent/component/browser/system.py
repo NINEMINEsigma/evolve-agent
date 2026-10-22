@@ -21,7 +21,10 @@ from system.lifecycle import (
 )
 from interface.browser_system import IBrowserSystem
 from interface.runtime_system import IRuntimeSystem
-from system.subprocess_utils import _kill_proc_tree
+from system.cleanup_errors import ResourceCleanupPendingError
+from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
+from entity.puretype.browser import HeadlessCleanupResult
+from entity.puretype.resource_cleanup import CleanupReport
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser, Playwright
@@ -128,14 +131,35 @@ class BrowserSystem(IBrowserSystem):
             raise failure
         task.result()
 
-    async def teardown(self) -> None:
-        """唯一关闭任务免受请求取消传播，清理失败保留并上抛。"""
-        task = self._teardown_task
-        if task is None or (task.done() and not task.cancelled() and task.exception() is None):
-            task = asyncio.create_task(self._teardown(), name="browser-disconnect")
-            self._teardown_task = task
-            task.add_done_callback(self._report_cleanup)
-        await self._wait_cleanup(task)
+    async def teardown(self) -> CleanupReport:
+        """Disconnect the owned browser connection without killing a user browser."""
+        if self._browser is None and self._pw is None:
+            return CleanupReport(complete=True)
+        browser = self._browser
+        driver = self._pw
+        reservation = self.runtime.cleanup.open_producer(
+            owner="BrowserSystem",
+            loop=asyncio.get_running_loop(),
+        ).reserve()
+
+        async def release() -> None:
+            if browser is not None:
+                await browser.close()
+            if driver is not None:
+                await driver.stop()
+
+        handle = self.runtime.cleanup.begin(
+            reservation,
+            resource_id=f"browser:{id(browser)}:{id(driver)}",
+            phase="disconnect",
+            factory=release,
+            is_released=lambda: browser is None or not browser.is_connected(),
+            kill_authorized=False,
+        )
+        handle.retain((browser, driver))
+        self._browser = None
+        self._pw = None
+        return await handle.wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
     async def _teardown(self) -> None:
         async with self._connection_lock:
@@ -169,44 +193,25 @@ class BrowserSystem(IBrowserSystem):
             raise LifecycleFailure("Browser process identifier already belongs to another handle")
         self._headless_procs[proc.pid] = proc
 
-    @staticmethod
-    def _stop_headless(proc: subprocess.Popen) -> int:
-        try:
-            if proc.poll() is None:
-                _kill_proc_tree(proc.pid)
-            proc.wait(timeout=BROWSER_PROCESS_EXIT_TIMEOUT_SECONDS)
-        except Exception as error:
-            raise LifecycleFailure("Headless browser process did not finish cleanup") from error
-        return 1
-
-    async def cleanup_headless_browser(self) -> int:
-        procs = tuple(self._headless_procs.values())
-        for proc in procs:
-            if proc.pid not in self._process_cleanup:
-                task = asyncio.create_task(
-                    asyncio.to_thread(self._stop_headless, proc),
-                    name=f"browser-process-{proc.pid}",
-                )
-                self._process_cleanup[proc.pid] = task
-                task.add_done_callback(self._report_cleanup)
-        calls = tuple((proc, self._process_cleanup[proc.pid]) for proc in procs)
-        failures: list[BaseException] = []
+    async def cleanup_headless_browser(self) -> HeadlessCleanupResult:
         killed = 0
-        for proc, task in calls:
-            try:
-                await self._wait_cleanup(task)
-            except asyncio.CancelledError:
-                # 原生任务仍在登记表，不能取消包装任务冒充进程已结束。
-                raise
-            except BaseException as error:
-                failures.append(error)
-            else:
-                killed += task.result()
+        pending: list[str] = []
+        for proc in tuple(self._headless_procs.values()):
+            identity = OwnedProcessIdentity.from_popen(proc)
+            if identity is None or not identity.still_matches():
+                pending.append(str(proc.pid))
+                continue
+            if proc.poll() is None:
+                await terminate_owned_tree(identity)
+            if proc.poll() is not None:
+                killed += 1
                 self._headless_procs.pop(proc.pid, None)
-                self._process_cleanup.pop(proc.pid, None)
-        if failures:
-            raise BaseExceptionGroup("Headless browser cleanup failed", failures)
-        return killed
+            else:
+                pending.append(str(proc.pid))
+        return HeadlessCleanupResult(
+            killed=killed,
+            cleanup=CleanupReport(complete=not pending, pending_resources=pending),
+        )
 
     def close_admission(self) -> None:
         self._closed = True
@@ -221,6 +226,9 @@ class BrowserSystem(IBrowserSystem):
                 raise LifecycleFailure("Cannot release browser resources while requests are active")
             await self.teardown()
 
-        await close_resources((stop_requests, release_connections, self.cleanup_headless_browser))
+        async def release_processes() -> None:
+            await self.cleanup_headless_browser()
+
+        await close_resources((stop_requests, release_connections, release_processes))
         if self._cleanup_failures:
             raise BaseExceptionGroup("Browser cleanup failed", list(self._cleanup_failures))

@@ -1085,6 +1085,10 @@ classDiagram
 
 ## 关键设计变更记录
 
+### 外部资源清理超时降级（2026-10-22）
+
+`RuntimeSystem` 新增叶对象 `ResourceCleanupRegistry`，不新增 AsyncSystem。登记器只保存资源身份、所属 loop、真实清理任务和终局事实；子进程、Shell、浏览器、LSP、MCP、文件监听、Gateway 和前端连接各自执行释放。`TaskOwner.handoff_cleanup` 只允许已完成业务交接的 MCP 连接任务使用。公开清理结果使用 `CleanupReport`，不加入 easysave 或 typeref。
+
 ### LLM空响应有界重试（2026-10-16）
 
 `abstract/llm/loader.py::create_llm_client` 在验证插件工厂返回类型后只包装一次 `EmptyResponseRetryClient`，其继承 `BaseLLMClient`，唯一 `_client` 字段持有原Provider对象；Application经原有Loop/System间接持有两者，不新增全局对象、连接、Loop字段或跨类protected访问。装饰器不读取底层私有状态，原公共参数和返回类型不变，插件继续只负责原Provider实现。`client.py::LLMEmptyResponseError` 是非持久化RuntimeError子类，`LLM_EMPTY_RESPONSE_MAX_ATTEMPTS`集中定义并导出。

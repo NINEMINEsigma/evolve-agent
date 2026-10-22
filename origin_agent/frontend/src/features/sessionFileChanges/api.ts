@@ -36,8 +36,9 @@ const TOOL_OPERATIONS: Record<SessionFileChangeToolName, readonly SessionFileCha
   Write: ["create", "modify"],
   PatchEdit: ["modify"],
   Delete: ["delete"],
-  Copy: ["copy"],
-  Move: ["move"],
+  // Copy/Move also record each parent directory they actually created.
+  Copy: ["create", "copy"],
+  Move: ["create", "move"],
 };
 
 function invalid(message: string): never {
@@ -121,24 +122,19 @@ function timestamp(value: unknown): string {
 
 /** Canonical logical path: namespace, optional relative part without empty or dot segments. */
 function logicalPath(value: unknown): string {
-  const path = nonEmptyText(value);
-  const separator = path.indexOf(":");
+  const raw = nonEmptyText(value);
+  const separator = raw.indexOf(":");
   if (separator <= 0) invalid("File change path requires a namespace");
-  const namespace = path.slice(0, separator);
-  if (namespace !== namespace.trim() || /[/\\\x00\r\n]/.test(namespace)) {
-    invalid("Invalid file change namespace");
+  const namespace = raw.slice(0, separator).trim();
+  if (!namespace || /[/\\\x00\r\n]/.test(namespace)) invalid("Invalid file change namespace");
+  const relative = raw.slice(separator + 1).replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  if (relative === "" || relative === ".") return `${namespace}:`;
+  if (relative.includes("\x00")) invalid("Invalid file change relative path");
+  const segments = relative.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment.includes(":"))) {
+    invalid("Non-canonical file change relative path");
   }
-  const relative = path.slice(separator + 1);
-  if (relative === "") return path;
-  if (relative.startsWith("/") || relative.endsWith("/") || relative.includes("\\") || relative.includes("\x00")) {
-    invalid("Invalid file change relative path");
-  }
-  for (const segment of relative.split("/")) {
-    if (segment === "" || segment === "." || segment === ".." || segment.includes(":")) {
-      invalid("Non-canonical file change relative path");
-    }
-  }
-  return path;
+  return `${namespace}:${segments.join("/")}`;
 }
 
 function actor(payload: unknown): SessionFileChangeActorDto {

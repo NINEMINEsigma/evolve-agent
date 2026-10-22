@@ -101,12 +101,15 @@ class StreamConsumer:
         llm: BaseLLMClient | None,
         sink: IAgentSink,
         character_name: str,
-        cancel_event: asyncio.Event
-        ) -> None:
+        cancel_event: asyncio.Event,
+        *,
+        cleanup_registry: Any | None = None,
+    ) -> None:
         self._llm = llm
         self._sink = sink
         self._character_name = character_name
         self._cancel_event = cancel_event
+        self._cleanup_registry = cleanup_registry
         # 最近一次当前流部分结果；强制取消时由 consume() 在传播前写入。
         self._last_partial: LLMResponse | None = None
 

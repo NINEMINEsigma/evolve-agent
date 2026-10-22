@@ -2,9 +2,11 @@
 
 from pydantic import BaseModel
 
+from .resource_cleanup import CleanupReport
+
 
 class ShellInfo(BaseModel):
-    """Shell会话元数据快照。"""
+    """Shell会话元数据快照。cleanup 为 None 表示未发起资源清理，不等于清理完成。"""
 
     shell_id: str
     pid: int | None = None
@@ -17,6 +19,15 @@ class ShellInfo(BaseModel):
     running: bool
     exit_code: int | None = None
     termination: str | None = None
+    cleanup: CleanupReport | None = None
+
+
+class ShellStopResult(BaseModel):
+    """显式停止结果。stopped 只能在 cleanup.complete 为 true 时为 true。"""
+
+    stopped: bool
+    shell: ShellInfo
+    cleanup: CleanupReport
 
 
 class ShellOutputSlice(BaseModel):

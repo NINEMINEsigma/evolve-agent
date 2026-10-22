@@ -468,8 +468,9 @@
 | 运行时系统 | Application 内的唯一配置与进程生命周期系统；持有运行状态、输入接收同步边界、关闭信号及失败记录，不代替各业务 System 的资源所有权 | RuntimeSystem |
 | 输入投递记录 | 关闭前已接受输入的非持久化提交记录，包含进程内序号、原始消息、准备状态和 History 提交状态；不同于 client_message_id，也不是可在重启后自动执行的持久队列 | InputDelivery |
 | 只落历史关闭 | 停止新工作与模型生成，把已接受但未提交的输入加入所属会话 History 并按原约定保存；重启不自动补跑，临时Agent不新增持久化 | history-only shutdown |
+| 资源清理待完成 | 外部资源清理已超过前台观察期限，但进程、线程、连接或 SDK 上下文尚未证明释放。应用停用该旧实例并保留引用继续收尾，不因该明确清理超时请求全应用失败；持久化失败、内部逻辑错误、必要业务交接失败和 60 秒最终退出保护不降级。自动收尾只记录日志；显式停止操作返回真实未完成状态，不宣称释放成功 | resource cleanup pending |
 
-上述约定按异步架构迁移阶段接入，当前实施进度见 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`。
+上述约定按异步架构迁移阶段接入，当前实施进度见 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md`。资源清理待完成的决策边界见 `.tasks/2026-10-22_2_external-resource-cleanup-timeout.md`。
 
 ---
 

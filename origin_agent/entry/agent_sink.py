@@ -235,6 +235,9 @@ class FrontendSink(IFrontendSink):
                         await entry.ws.close(code=1001, reason="going_away")
             except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
                 pass
+            except TimeoutError:
+                logger.warning("Frontend WebSocket cleanup is still pending | session=%s", session_id)
+                continue
             except BaseException as exc:
                 failures.append(exc)
                 continue

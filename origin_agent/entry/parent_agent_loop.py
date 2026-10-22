@@ -160,6 +160,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             sink=self._frontend_sink,
             character_name=self.current_character_agent,
             cancel_event=self._cancel_event,
+            cleanup_registry=self.app.get_system(IRuntimeSystem).cleanup,
         )
 
         # -- 主会话活动任务注册表（强制中断基础，IMainSessionLoop 公共实现）--

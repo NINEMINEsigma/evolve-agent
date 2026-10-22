@@ -14,7 +14,9 @@ import type {
 
 function describeFailure(failure: unknown, fallback: string): string {
   if (failure instanceof RequestTimeoutError) return fileChangesLabels.requestTimeout;
-  if (failure instanceof SessionFileChangesProtocolError) return fileChangesLabels.protocolError;
+  if (failure instanceof SessionFileChangesProtocolError) {
+    return formatFileChangesLabel(fileChangesLabels.protocolError, { detail: failure.message });
+  }
   if (failure instanceof SessionFileChangesRequestError) {
     return formatFileChangesLabel(fileChangesLabels.requestFailed, { status: failure.status });
   }

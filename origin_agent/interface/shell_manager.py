@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from entity.puretype.shell import ShellInfo, ShellOutputSlice
+from entity.puretype.shell import ShellInfo, ShellOutputSlice, ShellStopResult
 from framework import AsyncSystem
 
 from .runtime_system import IRuntimeSystem
@@ -87,8 +87,8 @@ class IShellManager(AsyncSystem, ABC):
         owner_session_id: str,
         character_name: str,
         shell_id: str
-        ) -> ShellInfo:
-        """Stop one owned Shell and return its terminal metadata."""
+        ) -> ShellStopResult:
+        """Stop one owned Shell and return its actual cleanup result."""
         ...
 
     @abstractmethod
@@ -101,7 +101,7 @@ class IShellManager(AsyncSystem, ABC):
         self,
         session_id: str,
         shell_id: str
-        ) -> ShellInfo:
+        ) -> ShellStopResult:
         """Stop one Shell through the user-facing ownership boundary."""
         ...
 

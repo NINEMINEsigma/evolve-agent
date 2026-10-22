@@ -15,7 +15,7 @@
   "pageReadFailed": "读取文件修改清单失败。",
   "requestFailed": "请求失败（HTTP {{status}}）。",
   "requestTimeout": "请求超时，请稍后重试。",
-  "protocolError": "服务端返回的文件修改数据格式无效。",
+  "protocolError": "服务端返回的文件修改数据格式无效：{{detail}}",
   "stale": "当前显示的是较早快照，可能不是最新记录。",
   "archived": "当前会话已归档，文件修改记录仍可只读查看。",
   "previous": "上一页",

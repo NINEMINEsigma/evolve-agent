@@ -230,10 +230,21 @@ class LSPManager(ILSPManager):
                 return {"error": "pyright-langserver not found. Install with: pip install pyright"}
 
             # 如果已有运行实例，先清理
-            previous_root: str | None = None
-            if self._process is not None:
-                previous_root = self._root_uri or ""
-                self._kill_existing()
+        if self._closing_handle is not None and not self._closing_handle.snapshot().complete:
+            return {
+                "started": False,
+                "cleanup_pending": True,
+                "error": "Previous language server cleanup is still pending",
+            }
+        previous_root: str | None = None
+        if self._process is not None:
+            previous_root = self._root_uri or ""
+            if not self._kill_existing():
+                return {
+                    "started": False,
+                    "cleanup_pending": True,
+                    "error": "Previous language server cleanup is still pending",
+                }
 
             # 更新状态
             self._state = LSPState.STARTING
@@ -870,9 +881,14 @@ class LSPManager(ILSPManager):
         proc = self._process
         if proc is None:
             return False
-        from system.subprocess_utils import _kill_proc_tree
+        from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
+        identity = OwnedProcessIdentity.from_popen(proc)
+        if identity is None:
+            return False
         if proc.poll() is None:
-            _kill_proc_tree(proc.pid)
+            asyncio.run_coroutine_threadsafe(terminate_owned_tree(identity), self.runtime.loop).result(
+                timeout=_KILL_WAIT_TIMEOUT,
+            )
         try:
             proc.wait(timeout=_KILL_WAIT_TIMEOUT)
         except subprocess.TimeoutExpired as error:

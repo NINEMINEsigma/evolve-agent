@@ -22,7 +22,9 @@ connected servers:
 No parameters. Returns a JSON object with keys:
 ``refreshed`` (bool), ``removed`` (list), ``added`` (list),
 ``failed`` (list of server names that could not be used), ``status`` (list of
-server status dicts, where skipped servers carry an ``error`` field), and
+server status dicts, where skipped servers carry an ``error`` field),
+``cleanup_pending`` (list of server names whose resource release is not yet
+confirmed), and
 ``errors`` (mapping of server name to failure summary).
 
 Use this after editing ``mcp_config.json`` to add, remove, or re-enable

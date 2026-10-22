@@ -134,6 +134,7 @@ class MultiAgentWorker:
             sink=self._sink,
             character_name=self.character_name,
             cancel_event=self._loop.loop.cancel_event,
+            cleanup_registry=self._loop.app.get_system(IRuntimeSystem).cleanup,
         )
         # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
         self._tool_executor = ToolExecutor(loop=self._loop)

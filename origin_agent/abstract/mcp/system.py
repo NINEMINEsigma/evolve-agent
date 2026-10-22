@@ -257,6 +257,7 @@ class MCPSystem(IMCPSystem):
                 "errors": dict(self._rejected),
             }
         result = await self.work.run(lambda: self.core.refresh(config))
+        result["cleanup_pending"] = result.get("cleanup_pending", [])
         status = self.status()
         reported = result.get("failed")
         failed: list[str] = list(reported) if isinstance(reported, list) else []

@@ -255,8 +255,6 @@ class GatewaySystem(IGatewaySystem):
         """结束 SSE/WS、uvicorn 与套接字；任务终局必须确认，失败上抛。"""
         server = self._server
         serve_task = self._serve_task
-        self._server = None
-        self._serve_task = None
 
         async def stop_serve() -> None:
             if serve_task is None:
@@ -267,20 +265,20 @@ class GatewaySystem(IGatewaySystem):
                 {serve_task}, timeout=GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
             )
             if not done:
-                serve_task.cancel()
-                try:
-                    await serve_task
-                except asyncio.CancelledError as exc:
-                    raise LifecycleFailure(
-                        "Gateway server task did not finish after cancellation"
-                    ) from exc
-            else:
-                serve_task.result()
+                logger.warning("Gateway server cleanup is still pending")
+                return
+            if not serve_task.cancelled():
+                error = serve_task.exception()
+                if error is not None:
+                    raise error
+            self._server = None
+            self._serve_task = None
 
         async def close_socket() -> None:
-            sock, self._socket = self._socket, None
+            sock = self._socket
             if sock is not None:
                 await asyncio.to_thread(sock.close)
+                self._socket = None
 
         await close_resources((stop_serve, close_socket))
 
