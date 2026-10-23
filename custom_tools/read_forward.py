@@ -64,8 +64,8 @@ logger = logging.getLogger(__name__)
 def _s():
     """委托到 Application 已注册的 Sandbox System。"""
     from system.application import Application
-    from system.sandbox import Sandbox
-    return Application.current().get_system(Sandbox)
+    from interface.sandbox import ISandbox
+    return Application.current().get_system(ISandbox)
 
 
 def _classify_media(mime_type: str) -> tuple[str, int] | None:
