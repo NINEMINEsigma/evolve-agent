@@ -39,6 +39,9 @@ FORWARDED_VIDEO_TAG: str = "forwarded_video"
 # NOTE: mp3 必须归一化为 mpeg（audio/mpeg）：部分 provider（如小米 MiMo）会静默拒绝非标准的 audio/mp3
 AUDIO_FORMAT_MIME_SUBTYPE: dict[str, str] = {"mp3": "mpeg", "wav": "wav"}
 
+# LLM 默认显式关闭推理深度；实际值仍由 Provider 或协议校验
+LLM_DEFAULT_REASONING_EFFORT: str = "none"
+
 # 所有LLM解析的重试次数
 LLM_RETRY_COUNT: int = 3
 

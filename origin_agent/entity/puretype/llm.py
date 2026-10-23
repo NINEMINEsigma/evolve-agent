@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
+from entity.constant import LLM_DEFAULT_REASONING_EFFORT
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ class LLMProfile(BaseModel):
     api_key: str = ""
     temperature: float = 0.7
     max_output_tokens: int = 4096
-    reasoning_effort: str = ""
+    reasoning_effort: str = LLM_DEFAULT_REASONING_EFFORT
     max_context_tokens: int = 128000
     # 多模态分工直接引用根对象中的 LLMProfile 实例。
     vision_image_profile: LLMProfile | None = None

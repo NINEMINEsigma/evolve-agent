@@ -4,6 +4,7 @@ import type { LlmProfile } from "../../types";
 import type { LlmProfileDraft } from "../../types/llmProfileUi";
 import type { LlmProfileManager } from "../../hooks/useLlmProfiles";
 import type { LlmProfileEditorController } from "../../hooks/useLlmProfileEditor";
+import { LLM_REASONING_EFFORT_OPTIONS } from "../../constants/llmProfile";
 
 interface LlmProfileDetailsProps {
   profile: LlmProfile | null;
@@ -49,7 +50,11 @@ export default function LlmProfileDetails({ profile, manager, editor }: LlmProfi
     return field(key, label, { full: true, choices });
   };
   const clients = Array.from(new Set([...manager.availableClients, ...(draft?.llm_client_name ? [draft.llm_client_name] : [])]));
-  const efforts = Array.from(new Set(["", "low", "medium", "high", ...(draft?.reasoning_effort ? [draft.reasoning_effort] : [])]));
+  const efforts = Array.from(new Set([
+    ...LLM_REASONING_EFFORT_OPTIONS,
+    ...(draft?.reasoning_effort && !LLM_REASONING_EFFORT_OPTIONS.includes(draft.reasoning_effort as typeof LLM_REASONING_EFFORT_OPTIONS[number])
+      ? [draft.reasoning_effort] : []),
+  ]));
 
   return <div className="llm-details">
     <div className="llm-details-heading">
@@ -85,7 +90,7 @@ export default function LlmProfileDetails({ profile, manager, editor }: LlmProfi
       <section className="llm-section"><h4>生成参数</h4><div className="llm-field-grid">
         {field("temperature", "采样温度")}
         {field("max_output_tokens", "最大输出 token 数")}
-        {field("reasoning_effort", "推理深度", { choices: efforts.map((value) => ({ value, label: value || "不启用" })) })}
+        {field("reasoning_effort", "推理深度", { choices: efforts.map((value) => ({ value, label: value === "none" ? "不启用" : value })) })}
         {field("max_context_tokens", "上下文窗口大小")}
       </div></section>
       <section className="llm-section"><h4>多模态分工</h4><div className="llm-field-grid">
@@ -106,7 +111,7 @@ export default function LlmProfileDetails({ profile, manager, editor }: LlmProfi
       <section className="llm-section"><h4>生成参数</h4>
         <dl className="llm-value-grid"><ReadValue label="采样温度">{String(profile.temperature)}</ReadValue>
           <ReadValue label="最大输出 token 数">{profile.max_output_tokens.toLocaleString()}</ReadValue>
-          <ReadValue label="推理深度">{profile.reasoning_effort || "不启用"}</ReadValue>
+          <ReadValue label="推理深度">{!profile.reasoning_effort || profile.reasoning_effort === "none" ? "不启用" : profile.reasoning_effort}</ReadValue>
           <ReadValue label="上下文窗口大小">{profile.max_context_tokens.toLocaleString()}</ReadValue></dl>
       </section>
       <section className="llm-section"><h4>多模态分工</h4>

@@ -23,7 +23,13 @@ export function groupLlmProfiles(profiles: LlmProfile[], query: string): LlmClie
 }
 
 export function createLlmProfileDraft(profile: LlmProfile): LlmProfileDraft {
-  return { ...profile, temperature: String(profile.temperature), max_output_tokens: String(profile.max_output_tokens), max_context_tokens: String(profile.max_context_tokens) };
+  return {
+    ...profile,
+    reasoning_effort: profile.reasoning_effort || "none",
+    temperature: String(profile.temperature),
+    max_output_tokens: String(profile.max_output_tokens),
+    max_context_tokens: String(profile.max_context_tokens),
+  };
 }
 
 export function validateLlmProfileDraft(

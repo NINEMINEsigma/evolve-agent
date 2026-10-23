@@ -431,6 +431,10 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 
 普通输入保持现有合批/链中注入；强制记录独立成批，工具注入不越过未提交的ACCEPTED/RESERVED强制记录，预订先选择后提交。无新增System、History/Profile字段、easysave版本或依赖。客户端公共关键字参数需前后端及实际扩展同批部署；现有活动快照传播与重新生成并发边界仍是尽力处理。已完成源码实施，未运行校验、构建或应用；用户验收见 `.tasks/2026-10-23_1_require-tool-on-user-response.md`。
 
+## Reasoning effort passthrough（2026-10-24）
+
+模型配置 Tab 提供协议无关的常见推理深度值 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其中 `none` 是“不启用”的显式值。值不按客户端过滤；当前 Profile 的 `reasoning_effort` 会由 OpenAI-compatible、Anthropic-compatible 与 KSCC 客户端无条件透传给 Provider 或协议。旧 Profile 的空字符串在客户端构造时归一为 `none`。无效值由 Provider 或协议返回错误，沿现有 LLM 错误处理记录日志并向会话前端推送系统状态消息。
+
 ## 开发者阅读顺序建议
 
 1. 先通读本文件，建立整体架构认知。

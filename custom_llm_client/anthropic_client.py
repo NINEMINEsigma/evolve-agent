@@ -34,6 +34,7 @@ from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
 from entity.constant import (
     BACKOFF_BASE,
+    LLM_DEFAULT_REASONING_EFFORT,
     LLM_RETRY_COUNT,
     TOOL_RESULT_PREVIEW_CHARS,
 )
@@ -64,6 +65,7 @@ class AnthropicLLMClient(BaseLLMClient):
         model: str,
         temperature: float,
         max_output_tokens: int,
+        reasoning_effort: str = LLM_DEFAULT_REASONING_EFFORT,
     ) -> None:
         if not api_key:
             logger.warning(
@@ -78,6 +80,7 @@ class AnthropicLLMClient(BaseLLMClient):
         self._model: str = model
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
+        self._reasoning_effort: str = reasoning_effort or LLM_DEFAULT_REASONING_EFFORT
 
     # -- 内部构造请求参数 --------------------------------------------------
 
@@ -104,6 +107,7 @@ class AnthropicLLMClient(BaseLLMClient):
             kwargs["tools"] = tools
         if require_tool_call:
             kwargs["tool_choice"] = {"type": "any"}
+        kwargs["reasoning_effort"] = self._reasoning_effort
         return kwargs
 
     # -- 公开 API ----------------------------------------------------------
@@ -734,4 +738,5 @@ def create_llm_client(
         model=profile.model,
         temperature=profile.temperature,
         max_output_tokens=profile.max_output_tokens,
+        reasoning_effort=profile.reasoning_effort,
     )

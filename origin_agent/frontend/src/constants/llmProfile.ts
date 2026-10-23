@@ -3,9 +3,12 @@ import type { LlmProfile } from "../types";
 /** 新建 Profile 的默认值；每次编辑必须复制，不修改共享对象。 */
 export const EMPTY_LLM_PROFILE: Readonly<LlmProfile> = {
   name: "", llm_client_name: "openai_client", base_url: "", model: "", api_key: "",
-  temperature: 0.7, max_output_tokens: 4096, reasoning_effort: "", max_context_tokens: 128000,
+  temperature: 0.7, max_output_tokens: 4096, reasoning_effort: "none", max_context_tokens: 128000,
   vision_image_profile: null, audio_profile: null, vision_video_profile: null, soul_file: "SOUL.md",
 };
+
+/** Common provider-facing reasoning effort values; validation belongs to the provider or protocol. */
+export const LLM_REASONING_EFFORT_OPTIONS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** 数字草稿字段，编辑期间保留原始字符串。 */
 export const LLM_NUMERIC_FIELDS = ["temperature", "max_output_tokens", "max_context_tokens"] as const;

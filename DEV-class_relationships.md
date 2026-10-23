@@ -1246,6 +1246,10 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 前端 `useLlmProfiles(sessionId)` 组合 `useSessionLlmSelection`，将浏览器待用名称按主会话隔离。显式本地选择优先，无本地覆盖时读取服务端；每条主会话消息/重新生成仍独立捕获名称，resume不提交本地选择。模型抽屉仅管理定义和全局引用，唯一会话选择入口为顶部栏的独立浮层菜单。`useLlmProfileEditor` 独立管理内存草稿，切分页不重建草稿；没有新增 Agent Loop 字段或 protected 访问。
 
+### Reasoning effort passthrough（2026-10-24）
+
+LLM Profile 的 `reasoning_effort` 是不区分客户端和协议的原始字符串参数。前端提供 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 七个常见值，其中 `none` 表示“不启用”；OpenAI-compatible、Anthropic-compatible 与 KSCC 客户端均无条件发送该字段，Provider 或协议负责校验。旧 Profile 的空字符串在客户端构造时归一为 `none`。拒绝不会在客户端能力层静默过滤：现有 LLM 错误日志与主会话系统状态消息链路负责记录和前端展示。模型配置 UI 不维护按客户端区分的选项列表。
+
 ### 全局元数据 Profile 与延续摘要保障
 
 `SessionMetadataService`是标题、标签和摘要生成的唯一业务入口。它优先使用 `LLMProfileData.metadata_profile`；仅在全局引用为空时通过 `SessionStore.read_active_profile_name(session_id)`按目标会话回退，并对选定 Profile执行浅拷贝形成单次调用快照。明确配置但无效或调用失败时禁止静默回退。手动终结中的摘要和标签为 best-effort，失败通过 `SessionTerminationResult.metadata_warnings`返回但仍归档；分支、合并与自动超限旋转必须先取得摘要。自动旋转在摘要或延续初始化失败时保持旧会话 active、保留触发消息并追加对 LLM 不可见的系统状态，成功初始化延续 History后才归档旧会话。

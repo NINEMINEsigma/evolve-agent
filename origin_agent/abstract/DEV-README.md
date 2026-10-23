@@ -252,6 +252,10 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 - **自定义工具**：在 `custom_tools/` 下编写 `.py` 文件，声明顶层固定名称 `TOOLSET = BaseToolSet(...)` 并在其中持有 `BaseTool` 子类实例；ToolDiscoverySystem 按 AST 发现后交给唯一 ToolRegistry 注册并预热，导入模块只创建无连接工具对象、不注册也不取得运行时服务。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 
+## Reasoning effort passthrough
+
+The LLM Profile editor exposes the common provider-facing values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without filtering by client or protocol. `none` is the explicit UI value for disabled reasoning. The selected string is sent unchanged as `reasoning_effort` by the bundled OpenAI-compatible and Anthropic-compatible clients, including legacy empty values normalized to `none`; the provider or protocol is responsible for accepting or rejecting it. Rejection follows the existing client error path: the service logs the failure and the active session receives a persisted system status message. No capability probe or client-specific option list is maintained.
+
 ## System 接口槽位约定（2026-10-20）
 
 `ToolRegistry`、`ToolDiscoverySystem` 和 `MCPSystem` 分别继承 `IToolRegistry`、`IToolDiscoverySystem` 和 `IMCPSystem`。工具发现使用 `IToolRegistry` 查询注册表，MCP 使用 `IMCPSystem` 作为运行期槽位；具体实现仍负责对象工具注册、发现记录和原生资源清理。抽象层不得通过具体 System 类型查询 Application。

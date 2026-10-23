@@ -16,6 +16,7 @@ from typing import Any, Optional
 import anthropic
 
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk
+from entity.constant import LLM_DEFAULT_REASONING_EFFORT
 from system.context import RuntimeContext
 
 from custom_llm_client.anthropic_client import AnthropicLLMClient
@@ -57,6 +58,7 @@ class KSCCAnthropicLLMClient(AnthropicLLMClient):
         model: str,
         temperature: float,
         max_output_tokens: int,
+        reasoning_effort: str = LLM_DEFAULT_REASONING_EFFORT,
     ) -> None:
         # 不调用 super().__init__()——父类会用 api_key 创建 x-api-key 认证，
         # 而 KSCC 代理需要 Bearer token 认证，因此在此直接构造 SDK 客户端。
@@ -73,6 +75,7 @@ class KSCCAnthropicLLMClient(AnthropicLLMClient):
         self._model: str = model
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
+        self._reasoning_effort: str = reasoning_effort or LLM_DEFAULT_REASONING_EFFORT
 
     # -- 内部构造请求参数 --------------------------------------------------
 
@@ -117,4 +120,5 @@ def create_llm_client(
         model=profile.model,
         temperature=profile.temperature,
         max_output_tokens=profile.max_output_tokens,
+        reasoning_effort=profile.reasoning_effort,
     )

@@ -26,7 +26,7 @@ from abstract.llm.client import BaseLLMClient, LLMAPIStatusError
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
-from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
+from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE, LLM_DEFAULT_REASONING_EFFORT
 from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class OpenAILLMClient(BaseLLMClient):
         model: str,
         temperature: float,
         max_output_tokens: int,
-        reasoning_effort: str = "",
+        reasoning_effort: str = LLM_DEFAULT_REASONING_EFFORT,
     ) -> None:
         if not api_key:
             logger.warning(
@@ -69,7 +69,7 @@ class OpenAILLMClient(BaseLLMClient):
         self._model: str = model
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
-        self._reasoning_effort: str = reasoning_effort
+        self._reasoning_effort: str = reasoning_effort or LLM_DEFAULT_REASONING_EFFORT
 
     # -- 内部消息转换 --------------------------------------------------
 
@@ -98,8 +98,7 @@ class OpenAILLMClient(BaseLLMClient):
             kwargs["tools"] = tools
         if require_tool_call:
             kwargs["tool_choice"] = "required"
-        if self._reasoning_effort:
-            kwargs["reasoning_effort"] = self._reasoning_effort
+        kwargs["reasoning_effort"] = self._reasoning_effort
         if response_format:
             kwargs["response_format"] = response_format
         return kwargs
