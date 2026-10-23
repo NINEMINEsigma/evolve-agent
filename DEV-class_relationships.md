@@ -552,6 +552,7 @@ classDiagram
         #_lock
         +get_mode()
         +initialize_session()
+        +inherit_session()
         +set_mode()
         +forget_session()
         +reset_all_non_manual_modes()
@@ -1005,7 +1006,7 @@ classDiagram
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
 | 全局 `Application.current()` | `session_manager`, `get_system(IFrontendSink)`, `get_system(ISubAgentOrchestrator)`, `get_system(IApprovalSystem)` | `Application` | 多处 | 各模块通过单例访问子系统；编排器、frontend_sink与审批均迁移为 `get_system(T)` |
 | 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `component/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 Application持有的 Store恢复、更新和显式重置模式 |
-| Gateway主会话生命周期 | `initialize_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py` | 新建普通/派生/随意聊聊主会话时初始化手动模式；永久删除成功后清理缓存，不复制来源模式 |
+| Gateway主会话生命周期 | `initialize_session()` / `inherit_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py`、`entry/session_manager.py` | 新建普通/派生/随意聊聊主会话及分支/合并会话初始化手动模式；上下文超限自动延续继承来源主会话当前模式；永久删除成功后清理缓存 |
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`gateway/message_router.py`（首条用户消息经 `maybe_generate_first_title` 触发一次性 LLM 标题生成+截取回退，SessionManager/FrontendSink 由服务动态取得）、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
@@ -1296,7 +1297,7 @@ Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型�
 
 会话级三态审批模式从 `component/approval/handsfree.py` 的模块级字典迁移到 Application持有的唯一 `ApprovalModeStore`。Store 以业务 `RLock` 保护缓存与“先更新内存、后尽力保存”的顺序，按主会话惰性加载 `approval_mode.es` 的 easysave `v1` key；`SessionApprovalModeState` 直接交给 `save()`，通过 `entity/typeref.py` 中的 `v1::SessionApprovalModeState` stable type token重建，禁止 `.model_dump()` 降级。easysave负责路径锁、前置 `.bak`、同目录临时文件、`fsync`与原子替换；写入失败只记录日志且不回滚内存。旧会话缺文件以及损坏、缺 key或类型错误均回退手动模式。
 
-普通新会话、自动延续、单源分支、多父合并和首次创建的“随意聊聊”都经 Gateway `SessionManager` 统一初始化为手动模式，不复制来源模式；归档保留状态，永久删除会话目录后清理 Store缓存。审批 Profile清空、删除或配置失效不再调用模式批量重置，也不通过 Profile广播携带 `handsfree_mode=false`；已恢复的脱手模式保持不变，实际审批后端不可用时继续按既有失败路径拒绝。
+普通新会话、单源分支、多父合并和首次创建的“随意聊聊”都经 Gateway `SessionManager` 统一初始化为手动模式；上下文超限产生的自动延续在新会话创建后、来源归档前，由 `ApprovalModeStore.inherit_session()` 继承来源主会话的当前模式。归档保留状态，永久删除会话目录后清理 Store缓存。审批 Profile清空、删除或配置失效不再调用模式批量重置，也不通过 Profile广播携带 `handsfree_mode=false`；已恢复的脱手模式保持不变，实际审批后端不可用时继续按既有失败路径拒绝。
 
 ### Agent 运行工具被 Shell会话取代
 

@@ -107,6 +107,25 @@ class ApprovalModeStore:
         """把新主会话显式初始化为手动模式。"""
         return self.set_mode(session_id, ApprovalMode.MANUAL)
 
+    def inherit_session(
+        self,
+        source_session_id: str,
+        target_session_id: str,
+        ) -> ApprovalMode:
+        """Inherit the current approval mode from one main session to another."""
+        self._validate_session_id(source_session_id)
+        self._validate_session_id(target_session_id)
+        if source_session_id == target_session_id:
+            raise ValueError("Approval mode inheritance requires distinct sessions")
+        with self._lock:
+            mode = self._modes.get(source_session_id)
+            if mode is None:
+                mode = self._load_mode_unlocked(source_session_id)
+                self._modes[source_session_id] = mode
+            self._modes[target_session_id] = mode
+            self._persist_best_effort_unlocked(target_session_id, mode)
+            return mode
+
     def set_mode(
         self,
         session_id: str,

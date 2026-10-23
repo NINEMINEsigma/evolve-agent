@@ -95,7 +95,7 @@ WS /ws/chat?resume=<sid>
 
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
 - `server_info`：服务端信息。
-- `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式。前端不持久化该值。
+- `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式，上下文超限产生的自动延续继承来源主会话的当前模式。前端不持久化该值。
 - `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。轮次后推送（`MessageRouter._send_history_sync`）的 `agents` 按会话当前注册 Loop 计算，不按轮次所属 Loop：ExitMultiAgent 退役 MultiAgentLoop 后，其最后一轮的轮次后推送若沿用退役 Loop 会把已清空的 agents 重新覆盖为过期列表，导致前端主徽章停留在多Agent配色。
 - `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，折叠日志按 `AGENTSPACE_WS_COALESCE_LOG_WINDOW_SECONDS` 时间窗限流并携带窗口累计 dropped；转发 task 登记在 `GatewaySystem.task_owner`，连接断开时经 `TaskOwner.cancel` 预期取消（禁止裸 `task.cancel()`，否则 Owner 会按 RV11 判定为未授权取消并报生命周期失败）并注销订阅；自动旋转复用同一物理连接和订阅。单事件发送超过 `AGENTSPACE_WS_SEND_TIMEOUT_SECONDS` 时抛哨兵异常 `AgentspaceSendTimeout`，done_callback 先经 `TaskOwner.mark_expected_failure` 标记例常预期失败（不触发应用失败关闭）再以 1011 断连驱逐慢消费者连接；该标记回调的注册顺序必须先于 `task_owner.track`（标记先于结算读取）。连接级终止分两类哨兵：`AgentspaceSendTimeout`（慢消费者，客户端仍在线但接收不过来，标记预期失败后以 1011 驱逐）与 `AgentspaceConnectionClosed`（对端已断开，由发送回调在状态预检或收到 `WebSocketDisconnect`/`ConnectionResetError`/`BrokenPipeError` 时抛出，close 帧已发出后的 `RuntimeError` 仅在连接确已断开时归类，标记预期失败后不再发送关闭帧）。两类哨兵均只终止当前连接、不触发应用失败关闭；订阅与连接登记由 `ws_chat` 的 finally 统一回收。done_callback 内判定顺序不可交换：必须先判 `requires_connection_eviction` 再判 `is_connection_termination`，因为 `AgentspaceSendTimeout` 同时满足两者，顺序颠倒会让慢消费者被静默收尾而失去 1011 驱逐能力。发送回调同时用于 `attach_agentspace_events` 的初始事件阶段，故 `ws_chat` 的外层断连分支必须同时捕获 `WebSocketDisconnect` 与 `AgentspaceConnectionClosed`。
 
@@ -366,7 +366,7 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 | `tool_resources.json` | 任务进度、剪贴板展示等 |
 | `approval_mode.es` | easysave `v1` key保存的 `SessionApprovalModeState`；BaseModel直接保存并通过 stable type token重建，缺失、缺 key、损坏或类型错误时回退手动模式；模式变更先更新内存再尽力保存，安全写入与 `.bak`由 easysave负责 |
 
-归档保留 `approval_mode.es`；永久删除会话目录时一并删除，随后清理 Store缓存。自动延续、单源分支和多父合并不会复制该文件，新会话统一写入手动模式。
+归档保留 `approval_mode.es`；永久删除会话目录时一并删除，随后清理 Store缓存。单源分支和多父合并不会复制来源模式，新会话统一写入手动模式；上下文超限产生的自动延续会继承来源主会话的当前模式。
 
 全局会话索引：`workspace/sessions/_index.json`。
 

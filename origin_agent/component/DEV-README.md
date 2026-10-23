@@ -268,7 +268,7 @@ Delete逐paths目标记录，失败项继续原错误结果，成功项在catch�
 - `ApprovalModeStore` 由 Application唯一持有，物理根为 sessions 目录；每个主会话使用 `approval_mode.es`，文件内逻辑根 key 为 `v1`，根对象为直接保存的 `SessionApprovalModeState`。
 - `get_mode()` 首次访问时通过 `load(v1, make_config(path), SessionApprovalModeState, ignore_missing_fields=True)` 惰性重建真实 BaseModel实例；旧会话缺文件静默使用手动模式，缺 key、损坏、类型 token错误、根类型或 `mode`类型错误记录 warning 后回退手动模式。
 - `set_mode()` 在业务 `RLock` 内先更新内存，再把 `SessionApprovalModeState`实例直接传给 easysave `save()`，禁止 `.model_dump()`降级。easysave负责路径锁、前置 `.bak`、同目录临时文件、`fsync`和原子替换；任何写入异常只记录会话 ID、目标模式、路径和堆栈，不回滚内存、不自动处理备份、不向前端报错。
-- `initialize_session()` 只接受新会话 ID并初始化手动模式，不提供来源会话复制能力。普通新会话、自动延续、单源分支、多父合并及首次创建“随意聊聊”均使用该入口。
+- `initialize_session()` 只接受新会话 ID并初始化手动模式；普通新会话、单源分支、多父合并及首次创建“随意聊聊”均使用该入口。上下文超限产生自动延续后，由 `inherit_session()` 显式继承来源主会话的当前模式；该继承发生在新会话创建后、来源会话归档前。
 - `forget_session()` 只清理缓存；`approval_mode.es` 随永久删除的会话目录统一清理。归档不删除状态。
 - `reset_all_non_manual_modes()` 仅为兼容显式调用保留，扫描 sessions 直接子目录并复用同一会话 ID校验与尽力写入规则；sessions 根不存在时不调用 `save()`，避免创建孤立目录。
 - `entity/typeref.py` 为持久化根登记 `v1::SessionApprovalModeState` stable type token；ES key版本与类型 token版本分别使用独立常量，职责不得混用。

@@ -361,9 +361,11 @@ async def terminate_and_rotate_session(
         )
 
     from system.application import Application
+    from interface.approval_system import IApprovalSystem
     from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
     variable_service = Application.current().get_system(IAgentspaceService).session_variables
+    approval_mode_store = Application.current().get_system(IApprovalSystem).mode_store
     if not session_manager.exists(old_sid) or session_manager.is_session_deleting(old_sid):
         raise MetadataGenerationError("Source session no longer exists")
     try:
@@ -382,6 +384,7 @@ async def terminate_and_rotate_session(
             role=Role.USER,
             loop_meta=loop_meta,
         )
+        approval_mode_store.inherit_session(old_sid, new_sid)
         with variable_service.install_inheritance(inheritance, new_sid):
             session_store.copy_active_profile_name(old_sid, new_sid)
             session_store.copy_loaded_toolsets(old_sid, new_sid)

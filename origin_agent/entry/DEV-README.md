@@ -266,7 +266,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 
 1. `LoopSessionManager.is_context_over_limit()` 检测超限。
 2. `rotate_session_for_continuation()`先调用 `get_system(ISessionMetadataService).ensure_summary()`；摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
-3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮），完成 History 初始化后才归档旧会话。
+3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮）；新会话创建后、旧会话归档前，由 `ApprovalModeStore.inherit_session()` 继承旧主会话当前的审批模式；完成 History 初始化后才归档旧会话。
 4. 迁移运行态资源（工具副作用、cron 任务）。
 5. 前端通过 `session_rotated` 系统消息刷新。
 
