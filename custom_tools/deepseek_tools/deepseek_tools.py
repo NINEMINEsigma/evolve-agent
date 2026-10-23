@@ -21,7 +21,8 @@ from ._deepseek_constants import (
 )
 from entity.constant import TOOL_INTERNAL_ARG_KEYS
 from entity.puretype import ToolAvailability, ToolDangerLevel
-from system.llm_profile_store import LLMProfileStore, ProfileNotFoundError
+from interface.llm_profile_store import ILLMProfileStore
+from system.llm_profile_store import ProfileNotFoundError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -98,7 +99,7 @@ def _build_endpoint(base_url: str, operation: Literal["search", "fetch"]) -> str
 
 def _read_connection(context: ToolContext, profile_name: str) -> tuple[str, str]:
     """Read immutable connection values under the existing Profile Store lock."""
-    store = context.app.get_system(LLMProfileStore)
+    store = context.app.get_system(ILLMProfileStore)
     try:
         with store.locked():
             profile = store.get_profile(profile_name)

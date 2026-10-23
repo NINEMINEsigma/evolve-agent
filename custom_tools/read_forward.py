@@ -9,7 +9,7 @@
 收到的多模态块，无法支持时自行抛出异常，本工具不假定客户端能力。
 
 注册入口为模块顶层 ``TOOLSET`` 对象，由 ToolDiscoverySystem 发现并注册。路径解析通过
-``Application.current().get_system(Sandbox)`` 获取共享的 ``Sandbox`` 实例。
+``Application.current().get_system(ISandbox)`` 获取共享的沙盒实例。
 """
 
 from __future__ import annotations
@@ -196,15 +196,15 @@ async def _handle_read_forward(
 
     # ── 步骤 c：按 profile_name 从共享根对象取得 LLMProfile ──
     from system.application import Application
-    from system.runtime import RuntimeSystem
+    from interface.runtime_system import IRuntimeSystem
     ctx = (
         context.runtime_context
         if context is not None
-        else Application.current().get_system(RuntimeSystem).context
+        else Application.current().get_system(IRuntimeSystem).context
     )
     try:
-        from system.llm_profile_store import LLMProfileStore
-        ref_profile = Application.current().get_system(LLMProfileStore).get_profile(profile_name)
+        from interface.llm_profile_store import ILLMProfileStore
+        ref_profile = Application.current().get_system(ILLMProfileStore).get_profile(profile_name)
     except LookupError as exc:
         return tool_error(str(exc), profile_name=profile_name)
 
