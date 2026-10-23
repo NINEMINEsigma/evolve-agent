@@ -87,6 +87,8 @@ class AnthropicLLMClient(BaseLLMClient):
         system: str,
         tools: Optional[list[dict[str, Any]]] = None,
         stream: bool = False,
+        *,
+        require_tool_call: bool = False,
     ) -> dict[str, Any]:
         """构造 Anthropic Messages API 的请求参数。"""
         kwargs: dict[str, Any] = {
@@ -100,6 +102,8 @@ class AnthropicLLMClient(BaseLLMClient):
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = tools
+        if require_tool_call:
+            kwargs["tool_choice"] = {"type": "any"}
         return kwargs
 
     # -- 公开 API ----------------------------------------------------------
@@ -112,6 +116,7 @@ class AnthropicLLMClient(BaseLLMClient):
         character: str = "",
         *,
         last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False,
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
@@ -122,6 +127,7 @@ class AnthropicLLMClient(BaseLLMClient):
             return await self._chat_non_stream(
                 messages, tools, response_format, character,
                 last_user_message=last_user_message,
+                require_tool_call=require_tool_call,
             )
         except Exception as exc:
             if _is_streaming_required_error(exc):
@@ -133,6 +139,7 @@ class AnthropicLLMClient(BaseLLMClient):
                     self.chat_stream(
                         messages, tools, response_format, character,
                         last_user_message=last_user_message,
+                        require_tool_call=require_tool_call,
                     )
                 )
             raise
@@ -145,6 +152,7 @@ class AnthropicLLMClient(BaseLLMClient):
         character: str = "",
         *,
         last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False,
     ) -> LLMResponse:
         """发送非流式聊天请求，返回结构化响应。
 
@@ -157,7 +165,8 @@ class AnthropicLLMClient(BaseLLMClient):
         )
         anthropic_tools = _openai_tools_to_anthropic(tools) if tools else None
         kwargs = self._build_kwargs(
-            anthropic_messages, system, anthropic_tools, stream=False
+            anthropic_messages, system, anthropic_tools, stream=False,
+            require_tool_call=require_tool_call,
         )
 
         for attempt in range(LLM_RETRY_COUNT):
@@ -203,6 +212,7 @@ class AnthropicLLMClient(BaseLLMClient):
         character: str = "",
         *,
         last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -230,7 +240,8 @@ class AnthropicLLMClient(BaseLLMClient):
             )
             try:
                 kwargs = self._build_kwargs(
-                    resume_messages, system, anthropic_tools, stream=True
+                    resume_messages, system, anthropic_tools, stream=True,
+                    require_tool_call=require_tool_call,
                 )
                 stream = await self._client.messages.create(**kwargs)
                 async with stream:

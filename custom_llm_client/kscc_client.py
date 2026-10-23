@@ -82,9 +82,14 @@ class KSCCAnthropicLLMClient(AnthropicLLMClient):
         system: str,
         tools: Optional[list[dict[str, Any]]] = None,
         stream: bool = False,
+        *,
+        require_tool_call: bool = False,
     ) -> dict[str, Any]:
         """在父类参数基础上追加 KSCC 专用查询参数，并适配服务端约束。"""
-        kwargs = super()._build_kwargs(messages, system, tools, stream)
+        kwargs = super()._build_kwargs(
+            messages, system, tools, stream,
+            require_tool_call=require_tool_call,
+        )
         kwargs["extra_query"] = dict(_KSCC_EXTRA_QUERY)
         # KSCC 代理的 kimi-k2.6 等模型要求 temperature 必须为 1
         if "kimi-k2.6" in self._model:

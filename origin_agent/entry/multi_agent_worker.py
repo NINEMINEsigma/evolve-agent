@@ -217,7 +217,7 @@ class MultiAgentWorker:
             response_characters=response_characters,
         )
 
-    async def run(self) -> WorkerResult:
+    async def run(self, *, require_tool_call: bool = False) -> WorkerResult:
         """执行完整的 tool loop + DSL 路由标签输出。
 
         流程:
@@ -234,6 +234,7 @@ class MultiAgentWorker:
         stream_id = ""  # 兜底初值：若循环体未执行，_error_result 会自动生成
         self._turn_counter.value = 0
         self._collected_metrics = []
+        first_request_pending = require_tool_call
         while self._turn_counter.value < MAX_TOOL_TURNS:
             self._loop.loop.app.get_system(IRuntimeSystem).require_running()
             turn = self._turn_counter.value
@@ -290,12 +291,15 @@ class MultiAgentWorker:
                 )
 
             try:
+                request_requires_tool = first_request_pending
+                first_request_pending = False
                 resp = await self._stream_consumer.consume(
                     self._loop.loop.session_id,
                     request.messages,
                     self._tools,
                     stream_id,
                     on_first_chunk=_mark_streaming,
+                    require_tool_call=request_requires_tool,
                 )
             except asyncio.CancelledError:
                 # 强制中断：固化当前参与Agent已显示的部分内容，然后上抛，

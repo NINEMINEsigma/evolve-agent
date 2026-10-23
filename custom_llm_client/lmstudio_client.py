@@ -75,11 +75,14 @@ class LMStudioLLMClient(OpenAILLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
         stream: bool = False,
         response_format: Optional[dict[str, str]] = None,
+        *,
+        require_tool_call: bool = False,
     ) -> dict[str, Any]:
         """在父类参数基础上合并 system 消息到开头。"""
         merged = _merge_leading_system(messages)
         return super()._build_kwargs(
             merged, tools, stream, response_format,
+            require_tool_call=require_tool_call,
         )
 
 

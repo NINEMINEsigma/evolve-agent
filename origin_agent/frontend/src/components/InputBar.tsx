@@ -11,6 +11,7 @@ import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
 import { selectChatRenderRows, useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { isMainSessionBusyForToolCall, TOOL_CALL_REQUIREMENT_LABELS } from "../features/chat/toolCallRequirement";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 
 // ── 左下功能组按钮间距（CSS .input-bar-actions-left gap 定值） ──
@@ -186,6 +187,12 @@ export default function InputBar({
       ? { kind: "ask", ask: pendingAsks[0] }
       : null;
   const morphActive = morphItem !== null;
+  const sendsToMain = targetSessions.length === 0 || targetSessions.includes("main");
+  const requireToolCallHint = !sendsToMain
+    ? TOOL_CALL_REQUIREMENT_LABELS.subagentHint
+    : isMainSessionBusyForToolCall(runtime)
+      ? TOOL_CALL_REQUIREMENT_LABELS.busyHint
+      : TOOL_CALL_REQUIREMENT_LABELS.idleHint;
   const queueExtra = pendingConfirms.length + pendingAsks.length - (morphItem ? 1 : 0);
 
   // ask 分页草稿：按题保存纯文本草稿（当前题实时草稿在 RichInput，切页时写入字典）；
@@ -590,6 +597,19 @@ export default function InputBar({
               llmMaxContextTokens={llmMaxContextTokens}
               tokenUsage={tokenUsage}
             />
+            <button
+              className="require-tool-call-btn"
+              type="button"
+              aria-label={TOOL_CALL_REQUIREMENT_LABELS.label}
+              aria-pressed={runtime.requireToolCall}
+              data-tooltip={`${TOOL_CALL_REQUIREMENT_LABELS.label} · ${requireToolCallHint}`}
+              disabled={!hasActiveProfile || morphActive || runtime.sessionId !== sessionId}
+              onClick={() => runtime.setRequireToolCall(!runtime.requireToolCall)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M14.7 6.3a5 5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a5 5 0 0 0 6.4-6.4L15 12l-3-3 2.7-2.7Z" />
+              </svg>
+            </button>
             <button className="send-btn" onClick={onSend} disabled={morphActive || !hasActiveProfile} type="button">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="12" y1="19" x2="12" y2="5" />

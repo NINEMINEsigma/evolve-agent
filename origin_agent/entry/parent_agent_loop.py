@@ -310,6 +310,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         character_name: str = USER_CHARACTER_NAME,
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
+        require_tool_call: bool = False,
         **kwargs
         ) -> str:
         sid = self.session_id
@@ -361,6 +362,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                     reply = await self._run_tool_loop(
                         sid, messages, user_message, activity_id=active_id,
+                        require_tool_call=require_tool_call,
                     )
                     logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
                     return reply
@@ -435,9 +437,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         messages: list[BaseMessage],
         user_message: MessageContent,
         *,
-        activity_id: str
+        activity_id: str,
+        require_tool_call: bool = False
         ) -> str:
         """执行 LLM 工具调用循环。"""
+        first_request_pending = require_tool_call
         round_id = self.begin_agentspace_round(self.current_character_agent)
 
         turn: RefWrapper[int] = RefWrapper(value=0)
@@ -504,12 +508,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
 
                 try:
+                    request_requires_tool = first_request_pending
+                    first_request_pending = False
                     resp = await self._stream_consumer.consume(
                         sid, request.messages,
                         self._get_tool_definitions(),
                         stream_id,
                         last_user_message=request.last_user_message,
                         on_first_chunk=_mark_streaming,
+                        require_tool_call=request_requires_tool,
                     )
                 except asyncio.CancelledError:
                     # 强制中断收尾：保留已显示文字并补发 cancelled。
@@ -853,6 +860,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """由会话消息队列驱动一轮回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
+        require_tool_call = any(item.payload.require_tool_call for item in items)
+        if require_tool_call and len(items) != 1:
+            raise LifecycleFailure("A required-tool input must occupy a single-message batch")
 
         activity_id = self.ensure_main_session_activity(
             activity_source_for_items([item.payload for item in items]),
@@ -939,6 +949,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         reply = await self._run_tool_loop(
                             sid, messages, "[queued-messages]",
                             activity_id=activity_id,
+                            require_tool_call=require_tool_call,
                         )
                     if reply:
                         await self._frontend_sink.emit_assistant_message(

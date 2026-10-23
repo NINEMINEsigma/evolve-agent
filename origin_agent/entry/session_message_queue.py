@@ -143,7 +143,10 @@ class SessionMessageQueue:
         while not self._input_buffer.frozen and self._runtime.state is ApplicationState.RUNNING:
             self._wakeup.clear()
             reservation_id = uuid.uuid4().hex
-            items = self._input_buffer.reserve_pending(reservation_id=reservation_id)
+            items = self._input_buffer.reserve_pending(
+                reservation_id=reservation_id,
+                isolate=lambda item: item.require_tool_call,
+            )
             if not items:
                 await self._wakeup.wait()
                 continue

@@ -255,3 +255,10 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 ## System 接口槽位约定（2026-10-20）
 
 `ToolRegistry`、`ToolDiscoverySystem` 和 `MCPSystem` 分别继承 `IToolRegistry`、`IToolDiscoverySystem` 和 `IMCPSystem`。工具发现使用 `IToolRegistry` 查询注册表，MCP 使用 `IMCPSystem` 作为运行期槽位；具体实现仍负责对象工具注册、发现记录和原生资源清理。抽象层不得通过具体 System 类型查询 Application。
+
+## 客户端单次工具选择契约（2026-10-23）
+
+BaseLLMClient.chat/chat_stream新增keyword-only `require_tool_call: bool = False`；true要求客户端以Provider原生工具选择参数请求任意至少一个工具调用，false保持原请求默认行为。值属于一次逻辑模型调用，客户端不得写入共享实例/全局配置；其内部网络重试、流式续传、非流式到流式回退必须显式保留同一参数。工厂接口不变，外部客户端实现及派生请求构造须同步接收并透传新关键字，不使用反射或静默剥离来兼容旧签名。
+
+EmptyResponseRetryClient两种方法在每次底层调用中保留参数，仍只按原条件重试空响应；StreamConsumer负责从Loop显式转交，不新增响应违约检测、能力探测、补救prompt或重试预算。服务不支持参数或配置冲突时走既有错误出口；工具执行、审批和权限不由此契约保证。子会话及辅助模型默认false，History/Profile/easysave结构不变。源码已实施，尚未运行验证。
+

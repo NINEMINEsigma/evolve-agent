@@ -59,7 +59,8 @@ class EmptyResponseRetryClient(BaseLLMClient):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None
+        last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False
         ) -> LLMResponse:
         """只对正常返回的空结果重试，其他结果和异常保持原语义。"""
         for attempt in range(LLM_EMPTY_RESPONSE_MAX_ATTEMPTS):
@@ -69,6 +70,7 @@ class EmptyResponseRetryClient(BaseLLMClient):
                 response_format=response_format,
                 character=character,
                 last_user_message=last_user_message,
+                require_tool_call=require_tool_call,
             )
             if response.content or response.tool_calls:
                 return response
@@ -84,7 +86,8 @@ class EmptyResponseRetryClient(BaseLLMClient):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None
+        last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False
         ) -> AsyncIterator[StreamChunk]:
         """透传实时输出，在自然结束且没有正文/工具时重新请求原始输入。
 
@@ -107,6 +110,7 @@ class EmptyResponseRetryClient(BaseLLMClient):
                     response_format=response_format,
                     character=character,
                     last_user_message=last_user_message,
+                    require_tool_call=require_tool_call,
                 ),
             )
             async with aclosing(stream):

@@ -1359,10 +1359,8 @@ async def regenerate_response(session_id: str, req: Request):
             error="agent loop not ready",
         )
 
-    # 并发防护：处理中拒绝重新生成
-    # NOTE: 存在窄 TOCTOU 窗口（is_processing 检查为 False 到 process_message
-    # 取锁之间），属尽力防护而非强互斥；强互斥需非阻塞 TryLock，超出本任务范围。
-    if loop.loop.is_processing():
+    # 尽力防护：包括已登记活动快照的排队/准备阶段；不是跨请求强互斥。
+    if loop.is_active():
         result = SessionRegenerateResult(
             regenerate=False,
             session_id=session_id,
@@ -1383,12 +1381,27 @@ async def regenerate_response(session_id: str, req: Request):
             error = "invalid message_index"
         elif "llm_profile_name" in detail:
             error = "invalid llm_profile_name"
+        elif "require_tool_call" in detail:
+            error = "invalid require_tool_call"
         else:
             error = "invalid JSON body"
         return HTMLResponse(
             json.dumps({"regenerate": False, "error": error}, ensure_ascii=False),
             media_type="application/json",
             status_code=400,
+        )
+
+    # 请求体解析期间允许其他输入进入，修改 Profile/History 前复核活动状态。
+    if loop.is_active():
+        result = SessionRegenerateResult(
+            regenerate=False,
+            session_id=session_id,
+            error="session is processing",
+        )
+        return HTMLResponse(
+            result.model_dump_json(exclude_none=True),
+            media_type="application/json",
+            status_code=409,
         )
 
     message_index = request.message_index
@@ -1444,6 +1457,7 @@ async def regenerate_response(session_id: str, req: Request):
             response_characters=result.response_characters,
             activity_source=MainSessionActivitySource.regenerate,
             activity_id=activity_id,
+            require_tool_call=request.require_tool_call,
         )
     finally:
         # 释放本次登记，包含取消和通知编码失败，不吞掉原异常。

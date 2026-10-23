@@ -67,13 +67,17 @@ class BaseLLMClient(ABC):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None
+        last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False
         ) -> LLMResponse:
         """发送聊天请求，返回完整结构化响应。
 
         *messages* 为 ``BaseMessage`` 对象列表，子类在发送前自行转换为 wire format。
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
         *response_format* 用于指定结构化输出格式（如 json_object）。
+        *require_tool_call* 为 true 时使用 Provider 原生参数要求本次逻辑请求至少发出一个
+        任意工具调用；false 保持 Provider 默认行为。不检查响应或保证工具执行成功，
+        同次请求内部重试必须保留该值，所有客户端实现必须接收此关键字。
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
 
@@ -90,9 +94,13 @@ class BaseLLMClient(ABC):
         response_format: dict[str, str] | None = None,
         character: str = "",
         *,
-        last_user_message: CharacterConversationMessage | None = None
+        last_user_message: CharacterConversationMessage | None = None,
+        require_tool_call: bool = False
         ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
+
+        *require_tool_call* 与 chat 相同，仅作用于本次逻辑调用；内部续传保留该值，
+        不增加响应检查、工具执行成功保证或专门重试。
 
         实现应支持 content 增量、reasoning 增量、tool_calls 累积输出，
         并在流结束时发出带 ``finish_reason`` 的 chunk。

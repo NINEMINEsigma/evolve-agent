@@ -56,6 +56,9 @@ export interface ChatRuntimeState {
   liveVersion: number;
   currentStreamId: string | null;
   processing: boolean;
+  requireToolCall: boolean;
+  setRequireToolCall: (enabled: boolean) => void;
+  clearRequireToolCall: (sessionId: string) => void;
   mainSessionActivity: MainSessionActivitySnapshot | null;
   draftHtml: string;
   draftText: string;
@@ -139,6 +142,7 @@ const initialState = {
   liveVersion: 0,
   currentStreamId: null as string | null,
   processing: false,
+  requireToolCall: false,
   mainSessionActivity: null as MainSessionActivitySnapshot | null,
   draftHtml: "",
   draftText: "",
@@ -373,12 +377,15 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
 
   beginSession: (sessionId) => {
     const nextGeneration = get().generation + 1;
-    set({
+    set((state) => ({
       ...initialState,
       sessionId,
       generation: nextGeneration,
+      // 同会话历史重建保留当前选择；真正切换或初次进入才关闭。
+      requireToolCall: Boolean(state.sessionId) && state.sessionId === sessionId
+        ? state.requireToolCall : false,
       loadedHistoryIndices: new Set<number>(),
-    });
+    }));
     return nextGeneration;
   },
 
@@ -1247,6 +1254,10 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     };
   }),
   setProcessing: (processing) => set({ processing }),
+  setRequireToolCall: (requireToolCall) => set({ requireToolCall }),
+  clearRequireToolCall: (sessionId) => {
+    if (get().sessionId === sessionId) set({ requireToolCall: false });
+  },
   setDraft: (draftHtml, draftText) => set({ draftHtml, draftText }),
 
   addPendingMessage: (clientMessageId, content) => set((state) => ({

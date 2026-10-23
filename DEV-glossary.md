@@ -81,6 +81,7 @@
 | 运行时Profile | 多Agent参与者的运行时形态 | `AgentProfile` 类 |
 | 参与Agent | 多Agent模式主会话中的参与者（主Agent 必居其一） | — |
 | 工具循环 | LLM→工具调用→结果回写→LLM 轮次循环（上限 90） | `MAX_TOOL_TURNS` |
+| 强制调用工具 | 用户为下一次空闲主会话发送或重新生成选择的一次性要求：首次模型逻辑请求必须发出任意至少一个工具调用；多Agent模式各初始响应者分别一次。请求发出后关闭，resume、忙碌期间补充发送及工具链续轮不使用、不消费。不是审批模式，不保证工具执行成功，依赖模型服务的原生参数契约 | require tool call / `require_tool_call` |
 | 级联 | 多Agent模式 `response_characters` 驱动的串行响应队列调度 | `_cascade` |
 
 ---

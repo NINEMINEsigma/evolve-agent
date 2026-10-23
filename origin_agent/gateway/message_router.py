@@ -294,6 +294,7 @@ class MessageRouter:
                 visible_characters=msg.visible_characters,
                 response_characters=msg.response_characters,
                 llm_profile_name=msg.llm_profile_name,
+                require_tool_call=msg.require_tool_call and not loop.is_active(),
             )
             main_sequence = loop.loop.message_queue.accept(item, ready=False)
 

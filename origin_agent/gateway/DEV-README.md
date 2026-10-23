@@ -384,3 +384,12 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 
 `SessionManager` 和 `GatewaySystem` 分别使用 `ISessionManager` 与 `IGatewaySystem` 作为 Application 装配槽位。Gateway 路由、会话清理、动态端点和前端连接查询均按接口取得唯一实例；GatewaySystem 仍最后唤醒、首先注销，SessionManager 的输入冻结、轮次停止和 History 刷新顺序不变。
 
+## 单次强制调用工具入站协议（2026-10-23）
+
+`Message`（user_message）与 `SessionRegenerateRequest` 新增 `require_tool_call: StrictBool = False`；省略保持自主选择，字符串/数字/null不转换为开启。该参数只属于当次操作，不写History、Profile或easysave。USER_MESSAGE仅为主目标创建QueuedMessage时传递，子会话转发不携带；服务端当前is_active为真时将其固定为false，正常接收补充正文，不将false提升为true。
+
+重新生成在请求体解析前后用is_active尽力拒绝忙碌操作（409），字段错误返回既有400结构及 `invalid require_tool_call`，之后显式传给process_message。值来自当前请求，不读历史旧选择。resume协议及工具链后续请求不启用此要求。多Agent用户初始指定响应者各自首次模型请求强制一次。
+
+is_active只覆盖已经登记活动快照的排队/准备窗口；accept登记到主loop唤醒之间仍可能短暂为false。活动复检不是强互斥，不修复所有既有History截断并发风险。前端请求发出即消费，不等待服务端确认；前后端状态延迟导致服务端按普通消息处理时也不恢复选择。已实施源码和文档，未运行校验或应用。
+
+

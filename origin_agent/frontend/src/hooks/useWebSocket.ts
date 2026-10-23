@@ -27,6 +27,11 @@ import { generateUUID, parseToolResult } from "../utils";
 import { chatRuntimeController } from "../features/chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { isRegenerateTrimPayload } from "../features/chat/regenerateTrim";
+import {
+  isMainSessionBusyForToolCall,
+  shouldRequireToolCall,
+  TOOL_CALL_REQUIREMENT_LABELS,
+} from "../features/chat/toolCallRequirement";
 import { hasMountedChatList } from "../features/chat/chatViewport";
 import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
@@ -696,21 +701,42 @@ export function useWebSocket() {
     const content: MessageContent = blocks.length === 1 && blocks[0].type === "text"
       ? blocks[0].text
       : blocks;
+    const requireToolCall = shouldRequireToolCall(runtime, sendsToMain);
     const clientMessageId = generateUUID();
     runtime.addPendingMessage(clientMessageId, content);
     if (sendsToMain) {
       runtime.beginOptimisticMainSessionActivity(clientMessageId, "user_message");
     }
-    currentConnection.send({
-      type: WS_OUT.USER_MESSAGE,
-      content,
-      target_sessions: targetSessions,
-      client_message_id: clientMessageId,
-      client_info: collectClientInfo(),
-      llm_profile_name: profileName ?? "",
-      ...(visibleCharacters ? { visible_characters: visibleCharacters } : {}),
-      ...(responseCharacters ? { response_characters: responseCharacters } : {}),
-    });
+    const releaseUnsentMessage = () => {
+      const current = useChatRuntimeStore.getState();
+      if (current.sessionId !== sid) return;
+      current.removePendingMessages([clientMessageId]);
+      if (sendsToMain) {
+        current.cancelOptimisticMainSessionActivity(`local:${clientMessageId}`);
+      }
+    };
+    let sent: boolean;
+    try {
+      sent = currentConnection.send({
+        type: WS_OUT.USER_MESSAGE,
+        content,
+        target_sessions: targetSessions,
+        client_message_id: clientMessageId,
+        client_info: collectClientInfo(),
+        llm_profile_name: profileName ?? "",
+        require_tool_call: requireToolCall,
+        ...(visibleCharacters ? { visible_characters: visibleCharacters } : {}),
+        ...(responseCharacters ? { response_characters: responseCharacters } : {}),
+      });
+    } catch (cause) {
+      releaseUnsentMessage();
+      throw cause;
+    }
+    if (!sent) {
+      releaseUnsentMessage();
+      return;
+    }
+    if (requireToolCall) runtime.clearRequireToolCall(sid);
     runtime.setDraft("", "");
     currentUpload.setPendingImages([]);
     currentUpload.setPendingAudios([]);
@@ -877,6 +903,15 @@ export function useWebSocket() {
       });
       return;
     }
+    const runtime = useChatRuntimeStore.getState();
+    if (isMainSessionBusyForToolCall(runtime)) {
+      sessionRef.current?.showOperationNotice({
+        kind: "warning",
+        message: TOOL_CALL_REQUIREMENT_LABELS.busyRegenerateNotice,
+      });
+      return;
+    }
+    const requireToolCall = runtime.requireToolCall;
     const sequence = ++regenerateRequestSequenceRef.current;
     const localId = `regenerate-${sequence}-${messageIndex}-${Date.now()}`;
     const optimisticActivityId = `local:${localId}`;
@@ -903,11 +938,17 @@ export function useWebSocket() {
       }
     };
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
+      const responsePromise = fetch(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message_index: messageIndex, llm_profile_name: profileName }),
+        body: JSON.stringify({
+          message_index: messageIndex,
+          llm_profile_name: profileName,
+          require_tool_call: requireToolCall,
+        }),
       });
+      if (requireToolCall) runtime.clearRequireToolCall(sid);
+      const response = await responsePromise;
       const data = await response.json().catch(() => ({}));
       if (!ownsRequest()) return;
       if (!response.ok || !data.regenerate) {

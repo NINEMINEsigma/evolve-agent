@@ -129,7 +129,8 @@ class StreamConsumer:
         stream_id: str,
         *,
         last_user_message: CharacterConversationMessage | None = None,
-        on_first_chunk: Callable[[str], Awaitable[None]] | None = None
+        on_first_chunk: Callable[[str], Awaitable[None]] | None = None,
+        require_tool_call: bool = False
         ) -> LLMResponse:
         """消费流式响应，返回聚合后的 LLMResponse。"""
         llm = self._llm
@@ -157,6 +158,7 @@ class StreamConsumer:
         stream = llm.chat_stream(
             messages, tools=tools, character=self._character_name,
             last_user_message=last_user_message,
+            require_tool_call=require_tool_call,
         )
         idle_timeout = LLM_STREAM_IDLE_TIMEOUT
         next_task: asyncio.Task | None = None

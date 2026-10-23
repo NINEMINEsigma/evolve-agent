@@ -22,7 +22,7 @@ export interface WebSocketConnection {
   connected: boolean;
   setStatus: React.Dispatch<React.SetStateAction<string>>;
   connect: (resumeSid?: string) => Promise<void>;
-  send: (payload: unknown) => void;
+  send: (payload: unknown) => boolean;
   disconnect: () => void;
   setHandlers: (handlers: WebSocketConnectionHandlers) => void;
   manualRef: React.RefObject<boolean>;
@@ -58,10 +58,11 @@ export function useWebSocketConnection(): WebSocketConnection {
     handlersRef.current = handlers;
   }, []);
 
-  const send = useCallback((payload: unknown) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(payload));
-    }
+  const send = useCallback((payload: unknown): boolean => {
+    const socket = wsRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(payload));
+    return true;
   }, []);
 
   const getOrCreateConnToken = useCallback((): string => {

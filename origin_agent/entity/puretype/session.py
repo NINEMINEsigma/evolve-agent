@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, Literal
 
 from ._base import MessageContent, TypedMessageContent
@@ -57,6 +57,7 @@ class SessionRegenerateRequest(BaseModel):
 
     message_index: int | None = None
     llm_profile_name: str
+    require_tool_call: StrictBool = False
 
 
 class SessionMergeRequest(BaseModel):
@@ -407,6 +408,8 @@ class QueuedMessage(BaseModel):
     response_characters: list[str] | None = None
     # 前端消息保留自己的 Profile 名称；None 仅供内部消息表示沿用当前配置。
     llm_profile_name: str | None = None
+    # 单次输入的生成要求，不投影到消息或工具结果正文。
+    require_tool_call: StrictBool = False
     # SP-5 bugfix：回显移到消费侧，client_message_id 随消息携带供 _append_queued_messages 回显
     client_message_id: str | None = None
 

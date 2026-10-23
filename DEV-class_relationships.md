@@ -1531,6 +1531,17 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 完整部署后应由用户重启对应进程再验收，避免旧模块/异常类对象残留；运行时副本合并复制及已生成技能不由本次源码编辑自动清理或覆盖。当前仅源码实施与只读静态审阅，未运行校验、实际导入、构建或应用，运行验收由用户执行。
 
+### 单次强制调用工具的状态归属（2026-10-23）
+
+- 前端ChatRuntimeState新增 `requireToolCall` 和set/同会话clear动作，唯一Store持有；beginSession同非空ID原子保留当前值，不同ID/reset关闭，不持久化。Controller同会话历史重建复用此入口，不另存快照。
+- Message、SessionRegenerateRequest、QueuedMessage追加默认false的StrictBool控制字段，仅请求/输入投递材料持有，不进入正式消息图、History、Profile、typeref或easysave。
+- ParentAgentLoop/MultiAgentWorker通过方法参数和局部first_request_pending控制首次调用；MultiAgentLoop._cascade通过局部pending_required_characters跟踪初始角色各一次。无新增Loop protected字段、AgentProfile字段或跨类私有状态读写。
+- InputDeliveryBuffer.reserve_pending增加可选isolate/stop_before同步纯谓词；SessionMessageQueue仅传前者，ToolInputReservation仅传后者。后者在ACCEPTED/RESERVED状态跳过前检查，不越过未提交强制输入；候选全部选好后才提交预订，异常不遗留部分状态。默认无谓词及关闭接口保持。
+- StreamConsumer、BaseLLMClient、EmptyResponseRetryClient公开接口增加默认false的keyword-only参数。客户端持有者/工厂、Application的20个System接口槽位和连接所有权不变，参数不保存到共享客户端。resume与工具链续轮默认false，辅助模型/子会话不启用。
+
+上述为源码及文档实施记录，未运行校验、构建或应用验收。服务原生工具选择前提、活动快照延迟与既有重新生成并发风险仍保留。
+
+
 
 
 

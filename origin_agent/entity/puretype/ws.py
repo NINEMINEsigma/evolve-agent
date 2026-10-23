@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Annotated, Any, Literal
 
 from .agentspace import AgentspaceEvent
@@ -195,6 +195,8 @@ class Message(BaseModel):
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
     # USER_MESSAGE/重新生成：前端当前选择的 Profile 名称；空字符串表示无配置。
     llm_profile_name: str | None = None
+    # 仅当次主会话发送的首次模型请求使用，不进入 History。
+    require_tool_call: StrictBool = False
     # LLM_PROFILE_CHANGED：Profile 名称变更或删除的全局通知。
     operation: str | None = None
     old_name: str | None = None

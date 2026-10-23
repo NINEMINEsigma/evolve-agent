@@ -42,7 +42,7 @@ from entity.constant import (
 from util.pathutils import get_templates_dir
 from util.templates import render_multi_agent_prompt
 from system.session_store import SessionStore
-from system.lifecycle import ApplicationStoppingError, requires_lifecycle_propagation
+from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
 from system.prompt import (
     build_dynamic_sandbox_spaces_block,
     build_session_chat_style_block,
@@ -438,6 +438,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         response_characters: list[str] | None = None,
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
+        require_tool_call: bool = False,
         **kwargs
         ) -> str:
         """处理用户消息入口；整个串行级联共享一次主会话活动。"""
@@ -488,7 +489,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                             self.session_id, _visible,
                         )
 
-                    await self._cascade(_response, activity_id=active_id)
+                    await self._cascade(
+                        _response, activity_id=active_id,
+                        require_tool_call=require_tool_call,
+                    )
 
                     if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
                         logger.warning(
@@ -542,6 +546,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """由会话消息队列驱动一轮多Agent回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
+        require_tool_call = any(item.payload.require_tool_call for item in items)
+        if require_tool_call and len(items) != 1:
+            raise LifecycleFailure("A required-tool input must occupy a single-message batch")
 
         activity_id = self.ensure_main_session_activity(activity_source_for_items([item.payload for item in items]))
         current_task = asyncio.current_task()
@@ -610,7 +617,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         )
                         if cascade_chars == [ALL_AGENTS_CHARACTER_REF_NAME]:
                             cascade_chars = list(self._agent_names)
-                        await self._cascade(cascade_chars, activity_id=activity_id)
+                        await self._cascade(
+                            cascade_chars, activity_id=activity_id,
+                            require_tool_call=require_tool_call,
+                        )
                         if (
                             self._token_record.prompt_tokens > 0
                             and self._is_context_over_limit()
@@ -703,7 +713,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self,
         response_characters: list[str],
         *,
-        activity_id: str
+        activity_id: str,
+        require_tool_call: bool = False
         ) -> None:
         """串行动态队列级联调度。
 
@@ -741,6 +752,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             return
 
         queue: deque[str] = deque(valid_chars)
+        pending_required_characters = set(valid_chars) if require_tool_call else set()
         step: int = 0
         max_steps: int = len(self._agents) * MULTI_AGENT_MAX_CASCADE_DEPTH
 
@@ -780,10 +792,13 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
             # ── 执行单个 Agent ──
             try:
+                agent_requires_tool = char in pending_required_characters
+                pending_required_characters.discard(char)
                 result = await self._run_single_agent(
                     char,
                     activity_id=activity_id,
                     is_final_round=is_final,
+                    require_tool_call=agent_requires_tool,
                 )
             except asyncio.CancelledError:
                 # 强制中断：不启动后续参与Agent，不追加路由结果，直接退出级联
@@ -933,7 +948,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         character_name: str,
         *,
         activity_id: str,
-        is_final_round: bool = False
+        is_final_round: bool = False,
+        require_tool_call: bool = False
         ) -> WorkerResult:
         """启动单个 Agent 的 tool loop + JSON 输出。
 
@@ -1020,7 +1036,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
             try:
-                result = await worker.run()
+                result = await worker.run(require_tool_call=require_tool_call)
             except asyncio.CancelledError:
                 # 强制中断：worker 内部已固化部分输出；此处聚合 token 后上抛，
                 # _cascade 捕获 CancelledError 后停止级联，不启动后续参与Agent。

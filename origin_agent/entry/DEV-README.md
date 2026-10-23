@@ -15,7 +15,7 @@ entry/
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
 ├── agent_sink.py                 ← FrontendSink / ParentAgentSink（契约见 interface/agent_sink.py）
 ├── history_projection.py       ← History 到前端骨架/内容页/资源索引的唯一投影层
-├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称；drain_injected 额外返回 consumed_client_message_ids 供前端移除已排队徽章）
+├── session_message_queue.py      ← 主会话输入批次消费队列（普通输入保留合批与工具结果注入；强制调用工具输入独立成批）
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
 ├── tool_executor.py              ← ToolExecutor（统一工具调用执行器）
@@ -95,7 +95,7 @@ EvolveCode 的关闭请求在专属 after 中唯一消费；`PreparedToolResult`
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 在摘要保障成功后创建延续会话，最后才归档旧会话；摘要失败时保留当前会话与触发消息，追加系统状态并中断本轮。
 - 标题、标签与摘要生成：统一委托 `Application.current().get_system(ISessionMetadataService)`；全局元数据 Profile优先，未配置时按目标会话活动 Profile回退。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
-- LLM Profile：活动配置始终是 `Application.current().get_system(ILLMProfileStore)` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
+- LLM Profile：活动配置始终是 `Application.current().get_system(ILLMProfileStore)` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列按sequence选取连续ready输入，普通消息可以合批，执行前使用批次最后一个非 `None` 的 `llm_profile_name` 选择；强制调用工具输入单独成批，避免被更晚消息覆盖请求归属。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
 
 ### `MultiAgentLoop` / `MultiAgentWorker`
 
@@ -250,7 +250,7 @@ sequenceDiagram
 7. 对 tool_call 执行 `ToolExecutor.execute()`：按主会话策略检查审批模式、危险等级与白名单；手动模式 safe/write 直接执行，critical 在手动/脱手模式由用户审批，YOLO 全部免审批。该流程也适用于多Agent模式中的所有参与Agent，不使用独立子会话策略。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
-> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 将消息写入工具结果内部 `_queued_messages`，并返回 `consumed_client_message_ids`，经提交后工具后处理通道分离后分别透传到 `tool_result.embedded_messages` 与顶层字段 → 前端在工具调用卡片的独立嵌入消息区域展示消息并移除匹配徽章（不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
+> **延迟渲染与消费确认**：前端发送后先显示已排队徽章，空闲消费通过emit_user_message回显；工具链期间由ToolInputReservation把普通补充输入预订进结果的 `_queued_messages`，提交后通过 `embedded_messages` 和 `consumed_client_message_ids`展示并移除对应徽章。长期consumer为每批输入创建单次回复task，中断不销毁consumer。输入状态以InputDeliveryBuffer为唯一真相，预订不代表已追加或已保存，不重放已APPENDED输入。强制调用工具记录不进入工具结果，具体边界见本文件“单次强制调用工具与输入批次”一节。
 
 ---
 
@@ -379,3 +379,12 @@ ParentAgentLoop将最后用户消息按对象身份重连到请求副本，保�
 因为 `IFrontendSink` 是 `IAgentSink` 的子类型，从 System 槽位取出的 sink 可以直接传给任何声明 `IAgentSink` 的 Loop、StreamConsumer 或审批执行器，不需要 `cast`。新增事件方法只改 `IAgentSink` 一处，两个实现和所有调用方同时生效。
 
 WebSocket 关闭观察超时保留原连接引用并记录资源清理待完成。`StreamConsumer` 接收 Runtime 持有的清理登记器，用于跟踪既有延迟关闭任务；Provider 自身的非超时关闭错误仍按原日志策略处理。
+
+## 单次强制调用工具与输入批次（2026-10-23）
+
+ParentAgentLoop.process_message/_run_tool_loop与MultiAgentLoop.process_message/_cascade显式接收默认false的 `require_tool_call`。Parent与MultiAgentWorker.run以局部first_request_pending在首次consume之前取值并清除，不依赖可被工具重置的计数器；后续工具请求自主选择。多Agent级联在有效初始响应者过滤后建立局部集合，每角色首次实际启动前移除，动态提前仍保留一次，后续回调/新加入角色不强制。resume沿默认false路径，不从历史重建选择。随意聊聊通过继承生效，辅助模型/子会话默认false。
+
+QueuedMessage持有非持久StrictBool字段。普通消息仍可合批和进入工具结果；只有已固定为true的输入通过 `reserve_pending(isolate=...)` 单条成批，Parent/Multi在消费前断言该批次只有一条。ToolInputReservation使用 `stop_before`：对ACCEPTED或RESERVED记录在状态跳过、ready检查前识别强制屏障，禁止越过等锁的强制消息吸收更晚输入；已APPENDED记录不阻挡，普通RESERVED仍可跳过。忙碌补充发送固定false，不因此改为独立轮次。
+
+InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用谓词判断，再统一修改state与reservation_id；谓词异常不留下部分预订。新可选参数默认None，其他Inbox及关闭预订行为不变。控制字段不进入 `_queued_messages`、CharacterConversationMessage或History持久化，输入移交直接保留payload。只做源码及文档实施，未运行校验、构建或应用。
+

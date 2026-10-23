@@ -371,6 +371,7 @@ export interface NonStreamWSMessage {
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
   llm_profile_name?: string;                   // USER_MESSAGE：当前 Profile 名称，空字符串=无配置
+  require_tool_call?: boolean;                // 单次发送/重新生成要求，不进入聊天历史
   operation?: "renamed" | "deleted";          // LLM_PROFILE_CHANGED
   old_name?: string;
   new_name?: string | null;

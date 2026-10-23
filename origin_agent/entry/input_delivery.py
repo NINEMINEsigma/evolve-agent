@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
@@ -61,20 +61,40 @@ class InputDeliveryBuffer(Generic[PayloadT]):
                 raise LifecycleFailure("Only an accepted input can finish preparation")
             record.ready = True
 
-    def reserve_pending(self, *, reservation_id: str) -> list[InputDelivery[PayloadT]]:
+    def reserve_pending(
+        self,
+        *,
+        reservation_id: str,
+        isolate: Callable[[PayloadT], bool] | None = None,
+        stop_before: Callable[[PayloadT], bool] | None = None,
+        ) -> list[InputDelivery[PayloadT]]:
+        """先选择再预订；谓词须同步且不修改状态，失败不留下部分预订。"""
         with self._lock:
             if self._frozen:
                 return []
             result: list[InputDelivery[PayloadT]] = []
             for record in sorted(self._records.values(), key=lambda item: item.sequence):
-                # 已由当前轮次预订的较早消息不阻止工具链注入后续消息。
+                # 未提交的已预订记录同样可以形成屏障，避免工具注入越过等锁输入。
+                if (
+                    stop_before is not None
+                    and record.state in (InputDeliveryState.ACCEPTED, InputDeliveryState.RESERVED)
+                    and stop_before(record.payload)
+                ):
+                    break
                 if record.state is not InputDeliveryState.ACCEPTED:
                     continue
                 if not record.ready:
                     break
+                isolated = isolate is not None and isolate(record.payload)
+                if isolated and result:
+                    break
+                result.append(record)
+                if isolated:
+                    break
+            # 所有谓词完成后才提交，不在状态修改之间调用外部函数。
+            for record in result:
                 record.state = InputDeliveryState.RESERVED
                 record.reservation_id = reservation_id
-                result.append(record)
             return result
 
     def reserve_shutdown(self, *, reservation_id: str) -> list[InputDelivery[PayloadT]]:
@@ -197,7 +217,10 @@ class ToolInputReservation:
         if self._called or self._released:
             raise LifecycleFailure("Tool input reservation can only be used once")
         self._called = True
-        self._items = self._buffer.reserve_pending(reservation_id=self.reservation_id)
+        self._items = self._buffer.reserve_pending(
+            reservation_id=self.reservation_id,
+            stop_before=lambda item: item.require_tool_call,
+        )
         if not self._items:
             return None
         existing = result.get("_queued_messages")
