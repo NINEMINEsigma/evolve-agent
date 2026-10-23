@@ -734,10 +734,17 @@ class MessageRouter:
         return _cb
 
     async def _handle_session_rotation(self, loop: IMainSessionLoop) -> None:
-        """检查并处理会话旋转（归档+新会话），更新 self.sid 和 WebSocket 映射。"""
+        """检查并处理会话旋转（归档+新会话），更新 self.sid 和 WebSocket 映射。
+
+        自动旋转在延续会话可查询时已经改挂连接并通知页面。这里只让本路由
+        后续的历史同步使用延续会话，避免再按旧 ID 读历史。
+        """
         _old: str = self.sid
         _rotated: str | None = loop.pop_session_rotated()
+        current_sid = loop.loop.session_id
         if not _rotated:
+            if current_sid and current_sid != self.sid:
+                self.sid = current_sid
             return
 
         from system.application import Application

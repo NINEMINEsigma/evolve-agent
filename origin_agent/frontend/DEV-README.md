@@ -321,7 +321,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。
 - 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交、skeleton/liveRows 正典交接的布局提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底或主动改变消息高度时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
 
-- Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
+- Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。上下文超限的自动旋转会先在当前页面显示一条不落盘的「正在终结」状态；延续会话可查询后才发送 `session_rotated` 和 `history_sync`，页面据此路由并读取延续历史。原会话用量在切换前原样封存。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
 - `stream_done` 先登记待结束流，实时 Footer 在布局阶段判断气泡是否与视口相交后再冻结 live 行；`history_sync` 后 skeleton 后缀与末尾内容页成功合并，才按 canonical cutoff 清理对应 live 行。
 - `stream_done` 先使 live 行进入待结束状态；`ChatLiveFooter` 在布局阶段只对结束瞬间与当前聊天区视口有正面积交集的普通 Agent 长回复记录展开选择，之后再固化流。视口外、工具消息与短消息维持既有规则；用户手动收起优先。滚出视口不会自动折叠。

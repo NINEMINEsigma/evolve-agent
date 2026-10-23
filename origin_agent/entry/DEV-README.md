@@ -265,10 +265,11 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 当单一会话的总 token 接近模型窗口上限时：
 
 1. `LoopSessionManager.is_context_over_limit()` 检测超限。
-2. `rotate_session_for_continuation()`先调用 `get_system(ISessionMetadataService).ensure_summary()`；摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
-3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮）；新会话创建后、旧会话归档前，由 `ApprovalModeStore.inherit_session()` 继承旧主会话当前的审批模式；完成 History 初始化后才归档旧会话。
-4. 迁移运行态资源（工具副作用、cron 任务）。
-5. 前端通过 `session_rotated` 系统消息刷新。
+2. `rotate_session_for_continuation()`先调用 `get_system(ISessionMetadataService).ensure_summary()`。开始生成摘要前，当前页面收到一条不写入 History 的系统状态：「上下文已达到上限，正在终结当前会话并创建延续会话。」摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
+3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮）；新会话创建后、旧会话归档前，由 `ApprovalModeStore.inherit_session()` 继承旧主会话当前的审批模式；完成 History 初始化后才归档旧会话。原会话 History 只追加一条终结说明，不替换原文。
+4. `handoff_token_usage()`先把当前用量原样写回原会话，再为延续会话换上独立的空记录。禁止就地清零原记录，否则下一次写盘会把原会话的上下文用量写成 0。
+5. 延续 History 载入当前 Loop 后，`SessionManager.rotate_session()`把 Loop 改挂到延续会话。随后把现有 WebSocket 改挂过去，发送 `session_rotated` 并立刻带上 `history_sync`。页面这时才路由到延续会话并读取历史。轮次结束时的再次同步只沿用已经切换的会话 ID，不再发送第二次旋转通知。
+6. 迁移其余运行态资源（工具副作用、cron 任务）。手动延续和合并不走这条自动旋转路径。
 
 上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩；独立 `CompressToolChains` 则仅扫描全部历史中的完整工具链，不截断轮次、不插入会话摘要。两者共用 `component/tools/_history_compression.py` 的替换准备入口，纯检测与构造仍位于 `agent_support/tool_chain_compress.py`，链摘要使用 `toolchain_summary.txt` / `toolchain_summary_input.txt` 及工具链摘要 Profile。未完成链和纯压缩占位链不参与；含新增真实调用的混合链仍可压缩。
 

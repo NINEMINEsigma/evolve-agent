@@ -16,6 +16,7 @@ from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.session_metadata_service import ISessionMetadataService
 from interface.shell_manager import IShellManager
 
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -107,11 +108,11 @@ class LoopSessionManager:
         old_sid: str,
         new_sid: str
         ) -> SessionRuntimeResourceTransferResult:
-        """将旧会话的运行态资源迁移到继承会话。"""
-        self._loop.last_prompt_tokens = 0
-        self._session_rotated_notify[old_sid] = new_sid
+        """将旧会话的运行态资源迁移到继承会话。
 
-        # 迁移工具副作用资源
+        用量不在这里改，也不在这里记录旋转通知。用量封存和页面路由都在
+        延续会话可查询之后单独完成。
+        """
         tool_resources_error: str | None = None
         if self._loop.session_store is not None:
             try:
@@ -256,6 +257,13 @@ class LoopSessionManager:
                 self._loop.save_history(session_id)
             raise
 
+        self._loop.append_system_status(
+            context_limit_rotation_finished_status(new_sid),
+            session_id=session_id,
+        )
+        # 先封存来源用量，再换入延续会话的 History。此时 session_id 仍是来源，
+        # 写盘必须显式带会话 ID，避免把延续内容写回来源会话。
+        self._loop.handoff_token_usage(session_id, new_sid)
         new_history = (
             self._loop.session_store.read_history(new_sid)
             if self._loop.session_store is not None
@@ -265,6 +273,16 @@ class LoopSessionManager:
             new_history.add_message(moved_message)
         self._loop.load_history(new_history)
         self._loop.save_history(new_sid)
+        # 通知前端之前，Loop 必须已经挂到延续会话，历史接口才能读到它。
+        sm.rotate_session(session_id, new_sid)
+        await announce_context_limit_rotation(
+            session_id,
+            new_sid,
+            history_count=self._loop.history.count,
+            token_usage=self._loop.get_token_usage(),
+            context_tokens=self._loop.get_context_tokens(),
+            processing=self._loop.is_processing(),
+        )
 
         transfer_result = self._transfer_session_runtime_resources(
             session_id,
@@ -316,6 +334,87 @@ class LoopSessionManager:
 # ---------------------------------------------------------------------------
 
 
+def context_limit_rotation_finished_status(new_sid: str) -> str:
+    """原会话归档说明。只追加到原会话 History，不改用量。"""
+    from entity.constant import CONTEXT_LIMIT_ROTATION_FINISHED_STATUS
+
+    return f"{CONTEXT_LIMIT_ROTATION_FINISHED_STATUS} 延续会话：{new_sid}"
+
+
+async def _notify_context_limit_rotation_started(session_id: str) -> None:
+    """旋转开始时立刻通知当前页面。这条状态不写入 History。"""
+    from entity.constant import CONTEXT_LIMIT_ROTATION_STARTED_STATUS
+    from interface.frontend_sink import IFrontendSink
+    from system.application import Application
+
+    await Application.current().get_system(IFrontendSink).emit_system_message(
+        session_id,
+        CONTEXT_LIMIT_ROTATION_STARTED_STATUS,
+        is_system_status=True,
+    )
+
+
+async def announce_context_limit_rotation(
+    old_sid: str,
+    new_sid: str,
+    *,
+    history_count: int,
+    token_usage: int,
+    context_tokens: int,
+    processing: bool,
+    agents: list[str] | None = None,
+) -> None:
+    """延续会话可查询后，把当前连接改挂过去并让页面路由。
+
+    连接改挂和路由通知失败不回滚已经提交的延续会话。
+    """
+    from entity.puretype.ws import Message, MessageType
+    from interface.frontend_sink import IFrontendSink
+    from system.application import Application
+
+    sink = Application.current().get_system(IFrontendSink)
+    if not sink.rebind_ws(old_sid, new_sid):
+        logger.warning(
+            "Context-limit rotation has no frontend connection to move | old=%s new=%s",
+            old_sid,
+            new_sid,
+        )
+        return
+    ws = sink.get_ws(new_sid)
+    if ws is None:
+        return
+    messages = (
+        Message(
+            type=MessageType.SYSTEM,
+            session_id=new_sid,
+            content=json.dumps({
+                "action": "session_rotated",
+                "new_sid": new_sid,
+                "old_sid": old_sid,
+            }),
+        ),
+        Message(
+            type=MessageType.HISTORY_SYNC,
+            session_id=new_sid,
+            history_count=history_count,
+            processing=processing,
+            token_usage=token_usage,
+            context_tokens=context_tokens,
+            agents=agents,
+        ),
+    )
+    try:
+        for message in messages:
+            await ws.send_text(message.model_dump_json(exclude_none=True))
+    except Exception:
+        logger.warning(
+            "Failed to announce context-limit rotation | old=%s new=%s",
+            old_sid,
+            new_sid,
+            exc_info=True,
+        )
+
+
 async def terminate_and_rotate_session(
     *,
     session_id: str,
@@ -335,6 +434,7 @@ async def terminate_and_rotate_session(
         raise MetadataGenerationError("session store not available")
 
     old_sid = session_id
+    await _notify_context_limit_rotation_started(old_sid)
     summary = await metadata_service.ensure_summary(old_sid)
     context = (
         read_template("session_inherit.txt")

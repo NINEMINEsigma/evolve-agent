@@ -48,6 +48,11 @@ class IFrontendSink(AsyncSystem, IAgentSink, ABC):
         ...
 
     @abstractmethod
+    def rebind_ws(self, old_sid: str, new_sid: str) -> bool:
+        """Move one live connection from the archived session to its continuation."""
+        ...
+
+    @abstractmethod
     async def close_session(
         self,
         session_id: str,

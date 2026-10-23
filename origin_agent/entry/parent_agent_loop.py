@@ -215,9 +215,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 await self.report_context_limit_rotation_blocked(old_sid, exc)
                 return
             raise
+        # Loop 已经在旋转提交时改挂到延续会话，这里只同步本对象的会话 ID。
         self.session_id = new_sid
-        if self._session_manager is not None:
-            self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
         prompts = build_agent_system_prompt(

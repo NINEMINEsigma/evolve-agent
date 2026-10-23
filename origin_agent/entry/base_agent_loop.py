@@ -699,6 +699,17 @@ class BaseAgentLoop(ABC):
         """Invalidate the previous prompt token count after History compression."""
         self._token_record.prompt_tokens = 0
 
+    def handoff_token_usage(self, old_sid: str, new_sid: str) -> None:
+        """把当前用量原样封存到来源会话，再为延续会话换上独立的空记录。
+
+        不得就地清零来源记录。清零后的同一次写盘会把来源会话的上下文用量写成 0。
+        """
+        if old_sid == new_sid:
+            raise ValueError("Token usage handoff requires two distinct sessions")
+        self._persist_token_usage(old_sid)
+        self._token_record = TokenUsageRecord()
+        self._persist_token_usage(new_sid)
+
     async def _push_usage_update(self, session_id: str) -> None:
         """推送 token 消耗到前端。"""
         try:

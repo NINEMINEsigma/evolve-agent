@@ -184,6 +184,18 @@ class FrontendSink(IFrontendSink):
         self._deny_session_confirms(session_id)
         self._deny_session_asks(session_id)
 
+    def rebind_ws(self, old_sid: str, new_sid: str) -> bool:
+        """把现有连接改挂到延续会话。没有连接时不创建，也不抛错。"""
+        if old_sid == new_sid:
+            return self.get_ws(old_sid) is not None
+        entry = self._ws_sinks.pop(old_sid, None)
+        if entry is None:
+            return False
+        self._deny_session_confirms(old_sid)
+        self._deny_session_asks(old_sid)
+        self._ws_sinks[new_sid] = entry
+        return True
+
     async def close_session(
         self,
         session_id: str,

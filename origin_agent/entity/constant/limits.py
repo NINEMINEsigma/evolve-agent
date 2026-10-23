@@ -56,3 +56,13 @@ CONTEXT_LIMIT_METADATA_FAILURE_STATUS: str = (
     "上下文已达到上限，但无法生成延续摘要，本轮已中断。"
     "请检查全局元数据 Profile 或当前会话的活动 Profile 后再恢复。"
 )
+
+# 自动旋转开始时只推送到当前页面，不写入原会话 History。
+CONTEXT_LIMIT_ROTATION_STARTED_STATUS: str = (
+    "上下文已达到上限，正在终结当前会话并创建延续会话。"
+)
+
+# 自动旋转提交后写入原会话 History 的说明；延续会话 ID 由调用方另附。
+CONTEXT_LIMIT_ROTATION_FINISHED_STATUS: str = (
+    "当前会话已因上下文上限终结，后续对话在延续会话中继续。"
+)

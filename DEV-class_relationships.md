@@ -983,7 +983,7 @@ classDiagram
 | `ShowTool._visible_tool_names` | `get_effective_visible_tool_names()` | `SubAgentLoop`（TaskAgentLoop 经虚分派覆写） | `component/tools/show_tool.py` | 子Agent可见性查询走公开方法，动态口径（loaded ∩ scope ∩ check_fn） |
 | `LoopSessionManager.initialize` | `_session_store`, `_history`, `session_id` | `ParentAgentLoop` | `entry/session_manager.py` | 初始化时读写 loop 内部 |
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
-| `LoopSessionManager.rotate_session_for_continuation` | `_remove_last_user_message`, `_append`, `_history`, `_last_prompt_tokens`, `_session_store`, `_session_manager`, `_llm`, `load_history`, `persist_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时大量调用 loop 内部 |
+| `LoopSessionManager.rotate_session_for_continuation` | `_history`, `_session_store`, `_session_manager`, `handoff_token_usage`, `load_history`, `save_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时封存来源用量并切换 History，不再就地清零来源 token 记录 |
 | `LoopSessionManager._terminate_session` | `_session_manager`, `_session_store`, `_history`, `_llm`, `get_full_history` | `ParentAgentLoop` | `entry/session_manager.py` | 终结会话时大量调用 loop 内部 |
 | `TaskAgentLoop`（模块级 import） | `_interrupted_result()` | `entry/tool_executor.py`（模块级函数） | `subagent/taskloop.py` | 跨模块导入 protected 函数，构造中断/异常时的工具结果占位 |
 | `_OrchestratorContext._drain_outbox` | `get_pending_feedback()` / `mark_feedback_delivered()` | `SubAgentLoop` | 仅通过反馈公开接口确认一次性交付 |

@@ -248,16 +248,31 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             ),
             current_character_agent=self.current_character_agent,
         )
-        self.set_session_id(new_sid)
-        self._token_record = TokenUsageRecord()
+        from entry.session_manager import context_limit_rotation_finished_status
+
+        self.append_system_status(
+            context_limit_rotation_finished_status(new_sid),
+            session_id=old_sid,
+        )
+        self.handoff_token_usage(old_sid, new_sid)
         new_history = (
             self._session_store.read_history(new_sid)
             if self._session_store is not None
             else None
+        ) or History()
+        self._history = new_history
+        sm.rotate_session(old_sid, new_sid)
+        from entry.session_manager import announce_context_limit_rotation
+
+        await announce_context_limit_rotation(
+            old_sid,
+            new_sid,
+            history_count=self._history.count,
+            token_usage=self.get_token_usage(),
+            context_tokens=self.get_context_tokens(),
+            processing=self.is_processing(),
+            agents=list(self._agents.keys()),
         )
-        if new_history is not None:
-            self._history = new_history
-        self._session_rotated_notify[old_sid] = new_sid
         logger.info(
             "Multi-agent session rotated for context limit | old=%s new=%s",
             old_sid,
