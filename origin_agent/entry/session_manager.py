@@ -94,7 +94,7 @@ class LoopSessionManager:
         if current_tokens == 0:
             return False
         max_context = self._loop.active_max_context_tokens
-        max_output = self._loop.active_max_output_tokens
+        max_output = min(self._loop.active_max_output_tokens*0.1, 50000)
         return (
             current_tokens + max_output + safety_margin
         ) > max_context
