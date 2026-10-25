@@ -12,6 +12,7 @@ from .runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
+    from system.session_export import SessionExportService
 
 WorkT = TypeVar("WorkT")
 
@@ -47,6 +48,12 @@ class IGatewaySystem(AsyncSystem, ABC):
     @abstractmethod
     def runtime(self) -> IRuntimeSystem:
         """Return the runtime service used by Gateway."""
+        ...
+
+    @property
+    @abstractmethod
+    def session_exports(self) -> SessionExportService:
+        """Return the read-only session export service owned by Gateway."""
         ...
 
     @abstractmethod

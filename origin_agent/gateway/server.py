@@ -177,7 +177,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_sm() -> ISessionManager|None:
+def _get_sm() -> ISessionManager:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().get_system(ISessionManager)
@@ -192,7 +192,7 @@ def _get_logger() -> ILoggerSystem:
 def _get_loop(session_id: str):
     """返回指定 session 的 BaseAgentLoop（可能是 ParentAgentLoop 或 MultiAgentLoop）。"""
     sm = _get_sm()
-    return sm.get_loop(session_id) if sm else None
+    return sm.get_loop(session_id)
 
 
 def _get_ws(session_id: str):
@@ -1085,10 +1085,18 @@ async def read_session_export_resource(session_id: str, req: Request):
             code=result.code, source=result.proof.source, proof=result.proof,
         )
         return JSONResponse({"detail": issue.model_dump(mode="json")}, status_code=status_code, headers={"Cache-Control": "no-store"})
-    return Response(result.content, media_type=result.mime_type, headers={
-        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-        SESSION_EXPORT_DIGEST_HEADER: result.proof.digest,
-        SESSION_EXPORT_IDENTITY_HEADER: result.proof.identity,
+    proof = result.proof
+    digest, identity = proof.digest, proof.identity
+    # SessionExportResourceRead validates that saved proofs carry digest and identity.
+    assert digest is not None and identity is not None, "Saved export proof lacks digest or identity"
+    return Response(
+        result.content, 
+        media_type=result.mime_type, 
+        headers={
+            "Cache-Control": "no-store", 
+            "X-Content-Type-Options": "nosniff",
+            SESSION_EXPORT_DIGEST_HEADER: digest,
+            SESSION_EXPORT_IDENTITY_HEADER: identity,
     })
 
 

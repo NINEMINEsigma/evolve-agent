@@ -465,10 +465,13 @@ class ToolExecutor:
                                     tool_registry.async_dispatch(execution),
                                     "dispatch",
                                 )
-                                if not isinstance(dispatched, ToolExecution) or dispatched.result is None:
+                                if not isinstance(dispatched, ToolExecution):
                                     raise LifecycleFailure("Object tool dispatch did not return an execution result")
                                 execution = dispatched
-                                result = execution.result
+                                dispatched_result = execution.result
+                                if dispatched_result is None:
+                                    raise LifecycleFailure("Object tool dispatch did not return an execution result")
+                                result = dispatched_result
                             else:
                                 raise LifecycleFailure(f"Tool {tc.name!r} disappeared before dispatch")
                         except ToolInterrupted as ti:
