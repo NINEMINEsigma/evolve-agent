@@ -36,6 +36,7 @@ export function useTabSystem(ws: WebSocketState) {
   const enabledTabs = useMemo<Record<TabId, boolean>>(
     () => ({
       chat: true,
+      activity: true,
       resources: true,
       changes: true,
       media: capabilityConfirmed && mediaCount > 0,

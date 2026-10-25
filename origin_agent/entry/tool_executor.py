@@ -24,6 +24,9 @@ from entity.puretype import (
     ToolCallRequest,
     LLMProfile,
     MainSessionActivityPhase,
+    ActivityEventKind,
+    ActivityEventPhase,
+    ActivityEventStatus,
 )
 from entity.gentype import RefWrapper
 from entity.constant import TOOL_TASK_CANCEL_CLEANUP_TIMEOUT, ApplicationState
@@ -170,8 +173,9 @@ class ToolExecutor:
         round_id: str,
         character_name: str | None = None,
         llm_profile: LLMProfile | None = None,
-        activity_id: str | None = None,
-        stream_id: str = ""
+        activity_id: str,
+        input_sequences: list[int] | None = None,
+        stream_id: str
         ) -> PreparedToolResult:
         """执行单个工具调用，只准备结果；调用方保存后再发送通知。
 
@@ -191,6 +195,41 @@ class ToolExecutor:
 
         char_name = character_name or self._loop.current_character_agent
         tool_registry = Application.current().get_system(IToolRegistry)
+        if not activity_id or not stream_id:
+            raise LifecycleFailure("Tool activity requires non-empty activity_id and stream_id")
+
+        activity_started_at = time.monotonic()
+        activity_finished = False
+
+        def complete_activity(status: ActivityEventStatus) -> None:
+            nonlocal activity_finished
+            if activity_finished:
+                return
+            activity_finished = True
+            self._loop.record_activity_event(
+                ActivityEventKind.tool_call,
+                ActivityEventPhase.completed,
+                status,
+                activity_id=activity_id,
+                input_sequences=input_sequences,
+                stream_id=stream_id,
+                tool_call_id=tc.id,
+                character_name=char_name,
+                tool_name=tc.name,
+                duration_ms=max(0, int((time.monotonic() - activity_started_at) * 1000)),
+            )
+
+        self._loop.record_activity_event(
+            ActivityEventKind.tool_call,
+            ActivityEventPhase.started,
+            ActivityEventStatus.active,
+            activity_id=activity_id,
+            input_sequences=input_sequences,
+            stream_id=stream_id,
+            tool_call_id=tc.id,
+            character_name=char_name,
+            tool_name=tc.name,
+        )
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -211,6 +250,7 @@ class ToolExecutor:
 
         # 取消检查：中断时返回统一强制中断失败结果（保证与 assistant tool_calls 配对）
         if self._loop.loop.is_interrupted() or self._runtime.state is not ApplicationState.RUNNING:
+            complete_activity(ActivityEventStatus.interrupted)
             return PreparedToolResult(message=_interrupted_result(tc, char_name, "pending"))
 
         args["_session_id"] = session_id
@@ -241,6 +281,7 @@ class ToolExecutor:
                 self._tool_stats[tc.name] = {"calls": 0, "errors": 0}
             self._tool_stats[tc.name]["calls"] += 1
             self._tool_stats[tc.name]["errors"] += 1
+            complete_activity(ActivityEventStatus.denied)
             return prepare_early(_disgust_result)
 
         # parse error
@@ -268,6 +309,7 @@ class ToolExecutor:
                 "_parse_failed": True,
                 "_meta": _meta.model_dump(),
             }
+            complete_activity(ActivityEventStatus.failed)
             return prepare_early(_result)
 
         logtc_arguments_strs = []
@@ -310,6 +352,7 @@ class ToolExecutor:
                     "_meta": _meta.model_dump(),
                 }
                 self._tool_stats[tc.name]["errors"] += 1
+                complete_activity(ActivityEventStatus.failed)
                 return prepare_early(_not_loaded_result)
 
         # 参数规范化为纯操作；审批仍查看原始模型参数。
@@ -319,6 +362,7 @@ class ToolExecutor:
             try:
                 normalized_args = declared_tool.ensure_arguments(args)
             except (ValueError, TypeError) as exc:
+                complete_activity(ActivityEventStatus.failed)
                 return prepare_early({"error": str(exc)})
 
         # 审批流程
@@ -344,9 +388,10 @@ class ToolExecutor:
                 "approval",
             )
         except ApplicationStoppingError:
+            complete_activity(ActivityEventStatus.interrupted)
             return PreparedToolResult(message=_interrupted_result(tc, char_name, "approval"))
         except ToolInterrupted as ti:
-            # 取消审批 task 触发 request_approval 的 CancelledError 分支，自行清理 pending confirms
+            complete_activity(ActivityEventStatus.interrupted)
             return PreparedToolResult(message=_interrupted_result(tc, char_name, ti.phase))
         approval_duration_ms: int = int((time.monotonic() - approval_start) * 1000)
         if activity_id is not None:
@@ -371,6 +416,7 @@ class ToolExecutor:
 
             # dispatch 前再次检查中断（缩短审批返回后→分发前的竞态窗口）
             if self._loop.loop.is_interrupted():
+                complete_activity(ActivityEventStatus.interrupted)
                 return PreparedToolResult(message=_interrupted_result(tc, char_name, "pending"))
 
             # availability scope 校验：拦截不在当前 loop scope 内的工具
@@ -434,13 +480,17 @@ class ToolExecutor:
                                 logger.warning(
                                     "kill_active failed for session=%s", session_id, exc_info=True,
                                 )
+                            complete_activity(ActivityEventStatus.interrupted)
                             return PreparedToolResult(message=_interrupted_result(tc, char_name, ti.phase))
                     except ApplicationStoppingError:
+                        complete_activity(ActivityEventStatus.interrupted)
                         return PreparedToolResult(message=_interrupted_result(tc, char_name, "dispatch"))
                     except BaseException as exc:
                         if requires_lifecycle_propagation(exc):
+                            complete_activity(ActivityEventStatus.interrupted)
                             raise
                         if not isinstance(exc, Exception):
+                            complete_activity(ActivityEventStatus.failed)
                             raise
                         logger.exception("Tool %s dispatch error: %s", tc.name, exc)
                         self._tool_stats[tc.name]["errors"] += 1
@@ -478,4 +528,10 @@ class ToolExecutor:
             if _entry is not None and _entry.resets_turn_counter:
                 self._turn_counter.value = 0
 
+        if _skip_dispatch:
+            complete_activity(ActivityEventStatus.denied)
+        elif execution is not None and execution.body_completed_normally:
+            complete_activity(ActivityEventStatus.succeeded)
+        else:
+            complete_activity(ActivityEventStatus.failed)
         return result_msg

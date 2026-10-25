@@ -27,6 +27,7 @@ from __future__ import annotations
 from interface.frontend_sink import IFrontendSink
 from interface.gateway_system import IGatewaySystem
 from interface.llm_profile_store import ILLMProfileStore
+from interface.logger_system import ILoggerSystem
 from interface.runtime_system import IRuntimeSystem
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
@@ -59,6 +60,10 @@ from entity.puretype import (
     QueuedMessage,
     SessionInfo,
     SessionStatus,
+    ActivityEventDraft,
+    ActivityEventKind,
+    ActivityEventPhase,
+    ActivityEventStatus,
 )
 from entry.agent_support.multimodal import summarize_message_for_log
 from system.lifecycle import ApplicationStoppingError
@@ -297,6 +302,15 @@ class MessageRouter:
                 require_tool_call=msg.require_tool_call and not loop.is_active(),
             )
             main_sequence = loop.loop.message_queue.accept(item, ready=False)
+            Application.current().get_system(ILoggerSystem).record_activity(
+                ActivityEventDraft(
+                    kind=ActivityEventKind.message_received,
+                    phase=ActivityEventPhase.observed,
+                    status=ActivityEventStatus.observed,
+                    session_id=self.sid,
+                    input_sequences=[main_sequence],
+                )
+            )
 
         return _AcceptedUserMessage(
             sequence=main_sequence,

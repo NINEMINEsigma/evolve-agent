@@ -1,0 +1,34 @@
+{
+  "title": "活动大盘",
+  "connection": {
+    "idle": "未连接",
+    "connecting": "连接中",
+    "live": "实时",
+    "degraded": "连接降级",
+    "closed": "已关闭"
+  },
+  "kpi": {
+    "sessions": "会话总数",
+    "loops": "活跃 Loop",
+    "tools": "工具",
+    "toolsets": "工具集",
+    "observed": "本次观察"
+  },
+  "events": {
+    "message_received": "消息接收",
+    "agent_response": "Agent 响应",
+    "tool_call": "工具调用",
+    "observed": "已观察",
+    "started": "开始",
+    "completed": "完成",
+    "active": "活动中",
+    "succeeded": "成功",
+    "failed": "失败",
+    "denied": "拒绝",
+    "interrupted": "中断",
+    "gap": "事件流出现缺口"
+  },
+  "empty": "等待活动事件",
+  "overviewError": "概览读取失败",
+  "gapDetail": "有事件未被当前连接观察到"
+}

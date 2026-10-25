@@ -439,12 +439,15 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
         require_tool_call: bool = False,
+        input_sequences: list[int] | None = None,
         **kwargs
         ) -> str:
         """处理用户消息入口；整个串行级联共享一次主会话活动。"""
         self._cancel_event.clear()
         self._disgust_event.clear()
+        owns_activity = activity_id is None
         active_id = activity_id or self.ensure_main_session_activity(activity_source)
+        input_sequences = list(input_sequences or [])
         try:
             async with self.reply_scope():
                 current_task = asyncio.current_task()
@@ -491,6 +494,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
                     await self._cascade(
                         _response, activity_id=active_id,
+                        input_sequences=input_sequences,
                         require_tool_call=require_tool_call,
                     )
 
@@ -519,7 +523,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     self._cancel_event.clear()
                     self.unregister_round_task(current_task)
         finally:
-            self.finish_main_session_activity(active_id)
+            if owns_activity:
+                self.finish_main_session_activity(active_id)
 
     # -- SP-4 会话消息队列接入 ------------------------------------------------
 
@@ -551,6 +556,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             raise LifecycleFailure("A required-tool input must occupy a single-message batch")
 
         activity_id = self.ensure_main_session_activity(activity_source_for_items([item.payload for item in items]))
+        input_sequences = [item.sequence for item in items]
         current_task = asyncio.current_task()
         registered = False
         try:
@@ -619,6 +625,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                             cascade_chars = list(self._agent_names)
                         await self._cascade(
                             cascade_chars, activity_id=activity_id,
+                            input_sequences=input_sequences,
                             require_tool_call=require_tool_call,
                         )
                         if (
@@ -631,7 +638,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 finally:
                     self._processing = False
                     self._cancel_event.clear()
-                    self.finish_main_session_activity(activity_id)
 
             if self._on_round_done is not None:
                 await self._on_round_done(self)
@@ -666,7 +672,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     self._history.remove_unpaired_tool_calls()
                     self.save_history(self.session_id)
                     # 以全体 agent 为初始响应者重新启动级联
-                    await self._cascade(list(self._agent_names), activity_id=activity_id)
+                    await self._cascade(
+                        list(self._agent_names),
+                        activity_id=activity_id,
+                        input_sequences=[],
+                    )
                     if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
                         if not await self._try_rotate_session_for_context_limit():
                             return ""
@@ -714,6 +724,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         response_characters: list[str],
         *,
         activity_id: str,
+        input_sequences: list[int],
         require_tool_call: bool = False
         ) -> None:
         """串行动态队列级联调度。
@@ -797,6 +808,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 result = await self._run_single_agent(
                     char,
                     activity_id=activity_id,
+                    input_sequences=input_sequences,
                     is_final_round=is_final,
                     require_tool_call=agent_requires_tool,
                 )
@@ -948,6 +960,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         character_name: str,
         *,
         activity_id: str,
+        input_sequences: list[int],
         is_final_round: bool = False,
         require_tool_call: bool = False
         ) -> WorkerResult:
@@ -1030,6 +1043,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 loop=self,
                 round_id=round_id,
                 activity_id=activity_id,
+                input_sequences=input_sequences,
                 max_context_tokens=profile.config.max_context_tokens,
                 max_output_tokens=profile.config.max_output_tokens,
                 llm_profile=profile.llm_profile,

@@ -13,6 +13,7 @@ from interface.tool_registry import IToolRegistry
 
 import json
 import logging
+import time
 import re
 import uuid
 from typing import Any, TYPE_CHECKING
@@ -26,6 +27,9 @@ from entity.puretype import (
     HistoryRowLink,
     SessionHistoryRowKind,
     MainSessionActivityPhase,
+    ActivityEventKind,
+    ActivityEventPhase,
+    ActivityEventStatus,
 )
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
@@ -114,6 +118,7 @@ class MultiAgentWorker:
         loop: IMainSessionLoop,
         round_id: str,
         activity_id: str,
+        input_sequences: list[int],
         max_context_tokens: int = 0,
         max_output_tokens: int = 0,
         llm_profile: LLMProfile | None = None
@@ -128,13 +133,14 @@ class MultiAgentWorker:
         self._loop: IMainSessionLoop = loop
         self._round_id: str = round_id
         self._activity_id: str = activity_id
+        self._input_sequences: list[int] = list(input_sequences)
         # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖
         self._stream_consumer = StreamConsumer(
             llm=self._llm,
             sink=self._sink,
             character_name=self.character_name,
             cancel_event=self._loop.loop.cancel_event,
-            cleanup_registry=self._loop.app.get_system(IRuntimeSystem).cleanup,
+            cleanup_registry=self._loop.loop.app.get_system(IRuntimeSystem).cleanup,
         )
         # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
         self._tool_executor = ToolExecutor(loop=self._loop)
@@ -217,6 +223,41 @@ class MultiAgentWorker:
             response_characters=response_characters,
         )
 
+    async def _emit_stream_done(
+        self,
+        session_id: str,
+        stream_id: str,
+        finish_reason: str,
+        *,
+        content: str = "",
+        metrics: MessageMetrics | None = None,
+        started_at: float,
+        ) -> None:
+        await self._sink.emit_stream_done(
+            session_id,
+            stream_id,
+            finish_reason,
+            content=content,
+            metrics=metrics,
+        )
+        status = (
+            ActivityEventStatus.interrupted
+            if finish_reason == "cancelled"
+            else ActivityEventStatus.failed
+            if finish_reason == "error"
+            else ActivityEventStatus.succeeded
+        )
+        self._loop.record_activity_event(
+            ActivityEventKind.agent_response,
+            ActivityEventPhase.completed,
+            status,
+            activity_id=self._activity_id,
+            input_sequences=self._input_sequences,
+            stream_id=stream_id,
+            character_name=self.character_name,
+            duration_ms=max(0, int((time.monotonic() - started_at) * 1000)),
+        )
+
     async def run(self, *, require_tool_call: bool = False) -> WorkerResult:
         """执行完整的 tool loop + DSL 路由标签输出。
 
@@ -232,6 +273,7 @@ class MultiAgentWorker:
         ] + self._messages
 
         stream_id = ""  # 兜底初值：若循环体未执行，_error_result 会自动生成
+        stream_started_at = time.monotonic()
         self._turn_counter.value = 0
         self._collected_metrics = []
         first_request_pending = require_tool_call
@@ -240,8 +282,23 @@ class MultiAgentWorker:
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
+            stream_started_at = time.monotonic()
+            self._loop.record_activity_event(
+                ActivityEventKind.agent_response,
+                ActivityEventPhase.started,
+                ActivityEventStatus.active,
+                activity_id=self._activity_id,
+                input_sequences=self._input_sequences,
+                stream_id=stream_id,
+                character_name=self.character_name,
+            )
             if self._loop.loop.is_interrupted():
-                return await self._error_result("Interrupted", stream_id=stream_id, collected_metrics=self._collected_metrics)
+                return await self._error_result(
+                    "Interrupted",
+                    stream_id=stream_id,
+                    started_at=stream_started_at,
+                    collected_metrics=self._collected_metrics,
+                )
 
             self._loop.loop.set_main_session_activity_phase(
                 self._activity_id,
@@ -279,6 +336,7 @@ class MultiAgentWorker:
                 return await self._error_result(
                     f"Multimodal preprocessing failed: {exc}",
                     stream_id=stream_id,
+                    started_at=stream_started_at,
                     collected_metrics=self._collected_metrics,
                 )
 
@@ -307,12 +365,13 @@ class MultiAgentWorker:
                 partial = self._stream_consumer.partial_result(finish_reason="cancelled")
                 partial_content = partial.content if partial else ""
                 partial_metrics = partial.metrics if partial else None
-                await self._sink.emit_stream_done(
+                await self._emit_stream_done(
                     self._loop.loop.session_id,
                     stream_id,
                     "cancelled",
                     content=partial_content,
                     metrics=partial_metrics,
+                    started_at=stream_started_at,
                 )
                 raise
             except Exception as exc:
@@ -325,16 +384,18 @@ class MultiAgentWorker:
                 return await self._error_result(
                     f"LLM error: {exc}",
                     stream_id=stream_id,
+                    started_at=stream_started_at,
                     collected_metrics=self._collected_metrics,
                 )
 
             # 发送 stream_done，固化本轮自然语言文本到前端
-            await self._sink.emit_stream_done(
+            await self._emit_stream_done(
                 self._loop.loop.session_id,
                 stream_id,
                 resp.finish_reason,
                 content=resp.content or "",
                 metrics=resp.metrics,
+                started_at=stream_started_at,
             )
 
             # 收集 token 消耗
@@ -462,6 +523,7 @@ class MultiAgentWorker:
                             character_name=self.character_name,
                             llm_profile=self._llm_profile,
                             activity_id=self._activity_id,
+                            input_sequences=self._input_sequences,
                             stream_id=stream_id,
                         )
 
@@ -590,6 +652,7 @@ class MultiAgentWorker:
                     "Empty response",
                     raw_text=text,
                     reasoning=resp.reasoning_content,
+                    started_at=stream_started_at,
                     collected_metrics=self._collected_metrics,
                 )
 
@@ -617,6 +680,7 @@ class MultiAgentWorker:
         return await self._error_result(
             f"Max tool turns ({MAX_TOOL_TURNS}) exceeded",
             stream_id=stream_id,
+            started_at=stream_started_at,
             collected_metrics=self._collected_metrics,
         )
 
@@ -628,6 +692,7 @@ class MultiAgentWorker:
         raw_text: str = "",
         reasoning: str | None = None,
         stream_id: str = "",
+        started_at: float | None = None,
         collected_metrics: list[tuple[str, int, MessageMetrics]] | None = None
         ) -> WorkerResult:
         """构造错误占位结果，同时推送错误文本到前端。"""
@@ -639,7 +704,7 @@ class MultiAgentWorker:
             stream_id=stream_id,
             character_name=self.character_name,
         )
-        await self._emit_text(text, stream_id=stream_id)
+        await self._emit_text(text, stream_id=stream_id, started_at=started_at)
         return WorkerResult(
             character_name=self.character_name,
             parsed_json=AgentResponse(
@@ -659,7 +724,8 @@ class MultiAgentWorker:
     async def _emit_text(
         self,
         text: str,
-        stream_id: str = ""
+        stream_id: str = "",
+        started_at: float | None = None,
         ) -> None:
         """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
 
@@ -674,9 +740,11 @@ class MultiAgentWorker:
                 delta=text,
                 character_name=self.character_name,
             )
-        await self._sink.emit_stream_done(
+        await self._emit_stream_done(
             self._loop.loop.session_id,
             stream_id,
+            "error",
             content=text,
+            started_at=started_at or time.monotonic(),
         )
 

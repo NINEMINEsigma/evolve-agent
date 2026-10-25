@@ -388,3 +388,9 @@ QueuedMessage持有非持久StrictBool字段。普通消息仍可合批和进入
 
 InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用谓词判断，再统一修改state与reservation_id；谓词异常不留下部分预订。新可选参数默认None，其他Inbox及关闭预订行为不变。控制字段不进入 `_queued_messages`、CharacterConversationMessage或History持久化，输入移交直接保留payload。只做源码及文档实施，未运行校验、构建或应用。
 
+## 主会话结构化活动事件
+
+主会话活动观察通过 `ILoggerSystem` 发布，不写入History。MessageRouter在主会话输入记录成功后发布单条 `message_received` observed事件；ParentAgentLoop/MultiAgentWorker为每个LLM `stream_id`发布response started/completed；ToolExecutor为每个工具调用发布tool_call started/completed。事件只携带安全元数据，`activity_id`复用既有主会话活动快照，`input_sequences`用于输入关联，工具事件必须携带非空stream_id。
+
+事件不替代既有FrontendSink WebSocket消息，也不把标准 Python logging正文转发到前端。普通子Agent不通过主会话ToolExecutor发布首版全局工具事件；ColloquyLoop沿ParentAgentLoop路径复用活动生命周期。
+

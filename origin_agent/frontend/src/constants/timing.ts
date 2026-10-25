@@ -9,6 +9,7 @@ export const TIMING = {
   CRITICAL_REQUEST_TIMEOUT: 15_000, // 会话预检与 History 关键请求硬截止
   TASK_POLL_INTERVAL:    3_000,   // 后台任务轮询
   MAIN_SESSION_ACTIVITY_POLL_INTERVAL: 1_000, // 主会话活动快照轮询
+  ACTIVITY_OVERVIEW_POLL_INTERVAL: 3_000, // 全局活动看板 KPI 快照轮询
   SESSION_FILE_CHANGES_POLL_INTERVAL: 3_000, // 文件修改摘要串行轮询间隔
   LOCK_POLL_INTERVAL:    3_000,   // agentspace 旧锁轮询（兼容常量，编辑器已改用 SSE）
   AGENTSPACE_EVENT_RECONNECT_NOTICE: 3_000, // SSE 中断状态提示延迟

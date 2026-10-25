@@ -221,7 +221,11 @@ capture使用Loop公开分段隔离输入，线程读取严格metrics并计算�
 
 本次迁移未由开发助手AI运行测试、类型检查、Lint、构建或应用。只做源文件读取和定向差异审阅；正式运行验证由用户在完整迁移完成后执行。
 
-## System 接口槽位约定（2026-10-20）
+## Logger System
+
+`LoggerSystem` 是 Application 持有的进程级结构化活动事件 System，依赖 RuntimeSystem。它内部持有 `ActivityLoggerComponent`，组件实现第三方 `BaseLoggerComponent` 与异步 framework `Component`，保存最近256条非持久化活动事件并管理有界订阅队列。标准 Python `logging` 仍独立负责诊断日志。
+
+`ActivityEventDraft`/`ActivityEvent` 位于 `entity.puretype`，跨字段事件矩阵校验位于 `system/logger.py`，不把业务 validator 放入 puretype。活动发布入口位于 Gateway 消息接收、Parent/MultiAgent LLM stream 和主会话 ToolExecutor；LoggerSystem不创建或终结主会话 activity ID。
 
 本包的 Runtime、SubprocessRunner、Sandbox、Shell、Agentspace、Profile、元数据、LSP 和多模态等 System 均继承对应 `interface/` 接口。它们的 `dependencies` 和内部 `get_system()` 查询只使用接口类型；Application 负责将实现实例注册到接口槽位。资源所有权、virtual lifecycle 和关闭错误传播仍由具体实现负责，接口不声明这些 framework 生命周期成员。
 

@@ -42,6 +42,7 @@ def _build_system_manifest(
     from interface.frontend_sink import IFrontendSink
     from interface.gateway_system import IGatewaySystem
     from interface.llm_profile_store import ILLMProfileStore
+    from interface.logger_system import ILoggerSystem
     from interface.lsp_manager import ILSPManager
     from interface.mcp_system import IMCPSystem
     from interface.modality_capability_system import IModalityCapabilitySystem
@@ -57,6 +58,7 @@ def _build_system_manifest(
     from subagent.orchestrator import SubAgentOrchestrator
     from system.agentspace.service import AgentspaceService
     from system.llm_profile_store import LLMProfileStore
+    from system.logger import LoggerSystem
     from system.lsp import LSPManager
     from system.modality_capability import ModalityCapabilitySystem
     from system.runtime import RuntimeSystem
@@ -67,6 +69,7 @@ def _build_system_manifest(
 
     return [
         (IRuntimeSystem, RuntimeSystem(context)),
+        (ILoggerSystem, LoggerSystem()),
         (ISubprocessRunner, SubprocessRunner()),
         (ISandbox, Sandbox()),
         (IShellManager, ShellManager()),

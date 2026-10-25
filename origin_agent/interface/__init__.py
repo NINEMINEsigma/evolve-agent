@@ -7,6 +7,7 @@ from .dynamic_endpoint_system import IDynamicEndpointSystem
 from .frontend_sink import IFrontendSink
 from .gateway_system import IGatewaySystem
 from .llm_profile_store import ILLMProfileStore
+from .logger_system import ILoggerSystem
 from .lsp_manager import ILSPManager
 from .mcp_system import IMCPSystem
 from .modality_capability_system import IModalityCapabilitySystem
@@ -30,6 +31,7 @@ __all__ = [
     "IFrontendSink",
     "IGatewaySystem",
     "ILLMProfileStore",
+    "ILoggerSystem",
     "ILSPManager",
     "IMCPSystem",
     "IModalityCapabilitySystem",

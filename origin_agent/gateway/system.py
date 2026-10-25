@@ -21,6 +21,7 @@ from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.frontend_sink import IFrontendSink
 from interface.gateway_system import IGatewaySystem
 from interface.llm_profile_store import ILLMProfileStore
+from interface.logger_system import ILoggerSystem
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_manager import ISessionManager
@@ -84,6 +85,7 @@ class GatewaySystem(IGatewaySystem):
             IRuntimeSystem, IToolDiscoverySystem, ISessionManager, ISubAgentOrchestrator,
             IDynamicEndpointSystem, IFrontendSink, IAgentspaceService, IApprovalSystem,
             ILLMProfileStore, ISessionMetadataService, ICronRouter, IShellManager, ISandbox,
+            ILoggerSystem,
         ))
         self._runtime: IRuntimeSystem | None = None
         self._admission: GatewayAdmission | None = None

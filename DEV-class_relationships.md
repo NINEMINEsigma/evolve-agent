@@ -1545,6 +1545,12 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 上述为源码及文档实施记录，未运行校验、构建或应用验收。服务原生工具选择前提、活动快照延迟与既有重新生成并发风险仍保留。
 
+### Logger System 与活动事件关系
+
+新增 `LoggerSystem/ILoggerSystem` 为进程级 System 节点，依赖 `RuntimeSystem`；`LoggerSystem` 持有 `ActivityLoggerComponent`，该组件同时实现第三方 `BaseLoggerComponent` 与异步 framework `Component`。`ActivityEventDraft`/`ActivityEvent` 为消息前纯类型，跨字段业务校验由 `system/logger.py` 承担。
+
+`MessageRouter` 发布主会话消息接收事实事件；`ParentAgentLoop`、`MultiAgentWorker` 发布每个 stream 的 Agent 响应生命周期事件；`ToolExecutor` 发布主会话工具调用生命周期事件。活动事件不进入 History、不替代 FrontendSink WebSocket、不持久化；Gateway 通过 Logger System 提供只读 overview/SSE，前端 Activity Dashboard 使用唯一 EventSource。
+
 
 
 

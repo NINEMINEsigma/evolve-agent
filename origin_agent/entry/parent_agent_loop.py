@@ -23,6 +23,7 @@ from interface.tool_registry import IToolRegistry
 import asyncio
 import json
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, TYPE_CHECKING
@@ -34,6 +35,7 @@ from entity.puretype import (
     LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord,
     MessageContent, LLMProfile, MessageMetrics, QueuedMessage, HistoryRowLink,
     SessionHistoryRowKind, MainSessionActivitySource, MainSessionActivityPhase,
+    ActivityEventKind, ActivityEventPhase, ActivityEventStatus,
 )
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
@@ -311,16 +313,20 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
         activity_id: str | None = None,
         require_tool_call: bool = False,
+        input_sequences: list[int] | None = None,
         **kwargs
         ) -> str:
         sid = self.session_id
         self._cancel_event.clear()
         self._disgust_event.clear()
         self._event_loop = asyncio.get_running_loop()
+        owns_activity = activity_id is None
         active_id = activity_id or self.ensure_main_session_activity(
             activity_source,
             character_name=self.current_character_agent,
         )
+        input_sequences = list(input_sequences or [])
+
 
         try:
             # 无 LLM client 时返回错误（不进工具循环）
@@ -362,6 +368,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                     reply = await self._run_tool_loop(
                         sid, messages, user_message, activity_id=active_id,
+                        input_sequences=input_sequences,
                         require_tool_call=require_tool_call,
                     )
                     logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
@@ -371,7 +378,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     self._cancel_event.clear()
                     self.unregister_round_task(current_task)
         finally:
-            self.finish_main_session_activity(active_id)
+            if owns_activity:
+                self.finish_main_session_activity(active_id)
 
     async def resume(self) -> str:
         """从当前历史状态恢复工具链执行。
@@ -418,6 +426,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     messages = self._get_full_history(sid)
                     reply = await self._run_tool_loop(
                         sid, messages, "[resume]", activity_id=activity_id,
+                        input_sequences=[],
                     )
                     if reply:
                         await self._frontend_sink.emit_assistant_message(
@@ -438,6 +447,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         user_message: MessageContent,
         *,
         activity_id: str,
+        input_sequences: list[int] | None = None,
         require_tool_call: bool = False
         ) -> str:
         """执行 LLM 工具调用循环。"""
@@ -453,6 +463,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 预初始化：while 循环内每轮重新赋值，但循环退出后的超限路径仍需引用，
         # 静态检查无法证明循环至少执行一次（_MAX_TOOL_TURNS=90 保证之）。
         stream_id: str = ""
+        stream_started_at: float = time.monotonic()
 
         try:
             while turn.value < _MAX_TOOL_TURNS:
@@ -469,6 +480,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 # 无法转发（无引用 Profile）→ 终止本轮并持久化配置指引供前端展示；
                 # 探针/转发途中的 provider 错误 → 降级为用户可见错误，不穿透炸轮次。
                 stream_id = uuid.uuid4().hex[:12]
+                stream_started_at = time.monotonic()
+                self.record_activity_event(
+                    ActivityEventKind.agent_response,
+                    ActivityEventPhase.started,
+                    ActivityEventStatus.active,
+                    activity_id=activity_id,
+                    input_sequences=input_sequences,
+                    stream_id=stream_id,
+                    character_name=self.current_character_agent,
+                )
                 try:
                     request = await self._prepare_multimodal_request(
                         sid, messages, round_id,
@@ -478,7 +499,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         "Modality forward unavailable | session=%s error=%s", sid, exc,
                     )
                     await self._emit_persisted_system_status(sid, str(exc))
-                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._emit_stream_done(
+                        sid, stream_id, "error", content="", metrics=None,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
                     return ""
                 except Exception as exc:
                     if requires_lifecycle_propagation(exc):
@@ -489,7 +514,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         f"Details: {exc}"
                     )
                     await self._emit_persisted_system_status(sid, err_text)
-                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._emit_stream_done(
+                        sid, stream_id, "error", content="", metrics=None,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
                     return ""
 
                 self.set_main_session_activity_phase(
@@ -537,6 +566,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await self._emit_stream_done(
                         sid, stream_id, "cancelled",
                         content=partial_content, metrics=partial_metrics,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
                     )
                     return partial_content or ""
                 except Exception as llm_exc:
@@ -550,10 +581,19 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         f"Details: {llm_exc}"
                     )
                     await self._emit_persisted_system_status(sid, err_text)
-                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._emit_stream_done(
+                        sid, stream_id, "error", content="", metrics=None,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
                     return ""
                 if self._cancel_event.is_set():
-                    await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
+                    await self._emit_stream_done(
+                        sid, stream_id, "cancelled",
+                        content=resp.content or "", metrics=resp.metrics,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
                     if resp.content:
                         msg_index = self._append(
                             sid, Role.ASSISTANT, resp.content,
@@ -590,7 +630,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         else (resp.content or ""),
                     )
 
-                await self._emit_stream_done(sid, stream_id, resp.finish_reason, content=resp.content or "", metrics=resp.metrics)
+                await self._emit_stream_done(
+                    sid, stream_id, resp.finish_reason,
+                    content=resp.content or "", metrics=resp.metrics,
+                    activity_id=activity_id, input_sequences=input_sequences,
+                    started_at=stream_started_at,
+                )
 
                 if not resp.tool_calls:
                     assistant_text = resp.content or ""
@@ -676,6 +721,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             character_name=self.current_character_agent,
                             llm_profile=self.active_llm_profile,
                             activity_id=activity_id,
+                            input_sequences=input_sequences,
                             stream_id=stream_id,
                         )
                         tool_msg = prepared.message
@@ -750,7 +796,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         self.save_history(sid)
                         await emit_tool_card_result_link(tool_msg)
                     await self._emit_persisted_system_status(sid, "工具链异常中断")
-                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._emit_stream_done(
+                        sid, stream_id, "error", content="", metrics=None,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
                     return ""
 
                 rotated_sid = await self._check_over_limit_in_tool_loop(sid)
@@ -772,7 +822,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             "Tool-call loop exceeded max turns (%d) for session=%s",
             _MAX_TOOL_TURNS, sid,
         )
-        await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+        await self._emit_stream_done(
+                        sid, stream_id, "error", content="", metrics=None,
+                        activity_id=activity_id, input_sequences=input_sequences,
+                        started_at=stream_started_at,
+                    )
         status_text = f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。"
         status_index = self.append_system_status(status_text, session_id=sid)
         await self._frontend_sink.emit_system_message(
@@ -868,6 +922,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             activity_source_for_items([item.payload for item in items]),
             character_name=self.current_character_agent,
         )
+        input_sequences = [item.sequence for item in items]
         current_task = asyncio.current_task()
         registered = False
         reply: str | None = None
@@ -949,6 +1004,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         reply = await self._run_tool_loop(
                             sid, messages, "[queued-messages]",
                             activity_id=activity_id,
+                            input_sequences=input_sequences,
                             require_tool_call=require_tool_call,
                         )
                     if reply:
@@ -959,7 +1015,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 finally:
                     self._processing = False
                     self._cancel_event.clear()
-                    self.finish_main_session_activity(activity_id)
 
             if self._on_round_done is not None:
                 await self._on_round_done(self)
@@ -1209,7 +1264,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         stream_id: str,
         finish_reason: str,
         content: str = "",
-        metrics: MessageMetrics | None = None
+        metrics: MessageMetrics | None = None,
+        *,
+        activity_id: str | None = None,
+        input_sequences: list[int] | None = None,
+        started_at: float | None = None,
         ) -> None:
         try:
             await self._frontend_sink.emit_stream_done(
@@ -1222,6 +1281,28 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 "Failed to emit stream_done for session=%s stream=%s",
                 session_id, stream_id, exc_info=True,
             )
+        finally:
+            if activity_id is not None:
+                status = (
+                    ActivityEventStatus.interrupted
+                    if finish_reason == "cancelled"
+                    else ActivityEventStatus.failed
+                    if finish_reason == "error"
+                    else ActivityEventStatus.succeeded
+                )
+                self.record_activity_event(
+                    ActivityEventKind.agent_response,
+                    ActivityEventPhase.completed,
+                    status,
+                    activity_id=activity_id,
+                    input_sequences=input_sequences,
+                    stream_id=stream_id,
+                    character_name=self.current_character_agent,
+                    duration_ms=(
+                        max(0, int((time.monotonic() - started_at) * 1000))
+                        if started_at is not None else None
+                    ),
+                )
 
     # ========================================================================
     # 会话管理（业务级）

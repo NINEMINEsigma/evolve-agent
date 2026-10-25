@@ -176,7 +176,9 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 动态端点的 `content` 使用稳定的多模态 content block 联合类型；content block 对未知扩展字段保持兼容，Gateway 在进入既有消息队列前转换为内部 `MessageContent` 结构。该转换是传输边界适配，不改变 History 或 LLM wire format。前端请求字段和 JSON wire format 保持不变。
 
-## REST API
+## 全局活动事件接口
+
+Gateway 新增只读 `/api/activity/overview` 与 `/api/activity/events`。overview 从 SessionManager/ToolRegistry读取当前会话、活跃主会话Loop、工具和工具集数量，不创建Loop；events只订阅LoggerSystem在连接建立后的增量事件，不发送历史快照或 `id:`，每个等待任务由GatewaySystem.task_owner登记，断线/取消/关闭在生成器finally中清理。
 
 ### 会话管理
 

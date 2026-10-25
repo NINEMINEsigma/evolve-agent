@@ -251,8 +251,11 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 聊天运行时通过 `useMainSessionActivityPolling` 每 1 秒查询当前会话状态；WebSocket 建立、恢复和页面重新可见时立即查询，断开、隐藏和卸载时停止并取消请求。`chatRuntimeStore` 先创建乐观空 assistant 流式行，再将权威 `activity_id` 收编；首个 `stream_id` 到达时与流事件共用唯一收敛函数进行原子换键。一个主会话活动可以先后拥有多个流式气泡，工具等待阶段不重复创建空气泡，终态会清理语义为空的占位行。
 
-## Hooks
+## Activity Dashboard Tab
 
+`features/activity/` 提供只读全局活动状态看板：`ActivityDashboardTab`、`ActivityCanvas`、`useActivityDashboard`、活动类型/标签；`services/activityEventBus.ts` 是前端唯一活动 EventSource 管理器，首个订阅创建连接，最后订阅关闭连接，使用连接代际阻止旧回调污染新连接。Activity Tab不提供preview，不导航、不审批、不中断、不控制资源。
+
+事件日志只显示当前观察窗口收到的增量；overview REST每3秒刷新会话、活跃主会话Loop、工具和工具集快照。Canvas视效使用原生Canvas、requestAnimationFrame和ResizeObserver，事件按消息/Agent响应/工具调用分色产生亮线和余辉；静态内盘网线、盘外基础通道和数据盘文字块在尺寸变化时分别预渲染到离屏Canvas，数据盘缓存包含代码行、键值进度、折线、条形、分段进度、点阵、仪表、矩阵等装饰块，并叠加环形测量刻度、轨道线和校准括号；每个数据盘 slot 有独立错相扫描光、标记移动和低亮变换动画，并拥有独立的内容刷新时间表；内容切换由全局约 360ms 的刷新节拍串行错峰，目标保持整体每秒约 2–3 个 slot 切换，再交叉淡入新的装饰内容；每帧还叠加 56 条独立错相的盘内常驻流光；常驻流光具有独立的明暗呼吸相位与速度，普通模式下持续运动并做亮度动画，prefers-reduced-motion时固定为低亮静态。
 前端采用 hooks 拆分状态管理逻辑，从原有的 `useWebSocket.ts` 中提取出独立职责：
 
 | Hook | 职责 |

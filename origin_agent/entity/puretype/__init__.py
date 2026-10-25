@@ -198,6 +198,16 @@ from .session import (
     MainSessionInterruptResult,
     ToolChainSpan,
 )
+from .activity import (
+    ActivityEventKind,
+    ActivityEventPhase,
+    ActivityEventStatus,
+    ActivityEventDraft,
+    ActivityEvent,
+    ActivityStreamGap,
+    ActivityOverview,
+    ActivityStreamItem,
+)
 from .session_export import (
     SessionExportStamp, SessionExportHistorySnapshot, SessionExportVisualEntry,
     SessionExportLimits, SessionExportSnapshotResponse, SessionExportResourceSource,
@@ -413,6 +423,15 @@ __all__ = [
     "QueuedMessage",
     "MainSessionInterruptResult",
     "ToolChainSpan",
+    # activity
+    "ActivityEventKind",
+    "ActivityEventPhase",
+    "ActivityEventStatus",
+    "ActivityEventDraft",
+    "ActivityEvent",
+    "ActivityStreamGap",
+    "ActivityOverview",
+    "ActivityStreamItem",
     # agent
     "AgentConfig",
     "CharacterProfile",

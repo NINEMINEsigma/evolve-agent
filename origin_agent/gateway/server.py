@@ -21,12 +21,14 @@ from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.frontend_sink import IFrontendSink
 from interface.gateway_system import IGatewaySystem
 from interface.llm_profile_store import ILLMProfileStore
+from interface.logger_system import ILoggerSystem
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
 from interface.shell_manager import IShellManager
 from interface.subagent_orchestrator import ISubAgentOrchestrator
+from interface.tool_registry import IToolRegistry
 
 import hashlib
 import json
@@ -72,6 +74,9 @@ from entity.constant import (
     DIR_ZIP_MAX_TOTAL_BYTES,
     SYSTEM_CHARACTER_NAME,
     AGENTSPACE_SSE_HEARTBEAT_SECONDS,
+    ACTIVITY_SSE_HEARTBEAT_SECONDS,
+    ACTIVITY_SSE_EVENT_NAME,
+    ACTIVITY_SSE_GAP_EVENT_NAME,
     LOCAL_FONT_HTTP_PREFIX,
     LOCAL_FONT_MIME_TYPES,
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
@@ -135,6 +140,9 @@ from entity.puretype import (
     DynamicSandboxSpaceCreateRequest,
     DynamicSandboxSpaceUpdateRequest,
     SessionRuntimeStatus,
+    ActivityEvent,
+    ActivityStreamGap,
+    ActivityOverview,
     SessionMessageEditResult,
     SessionMessageDeletionResult,
     SessionRegenerateResult,
@@ -173,6 +181,12 @@ def _get_sm() -> ISessionManager|None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().get_system(ISessionManager)
+
+
+def _get_logger() -> ILoggerSystem:
+    """Return the process Logger System through its interface slot."""
+    from system.application import Application
+    return Application.current().get_system(ILoggerSystem)
 
 
 def _get_loop(session_id: str):
@@ -401,6 +415,87 @@ async def health():
     return JSONResponse(
         {"status": "shutting_down", **payload},
         status_code=503,
+    )
+
+
+def _activity_sse(item: ActivityEvent | ActivityStreamGap) -> str:
+    event_name = (
+        ACTIVITY_SSE_EVENT_NAME
+        if isinstance(item, ActivityEvent)
+        else ACTIVITY_SSE_GAP_EVENT_NAME
+    )
+    return f"event: {event_name}\ndata: {item.model_dump_json()}\n\n"
+
+
+@router.get("/api/activity/overview", response_model=ActivityOverview)
+async def get_activity_overview() -> ActivityOverview:
+    """Return current process-level activity dashboard counts."""
+    _admit_business_http()
+    from system.application import Application
+    manager = _get_sm()
+    registry = Application.current().get_system(IToolRegistry)
+    return ActivityOverview(
+        session_count=manager.count,
+        active_loop_count=len(manager.get_all_loops()),
+        tool_count=len(registry.get_all_tool_names()),
+        toolset_count=len(registry.get_registered_toolset_names()),
+    )
+
+
+@router.get("/api/activity/events")
+async def activity_events(req: Request):
+    """Stream only activity events published after this subscription starts."""
+    _admit_business_http()
+    logger_system = _get_logger()
+    subscription_id, queue = logger_system.subscribe_activity_events()
+    gateway = _gateway()
+
+    async def stream():
+        from system.application import Application
+        shutdown_wait = gateway.task_owner.track(
+            asyncio.create_task(
+                Application.current().get_system(IRuntimeSystem).shutdown_event.wait(),
+                name="activity-sse-shutdown-wait",
+            )
+        )
+        try:
+            while not await req.is_disconnected():
+                event_wait = gateway.task_owner.track(
+                    asyncio.create_task(queue.get(), name="activity-sse-event-wait")
+                )
+                try:
+                    done, _ = await asyncio.wait(
+                        (event_wait, shutdown_wait),
+                        timeout=ACTIVITY_SSE_HEARTBEAT_SECONDS,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    if not event_wait.done():
+                        gateway.task_owner.cancel(event_wait)
+                        await asyncio.gather(event_wait, return_exceptions=True)
+                if shutdown_wait in done:
+                    return
+                if event_wait in done:
+                    error = event_wait.exception()
+                    if error is not None:
+                        raise error
+                    yield _activity_sse(event_wait.result())
+                else:
+                    yield ": keepalive\n\n"
+        finally:
+            if not shutdown_wait.done():
+                gateway.task_owner.cancel(shutdown_wait)
+            await asyncio.gather(shutdown_wait, return_exceptions=True)
+            logger_system.unsubscribe_activity_events(subscription_id)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -1457,6 +1552,7 @@ async def regenerate_response(session_id: str, req: Request):
             response_characters=result.response_characters,
             activity_source=MainSessionActivitySource.regenerate,
             activity_id=activity_id,
+            input_sequences=[],
             require_tool_call=request.require_tool_call,
         )
     finally:

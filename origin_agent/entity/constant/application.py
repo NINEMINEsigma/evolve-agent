@@ -44,7 +44,7 @@ EXIT_EVOLVED: int = -1
 EXIT_FAILURE: int = 1
 
 # 应用关闭硬截止（秒）；超过后强制失败退出，绝不报告进化成功。
-APPLICATION_SHUTDOWN_TIMEOUT_SECONDS: float = 60.0
+APPLICATION_SHUTDOWN_TIMEOUT_SECONDS: float = 5
 # 单个系统停止活动任务的等待上限（秒），不作为继续生成回复的宽限期。
 SYSTEM_QUIESCE_TIMEOUT_SECONDS: float = 10.0
 # 关闭期间单次前端发送的等待上限（秒），写盘不依赖前端确认。

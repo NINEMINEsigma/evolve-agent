@@ -13,6 +13,7 @@ import SandboxTab from "./SandboxTab";
 import VariablesTab from "./VariablesTab";
 import MediaInputTab from "./MediaInputTab";
 import FileChangesTab from "./FileChangesTab";
+import ActivityDashboardTab from "../activity/ActivityDashboardTab";
 import { mediaInputLabels } from "../sessionMedia/labels";
 import { fileChangesLabels } from "../sessionFileChanges/labels";
 import type { UseSessionFileChangesState } from "../sessionFileChanges/types";
@@ -24,7 +25,7 @@ import {
 } from "./tabPreviewSelectors";
 
 /** Tab id union. Adding a future tab = one registry entry + one enabled derivation in useTabSystem. */
-export type TabId = "chat" | "resources" | "changes" | "media" | "variables" | "subagents" | "characters" | "site" | "llm" | "sandbox";
+export type TabId = "chat" | "activity" | "resources" | "changes" | "media" | "variables" | "subagents" | "characters" | "site" | "llm" | "sandbox";
 
 /** Shared render context handed to every tab content layer. */
 export interface TabRenderContext {
@@ -65,6 +66,12 @@ export interface TabDefinition {
 const chatIcon = (
   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+const activityIcon = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12h4l2.2-7 4.1 14 2.1-7H21" />
   </svg>
 );
 
@@ -152,6 +159,7 @@ const sandboxIcon = (
 /** Declarative tab registry. The rail and the stage both render from this list. */
 export const TAB_REGISTRY: readonly TabDefinition[] = [
   { id: "chat", title: "聊天", icon: chatIcon, render: (ctx) => <ChatTab ctx={ctx} />, preview: selectChatPreview },
+  { id: "activity", title: "活动大盘", icon: activityIcon, render: (ctx) => <ActivityDashboardTab ctx={ctx} /> },
   { id: "resources", title: "资源 / 任务", icon: resourcesIcon, render: (ctx) => <ResourcesTab ctx={ctx} />, preview: selectResourcesPreview },
   { id: "changes", title: fileChangesLabels.title, icon: changesIcon, render: (ctx) => <FileChangesTab ctx={ctx} />, preview: selectFileChangesPreview },
   { id: "media", title: mediaInputLabels.title, icon: mediaIcon, render: (ctx) => <MediaInputTab ctx={ctx} />, preview: selectMediaPreview },

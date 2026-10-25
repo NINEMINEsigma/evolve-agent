@@ -20,6 +20,7 @@ import "./styles/dialogs.css";
 import "./styles/panels.css";
 import "./styles/drawer.css";
 import "./styles/tabs.css";
+import "./styles/activity-dashboard.css";
 import "./styles/session-variables.css";
 import "./styles/session-media.css";
 import "./styles/session-file-changes.css";

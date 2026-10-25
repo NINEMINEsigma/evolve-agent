@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from interface.agentspace_service import IAgentspaceService
 from interface.llm_profile_store import ILLMProfileStore
+from interface.logger_system import ILoggerSystem
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_metadata_service import ISessionMetadataService
@@ -48,6 +49,11 @@ from entity.puretype import (
     MainSessionActivitySource,
     MainSessionActivityPhase,
     MainSessionActivitySnapshot,
+    ActivityEvent,
+    ActivityEventDraft,
+    ActivityEventKind,
+    ActivityEventPhase,
+    ActivityEventStatus,
     SessionTerminationResult,
     SessionMessageEditResult,
     SessionMessageDeletionResult,
@@ -1424,6 +1430,35 @@ class BaseAgentLoop(ABC):
             clipboard_display=resources.get("clipboard_display", {}),
         )
 
+    def record_activity_event(
+        self,
+        kind: ActivityEventKind,
+        phase: ActivityEventPhase,
+        status: ActivityEventStatus,
+        *,
+        activity_id: str | None,
+        input_sequences: list[int] | None = None,
+        stream_id: str | None = None,
+        tool_call_id: str | None = None,
+        character_name: str | None = None,
+        tool_name: str | None = None,
+        duration_ms: int | None = None,
+        ) -> ActivityEvent:
+        draft = ActivityEventDraft(
+            kind=kind,
+            phase=phase,
+            status=status,
+            session_id=self.session_id,
+            activity_id=activity_id,
+            input_sequences=list(input_sequences or []),
+            stream_id=stream_id,
+            tool_call_id=tool_call_id,
+            character_name=character_name,
+            tool_name=tool_name,
+            duration_ms=duration_ms,
+        )
+        return self.app.get_system(ILoggerSystem).record_activity(draft)
+
     # -- 主会话活动快照 --------------------------------------------------
 
     def ensure_main_session_activity(
@@ -1968,6 +2003,33 @@ class IMainSessionLoop(ABC):
         if isinstance(self, BaseAgentLoop):
             return self
         raise ValueError("current instance is not a BaseAgentLoop")
+
+    def record_activity_event(
+        self,
+        kind: ActivityEventKind,
+        phase: ActivityEventPhase,
+        status: ActivityEventStatus,
+        *,
+        activity_id: str | None,
+        input_sequences: list[int] | None = None,
+        stream_id: str | None = None,
+        tool_call_id: str | None = None,
+        character_name: str | None = None,
+        tool_name: str | None = None,
+        duration_ms: int | None = None,
+        ) -> ActivityEvent:
+        return self.loop.record_activity_event(
+            kind,
+            phase,
+            status,
+            activity_id=activity_id,
+            input_sequences=input_sequences,
+            stream_id=stream_id,
+            tool_call_id=tool_call_id,
+            character_name=character_name,
+            tool_name=tool_name,
+            duration_ms=duration_ms,
+        )
 
     def ensure_main_session_activity(
         self,

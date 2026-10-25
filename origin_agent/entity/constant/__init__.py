@@ -56,6 +56,13 @@ from .session_variables import (
     SESSION_VARIABLE_ISSUE_MESSAGES,
 )
 from .resource_cleanup import CleanupState
+from .activity import (
+    ACTIVITY_EVENT_BUFFER_SIZE,
+    ACTIVITY_EVENT_QUEUE_SIZE,
+    ACTIVITY_SSE_HEARTBEAT_SECONDS,
+    ACTIVITY_SSE_EVENT_NAME,
+    ACTIVITY_SSE_GAP_EVENT_NAME,
+)
 from .application import (
     ApplicationState,
     ShutdownReason,
@@ -408,6 +415,11 @@ __all__ = [
     "DOM_TEXT_SUMMARY_CHARS",
     "QUERY_MAX_RESULTS",
     "QUERY_MAX_RESULTS_HARD",
+    "ACTIVITY_EVENT_BUFFER_SIZE",
+    "ACTIVITY_EVENT_QUEUE_SIZE",
+    "ACTIVITY_SSE_HEARTBEAT_SECONDS",
+    "ACTIVITY_SSE_EVENT_NAME",
+    "ACTIVITY_SSE_GAP_EVENT_NAME",
     "ApplicationState",
     "ShutdownReason",
     "TaskOwnership",

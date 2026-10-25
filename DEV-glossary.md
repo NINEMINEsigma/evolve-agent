@@ -492,3 +492,12 @@
 | 资源抽屉 / 模型配置抽屉 / 会话网页抽屉 / 子会话面板 | 资源 Tab / 模型配置 Tab / 会话网页 Tab / 子会话 Tab | 右侧抽屉体系 tab 化后退役；规范称谓见 §11「Tab 导航体系」 |
 | 小地图 / 逻辑 Minimap 映射 | 轮次导航条（round navigation rail，`RoundNavRail`） | 2026-10-12 起轮次导航改造退役；主聊天区与子会话的小地图（Canvas 逻辑映射 / DOM 几何预览）整体替换为轮次导航条 |
 | 动态沙盒空间管理弹窗 | 动态沙盒空间 Tab | 命令菜单弹窗 tab 化后退役（2026-10-12）；规范称谓见 §11「Tab 导航体系」 |
+
+## §14 全局活动看板
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| Logger System | Application 注册的进程级结构化活动事件 System；与标准 Python `logging` 并存，首版仅保存有界内存活动事件，不替代诊断日志 | Logger System |
+| 结构化活动事件 | 主会话消息接收、Agent 响应流和工具调用的安全元数据事件；不包含用户正文、Agent 正文、工具参数、工具结果或密钥 | structured activity event |
+| 全局活动状态看板 Tab | 右侧 Tab 栏中的只读进程级活动视效 Tab；使用当前 KPI 快照和打开后的活动事件增量，不提供导航或业务控制 | global activity dashboard tab |
+| 活动事件 SSE | Activity Tab 使用的单一全局 Server-Sent Events 连接；只发送订阅建立后的事件，不发送历史快照或断线期间事件 | activity event SSE |
