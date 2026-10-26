@@ -3,10 +3,10 @@ import RichInput from "./RichInput";
 import TaskProgressPanel from "./TaskProgressPanel";
 import InputMorph, { MorphItem } from "./InputMorph";
 import RecorderButton from "./RecorderButton";
-import TokenRing from "./TokenRing";
+import ApprovalModeBadge from "./ApprovalModeBadge";
 import PopupLayer from "./primitives/PopupLayer";
 import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSocket";
-import type { AskAnswerItem, AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
+import type { ApprovalMode, ApprovalModeSyncStatus, AskAnswerItem, AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -106,10 +106,12 @@ interface InputBarProps {
   pendingConfirms: ConfirmRequest[];
   onRespondAsk: (ask: AskRequest, answers: AskAnswerItem[] | null) => void;
   onRespondConfirm: (confirm: ConfirmRequest, action: string, reason?: string) => void;
-  // 上下文徽章数据
-  tokenUsage: number;
-  contextTokens: number;
-  llmMaxContextTokens: number;
+  // 审批模式
+  approvalMode: ApprovalMode;
+  approvalModeSyncStatus: ApprovalModeSyncStatus;
+  approvalModelAvailable: boolean;
+  approvalModelName: string;
+  onSetApprovalMode: (mode: ApprovalMode) => void;
 }
 
 // ── 零测量静态判定 hook：按展开态固有宽度（常量）与视口比较，防收起后振荡 ──
@@ -163,9 +165,11 @@ export default function InputBar({
   pendingConfirms,
   onRespondAsk,
   onRespondConfirm,
-  tokenUsage,
-  contextTokens,
-  llmMaxContextTokens,
+  approvalMode,
+  approvalModeSyncStatus,
+  approvalModelAvailable,
+  approvalModelName,
+  onSetApprovalMode,
 }: InputBarProps) {
   const runtime = useChatRuntimeStore();
   const input = runtime.draftHtml;
@@ -592,10 +596,13 @@ export default function InputBar({
           </div>
           
           <div className="input-bar-actions-right">
-            <TokenRing
-              contextTokens={contextTokens}
-              llmMaxContextTokens={llmMaxContextTokens}
-              tokenUsage={tokenUsage}
+            <ApprovalModeBadge
+              className="input-approval-mode"
+              mode={approvalMode}
+              syncStatus={approvalModeSyncStatus}
+              approvalModelAvailable={approvalModelAvailable}
+              approvalModelName={approvalModelName}
+              onSetApprovalMode={onSetApprovalMode}
             />
             <button
               className="require-tool-call-btn"

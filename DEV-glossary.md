@@ -256,7 +256,7 @@
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
 | 会话 Tab 能力探测 | `useSessionTabCapabilities` / `GET /api/sessions/{id}/tab-capabilities` | 不读取完整媒体载荷或变量正文的只读能力链路；返回当前 History 媒体实例数量和变量 Tab 是否有可展示内容。首次未知、会话切换或失败时目标 Tab 禁用；同一会话后台 refreshing 保留已确认快照，成功确认空内容后禁用 | session tab capability probe |
-| 右侧 Tab 栏 | `TabRail` / `.tab-rail-column` | 屏幕右缘 44px 常驻竖排 Tab 列（移动端 40px），由可滚动图标区和固定底部控制区组成；图标无内容或能力未确认时为禁用态不可点击，底部控制区上方为审批模式三态切换、下方为命令菜单 | tab rail |
+| 右侧 Tab 栏 | `TabRail` / `.tab-rail-column` | 屏幕右缘 44px 常驻竖排 Tab 列（移动端 40px），由可滚动图标区和固定底部控制区组成；图标无内容或能力未确认时为禁用态不可点击，底部控制区仅保留命令菜单 | tab rail |
 | Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十个 Tab，顺序为聊天、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
@@ -349,7 +349,6 @@
 | system 角色用户消息显示开关 | `showSystemUserMessages` | 控制 Role 为 `user` 且角色名为 `system` 的消息是否显示；默认显示，作为浏览器全局偏好保存，覆盖主聊天区、子会话和工具结果嵌入消息；不影响 History、模型上下文或系统状态提示（英文锚点：system-character user message visibility toggle） |
 | 状态胶囊 | `HeaderPill` / `.header-pill` | 顶部栏右侧梯形中的圆角矩形主徽章；保留待用模型入口，连接健康由独立亮灯表达 |
 | 模型选择菜单 | `ModelProfileMenu` / `.model-profile-menu` | 顶部栏唯一的会话待用 Profile 选择入口，body独立浮层；选择仅更新当前会话浏览器值，发送或重新生成时提交 |
-| 审批模式切换 | `ApprovalModeBadge` / `.approval-model-badge` | 右侧 Tab 栏底部固定控制区上方的手动/脱手/YOLO 三态切换入口；没有会话时显示不可操作状态 |
 | 上下文进度徽章 | `ContextProgressBadge` / `.context-progress-badge` | 顶部栏右侧梯形中的进度条，显示上下文使用百分比；悬停显示累计 token、已用上下文和上限 |
 | 顶部栏折叠按钮 | — | 已退役；顶部栏常驻，不再提供移动端折叠入口 |
 
@@ -399,7 +398,7 @@
 | 待上传图片预览 | `pendingImages` / `.pending-image` | 输入栏上方显示待发送的图片缩略图，可移除 |
 | 目标会话选择器 | `targetSessions` | 选择消息发送目标（main / 子会话），位于输入栏工具区 |
 | 角色可见性控制 | `visibleCharacters` / `responseCharacters` | 多 Agent 模式下控制消息可见范围与响应角色 |
-| 上下文徽章 | `TokenRing`（独立组件） | 输入栏右下角环形上下文用量徽章（contextTokens/llmMaxContextTokens 百分比），悬浮/点击展示累计·已用·上限 | context badge |
+| 审批模式切换 | `ApprovalModeBadge` / `.input-approval-mode` | 聊天 Tab 输入栏右侧操作区中的手动/脱手/YOLO 三态切换入口；使用盾牌图标、模式标签和悬浮提示表达当前状态；没有会话或状态未同步时显示不可操作状态 | approval mode toggle |
 | 输入栏功能组 | `.input-bar-actions-left` | 输入栏下行左侧功能按钮组（中断/厌恶/上传/剪贴板/录音/Agentspace/恢复），超宽收起为菜单 | input actions group |
 | 功能组菜单 | `.input-actions-menu` | 功能组收起后的纵向菜单（图标+文字），PopupLayer 承载 | input actions menu |
 

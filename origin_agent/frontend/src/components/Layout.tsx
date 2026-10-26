@@ -211,12 +211,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   );
   const tabRailFooter = (
     <TabRailFooter
-      hasSession={Boolean(ws.sessionId)}
-      approvalMode={ws.approvalMode}
-      approvalModeSyncStatus={ws.approvalModeSyncStatus}
-      approvalModelAvailable={ws.approvalModelAvailable}
-      approvalModelName={ws.approvalModelName}
-      onSetApprovalMode={ws.setApprovalMode}
       commandMenu={commandMenu}
     />
   );

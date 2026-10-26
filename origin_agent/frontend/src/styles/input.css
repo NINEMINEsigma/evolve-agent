@@ -807,13 +807,151 @@
   flex-shrink: 0;
 }
 
-/* ── 上下文徽章（输入栏） ── */
-/* header.css 的 .token-ring { display: none } 控制宽屏隐藏（Header 专用），
-   input.css 后加载——若迁移基础规则会导致 Header 窄屏 @media 被覆盖（回归），
-   故保留 header.css 不动，在此用更高特异性的后代选择器覆盖显隐 */
-.input-bar-actions .token-ring {
+/* ── 输入栏右侧审批模式控件 ── */
+.input-bar-actions-right {
+  gap: 8px;
+  padding-left: 2px;
+}
+
+.input-approval-mode {
+  position: relative;
+  gap: 6px;
+  width: auto;
+  min-width: 88px;
+  max-width: 156px;
+  height: 32px;
+  padding: 0 9px 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.34);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(var(--accent-hover-rgb), 0.20), rgba(var(--accent-rgb), 0.07)),
+    rgba(var(--bg-secondary-rgb), 0.46);
+  color: var(--text-secondary);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--white-rgb), 0.12),
+    0 4px 14px rgba(var(--black-rgb), 0.14);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.input-approval-mode .approval-mode-icon,
+.input-approval-mode .approval-mode-caret {
   display: inline-flex;
-  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.input-approval-mode .approval-mode-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+}
+
+.input-approval-mode .approval-mode-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-approval-mode .approval-mode-caret {
+  margin-left: auto;
+  color: currentColor;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.input-approval-mode.handsfree-off {
+  border-color: rgba(var(--accent-rgb), 0.38);
+  background:
+    linear-gradient(135deg, rgba(var(--accent-hover-rgb), 0.22), rgba(var(--accent-rgb), 0.08)),
+    rgba(var(--bg-secondary-rgb), 0.52);
+  color: var(--accent);
+  opacity: 1;
+}
+
+.input-approval-mode.handsfree-on[data-approval-mode="handsfree"] {
+  border-color: rgba(var(--multi-accent-base-rgb), 0.42);
+  background:
+    linear-gradient(135deg, rgba(var(--multi-accent-base-rgb), 0.24), rgba(var(--accent-rgb), 0.10)),
+    rgba(var(--bg-secondary-rgb), 0.52);
+  color: var(--multi-accent-base);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--white-rgb), 0.14),
+    0 0 18px rgba(var(--multi-accent-base-rgb), 0.14);
+}
+
+.input-approval-mode.handsfree-on[data-approval-mode="yolo"] {
+  border-color: rgba(var(--status-warning-rgb), 0.48);
+  background:
+    linear-gradient(135deg, rgba(var(--status-warning-rgb), 0.23), rgba(var(--danger-rgb), 0.10)),
+    rgba(var(--bg-secondary-rgb), 0.52);
+  color: var(--status-warning);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--white-rgb), 0.14),
+    0 0 18px rgba(var(--status-warning-rgb), 0.14);
+}
+
+.input-approval-mode.handsfree-on[data-approval-mode="handsfree"] .approval-mode-icon {
+  background: rgba(var(--multi-accent-base-rgb), 0.16);
+  color: var(--multi-accent-base);
+}
+
+.input-approval-mode.handsfree-on[data-approval-mode="yolo"] .approval-mode-icon {
+  background: rgba(var(--status-warning-rgb), 0.16);
+  color: var(--status-warning);
+}
+
+.input-approval-mode.sync-loading,
+.input-approval-mode.sync-unavailable {
+  border-color: var(--border);
+  background: rgba(var(--bg-secondary-rgb), 0.48);
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+.input-approval-mode:hover:not(:disabled),
+.input-approval-mode:focus-visible:not(:disabled) {
+  border-color: currentColor;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--white-rgb), 0.16),
+    0 0 0 3px rgba(var(--accent-rgb), 0.10),
+    0 6px 18px rgba(var(--black-rgb), 0.18);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.input-approval-mode:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.input-approval-mode:disabled {
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .input-approval-mode {
+    min-width: 38px;
+    width: 38px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .input-approval-mode .approval-mode-label,
+  .input-approval-mode .approval-mode-caret {
+    display: none;
+  }
 }
 
 /* ── 功能组收起后的纵向菜单 ── */

@@ -6,6 +6,7 @@ export interface ApprovalModeBadgeProps {
   approvalModelAvailable: boolean;
   approvalModelName: string;
   onSetApprovalMode: (mode: ApprovalMode) => void;
+  className?: string;
 }
 
 export default function ApprovalModeBadge({
@@ -14,6 +15,7 @@ export default function ApprovalModeBadge({
   approvalModelAvailable,
   approvalModelName,
   onSetApprovalMode,
+  className = "",
 }: ApprovalModeBadgeProps) {
   const disabled = syncStatus !== "ready";
   const label = syncStatus === "loading"
@@ -51,13 +53,21 @@ export default function ApprovalModeBadge({
   return (
     <button
       type="button"
-      className={`approval-model-badge ${stateClass}`}
+      className={`approval-mode-badge ${stateClass} ${className}`}
+      data-approval-mode={mode}
       data-tooltip={tooltip}
       onClick={cycleMode}
       disabled={disabled}
       aria-label={`审批模式：${label}`}
     >
-      {label}
+      <span className="approval-mode-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+          <path d="M12 3 19 6v5c0 4.7-2.9 8.1-7 10-4.1-1.9-7-5.3-7-10V6l7-3Z" />
+          <path d="m9.5 12 1.7 1.7 3.5-3.5" />
+        </svg>
+      </span>
+      <span className="approval-mode-label">{label}</span>
+      <span className="approval-mode-caret" aria-hidden="true">⌄</span>
     </button>
   );
 }

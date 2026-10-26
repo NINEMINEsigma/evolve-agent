@@ -80,9 +80,11 @@ export default function ChatTab({ ctx }: { ctx: TabRenderContext }) {
           pendingConfirms={ws.pendingConfirms}
           onRespondAsk={ws.respondAsk}
           onRespondConfirm={ws.respondConfirm}
-          tokenUsage={ws.tokenUsage}
-          contextTokens={ws.contextTokens}
-          llmMaxContextTokens={ws.llmMaxContextTokens}
+          approvalMode={ws.approvalMode}
+          approvalModeSyncStatus={ws.approvalModeSyncStatus}
+          approvalModelAvailable={ws.approvalModelAvailable}
+          approvalModelName={ws.approvalModelName}
+          onSetApprovalMode={ws.setApprovalMode}
         />
       </ChatArea>
     </div>
