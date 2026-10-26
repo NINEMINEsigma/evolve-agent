@@ -261,7 +261,7 @@
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail-column` | 屏幕右缘 44px 常驻竖排 Tab 列（移动端 40px），由可滚动图标区和固定底部控制区组成；图标无内容或能力未确认时为禁用态不可点击，底部控制区仅保留命令菜单 | tab rail |
 | Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十个 Tab，顺序为聊天、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
-| 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
+| 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 文件修改 Tab | `FileChangesTab` / `[data-tab-panel="changes"]` | 按主会话汇总内置五种文件工具成功目标操作的只读目录树；显示当前可见文件和目录条目，父目录仅为结构节点；首次创建绿色、已有路径修改黄色、已有路径删除红色，会话新增路径删除后隐藏；每个可见条目附最后操作徽章 | session file changes tab |
 | 操作次数 | `SessionFileChangesSummary.operation_count` | 所有成功目标操作总数；隐藏的删除操作仍计入，一次移动全局只计一次，不等于树中路径行次数之和 | successful target operation count |
 | 逻辑路径条目数 | `file_count` / `directory_count` | 当前可见文件/目录条目数；删除条目不计入，目录树父节点是合成结构不计入；不表示磁盘存量或跨重命名物理文件数 | logical path entry count |
@@ -362,7 +362,6 @@
 |---|---|---|
 | 主内容区 | `.main-content` | 位于常驻顶部栏和左侧导航栏主体之后的主界面区域；内部为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`） |
 | 任务进度面板 | `TaskProgressPanel` | 输入栏抽屉面内（聊天 Tab），仅非空会话显示 |
-| 统一面板（剪贴板） | `UnifiedPanel` | 剪贴板面板 `ClipboardPanel`，归属聊天 Tab，随 tab 隐藏（保持挂载） |
 | 聊天区 | `ChatArea` | 消息流；归属聊天 Tab（`ChatTab` 包裹） |
 | 输入栏 | `InputBar` | 底部输入区；归属聊天 Tab；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制 hidden/peek/open 三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时默认收缩，抵达聊天区底部时自动展开，离开底部后恢复收缩，热区悬停、聚焦及附件、上传、录音、任务进度等交互期间保持展开；ask/审批变形同样遵循三态收起规则（不位于底部或不聚焦输入框时收起），变形待办通过热区呼吸光效与角标提示，聚焦变形按钮会钉住展开；触摸设备保持完整形态 |
 | 图片灯箱 | `Lightbox` | 图片放大查看 |
@@ -430,12 +429,6 @@
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
 | 播放列表播放器 | `PlaylistPlayer` | 音频播放列表 UI（上一首/下一首/进度条/展开折叠） |
-
-### 遗留组件
-
-| 中文名称 | 代码标识 | 说明 |
-|---|---|---|
-| 剪贴板面板（旧版） | `ClipboardPanel` / `.clipboard-display-panel` | 与 `UnifiedPanel` 功能重叠的旧版组件，已被 `UnifiedPanel` 替代 |
 
 ---
 

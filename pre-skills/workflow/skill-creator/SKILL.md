@@ -380,7 +380,7 @@ SKILL.md 中的 description 字段是决定 Agent 是否调用技能的主要机
    ```html
    <iframe src="/uploads/output/eval_review_<skill-name>.html" style="width:100%;height:600px;border:none"></iframe>
    ```
-4. 用户编辑查询、切换 should-trigger、增删条目，然后点击「Export Eval Set」——在聊天前端中让用户把导出的 JSON 粘贴回来，或用 `SetClipboardDisplay` 收集
+4. 用户编辑查询、切换 should-trigger、增删条目，然后点击「Export Eval Set」——在聊天前端中让用户把导出的 JSON 粘贴回来
 
 这一步很重要——坏的评估查询导致坏的描述。
 

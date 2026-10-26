@@ -4,7 +4,6 @@
  * so a delayed response never commits into a newer session.
  */
 import type {
-  ClipboardDisplay,
   CronTask,
   DynamicEndpoint,
   ShellInfo,
@@ -51,6 +50,5 @@ export interface SessionResourceSnapshots {
 export interface SessionToolResourcesDto {
   session_id: string;
   task_progress: Record<string, TaskProgress>;
-  clipboard_display: Record<string, ClipboardDisplay>;
   dynamic_endpoints: DynamicEndpoint[];
 }

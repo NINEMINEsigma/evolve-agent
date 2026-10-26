@@ -32,13 +32,13 @@ component/
 
 ### 注册与发现
 
-`component/` 下全部工具来源（`tools/` 18、`extools/` 5、`multiagenttools/` 9、`browser/` 10、`automation/` 9 个模块）均已迁移为 `BaseTool` 子类与顶层 `TOOLSET = BaseToolSet(...)` 声明；每个模块导入只创建无连接工具对象，不取得 Application、不注册、不创建运行时连接。自定义工具与 MCP 来源使用同一对象契约。来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。
+`component/` 下全部工具来源（`tools/` 17、`extools/` 5、`multiagenttools/` 9、`browser/` 10、`automation/` 9 个模块）均已迁移为 `BaseTool` 子类与顶层 `TOOLSET = BaseToolSet(...)` 声明；每个模块导入只创建无连接工具对象，不取得 Application、不注册、不创建运行时连接。自定义工具与 MCP 来源使用同一对象契约。来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。
 
 `ToolRegistry` 是依赖 RuntimeSystem 的 AsyncSystem，运行期通过 `get_system(IToolRegistry)` 取得唯一实例；注册期由 `ToolDiscoverySystem` 按 AST 识别顶层 `TOOLSET` 后，以 `register_toolset(toolset, merge=True)` 装载并执行一次 `preheat()`。模块级 registry 单例、函数式 `register`、`ToolEntry`/`ToolsetEntry` 镜像、`HandlerToolAdapter` 与 `UIEventRouter` 均已移除；AST 发现对退役的 `register_tools`、旧全局注册表导入与导入期注册直接失败。
 
 工具四阶段（工具调用前 `before_handle`、工具主体 `handle`、工具调用后处理 `after_handle`）与工具集 `preheat()` 的完整契约见 `abstract/DEV-README.md`。专属后处理示例：
 
-- 进度/剪贴板的四个工具在主体内保留原会话资源更新逻辑，`after_handle` 直接通过当前 Sink 发送原 payload，业务 error 不发送成功 UI 更新。
+- 进度工具在主体内保留原会话资源更新逻辑，`after_handle` 直接通过当前 Sink 发送原 payload，业务 error 不发送成功 UI 更新。
 - `EvolveCode` 在保存后的 `after_handle` 唯一请求进化关闭。
 - `Enter/ExitMultiAgent` 主体只准备材料，`after_handle` 执行子Agent关闭（进入时）、目标 Loop 构造与 SessionManager 交接，完成后立即停止旧轮次。
 
@@ -67,7 +67,6 @@ component/
 | `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改；用户也可通过命令菜单中的动态沙盒空间管理弹窗直接执行 REST CRUD |
 | `ask_question.py` | `Ask` | 向前端提问（多问题表单：一次调用携带 1~N 个问题，每题独立单选/多选 + 可选自定义文本，推送 ask_request 后阻塞等待整表提交；answers 按题返回） |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
-| `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据；可见性按当前 Loop 口径分派，子Agent（SubAgentLoop/TaskAgentLoop）按动态口径（已加载工具集 ∩ scope ∩ check_fn）返回，与各自 LLM 工具表一致 |
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
 | `compress_history.py` | `CompressHistory`（`CompressHistoryTool` + `TOOLSET`） | 会话历史压缩：`handle` 只校验参数并把 `summary`、保留轮次起点登记为调用态材料；结果提交后的 `after_handle` 重新扫描历史，把旧轮次替换为 Agent 撰写的会话摘要，并把保留轮次内的完整工具链重打包为伪造的 `CompressedToolChain` 调用 + 工具链摘要 Profile 生成的链摘要（`no_timeout`）。摘要模型调用前发「正在压缩历史...」，替换、`save_history()` 与 `reset_context_tokens()` 成功后发「压缩完成」；链摘要任一步失败直接传播、历史不变。排除当前调用所在链，故当前轮不被压缩 |

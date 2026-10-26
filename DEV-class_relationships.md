@@ -101,7 +101,6 @@ classDiagram
     class SessionToolResources {
         +session_id
         +task_progress
-        +clipboard_display
         +dynamic_endpoints
     }
 
@@ -322,7 +321,6 @@ classDiagram
         +emit_stream_done()*
         +emit_usage_update()*
         +emit_progress()*
-        +emit_clipboard_display()*
         +emit_subagent_update()*
         +emit_system_message()*
     }
@@ -360,7 +358,6 @@ classDiagram
         +emit_stream_done()
         +emit_usage_update()
         +emit_progress()
-        +emit_clipboard_display()
         +emit_subagent_update()
         +emit_system_message()
     }
@@ -1519,7 +1516,7 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 ### 事件契约分层（2026-10-21）
 
-`interface/agent_sink.py::IAgentSink` 是向上通信事件契约的唯一声明处，共 15 个方法（`ask_question`、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_tool_calls_discarded`、`emit_history_updated`、`emit_user_message`、`emit_assistant_message`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_clipboard_display`、`emit_subagent_update`、`emit_system_message`）。`IFrontendSink(AsyncSystem, IAgentSink)` 只追加前端专有的 16 个连接、广播与交互解析成员，不复述事件方法；`FrontendSink` 单一继承 `IFrontendSink`，`ParentAgentSink` 直接实现 `IAgentSink`。`entry/agent_sink.py` 不再定义 `AgentSink`。
+`interface/agent_sink.py::IAgentSink` 是向上通信事件契约的唯一声明处，共 14 个方法（`ask_question`、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_tool_calls_discarded`、`emit_history_updated`、`emit_user_message`、`emit_assistant_message`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_subagent_update`、`emit_system_message`）。`IFrontendSink(AsyncSystem, IAgentSink)` 只追加前端专有的 16 个连接、广播与交互解析成员，不复述事件方法；`FrontendSink` 单一继承 `IFrontendSink`，`ParentAgentSink` 直接实现 `IAgentSink`。`entry/agent_sink.py` 不再定义 `AgentSink`。
 
 此前的方案让 `IFrontendSink` 与 `entry.AgentSink` 各自独立声明同一批事件方法，两者之间没有类型关系：`FrontendSink` 必须多重继承两个不相干的 ABC，且从 System 槽位取出的 `IFrontendSink` 实例在静态类型上不能传给任何声明 `AgentSink` 的参数，只能靠 `cast` 压制，两份契约还会各自漂移。改为接口层单一声明后，`IFrontendSink` 是 `IAgentSink` 的子类型，槽位实例可直接向下传递，所有 `cast` 已移除；新增事件方法只需修改 `IAgentSink` 一处。
 

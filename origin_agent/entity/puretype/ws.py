@@ -55,7 +55,6 @@ class MessageType(str, Enum):
     FILE_UPLOAD = "file_upload"
     HANDSFREE_MODE = "handsfree_mode"
     TASK_PROGRESS = "task_progress"
-    CLIPBOARD_DISPLAY = "clipboard_display"
     STREAM_DELTA = "stream_delta"
     STREAM_DONE = "stream_done"
     PING = "ping"

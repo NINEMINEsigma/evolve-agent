@@ -1,4 +1,3 @@
-import ClipboardPanel from "../../components/ClipboardPanel";
 import ChatArea from "../../components/ChatArea";
 import CronCountdown from "../../components/CronCountdown";
 import SubagentCountdown from "../../components/SubagentCountdown";
@@ -7,7 +6,7 @@ import type { TabRenderContext } from "./registry";
 
 /**
  * Chat tab content layer. Wraps the existing ChatArea component tree as-is;
- * ClipboardPanel, countdown strips and InputBar live inside the chat tab and
+ * ChatArea, countdown strips and InputBar live inside the chat tab and
  * hide together with it (mounted, never unmounted by tab switches).
  */
 export default function ChatTab({ ctx }: { ctx: TabRenderContext }) {
@@ -15,12 +14,6 @@ export default function ChatTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="chat-tab">
-      <ClipboardPanel
-        clipboardDisplays={ws.clipboardDisplays}
-        collapsed={ctx.clipboardCollapsed}
-        onToggleCollapse={ctx.onToggleClipboardCollapse}
-      />
-
       <ChatArea
         archived={ctx.currentSessionArchived}
         onImageClick={ctx.setLightboxSrc}

@@ -1432,7 +1432,6 @@ class BaseAgentLoop(ABC):
         return SessionToolResources(
             session_id=self.session_id,
             task_progress=resources.get("task_progress", {}),
-            clipboard_display=resources.get("clipboard_display", {}),
         )
 
     def record_activity_event(

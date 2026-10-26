@@ -873,14 +873,6 @@ class FrontendSink(IFrontendSink):
         ) -> None:
         await self._send_msg(session_id, "task_progress", tool_name, payload)
 
-    async def emit_clipboard_display(
-        self,
-        session_id: str,
-        tool_name: str,
-        payload: str
-        ) -> None:
-        await self._send_msg(session_id, "clipboard_display", tool_name, payload)
-
     async def emit_subagent_update(
         self,
         session_id: str,
@@ -961,9 +953,6 @@ class FrontendSink(IFrontendSink):
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
         elif event_type == "task_progress":
             msg = Message(type=MessageType.TASK_PROGRESS, session_id=session_id, tool=tool_name,
-                          result=payload)
-        elif event_type == "clipboard_display":
-            msg = Message(type=MessageType.CLIPBOARD_DISPLAY, session_id=session_id, tool=tool_name,
                           result=payload)
         elif event_type == "subagent_update":
             msg = Message(type=MessageType.SUBAGENT_UPDATE, session_id=session_id,
@@ -1225,24 +1214,6 @@ class ParentAgentSink(IAgentSink):
         except Exception:
             logger.warning(
                 "Failed to forward progress event to parent session=%s", session_id, exc_info=True
-            )
-
-    async def emit_clipboard_display(
-        self,
-        session_id: str,
-        tool_name: str,
-        payload: str
-        ) -> None:
-        """转发剪贴板展示事件到父 Agent 前端。"""
-        try:
-            from system.application import Application
-            sink = Application.current().get_system(IFrontendSink)
-            await sink.emit_clipboard_display(
-                self._loop.parent_session_id, tool_name, payload,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to forward clipboard_display to parent session=%s", session_id, exc_info=True
             )
 
     async def emit_subagent_update(

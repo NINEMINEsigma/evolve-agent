@@ -358,7 +358,6 @@ class SessionToolResources(BaseModel):
 
     session_id: str
     task_progress: dict[str, Any] = Field(default_factory=dict)
-    clipboard_display: dict[str, Any] = Field(default_factory=dict)
     dynamic_endpoints: list[dict[str, Any]] = Field(default_factory=list)
 
 

@@ -131,7 +131,7 @@ ParentAgentSink不作为System；它直接实现`IAgentSink`，其转发方法�
 
 ## 工具事件路由移除
 
-`UIEventRouter` 与 `abstract/tools/ui_event_router.py` 已删除，Application 拓扑相应由 21 个 System 减为 20 个。工具后处理不再经独立事件路由，而是在结果提交 History 后通过工具实例的 `after_handle(execution)` 直接向前端 Sink 发送事件（如任务进度、剪贴板展示）；发送与取消清理责任仍由所属 Loop 与 FrontendSink 承担。
+`UIEventRouter` 与 `abstract/tools/ui_event_router.py` 已删除，Application 拓扑相应由 21 个 System 减为 20 个。工具后处理不再经独立事件路由，而是在结果提交 History 后通过工具实例的 `after_handle(execution)` 直接向前端 Sink 发送事件（如任务进度）；发送与取消清理责任仍由所属 Loop 与 FrontendSink 承担。
 
 ## LSPManager接入
 

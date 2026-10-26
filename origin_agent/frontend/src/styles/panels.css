@@ -69,98 +69,6 @@
   white-space: nowrap;
 }
 
-/* ── Clipboard display items (shared) ── */
-.clipboard-display-item {
-  margin-bottom: 8px;
-}
-
-.clipboard-display-item:last-child {
-  margin-bottom: 0;
-}
-
-.clipboard-display-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-}
-
-.clipboard-display-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.clipboard-display-copy {
-  font-size: 12px;
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
-}
-
-.clipboard-display-copy:hover {
-  background: var(--accent);
-  color: var(--text-white);
-  border-color: var(--accent);
-}
-
-.clipboard-display-content {
-  margin: 0;
-  padding: 8px 10px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-/* ── Collapsible panel header ── */
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 16px;
-  cursor: pointer;
-  user-select: none;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  transition: background var(--duration-fast);
-}
-
-.panel-header:hover {
-  background: var(--bg-hover);
-}
-
-.panel-header-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.panel-header-toggle {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 6px;
-}
-
 /* ── Cron countdown strip ── */
 .cron-countdown-strip {
   position: relative;
@@ -328,17 +236,6 @@
   font-size: 11px;
 }
 
-/* ── Clipboard Panel ── */
-.unified-panel {
-  padding: 0;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-}
-
-.unified-content {
-  padding: 10px 16px;
-}
-
 /* ── Subagent display ── */
 .subagent-info {
   display: flex;
@@ -407,6 +304,3 @@
 }
 
 /* ── Clipboard panel collapsed ── */
-.unified-panel.collapsed .unified-content {
-  display: none;
-}

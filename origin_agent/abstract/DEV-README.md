@@ -173,7 +173,7 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ### UI 事件路由
 
-`abstract/tools/ui_event_router.py` 与 `UIEventRouter` 已删除。工具的后处理不再经独立事件路由，而是在结果提交 History 后通过工具实例的 `after_handle(execution)` 直接向前端 Sink 发送事件（如任务进度、剪贴板展示），发送任务与取消清理责任仍由所属 Loop 与 FrontendSink 承担。
+`abstract/tools/ui_event_router.py` 与 `UIEventRouter` 已删除。工具的后处理不再经独立事件路由，而是在结果提交 History 后通过工具实例的 `after_handle(execution)` 直接向前端 Sink 发送事件（如任务进度），发送任务与取消清理责任仍由所属 Loop 与 FrontendSink 承担。
 
 ---
 

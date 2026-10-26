@@ -51,7 +51,6 @@ frontend/
 │   │   ├── primitives/             ← 基础 UI 原语
 │   │   │   ├── ModalWindow.tsx
 │   │   │   ├── PopupLayer.tsx
-│   │   │   └── CopyBanner.tsx
 │   │   └── ...                      ← 聊天、弹窗、面板等组件
 │   ├── services/
 │   │   ├── agentspaceApi.ts ← 独立 Agentspace 编辑器 REST/SSE 适配层
@@ -110,7 +109,7 @@ frontend/
 | `features/tabs/useTabPreview.ts` | 只读摘要数据组装：把 TabDataProvider / chatRuntimeStore / WebSocket 快照投影为纯 `TabPreviewInput` 并运行选择器；不发请求，仅资源预览且有下一项时运行本地 1 秒 tick |
 | `features/tabs/TabHoverPreview.tsx` | 只读摘要卡片：复用 `PopupLayer`（外部点击/ESC 关闭显式 false），内层 `role=tooltip`，无按钮/输入/焦点陷阱/aria-live |
 | `features/tabs/tabPreviewSelectors.ts` | 十个纯选择器 + `selectNextCronEvent`/`formatPreviewCountdown`/`truncatePreviewText`/`formatPreviewPayloadChars`/`formatPreviewRatio`；媒体双进度条与变量概要均在此组装 |
-| `features/tabs/ChatTab.tsx` | 聊天 Tab 内容层：ChatArea + ClipboardPanel + 双倒计时条 + InputBar |
+| `features/tabs/ChatTab.tsx` | 聊天 Tab 内容层：ChatArea + 双倒计时条 + InputBar |
 | `features/tabs/ResourcesTab.tsx` | 资源 Tab：四折叠区块（资源/Shell/Cron/动态端点），资源按 tab 激活懒加载 |
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
 | `features/tabs/CharactersTab.tsx` | 角色档案 Tab：全部子Agent 角色档案的只读配置目录；roleplay/task 分组列表 + 展开式详情（profile.md 全文、`[profile]` 引用提示词文件、LLM Profile 名称、错误全文），错误条目高亮、空态引导与“如需修改请在聊天中让主Agent操作”提示；运行状态仅当前会话视角（按角色名匹配 `subagentSessions`，优先 running）；提示词条目由 `buildPromptItems` 尽力对齐（正文与路径不保证一一对应）；档案数据从共享 `TabDataContext` 读取（唯一 hook 实例在 Provider，激活条件 `activeTab==="characters"`），不再直接调用 hook |
@@ -222,7 +221,6 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 | 组件 | 职责 |
 |---|---|
-| `ClipboardPanel.tsx` | 剪贴板展示面板（聊天 Tab 内） |
 | `SubagentCard.tsx` | 子会话卡片：单会话消息流 + 轮次导航条（子会话 Tab 内） |
 | `TaskProgressPanel.tsx` | 任务进度面板（输入栏抽屉面内，聊天 Tab） |
 | `PlaylistPlayer.tsx` | 播放列表播放器（资源 Tab） |

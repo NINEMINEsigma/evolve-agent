@@ -152,16 +152,6 @@ class IAgentSink(ABC):
         ...
 
     @abstractmethod
-    async def emit_clipboard_display(
-        self,
-        session_id: str,
-        tool_name: str,
-        payload: str
-        ) -> None:
-        """Send a clipboard-display update."""
-        ...
-
-    @abstractmethod
     async def emit_subagent_update(
         self,
         session_id: str,

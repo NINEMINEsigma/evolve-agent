@@ -43,8 +43,6 @@ export interface TabRenderContext {
   onToggleMessageVisibility: (messageId: string, agentName: string) => void;
   setLightboxSrc: (src: string | null) => void;
   currentSessionArchived: boolean;
-  clipboardCollapsed: boolean;
-  onToggleClipboardCollapse: () => void;
   stageState: SessionStageState;
   chatStyleCssText: string | null;
   chatStyleStatus: SessionChatStyleState["status"];

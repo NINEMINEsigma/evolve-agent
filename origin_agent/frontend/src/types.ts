@@ -235,7 +235,6 @@ export type MessageType =
   | "tool_result"
   | "tool_calls_discarded"
   | "task_progress"
-  | "clipboard_display"
   | "confirm_request"
   | "ask_request"
   | "stream_delta"
@@ -478,12 +477,6 @@ export interface TaskProgress {
   total: number;
   percent: number;
   status: string;
-}
-
-export interface ClipboardDisplay {
-  display_id: string;
-  label: string;
-  content: string;
 }
 
 export interface DynamicEndpoint {

@@ -3,7 +3,6 @@ import type {
   ApprovalMode,
   AskAnswerItem,
   AskRequest,
-  ClipboardDisplay,
   ClientDiagnostic,
   ConfirmRequest,
   CronTask,
@@ -97,7 +96,6 @@ function decodeSessionToolResources(payload: unknown, sessionId: string): Sessio
   const value = objectValue(payload);
   if (value.session_id !== sessionId) throw new Error("Tool resources belong to a different session");
   const taskProgress = objectValue(value.task_progress);
-  const clipboard = objectValue(value.clipboard_display);
   const rawEndpoints = value.dynamic_endpoints;
   if (!Array.isArray(rawEndpoints)) throw new Error("Invalid dynamic endpoints payload");
   const dynamicEndpoints = rawEndpoints.map((entry) => {
@@ -112,7 +110,6 @@ function decodeSessionToolResources(payload: unknown, sessionId: string): Sessio
   return {
     session_id: sessionId,
     task_progress: taskProgress as Record<string, TaskProgress>,
-    clipboard_display: clipboard as Record<string, ClipboardDisplay>,
     dynamic_endpoints: dynamicEndpoints,
   };
 }
@@ -192,7 +189,6 @@ export function useWebSocket() {
     if (endpointToken) {
       if (toolRes.status === "fulfilled") {
         owner.setTaskProgress(toolRes.value.task_progress);
-        owner.setClipboardDisplays(toolRes.value.clipboard_display);
         owner.dynamicEndpointResource.completeRequest(endpointToken, toolRes.value.dynamic_endpoints);
       } else {
         owner.dynamicEndpointResource.failRequest(endpointToken, "tool-resources 请求失败");
@@ -1053,7 +1049,6 @@ export function useWebSocket() {
     approvalMode: session.approvalMode,
     approvalModeSyncStatus: session.approvalModeSyncStatus,
     taskProgress: session.taskProgress,
-    clipboardDisplays: session.clipboardDisplays,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
     llmMaxContextTokens: llmProfiles.activeProfile?.max_context_tokens ?? 0,

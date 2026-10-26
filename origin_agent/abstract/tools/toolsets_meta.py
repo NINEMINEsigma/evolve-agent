@@ -88,10 +88,6 @@ Multimodal Read conventions:
 - If the task is cancelled or aborted, call ClearTaskProgress to remove the stale bar.""",
     ),
     BaseToolSet(
-        name="clipboard",
-        description="Create and manage one-click copy areas in the frontend top panel.",
-    ),
-    BaseToolSet(
         name="multiagent",
         description="Register, run, chat with, stop, and manage sub-agents; enter and exit multi-agent mode.",
         usage_guide="""Sub-agent conventions:

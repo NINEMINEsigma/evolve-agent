@@ -53,7 +53,6 @@ class SessionStore:
     # 工具副作用资源分区 → 独立文件（磁盘唯一真相，分区写互不干扰）
     _PARTITION_FILES: dict[str, str] = {
         "task_progress": "task_progress.json",
-        "clipboard_display": "clipboard_display.json",
     }
 
     def __init__(self, base_dir: Path | str) -> None:
@@ -85,11 +84,7 @@ class SessionStore:
         session_id: str,
         partition: str
         ) -> dict[str, Any]:
-        """读单个分区；分区文件不存在时回退读旧单文件 tool_resources.json 对应键。
-
-        必须逐分区判断文件存在（不能"任一分区存在就整体走分区"），
-        否则 clear 只写 task_progress.json 后 clipboard_display 仍读旧单文件残留。
-        """
+        """读单个分区；分区文件不存在时回退读旧单文件 tool_resources.json 对应键。"""
         path = self.partition_path(session_id, partition)
         if path.is_file():
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -176,7 +171,6 @@ class SessionStore:
         """合并读全部分区（兼容旧单文件逐分区回退）。"""
         return {
             "task_progress": self.read_partition(session_id, "task_progress"),
-            "clipboard_display": self.read_partition(session_id, "clipboard_display"),
         }
 
     def write_tool_resources(

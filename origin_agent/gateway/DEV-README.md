@@ -125,7 +125,6 @@ WS /ws/chat?resume=<sid>
 | `tool_result` | 工具执行结果；工具链中被消费的排队消息通过 `embedded_messages` 独立传输，不混入普通结果 JSON。 |
 | `tool_calls_discarded` | 同一模型批次中因前序工具 `accepts_following_calls=False` 被截断、在执行前视为未发生的调用；顶层携带 `session_id`、`stream_id` 与 `tool_call_ids`，前端据此移除对应实时工具卡片。 |
 | `task_progress` | 任务进度更新 |
-| `clipboard_display` | 剪贴板展示更新 |
 | `subagent_update` | 子会话状态更新 |
 | `history_sync` | 正典历史同步元数据；普通追加与轮次状态仍走该事件，正文通过 REST 加载 |
 | `history_updated` | `HistoryUpdatedEvent`：仅含固定 type 与非空 session_id。已提交历史发生非追加变更时要求前端完整重载历史骨架与按需正文；不刷新页面、不重放工具，也不依赖消息数下降。 |
@@ -365,7 +364,7 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 | `history.es` | 新版消息历史（v1，easysave 多态序列化） |
 | `summary.txt` | 会话摘要 |
 | `token_usage.json` | token 消耗 |
-| `tool_resources.json` | 任务进度、剪贴板展示等 |
+| `tool_resources.json` | 任务进度等工具资源（旧版兼容读取） |
 | `approval_mode.es` | easysave `v1` key保存的 `SessionApprovalModeState`；BaseModel直接保存并通过 stable type token重建，缺失、缺 key、损坏或类型错误时回退手动模式；模式变更先更新内存再尽力保存，安全写入与 `.bak`由 easysave负责 |
 
 归档保留 `approval_mode.es`；永久删除会话目录时一并删除，随后清理 Store缓存。单源分支和多父合并不会复制来源模式，新会话统一写入手动模式；上下文超限产生的自动延续会继承来源主会话的当前模式。

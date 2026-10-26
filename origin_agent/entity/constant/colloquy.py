@@ -14,7 +14,7 @@ COLLOQUY_COMPRESS_RATIO: float = 0.3
 # sandbox 管理工具集有意排除：随意聊聊会话可使用已有动态空间，但不可修改全局配置。
 COLLOQUY_TOOLSET_WHITELIST: frozenset[str] = frozenset({
     "filesystem", "core", "progress", "lsp", "frontend", "code",
-    "clipboard", "shell",
+    "shell",
     "extools", "cron", "dynamic", "archive",
 })
 

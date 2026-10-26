@@ -80,7 +80,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
-  const [clipboardCollapsed, setClipboardCollapsed] = usePersistentState(STORAGE_KEYS.CLIPBOARD_COLLAPSED, false);
 
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`);
@@ -168,8 +167,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     : currentSession?.title || "未命名会话";
 
   const tabSystem = useTabSystem(ws);
-  const onToggleClipboardCollapse = useCallback(() => setClipboardCollapsed((v) => !v), [setClipboardCollapsed]);
-
   const tabRenderContext: TabRenderContext = {
     ws,
     activeTab: tabSystem.activeTab,
@@ -184,8 +181,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     onToggleMessageVisibility: handleToggleMessageVisibility,
     setLightboxSrc,
     currentSessionArchived,
-    clipboardCollapsed,
-    onToggleClipboardCollapse,
     stageState,
     chatStyleCssText: chatStyleState.cssText,
     chatStyleStatus: chatStyleState.status,

@@ -7,7 +7,6 @@ export const WS_IN = {
   TOOL_RESULT:       "tool_result",
   TOOL_CALLS_DISCARDED: "tool_calls_discarded",
   TASK_PROGRESS:     "task_progress",
-  CLIPBOARD_DISPLAY: "clipboard_display",
   CONFIRM_REQUEST:   "confirm_request",
   ASK_REQUEST:       "ask_request",
   STREAM_DELTA:      "stream_delta",

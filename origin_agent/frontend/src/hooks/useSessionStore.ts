@@ -11,7 +11,6 @@ import type {
   ApprovalModeSyncStatus,
   AskAnswerItem,
   AskRequest,
-  ClipboardDisplay,
   ConfirmRequest,
   CronTask,
   DynamicEndpoint,
@@ -51,8 +50,6 @@ export interface SessionStore {
   setApprovalModeSyncStatus: React.Dispatch<React.SetStateAction<ApprovalModeSyncStatus>>;
   taskProgress: Record<string, TaskProgress>;
   setTaskProgress: React.Dispatch<React.SetStateAction<Record<string, TaskProgress>>>;
-  clipboardDisplays: Record<string, ClipboardDisplay>;
-  setClipboardDisplays: React.Dispatch<React.SetStateAction<Record<string, ClipboardDisplay>>>;
   dynamicEndpoints: DynamicEndpoint[];
   setDynamicEndpoints: React.Dispatch<React.SetStateAction<DynamicEndpoint[]>>;
   shellResource: SessionResourceState<ShellInfo[]>;
@@ -128,7 +125,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>("manual");
   const [approvalModeSyncStatus, setApprovalModeSyncStatus] = useState<ApprovalModeSyncStatus>("loading");
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
-  const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [agents, setAgents] = useState<string[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
@@ -245,7 +241,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setTokenUsage(0);
           setContextTokens(0);
           setTaskProgress({});
-          setClipboardDisplays({});
           clearPendingInteractions();
           callbacksRef.current.onSessionRotated?.(data.new_sid, oldSid);
           fetchSessions();
@@ -296,27 +291,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
             total: data.total ?? 100,
             percent: data.percent ?? 0,
             status: data.status || "running",
-          } }));
-        }
-      } catch {}
-      return;
-    }
-    if (message.type === WS_IN.CLIPBOARD_DISPLAY) {
-      if (message.session_id && message.session_id !== sessionId) return;
-      try {
-        const data = JSON.parse(message.result ?? "");
-        if (data.cleared) {
-          setClipboardDisplays((previous) => {
-            if (!Array.isArray(data.cleared) || !data.cleared.length) return {};
-            const next = { ...previous };
-            for (const id of data.cleared) delete next[id];
-            return next;
-          });
-        } else if (data.display_id) {
-          setClipboardDisplays((previous) => ({ ...previous, [data.display_id]: {
-            display_id: data.display_id,
-            label: data.label || data.display_id,
-            content: data.content ?? "",
           } }));
         }
       } catch {}
@@ -378,7 +352,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTokenUsage(0);
     setContextTokens(0);
     setTaskProgress({});
-    setClipboardDisplays({});
     setInterruptStatus("idle");
     setApprovalModeSyncStatus("loading");
     setOperationNotice(null);
@@ -607,7 +580,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     sessionId, setSessionId, tokenUsage, setTokenUsage, contextTokens, setContextTokens,
     sessions, setSessions, searchQuery, setSearchQuery,
     approvalMode, setApprovalMode, approvalModeSyncStatus, setApprovalModeSyncStatus,
-    taskProgress, setTaskProgress, clipboardDisplays, setClipboardDisplays,
+    taskProgress, setTaskProgress,
     dynamicEndpoints: dynamicEndpointResource.snapshot.data ?? [],
     setDynamicEndpoints: dynamicEndpointResource.setData,
     shellResource, cronResource, dynamicEndpointResource,
