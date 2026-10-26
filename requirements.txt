@@ -3,7 +3,7 @@ httpx
 uvicorn
 websockets
 openai
-anthropic==0.71.0
+anthropic==0.78.0
 pywinpty>=3.0.5,<4; sys_platform == "win32"
 pydantic
 pyautogui>=0.9.54; sys_platform == 'darwin' or sys_platform == 'win32'

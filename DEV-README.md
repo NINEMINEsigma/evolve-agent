@@ -103,7 +103,7 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 | `entity/` | 常量与消息体系：`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
 | `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
 
-前端布局约定：`Layout` 以 `.app-layout` 纵向排列 28px 结构性常驻 `Header` 和 `.app-body`；`.app-body` 横向承载左侧导航栏与主内容区，右侧 Tab 栏由可滚动图标区和固定底部控制区组成。命令菜单和审批模式入口位于右侧 Tab 栏底部，顶部栏不再使用浮层热区或 56px 顶部安全区。详细组件、样式与人工验收边界见 `origin_agent/frontend/DEV-README.md`。
+前端布局约定：`Layout` 以 `.app-layout` 纵向排列 28px 结构性常驻 `Header` 和 `.app-body`；`.app-body` 横向承载左侧导航栏与主内容区，右侧 Tab 栏由可滚动图标区和固定底部控制区组成。顶部栏主徽章的右侧边缘与右侧 Tab 栏的左边界对齐，连接健康灯在主徽章右侧与屏幕右缘、顶部栏底边围成的矩形中心。命令菜单和审批模式入口位于右侧 Tab 栏底部，顶部栏不再使用浮层热区或 56px 顶部安全区。详细组件、样式与人工验收边界见 `origin_agent/frontend/DEV-README.md`。
 
 ---
 

@@ -43,6 +43,25 @@ from system.context import RuntimeContext
 logger = logging.getLogger(__name__)
 
 
+_ANTHROPIC_EFFORT_VALUES = frozenset({"low", "medium", "high", "xhigh", "max"})
+_ANTHROPIC_EFFORT_ALIASES = {"minimal": "low"}
+
+
+def _normalize_reasoning_effort(value: str) -> str | None:
+    """Normalize the shared Profile reasoning value for Anthropic Messages."""
+    normalized = (value or LLM_DEFAULT_REASONING_EFFORT).strip().lower()
+    if normalized in ("", "none"):
+        return None
+    normalized = _ANTHROPIC_EFFORT_ALIASES.get(normalized, normalized)
+    if normalized not in _ANTHROPIC_EFFORT_VALUES:
+        supported = ", ".join(sorted(_ANTHROPIC_EFFORT_VALUES))
+        raise ValueError(
+            f"Unsupported Anthropic reasoning effort {value!r}; "
+            f"expected none, minimal, or one of: {supported}"
+        )
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # 客户端
 # ---------------------------------------------------------------------------
@@ -94,22 +113,27 @@ class AnthropicLLMClient(BaseLLMClient):
         require_tool_call: bool = False,
     ) -> dict[str, Any]:
         """构造 Anthropic Messages API 的请求参数。"""
+        effort = _normalize_reasoning_effort(self._reasoning_effort)
         kwargs: dict[str, Any] = {
             "model": self._model,
             "max_tokens": self._max_tokens,
-            "temperature": self._temperature,
             "messages": messages,
             "stream": stream,
         }
+        if effort is None:
+            kwargs["temperature"] = self._temperature
+            kwargs["thinking"] = {"type": "disabled"}
+        else:
+            # Adaptive thinking controls the reasoning budget through effort.
+            # Anthropic extended thinking does not accept a custom temperature.
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": effort}
         if system:
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = tools
         if require_tool_call:
             kwargs["tool_choice"] = {"type": "any"}
-        # Anthropic's Messages API does not accept OpenAI's reasoning_effort
-        # keyword. Keep the shared Profile field for cross-client compatibility,
-        # but do not forward it as an unsupported SDK argument.
         return kwargs
 
     # -- 公开 API ----------------------------------------------------------

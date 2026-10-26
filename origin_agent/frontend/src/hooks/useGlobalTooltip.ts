@@ -3,6 +3,85 @@ import { TIMING } from "../constants/timing";
 
 const TOOLTIP_MARGIN = 10;
 const TOOLTIP_ARROW = 6;
+const CONTEXT_TOOLTIP_VARIANT = "context-usage";
+
+function readTooltipNumber(host: HTMLElement, attribute: string): number | null {
+  const value = host.getAttribute(attribute);
+  if (value === null || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatTooltipNumber(value: number): string {
+  return value.toLocaleString();
+}
+
+function renderContextUsageTooltip(tooltip: HTMLDivElement, host: HTMLElement): boolean {
+  const contextTokens = readTooltipNumber(host, "data-tooltip-context-tokens");
+  const maxContextTokens = readTooltipNumber(host, "data-tooltip-max-context-tokens");
+  const tokenUsage = readTooltipNumber(host, "data-tooltip-token-usage");
+  if (contextTokens === null || maxContextTokens === null || tokenUsage === null || maxContextTokens <= 0) {
+    return false;
+  }
+
+  const percent = Math.min(100, Math.max(0, (contextTokens / maxContextTokens) * 100));
+  const remainingTokens = maxContextTokens - contextTokens;
+  const usageTone = percent >= 90 ? "danger" : percent >= 75 ? "warning" : "normal";
+  const createText = (tagName: string, className: string, text: string) => {
+    const element = document.createElement(tagName);
+    element.className = className;
+    element.textContent = text;
+    return element;
+  };
+
+  const content = document.createElement("div");
+  content.className = "global-tooltip-context-usage";
+
+  const heading = document.createElement("div");
+  heading.className = "global-tooltip-context-heading";
+  heading.append(
+    createText("span", "global-tooltip-context-title", "上下文用量"),
+    createText("span", `global-tooltip-context-percent global-tooltip-context-percent--${usageTone}`, `${Math.round(percent)}%`),
+  );
+
+  const progress = document.createElement("div");
+  progress.className = "global-tooltip-context-progress";
+  const progressValue = document.createElement("div");
+  progressValue.className = `global-tooltip-context-progress-value global-tooltip-context-progress-value--${usageTone}`;
+  progressValue.style.width = `${percent}%`;
+  progress.appendChild(progressValue);
+
+  const stats = document.createElement("div");
+  stats.className = "global-tooltip-context-stats";
+  const usedRow = document.createElement("div");
+  usedRow.className = "global-tooltip-context-stat";
+  usedRow.append(
+    createText("span", "global-tooltip-context-stat-label", "已用上下文"),
+    createText("strong", "global-tooltip-context-stat-value", formatTooltipNumber(contextTokens)),
+    createText("span", "global-tooltip-context-stat-detail", `/ ${formatTooltipNumber(maxContextTokens)}`),
+  );
+  const remainingRow = document.createElement("div");
+  remainingRow.className = "global-tooltip-context-stat";
+  remainingRow.append(
+    createText("span", "global-tooltip-context-stat-label", "剩余空间"),
+    createText(
+      "strong",
+      `global-tooltip-context-stat-value global-tooltip-context-stat-value--${remainingTokens < 0 ? "danger" : "normal"}`,
+      remainingTokens >= 0 ? formatTooltipNumber(remainingTokens) : `超出 ${formatTooltipNumber(Math.abs(remainingTokens))}`,
+    ),
+  );
+  const totalRow = document.createElement("div");
+  totalRow.className = "global-tooltip-context-stat global-tooltip-context-stat--total";
+  totalRow.append(
+    createText("span", "global-tooltip-context-stat-label", "累计消耗"),
+    createText("strong", "global-tooltip-context-stat-value", formatTooltipNumber(tokenUsage)),
+  );
+  stats.append(usedRow, remainingRow, totalRow);
+  content.append(heading, progress, stats);
+  tooltip.appendChild(content);
+  tooltip.classList.add("global-tooltip--context-usage");
+  return true;
+}
 
 export function useGlobalTooltip() {
   useEffect(() => {
@@ -20,8 +99,13 @@ export function useGlobalTooltip() {
         clearTimeout(hideTimer);
         hideTimer = null;
       }
-      tooltip.textContent = text;
+      tooltip.classList.remove("global-tooltip--context-usage");
+      tooltip.textContent = "";
+      const renderedContextUsage = target.getAttribute("data-tooltip-variant") === CONTEXT_TOOLTIP_VARIANT
+        && renderContextUsageTooltip(tooltip, target);
+      if (!renderedContextUsage) tooltip.textContent = text;
       tooltip.appendChild(arrow);
+      tooltip.style.maxWidth = "";
       tooltip.classList.add("visible");
 
       const rect = target.getBoundingClientRect();

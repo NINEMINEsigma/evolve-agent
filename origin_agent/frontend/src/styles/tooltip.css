@@ -95,3 +95,97 @@
   border-left: none;
   border-bottom: none;
 }
+
+.global-tooltip--context-usage {
+  width: min(252px, calc(100vw - 20px));
+  max-width: 252px;
+  padding: 12px 14px;
+  white-space: normal;
+}
+
+.global-tooltip-context-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.global-tooltip-context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.global-tooltip-context-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.global-tooltip-context-percent {
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.global-tooltip-context-percent--normal { color: #b9a9ff; }
+.global-tooltip-context-percent--warning { color: var(--status-warning); }
+.global-tooltip-context-percent--danger { color: var(--danger); }
+
+.global-tooltip-context-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(var(--black-rgb), 0.42);
+  box-shadow: inset 0 1px 2px rgba(var(--black-rgb), 0.45);
+}
+
+.global-tooltip-context-progress-value {
+  height: 100%;
+  border-radius: inherit;
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.global-tooltip-context-progress-value--normal { background: linear-gradient(90deg, #836cff, #c8bdff); }
+.global-tooltip-context-progress-value--warning { background: linear-gradient(90deg, #d69b3c, #ffd27d); }
+.global-tooltip-context-progress-value--danger { background: linear-gradient(90deg, #df596a, #ff9aa6); }
+
+.global-tooltip-context-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.global-tooltip-context-stat {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.global-tooltip-context-stat--total {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(var(--white-rgb), 0.1);
+}
+
+.global-tooltip-context-stat-label { color: var(--text-secondary); }
+.global-tooltip-context-stat-value { color: var(--text-primary); font-size: 10px; font-weight: 650; text-align: right; }
+.global-tooltip-context-stat-value--normal { color: #c8bdff; }
+.global-tooltip-context-stat-value--danger { color: var(--danger); }
+.global-tooltip-context-stat-detail { color: var(--text-muted); font-size: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .global-tooltip { transition: opacity 0.01ms linear; }
+  .global-tooltip-context-progress-value { transition: none; }
+}

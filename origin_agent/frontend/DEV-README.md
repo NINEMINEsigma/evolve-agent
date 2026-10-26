@@ -98,7 +98,7 @@ frontend/
 | `App.tsx` | 根组件，组合 Sidebar / Header / Tab 系统 / 各类弹窗 |
 | `Layout.tsx` | 布局容器；`.app-layout` 纵向排列常驻 Header 与 `.app-body`，`.app-body` 横向承载 Sidebar 与 `.main-content`；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`）；会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单/命令菜单任一） |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
-| `Header.tsx` | 28px 结构性常驻顶部栏；左侧显示会话标题/会话 ID，右侧直角梯形容纳主徽章、上下文进度徽章和连接健康灯；审批模式与命令菜单位于右侧 Tab 栏底部；`modelMenuBlocked` 由性能遥测、灯箱、引导、会话导出和命令菜单触发 |
+| `Header.tsx` | 28px 结构性常驻顶部栏；左侧显示会话标题/会话 ID，右侧直角梯形容纳主徽章、上下文进度徽章和连接健康灯；主徽章右侧边缘与右侧 Tab 栏左边界对齐，连接健康灯在主徽章右侧、屏幕右缘与顶部栏底边围成的矩形中心；审批模式与命令菜单位于右侧 Tab 栏底部；`modelMenuBlocked` 由性能遥测、灯箱、引导、会话导出和命令菜单触发 |
 | `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 十条目（chat/resources/changes/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
 | `features/tabs/sessionTabCapabilitiesApi.ts` | 会话 Tab 能力 REST DTO/严格解码器/请求适配：只返回媒体数量和变量可见内容标志，不读取完整载荷 |
 
@@ -199,7 +199,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `RichInput.tsx` | 富文本输入（支持多行、快捷键） |
 | `InputMorph.tsx` | ask/审批变形卡片（输入框顶部融合，非模态）；ask 侧为多问题分页向导——题号徽章（`2/3`）与左右切换箭头、按题选中 chips（多选 toggle / 单选替换，选中与文本草稿并存）、已答题圆点标记、非末题按钮"下一题"、末题"跳过"（整表回空）+ "提交"（始终可点，一次性回传按题 answers）；长标题单行 LED 跑马灯自动滚动（溢出检测后双份文本无缝循环，悬停暂停）+ `data-tooltip` 悬停全文；confirm 侧保持原因 + 参数 JSON 视图 + 三按钮。 |
 | `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时默认收缩，抵达聊天区底部时自动展开，离开底部后恢复收缩，热区悬停、聚焦及附件、审批、上传、录音、任务进度等交互期间保持展开；ask/审批变形同样遵循三态收起规则（不位于底部或不聚焦输入框时收起），变形待办通过热区呼吸光效与角标提示，聚焦变形按钮会钉住展开；中断按钮支持「正在中断」状态、禁止重复点击、失败后允许重试；审批确认内容先显示原因，再显示工具参数。ask 变形为多问题分页向导：InputBar 维护按题草稿字典（`askDrafts`）与当前页索引，`goToQuestion` 切页时保存/恢复 RichInput 草稿，RichInput 始终是当前题的回答输入框。 |
-| `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
+| `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用）；悬浮显示结构化上下文用量 tooltip，包含使用率、进度条、已用上下文／上限、剩余空间与累计消耗 |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
 | `RoundNavRail.tsx` | 轮次导航条：每条目对应一条 Role 为 `user` 的展示行（杠+内容文本一体，条目虚拟滚动，少轮次时列表垂直居中），杠按作者角色名 hue 散列着色（与头像一致），当前轮放大+花纹凸显并自动保持可见，点击跳转到目标消息（主聊天区经 `ChatVirtualListHandle.jumpToRound`，子会话卡片经本地 DOM 滚动）；当前轮按「已渲染行中最后位于视口参考线（视口顶 + 跳转偏移比例）以上的行」判定；条目在收起/展开两态共用同一套绝对定位布局——杠锚定条目右侧固定位置，文本是杠左侧的覆盖层，桌面 hover/focus 展开浮层只加宽背板并淡入文本，杠的坐标与间距不变；窄条常驻（无折叠按钮），触摸端点杠直接跳转 |

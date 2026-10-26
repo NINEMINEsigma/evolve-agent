@@ -22,6 +22,10 @@ export default function ContextProgressBadge({
     <span
       className="context-progress-badge"
       data-tooltip={tooltip}
+      data-tooltip-variant="context-usage"
+      data-tooltip-context-tokens={contextTokens}
+      data-tooltip-max-context-tokens={llmMaxContextTokens}
+      data-tooltip-token-usage={tokenUsage}
       role="img"
       aria-label={`上下文使用率 ${Math.round(percent)}%`}
     >

@@ -254,7 +254,7 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ## Reasoning effort passthrough
 
-The LLM Profile editor exposes the common provider-facing values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without filtering by client or protocol. `none` is the explicit UI value for disabled reasoning. The bundled OpenAI-compatible client forwards the selected value as `reasoning_effort`; the Anthropic-compatible client keeps the shared Profile field but does not pass this OpenAI-specific keyword to Anthropic's `Messages` SDK, which rejects unknown request arguments. Provider-specific Anthropic reasoning must use the protocol's supported `thinking` configuration or a client-specific adapter. Legacy empty values are normalized to `none`; no capability probe or client-specific option list is maintained.
+The LLM Profile editor exposes the common values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. The bundled OpenAI-compatible client forwards these values as `reasoning_effort`. The Anthropic-compatible client uses Anthropic SDK 0.78.0: `none` sends `thinking: {"type": "disabled"}`, while `minimal` maps to `low` and the remaining effort values use `thinking: {"type": "adaptive"}` with `output_config.effort`. Thinking-enabled requests omit custom temperature because Anthropic extended thinking controls that parameter. Provider and model support for adaptive thinking and each effort level remains the authority; unsupported combinations fail through the existing client error path.
 
 ## System 接口槽位约定（2026-10-20）
 

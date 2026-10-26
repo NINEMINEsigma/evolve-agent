@@ -1,6 +1,8 @@
 /* Header */
 .app-header {
   --header-trapezoid-width: max(50vw, 320px);
+  --header-pill-width: 108px;
+  --header-control-gap: 9px;
   display: flex;
   align-items: center;
   width: 100%;
@@ -110,20 +112,20 @@
   position: absolute;
   inset: 0 0 0 auto;
   z-index: 2;
-  display: grid;
-  grid-template-columns: minmax(52px, 1fr) 108px 10px;
-  align-items: center;
-  gap: 9px;
   width: var(--header-trapezoid-width);
-  padding: 0 22px 0 38px;
 }
 
 .context-progress-badge {
+  position: absolute;
+  top: 50%;
+  left: 38px;
+  right: calc(var(--tab-rail-width) + var(--header-pill-width) + var(--header-control-gap));
+  transform: translateY(-50%);
   display: inline-grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: auto;
   min-width: 0;
   max-width: none;
   height: 20px;
@@ -154,12 +156,16 @@
 .context-progress-label { min-width: 24px; text-align: right; }
 
 .header-pill {
+  position: absolute;
+  top: 50%;
+  right: var(--tab-rail-width);
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 108px;
-  min-width: 108px;
-  max-width: 108px;
+  width: var(--header-pill-width);
+  min-width: var(--header-pill-width);
+  max-width: var(--header-pill-width);
   height: 22px;
   padding: 0 7px;
   border: 1px solid rgba(var(--accent-rgb), 0.42);
@@ -217,6 +223,10 @@
 .pill-profile-button:disabled { opacity: 0.6; cursor: default; }
 
 .connection-status-light {
+  position: absolute;
+  top: 50%;
+  right: calc((var(--tab-rail-width) - 9px) / 2);
+  transform: translateY(-50%);
   display: inline-block;
   width: 9px;
   height: 9px;
@@ -339,7 +349,7 @@
 @media (max-width: 640px) {
   .app-header { --header-trapezoid-width: 50vw; }
   .header-session-area { padding-left: 12px; }
-  .header-trapezoid { grid-template-columns: minmax(42px, 1fr) 108px 9px; gap: 6px; padding-left: 34px; padding-right: 10px; }
+  .context-progress-badge { left: 34px; }
   .header-pill { width: 108px; min-width: 108px; max-width: 108px; }
 }
 

@@ -31,8 +31,8 @@
 }
 
 .tab-rail-column {
-  width: 44px;
-  flex: 0 0 44px;
+  width: var(--tab-rail-width);
+  flex: 0 0 var(--tab-rail-width);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -120,7 +120,7 @@
 }
 
 @media (max-width: 768px) {
-  .tab-rail-column { width: 40px; flex-basis: 40px; }
+  :root { --tab-rail-width: 40px; }
   .tab-rail-footer { padding-inline: 2px; }
   .tab-rail-footer-button { font-size: 8px; }
 }

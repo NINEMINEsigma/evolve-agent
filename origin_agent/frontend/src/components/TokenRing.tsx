@@ -3,7 +3,7 @@
  *
  * 从 Header.tsx 提取为独立组件，供 Header 与 InputBar 共用。
  * 环形 SVG + 中央百分比；llmMaxContextTokens <= 0 时返回 null。
- * data-tooltip 悬浮显示累计消耗 / 已用上下文 / 最大上下文三项。
+ * data-tooltip 悬浮显示结构化上下文用量，包括使用率、进度条、已用上下文 / 上限、剩余空间和累计消耗。
  */
 
 interface TokenRingProps {
@@ -31,6 +31,10 @@ export default function TokenRing({
     <span
       className="token-ring"
       data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}
+      data-tooltip-variant="context-usage"
+      data-tooltip-context-tokens={contextTokens}
+      data-tooltip-max-context-tokens={llmMaxContextTokens}
+      data-tooltip-token-usage={tokenUsage}
     >
       <svg viewBox="0 0 32 32" width="28" height="28">
         <circle
