@@ -162,12 +162,25 @@
   max-width: 108px;
   height: 22px;
   padding: 0 7px;
-  border: 0;
+  border: 1px solid rgba(var(--accent-rgb), 0.42);
   border-radius: 7px;
-  background: linear-gradient(135deg, #6d43d4, #594dce);
+  background:
+    linear-gradient(135deg, rgba(var(--accent-hover-rgb), 0.28), rgba(var(--accent-rgb), 0.12)),
+    rgba(var(--bg-secondary-rgb), 0.38);
   color: var(--text-white);
-  box-shadow: 0 3px 12px rgba(80, 70, 220, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--white-rgb), 0.12),
+    0 3px 12px rgba(var(--accent-rgb), 0.16);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   overflow: hidden;
+}
+
+.header-pill--menu-open {
+  border-color: rgba(var(--accent-rgb), 0.68);
+  background:
+    linear-gradient(135deg, rgba(var(--accent-hover-rgb), 0.38), rgba(var(--accent-rgb), 0.18)),
+    rgba(var(--bg-secondary-rgb), 0.48);
 }
 
 .pill-profile-label,
@@ -192,8 +205,12 @@
   cursor: pointer;
 }
 
+.pill-profile-button:hover:not(:disabled) {
+  background: rgba(var(--white-rgb), 0.08);
+}
+
 .pill-profile-button:focus-visible {
-  outline: 1px solid var(--text-white);
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 

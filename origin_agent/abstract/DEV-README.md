@@ -254,7 +254,7 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ## Reasoning effort passthrough
 
-The LLM Profile editor exposes the common provider-facing values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without filtering by client or protocol. `none` is the explicit UI value for disabled reasoning. The selected string is sent unchanged as `reasoning_effort` by the bundled OpenAI-compatible and Anthropic-compatible clients, including legacy empty values normalized to `none`; the provider or protocol is responsible for accepting or rejecting it. Rejection follows the existing client error path: the service logs the failure and the active session receives a persisted system status message. No capability probe or client-specific option list is maintained.
+The LLM Profile editor exposes the common provider-facing values `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` without filtering by client or protocol. `none` is the explicit UI value for disabled reasoning. The bundled OpenAI-compatible client forwards the selected value as `reasoning_effort`; the Anthropic-compatible client keeps the shared Profile field but does not pass this OpenAI-specific keyword to Anthropic's `Messages` SDK, which rejects unknown request arguments. Provider-specific Anthropic reasoning must use the protocol's supported `thinking` configuration or a client-specific adapter. Legacy empty values are normalized to `none`; no capability probe or client-specific option list is maintained.
 
 ## System 接口槽位约定（2026-10-20）
 

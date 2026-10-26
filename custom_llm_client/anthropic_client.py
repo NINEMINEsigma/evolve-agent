@@ -107,7 +107,9 @@ class AnthropicLLMClient(BaseLLMClient):
             kwargs["tools"] = tools
         if require_tool_call:
             kwargs["tool_choice"] = {"type": "any"}
-        kwargs["reasoning_effort"] = self._reasoning_effort
+        # Anthropic's Messages API does not accept OpenAI's reasoning_effort
+        # keyword. Keep the shared Profile field for cross-client compatibility,
+        # but do not forward it as an unsupported SDK argument.
         return kwargs
 
     # -- 公开 API ----------------------------------------------------------
