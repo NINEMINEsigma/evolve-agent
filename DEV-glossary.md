@@ -80,7 +80,9 @@
 | （子Agent的）档案 | 角色目录中的 `profile.md` 与 `profile.md.meta`；`[profile]` 可按行声明多个独立系统提示词路径 | character profile prompts |
 | 运行时Profile | 多Agent参与者的运行时形态 | `AgentProfile` 类 |
 | 参与Agent | 多Agent模式主会话中的参与者（主Agent 必居其一） | — |
-| 工具循环 | LLM→工具调用→结果回写→LLM 轮次循环（上限 90） | `MAX_TOOL_TURNS` |
+| 工具循环 | LLM→工具调用→结果回写→LLM 轮次循环；上限默认使用 `MAX_TOOL_TURNS`（当前90），由全局工具循环配置覆盖；沿用各 Loop 既有计数周期与工具重置规则，不等于同批工具调用条数 | tool loop / `MAX_TOOL_TURNS` |
+| 全局工具循环配置 | 服务端独立持久化、所有 Agent 共用的工具循环轮次上限；未配置时使用 `MAX_TOOL_TURNS`，保存后在下一次循环条件检查生效，当前模型请求和工具批次继续收尾；非会话配置、非 LLM Profile 字段 | global tool-loop settings |
+| 全局运行配置页 | 模型配置 Tab 内的第三个二级分页，提供全局工具循环配置的读取、保存和恢复默认；不新增右侧顶层 Tab | global runtime settings page |
 | 强制调用工具 | 用户为下一次空闲主会话发送或重新生成选择的一次性要求：首次模型逻辑请求必须发出任意至少一个工具调用；多Agent模式各初始响应者分别一次。请求发出后关闭，resume、忙碌期间补充发送及工具链续轮不使用、不消费。不是审批模式，不保证工具执行成功，依赖模型服务的原生参数契约 | require tool call / `require_tool_call` |
 | 级联 | 多Agent模式 `response_characters` 驱动的串行响应队列调度 | `_cascade` |
 

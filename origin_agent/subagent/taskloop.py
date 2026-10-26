@@ -2,7 +2,7 @@
 
 继承 ``SubAgentLoop``，覆写终止行为：
 - LLM 产出纯文本回复时立即终止（不等待 ``_wake_event``）
-- 达到 ``MAX_TOOL_TURNS`` 上限时终止并登记反馈
+- Stop and report feedback at the global tool-loop limit
 - 无系统提示词
 - 无持久化、无历史保存
 """
@@ -42,7 +42,7 @@ class TaskAgentLoop(SubAgentLoop):
     与 ``SubAgentLoop`` 的核心差异：
     - 无系统提示词（``_build_system_prompt`` 返回空列表）
     - LLM 产出纯文本时设 ``_completed=True`` 并 return（不 await ``_wake_event``）
-    - 达到 ``MAX_TOOL_TURNS`` 时设 ``_completed=True`` 并登记反馈
+    - Set ``_completed=True`` and report feedback at the global tool-loop limit
     """
 
     def _build_system_prompt(self) -> list[str]:
@@ -104,7 +104,10 @@ class TaskAgentLoop(SubAgentLoop):
             self._maybe_inject_inbox()
 
             turn: int = 0
-            while turn < self._max_turns:
+            while True:
+                max_tool_turns = self.max_tool_turns
+                if turn >= max_tool_turns:
+                    break
                 if self._cancel_event.is_set():
                     return
                 turn += 1
@@ -259,13 +262,13 @@ class TaskAgentLoop(SubAgentLoop):
                 self._round_active = False
                 self._maybe_inject_inbox()
 
-            # 达到 MAX_TOOL_TURNS 上限
+            # 达到本次检查的全局工具循环上限
             self.append_feedback("[taskagent] Max tool turns reached.")
             self._completed = True
             self._round_active = False
             logger.warning(
                 "TaskAgent reached max tool turns | session=%s turns=%d",
-                self.session_id, self._max_turns,
+                self.session_id, max_tool_turns,
             )
 
         except Exception as exc:

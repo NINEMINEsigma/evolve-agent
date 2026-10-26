@@ -128,7 +128,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         ctx: SubRuntimeContext,
         session_id: str,
         tools: list[dict[str, Any]],
-        max_turns: int,
         on_message: Callable[[dict[str, Any]], None],
         parent_session_id: str = "",
         parent_character_agent: str = "",
@@ -165,7 +164,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         # 反馈由 SubAgentLoop 自身登记，编排器只负责一次性交接。
         self._feedback_records: list[SubAgentFeedbackDelivery] = []
         self._pending_approvals: list[PendingToolCall] = []   # 等待父 Agent 审批的工具调用队列
-        self._max_turns: int = max_turns                     # 最大工具调用轮次上限
         self._outbox_event: asyncio.Event = asyncio.Event()
 
         self._last_message_from_parent: bool = True          # 上一条消息是否来自父 Agent（用于决定是否入 outbox）
@@ -436,7 +434,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             self._maybe_inject_inbox()
 
             turn: int = 0
-            while turn < self._max_turns:
+            while True:
+                max_tool_turns = self.max_tool_turns
+                if turn >= max_tool_turns:
+                    break
                 if self._cancel_event.is_set():
                     return
                 if active_round_id is None:

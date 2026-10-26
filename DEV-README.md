@@ -454,3 +454,13 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 `Application` 新增 `ILoggerSystem`/`LoggerSystem` 槽位，LoggerSystem 依赖 `IRuntimeSystem`，内部装配 `ActivityLoggerComponent`。组件同时实现第三方 `BaseLoggerComponent` 与异步 framework `Component`；LoggerSystem 通过第三方 `BaseLogger` 分发兼容文本入口，结构化活动事件经 `ActivityEventDraft` 业务校验后在 Runtime 事件循环分配 sequence/timestamp。
 
 `ActivityEvent` 仅携带主会话消息接收、Agent response stream、tool call 的安全元数据。`message_received` 是单条 observed 事实事件；Agent response/tool call 有 started/completed 生命周期。Gateway 通过 LoggerSystem 订阅活动 SSE，前端 Activity Tab 不直接读取混合日志或内部 protected 字段。
+
+## 全局工具循环配置（2026-10-26）
+
+前端“模型配置 Tab → 全局运行配置”提供所有Agent共用的工具循环轮次上限；正整数或留空用默认，`MAX_TOOL_TURNS`保留为唯一默认来源（当前90），显式配置90与未配置null不同。保存/恢复默认通过typed `GET/PUT /api/agent-loop/settings`，服务端返回自定义值、有效值与默认值，前端不写localStorage也不复制默认数字。
+
+RuntimeSystem持有独立AgentLoopSettingsStore叶服务，经IRuntimeSystem公共契约与BaseAgentLoop只读属性供普通/随意聊聊/多Agent参与者/子Agent/临时Agent读取。无新增System或装配依赖，可变值不进启动配置、RuntimeContext、LLM Profile或会话History。默认物理路径为 `workspace/agent_loop_settings.es`，实际跟随RuntimeContext.workspace；key为新格式v1，直接保存AgentLoopSettingsData模型和稳定类型名。文件缺失不写盘，首次保存不同配置才创建；重启及正常进化保留，支持新配置的fast/fallback共用。
+
+各Loop每次下一迭代条件检查使用最新值，当前模型/审批/整批工具继续完成；只改变上限来源，保留原计数周期、提问工具重置和多Agent级联深度，循环次数不等于单批工具数量。提高额度不自动恢复已终结回复。前端无新增广播/轮询，跨页面通过再进入或主动重读同步；网络超时保存要先确认当前状态，GET不是旧PUT结束屏障，最后成功提交生效。
+
+加载未知key/损坏/正式.bak直接失败，不能用90掩盖；共享文件错误可能同时阻断新fast/fallback启动，用户停机后人工处理，开发助手AI不操作运行时文件。保存采用外层临时easysave、正式原子替换、同步发布缓存，失败不覆盖旧有效值。仅完成源码与只读审阅，未运行校验、构建、应用或实际导入，人工验收见任务文件 `.tasks/2026-10-26_1_global-max-tool-turns.md`。

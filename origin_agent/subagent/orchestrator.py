@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Coroutine
 
 from entity.constant import (
-    MAX_TOOL_TURNS,
     SYSTEM_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     History_Version as __History_Version__,
@@ -229,7 +228,7 @@ class _OrchestratorContext:
             ), name=f"subagent-ws-{session_id[:16]}")
 
         loop = TaskAgentLoop(
-            ctx, session_id, tools, MAX_TOOL_TURNS,
+            ctx, session_id, tools,
             on_message=_push_msg,
             parent_session_id=self._parent_session_id,
             parent_character_agent=self._require_agent_loop().current_character_agent,
@@ -785,7 +784,7 @@ class _OrchestratorContext:
             ), name=f"subagent-ws-{session_id[:16]}")
 
         loop = SubAgentLoop(
-            ctx, session_id, tools, MAX_TOOL_TURNS,
+            ctx, session_id, tools,
             on_message=_push_msg,
             parent_session_id=self._parent_session_id,
             parent_character_agent=self._require_agent_loop().current_character_agent,

@@ -1,6 +1,6 @@
 import type { LlmProfile } from "../types";
 
-export type LlmDrawerTab = "profiles" | "references";
+export type LlmDrawerTab = "profiles" | "references" | "runtime";
 export type LlmProfileDraft = Omit<LlmProfile, "temperature" | "max_output_tokens" | "max_context_tokens"> & {
   temperature: string;
   max_output_tokens: string;

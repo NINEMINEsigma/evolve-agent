@@ -6,6 +6,7 @@ from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING
 
 from entity.constant import ApplicationState, ShutdownReason
+from entity.puretype.agent_settings import AgentLoopSettingsState
 from framework import AsyncSystem
 from system.context import RuntimeContext
 
@@ -30,6 +31,22 @@ class IRuntimeSystem(AsyncSystem, ABC):
     @abstractmethod
     def context(self) -> RuntimeContext:
         """Return the immutable runtime context built once per process start."""
+        ...
+
+    @property
+    @abstractmethod
+    def max_tool_turns(self) -> int:
+        """Return the current global tool-loop limit without reading storage."""
+        ...
+
+    @abstractmethod
+    def get_agent_loop_settings(self) -> AgentLoopSettingsState:
+        """Return the configured, effective and default global tool-loop limits."""
+        ...
+
+    @abstractmethod
+    def set_max_tool_turns(self, value: int | None) -> AgentLoopSettingsState:
+        """Persist a global limit, or null to use the default; require running."""
         ...
 
     @property

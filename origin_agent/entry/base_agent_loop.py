@@ -493,6 +493,11 @@ class BaseAgentLoop(ABC):
         return self._session_store
 
     @property
+    def max_tool_turns(self) -> int:
+        """读取服务端全局工具循环上限，不在Loop中缓存配置。"""
+        return self.app.get_system(IRuntimeSystem).max_tool_turns
+
+    @property
     def active_llm_profile(self) -> LLMProfile | None:
         """返回当前活跃的 LLM 配置（前端切换后），未切换时返回 None。"""
         return self._active_llm_profile

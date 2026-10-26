@@ -248,7 +248,7 @@ sequenceDiagram
 5. `StreamConsumer.consume()` 调用 `BaseLLMClient.chat_stream()` 流式生成。
 6. 解析流中的文本 / tool_call，通过 `FrontendSink` 实时推送。
 7. 对 tool_call 执行 `ToolExecutor.execute()`：按主会话策略检查审批模式、危险等级与白名单；手动模式 safe/write 直接执行，critical 在手动/脱手模式由用户审批，YOLO 全部免审批。该流程也适用于多Agent模式中的所有参与Agent，不使用独立子会话策略。
-8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
+8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `BaseAgentLoop.max_tool_turns` 返回的全局有效上限（未配置时默认 `MAX_TOOL_TURNS`）。
 
 > **延迟渲染与消费确认**：前端发送后先显示已排队徽章，空闲消费通过emit_user_message回显；工具链期间由ToolInputReservation把普通补充输入预订进结果的 `_queued_messages`，提交后通过 `embedded_messages` 和 `consumed_client_message_ids`展示并移除对应徽章。长期consumer为每批输入创建单次回复task，中断不销毁consumer。输入状态以InputDeliveryBuffer为唯一真相，预订不代表已追加或已保存，不重放已APPENDED输入。强制调用工具记录不进入工具结果，具体边界见本文件“单次强制调用工具与输入批次”一节。
 
@@ -393,4 +393,12 @@ InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用
 主会话活动观察通过 `ILoggerSystem` 发布，不写入History。MessageRouter在主会话输入记录成功后发布单条 `message_received` observed事件；ParentAgentLoop/MultiAgentWorker为每个LLM `stream_id`发布response started/completed；ToolExecutor为每个工具调用发布tool_call started/completed。事件只携带安全元数据，`activity_id`复用既有主会话活动快照，`input_sequences`用于输入关联，工具事件必须携带非空stream_id。
 
 事件不替代既有FrontendSink WebSocket消息，也不把标准 Python logging正文转发到前端。普通子Agent不通过主会话ToolExecutor发布首版全局工具事件；ColloquyLoop沿ParentAgentLoop路径复用活动生命周期。
+
+## 全局工具循环配置（2026-10-26）
+
+`BaseAgentLoop.max_tool_turns` 是所有真实Loop共用的公开只读入口，通过 `IRuntimeSystem.max_tool_turns` 读取服务端内存值，不复制配置到Loop。`ParentAgentLoop`（含随意聊聊）与 `MultiAgentWorker` 每次进入下一迭代前捕获有效上限，和原计数器比较；超限日志/提示使用导致退出的同一个局部值，保存期间已发模型请求、审批和整批工具继续提交收尾。旧 `_MAX_TOOL_TURNS` 模块别名已删除。
+
+只改变上限来源：保留每轮计数增加位置、`resets_turn_counter` 工具重置、取消/配对/History/旋转与多Agent级联深度；循环轮次不是同批工具条数。提高额度不自动恢复已结束回复。主会话在执行工具循环前通过 `read_template('messages/tool_turn_limit.txt')` 读取并严格校验唯一 `{{MAX_TOOL_TURNS}}` 占位符，超限时显式替换；缺失/空模板直接失败，不输出空状态或硬编码中文兜底。
+
+配置不进入History、LLM Profile或客户端参数；存储/默认/恢复语义见system文档。仅源码实施与只读审阅，未运行校验、构建或应用，动态边界与原计数兼容性待用户人工验收。
 

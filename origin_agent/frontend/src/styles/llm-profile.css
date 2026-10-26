@@ -106,7 +106,17 @@
 .llm-confirmation-window .modal-actions { flex-wrap: wrap; }
 .llm-confirmation-window .modal-btn { min-height: 44px; }
 .llm-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+/* 全局运行配置页复用模型配置表单原语，新增样式限制在功能自身。 */
+.agent-loop-settings-page { min-width: 0; }
+.agent-loop-settings-page .llm-inline-actions { margin-top: 12px; }
+.agent-loop-settings-status { color: var(--text-secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.agent-loop-settings-status:empty { display: none; }
+.agent-loop-settings-page form { margin-top: 18px; }
+.agent-loop-settings-page details > summary { cursor: pointer; }
 @container (max-width: 520px) {
+  .llm-tabs { flex-wrap: wrap; }
+  .llm-tabs > button { flex-basis: 120px; overflow-wrap: anywhere; }
+  .agent-loop-settings-page .llm-reference-card { padding: 16px 12px; }
   .llm-field-grid, .llm-value-grid { grid-template-columns: minmax(0,1fr); }
   .llm-details-heading { align-items: flex-start; }
 }

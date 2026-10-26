@@ -42,7 +42,6 @@ from system.session_store import SessionStore
 from entity.constant import (
     ApplicationState,
     LOG_PREVIEW_CHARS,
-    MAX_TOOL_TURNS,
     USER_CHARACTER_NAME,
 )
 from entity.messages import (
@@ -84,6 +83,7 @@ from system.lifecycle import ApplicationStoppingError, LifecycleFailure, require
 from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
+from util.templates import read_template
 from entry.session_message_queue import SessionMessageQueue, activity_source_for_items
 
 if TYPE_CHECKING:
@@ -92,9 +92,6 @@ if TYPE_CHECKING:
     from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
-
-# 每条消息的最大工具调用循环次数
-_MAX_TOOL_TURNS: int = MAX_TOOL_TURNS
 
 
 class IncompatibleHistoryError(Exception):
@@ -451,6 +448,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         require_tool_call: bool = False
         ) -> str:
         """执行 LLM 工具调用循环。"""
+        limit_template = read_template("messages/tool_turn_limit.txt")
+        if not limit_template or limit_template.count("{{MAX_TOOL_TURNS}}") != 1:
+            raise ValueError("Invalid or missing messages/tool_turn_limit.txt template")
         first_request_pending = require_tool_call
         round_id = self.begin_agentspace_round(self.current_character_agent)
 
@@ -460,13 +460,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 计时数据累积器（三元组：session_id, msg_index, metrics）
         collected_metrics: list[tuple[str, int, MessageMetrics]] = []
 
-        # 预初始化：while 循环内每轮重新赋值，但循环退出后的超限路径仍需引用，
-        # 静态检查无法证明循环至少执行一次（_MAX_TOOL_TURNS=90 保证之）。
+        # 预初始化：有效上限始终为正整数，但动态边界也可能直接结束已有计数。
+        # 循环退出后的超限路径仍需引用最后一个流的状态。
         stream_id: str = ""
         stream_started_at: float = time.monotonic()
 
         try:
-            while turn.value < _MAX_TOOL_TURNS:
+            while True:
+                max_tool_turns = self.max_tool_turns
+                if turn.value >= max_tool_turns:
+                    break
                 if self.app.get_system(IRuntimeSystem).state is not ApplicationState.RUNNING:
                     return ""
                 if self._cancel_event.is_set():
@@ -820,14 +823,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
-            _MAX_TOOL_TURNS, sid,
+            max_tool_turns, sid,
         )
         await self._emit_stream_done(
                         sid, stream_id, "error", content="", metrics=None,
                         activity_id=activity_id, input_sequences=input_sequences,
                         started_at=stream_started_at,
                     )
-        status_text = f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。"
+        status_text = limit_template.replace("{{MAX_TOOL_TURNS}}", str(max_tool_turns))
         status_index = self.append_system_status(status_text, session_id=sid)
         await self._frontend_sink.emit_system_message(
             sid,

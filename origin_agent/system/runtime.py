@@ -13,6 +13,7 @@ from pathlib import Path
 from interface.runtime_system import IRuntimeSystem
 
 from entity.constant import (
+    AGENT_LOOP_SETTINGS_ES_FILENAME,
     APPLICATION_SHUTDOWN_TIMEOUT_SECONDS,
     ApplicationState,
     DEFAULT_MAIN_AGENT_CHARACTER_NAME,
@@ -22,6 +23,8 @@ from entity.constant import (
     SOUL_META_CHARACTER_NAME_KEY,
     ShutdownReason,
 )
+from entity.puretype.agent_settings import AgentLoopSettingsState
+from system.agent_loop_settings import AgentLoopSettingsStore
 from system.cleanup_errors import split_cleanup_timeouts
 from system.context import RuntimeContext
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
@@ -76,6 +79,7 @@ class RuntimeSystem(IRuntimeSystem):
         self._shutdown_reason: ShutdownReason | None = None
         self._failures: list[BaseException] = []
         self._cleanup = ResourceCleanupRegistry(self.record_failure)
+        self._agent_loop_settings: AgentLoopSettingsStore | None = None
         self._input_sequence = 0
         self._shutdown_deadline: threading.Timer | None = None
         # 主Agent角色名：启动时从 SOUL.md.meta 读取一次；运行期由 RefreshIdentity 工具刷新。
@@ -94,6 +98,10 @@ class RuntimeSystem(IRuntimeSystem):
                 self._shutdown_event.set()
             else:
                 raise LifecycleFailure(f"Invalid runtime initialization state: {self._state}")
+        self._agent_loop_settings = AgentLoopSettingsStore(
+            self._context.workspace / AGENT_LOOP_SETTINGS_ES_FILENAME,
+        )
+        self._agent_loop_settings.initialize()
         # 启动时读取一次主Agent角色名（SOUL.md.meta），此后由 RefreshIdentity 工具按需刷新。
         self.refresh_main_agent_character_name()
 
@@ -104,6 +112,22 @@ class RuntimeSystem(IRuntimeSystem):
     @property
     def context(self) -> RuntimeContext:
         return self._context
+
+    def _require_agent_loop_settings(self) -> AgentLoopSettingsStore:
+        if self._agent_loop_settings is None:
+            raise LifecycleFailure("Agent loop settings have not been initialized")
+        return self._agent_loop_settings
+
+    @property
+    def max_tool_turns(self) -> int:
+        return self._require_agent_loop_settings().max_tool_turns
+
+    def get_agent_loop_settings(self) -> AgentLoopSettingsState:
+        return self._require_agent_loop_settings().get_state()
+
+    def set_max_tool_turns(self, value: int | None) -> AgentLoopSettingsState:
+        self.require_running()
+        return self._require_agent_loop_settings().set_max_tool_turns(value)
 
     @property
     def main_agent_character_name(self) -> str:

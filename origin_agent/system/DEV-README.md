@@ -229,3 +229,13 @@ capture使用Loop公开分段隔离输入，线程读取严格metrics并计算�
 
 本包的 Runtime、SubprocessRunner、Sandbox、Shell、Agentspace、Profile、元数据、LSP 和多模态等 System 均继承对应 `interface/` 接口。它们的 `dependencies` 和内部 `get_system()` 查询只使用接口类型；Application 负责将实现实例注册到接口槽位。资源所有权、virtual lifecycle 和关闭错误传播仍由具体实现负责，接口不声明这些 framework 生命周期成员。
 
+## 全局工具循环配置（2026-10-26）
+
+`RuntimeSystem._agent_loop_settings` 唯一持有 `system/agent_loop_settings.py::AgentLoopSettingsStore` 叶服务，无新增 System、后台任务或装配依赖。构造不做I/O，`virtual_awake` 初始化；`IRuntimeSystem` 暴露只读 `max_tool_turns`、`get_agent_loop_settings()` 和 `set_max_tool_turns(value)`，不暴露具体Store。可变值不进入不可变RuntimeContext。
+
+持久化位于 `RuntimeContext.workspace/agent_loop_settings.es`，初始key为 `v1`，稳定类型名为 `v1::AgentLoopSettingsData`；根字段 `max_tool_turns: int | None`，null使用 `MAX_TOOL_TURNS`（当前90）。持久化Data不冻结以兼容easysave逐字段还原，只有Store私有持有；HTTP请求与独立状态快照仍冻结。范围为1至JavaScript安全整数上界，不提供无限制；加载后显式验证，排除布尔/字符串/小数。GET只查缓存且缺文件不创建；已有文件缺key、类型/值损坏或正式 `.bak` 都失败，不静默用默认覆盖。该文件由支持此功能的fast/fallback共用，坏文件可能同时阻断两者启动，只允许用户停机后人工处理，不自动恢复或删备份。
+
+写入在Store唯一RLock内准备候选：复制正式文件原字节到同目录独占临时文件，把BaseModel直接交给easysave保存临时路径，内部提交/清理全部成功后用既有 `util.atomic_io.replace_atomic` 替换正式文件，随后无await、无后置磁盘清理地发布缓存。失败仅清理本次临时资源，原错误与清理错误并组，不改正式目标或旧缓存；相同值短路前也拒绝正式备份冲突。HTTP保存为同步短事务，不持Runtime接收锁跨磁盘I/O，不承诺零阻塞或跨进程事务。必要配置保存失败交回HTTP边界，不据此主动关闭应用。
+
+所有Loop每次循环检查读取内存有效值，不反复读盘。文件不放进会话、LLM Profile或派生源码副本；重启/正常进化保留，不改变既有计数周期。仅完成源码与只读审阅，未运行校验、构建、应用或导入验证，需用户人工验收。
+

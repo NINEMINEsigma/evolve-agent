@@ -268,5 +268,13 @@ TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe�
 
 `SubAgentOrchestrator` 继承 `ISubAgentOrchestrator`，依赖和运行期查询使用 `IRuntimeSystem`、`ISessionManager` 及其他接口槽位。`_OrchestratorContext` 仍是编排器内部运行对象，不注册为 System；子Agent Loop 的 History、反馈交接和关闭所有权不因接口化改变。
 
+## 全局工具循环配置（2026-10-26）
+
+`SubAgentLoop.__init__` 参数顺序现为 `ctx, session_id, tools, on_message, parent_session_id='', parent_character_agent='', name=''`，删除 `max_turns` 参数及 `_max_turns` 字段。`TaskAgentLoop` 继承新构造，编排器两处调用已同步；不再在创建时复制 `MAX_TOOL_TURNS`。
+
+普通子Agent和临时Agent每次循环检查都读取继承的 `BaseAgentLoop.max_tool_turns`，与主会话共用服务端全局配置，因此已经存在的实例也可取得更新。当前模型请求/审批/整批工具继续完成，下一检查达到或超过新额度才停止；临时Agent超限日志使用该次检查值。未配置默认90，前端“模型配置 Tab → 全局运行配置”修改后服务端持久化。
+
+原计数周期保持：普通子Agent的turn在整个run内累积，纯文本回复后等待/唤醒不重置，改配置不主动唤醒等待者；临时Agent纯文本完成即结束、原反馈/停止/安全授权不变。提高上限不重建已结束实例，不增加构造期或每角色覆盖。仅源码实施与只读审阅，未运行校验、构建或应用，用户人工验收待完成。
+
 
 

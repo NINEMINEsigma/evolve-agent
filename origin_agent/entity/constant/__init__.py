@@ -280,7 +280,13 @@ from .llm import (
     GLOBAL_LLM_PROFILE_FILENAME,
     LOADED_TOOLSETS_FILENAME,
 )
-from .agent import MAX_TOOL_TURNS
+from .agent import (
+    MAX_TOOL_TURNS,
+    MIN_TOOL_TURNS,
+    MAX_CONFIGURABLE_TOOL_TURNS,
+    AGENT_LOOP_SETTINGS_ES_FILENAME,
+    AGENT_LOOP_SETTINGS_ES_KEY,
+)
 from .subagent import (
     SUBAGENT_NAME_PATTERN,
 )
@@ -349,6 +355,7 @@ from .versions import (
     AgentConfig_Type_Version,
     SessionApprovalModeState_Type_Version,
     SessionFileChanges_Type_Version,
+    AgentLoopSettings_Type_Version,
 )
 
 
@@ -586,6 +593,11 @@ __all__ = [
     "GLOBAL_LLM_PROFILE_FILENAME",
     "LOADED_TOOLSETS_FILENAME",
     "MAX_TOOL_TURNS",
+    "MIN_TOOL_TURNS",
+    "MAX_CONFIGURABLE_TOOL_TURNS",
+    "AGENT_LOOP_SETTINGS_ES_FILENAME",
+    "AGENT_LOOP_SETTINGS_ES_KEY",
+    "AgentLoopSettings_Type_Version",
     "SUBAGENT_NAME_PATTERN",
     "CHARACTERS_DIR_NAME",
     "CHARACTER_ROLEPLAY_DIR_NAME",

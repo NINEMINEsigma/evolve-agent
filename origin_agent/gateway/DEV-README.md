@@ -394,4 +394,12 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；等待�
 
 is_active只覆盖已经登记活动快照的排队/准备窗口；accept登记到主loop唤醒之间仍可能短暂为false。活动复检不是强互斥，不修复所有既有History截断并发风险。前端请求发出即消费，不等待服务端确认；前后端状态延迟导致服务端按普通消息处理时也不恢复选择。已实施源码和文档，未运行校验或应用。
 
+## 全局工具循环配置 REST（2026-10-26）
+
+`GET /api/agent-loop/settings` 返回 `AgentLoopSettingsState`：`max_tool_turns`（自定义正整数或null）、`effective_max_tool_turns`（当前有效值）、`default_max_tool_turns`（MAX_TOOL_TURNS，当前90）。只查Runtime持有Store的缓存，不创建Loop或默认文件，响应 `Cache-Control: no-store`。
+
+`PUT /api/agent-loop/settings` 必须显式提交 `max_tool_turns`；null恢复默认，合法整数范围1至9,007,199,254,740,991，严格拒绝布尔/字符串/小数/额外字段。入口先业务准入，经既有 `_parse_request_model` 读取后再次准入，再同步保存并返回同型权威状态。无效JSON/字段400，停止503，存储/备份冲突和内部错误沿FastAPI失败边界传播，不返回默认值或成功。保存不持Runtime接收锁跨磁盘，不新增后台任务、WS事件或广播；无会话ID、Profile和归档写入限制。
+
+正常保存后各Agent下一次循环检查读新值，当前请求/批次继续；其它前端需主动重读。客户端超时不代表请求未提交，GET也不是旧PUT终止屏障；多个页面按服务端最后成功提交生效。新前端遇到旧后端404/HTML明确报错，不猜测默认90。仅源码实施与只读审阅，未运行校验、构建或应用，需用户同批部署验收。
+
 

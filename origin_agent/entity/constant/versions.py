@@ -12,4 +12,5 @@ History_Type_Version = "v1"
 LLMProfileData_Type_Version = "v2"
 AgentConfig_Type_Version = "v1"
 SessionApprovalModeState_Type_Version = "v1"
+AgentLoopSettings_Type_Version = "v1"  # 全局工具循环配置根对象的稳定类型版本。
 SessionFileChanges_Type_Version = "v1"  # 会话文件操作聚合根、条目和作者的稳定类型版本。

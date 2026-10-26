@@ -96,6 +96,8 @@ from entity.constant import (
     VISUAL_VERSION_HEADER,
 )
 from entity.puretype import (
+    AgentLoopSettingsState,
+    AgentLoopSettingsUpdateRequest,
     SessionMediaListResponse,
     SessionMediaUpdateRequest,
     SessionMediaUpdateResponse,
@@ -2605,6 +2607,38 @@ async def put_modality_profile(update: ModalityProfileUpdateRequest):
         state=state,
         notification_failures=failures,
     )
+
+
+# ---------------------------------------------------------------------------
+# Global tool-loop settings API
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/agent-loop/settings", response_model=AgentLoopSettingsState)
+async def get_agent_loop_settings(response: Response) -> AgentLoopSettingsState:
+    """读取全局配置；不创建Loop或写入默认配置文件。"""
+    from system.application import Application
+
+    _admit_business_http()
+    response.headers["Cache-Control"] = "no-store"
+    return Application.current().get_system(IRuntimeSystem).get_agent_loop_settings()
+
+
+@router.put("/api/agent-loop/settings", response_model=AgentLoopSettingsState)
+async def put_agent_loop_settings(
+    request: Request, response: Response,
+) -> AgentLoopSettingsState:
+    """同步短事务保存候选配置，文件提交成功后才发布新有效值。"""
+    from system.application import Application
+
+    _admit_business_http()
+    update = await _parse_request_model(request, AgentLoopSettingsUpdateRequest)
+    _admit_business_http()
+    state = Application.current().get_system(IRuntimeSystem).set_max_tool_turns(
+        update.max_tool_turns,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return state
 
 
 # ---------------------------------------------------------------------------

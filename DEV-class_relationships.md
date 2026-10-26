@@ -9,6 +9,7 @@ classDiagram
     class BaseAgentLoop {
         +session_id
         +app
+        +max_tool_turns
         #_inbox
         #_cancel_event
         #_message_hooks_cache
@@ -375,7 +376,6 @@ classDiagram
         #_on_message
         #_outbox
         #_pending_approvals
-        #_max_turns
         #_last_message_from_parent
         #_paused_event
         #_wake_event
@@ -1550,6 +1550,24 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 新增 `LoggerSystem/ILoggerSystem` 为进程级 System 节点，依赖 `RuntimeSystem`；`LoggerSystem` 持有 `ActivityLoggerComponent`，该组件同时实现第三方 `BaseLoggerComponent` 与异步 framework `Component`。`ActivityEventDraft`/`ActivityEvent` 为消息前纯类型，跨字段业务校验由 `system/logger.py` 承担。
 
 `MessageRouter` 发布主会话消息接收事实事件；`ParentAgentLoop`、`MultiAgentWorker` 发布每个 stream 的 Agent 响应生命周期事件；`ToolExecutor` 发布主会话工具调用生命周期事件。活动事件不进入 History、不替代 FrontendSink WebSocket、不持久化；Gateway 通过 Logger System 提供只读 overview/SSE，前端 Activity Dashboard 使用唯一 EventSource。
+
+### 全局工具循环配置关系（2026-10-26，权威）
+
+| 归属 | 新字段/公共契约 | 跨模块访问与生命周期 |
+|---|---|---|
+| RuntimeSystem | `_agent_loop_settings: AgentLoopSettingsStore | None` | 构造无I/O，virtual_awake创建/初始化唯一叶Store；Application经既有Runtime槽位间接持有，无新System |
+| IRuntimeSystem / RuntimeSystem | `max_tool_turns`只读property、`get_agent_loop_settings()`、`set_max_tool_turns(value)` | 接口仅依赖消息前纯类型，不暴露具体Store；更新先require_running，磁盘操作不持Runtime接收锁 |
+| AgentLoopSettingsStore | `_path`、唯一`_lock`、`_data`；initialize/get_state/set_max_tool_turns/max_tool_turns | 全局根类型保留存储；外层临时准备、正式原子替换后立即发布，无后台/关闭时刷盘 |
+| BaseAgentLoop | `max_tool_turns`只读property | 所有真实Loop继承，经app.get_system(IRuntimeSystem)实时取内存值，无配置副本 |
+| MultiAgentWorker | 既有`_loop.loop.max_tool_turns` | 每次下一循环检查读取，不新增字段或protected访问 |
+| SubAgentLoop / TaskAgentLoop | **移除`_max_turns`字段及构造参数`max_turns`** | 两处编排构造同步；旧图中的固定上限字段自此退役，改用继承的公开属性 |
+
+消息前纯模型 `AgentLoopSettingsData/UpdateRequest/State` 位于entity/puretype/agent_settings.py并独立导出，只有Data进入typeref（v1::AgentLoopSettingsData），新文件 `RuntimeContext.workspace/agent_loop_settings.es` 使用独立v1 key。MAX_TOOL_TURNS=90仅默认，null恢复默认，不改History/Profile存储版本与不可变RuntimeContext。
+
+主/随意聊聊/多Agent/普通子Agent/临时Agent各循环在下一迭代前读取新值；保留原计数周期和工具重置，不取消当前模型/审批/整批工具。普通子Agent纯文本后等待期间仍累计原run计数，不因设置变化唤醒。主会话超限文本经正式模板读取并校验唯一数字占位符。
+
+前端独立agentLoopSettings功能hook管理权威快照、草稿基线、单请求代际与不确定保存，SettingsPage唯一注册beforeunload；LlmTab新增runtime二级分页，Profile hook保持挂载，不增加聊天Store字段/广播/轮询。共享损坏配置或正式备份会使新fast/fallback均严格失败，恢复由用户停机后人工处理。仅源码实施与只读审阅，未运行校验、构建、导入或应用，用户人工验收待完成。
+
 
 
 

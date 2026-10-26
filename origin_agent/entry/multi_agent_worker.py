@@ -34,7 +34,6 @@ from entity.puretype import (
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
-    MAX_TOOL_TURNS,
     LOG_PREVIEW_CHARS,
     ALL_AGENTS_CHARACTER_REF_NAME,
     MULTI_AGENT_ROUTING_TAG_VISIBLE,
@@ -277,7 +276,10 @@ class MultiAgentWorker:
         self._turn_counter.value = 0
         self._collected_metrics = []
         first_request_pending = require_tool_call
-        while self._turn_counter.value < MAX_TOOL_TURNS:
+        while True:
+            max_tool_turns = self._loop.loop.max_tool_turns
+            if self._turn_counter.value >= max_tool_turns:
+                break
             self._loop.loop.app.get_system(IRuntimeSystem).require_running()
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
@@ -678,7 +680,7 @@ class MultiAgentWorker:
 
         # tool loop 超过最大轮数
         return await self._error_result(
-            f"Max tool turns ({MAX_TOOL_TURNS}) exceeded",
+            f"Max tool turns ({max_tool_turns}) exceeded",
             stream_id=stream_id,
             started_at=stream_started_at,
             collected_metrics=self._collected_metrics,

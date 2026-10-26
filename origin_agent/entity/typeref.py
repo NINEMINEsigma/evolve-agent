@@ -20,10 +20,12 @@ from entity.constant import (
     AgentConfig_Type_Version,
     SessionApprovalModeState_Type_Version,
     SessionFileChanges_Type_Version,
+    AgentLoopSettings_Type_Version,
 )
 from entity.messages import History
 from entity.puretype.llm import LLMProfileData
 from entity.puretype.agent import AgentConfig
+from entity.puretype.agent_settings import AgentLoopSettingsData
 from entity.puretype.approval import SessionApprovalModeState
 from entity.puretype.session_file_changes import (
     SessionFileChangesData, SessionFileChangeEntry, SessionFileChangeActor,
@@ -31,6 +33,7 @@ from entity.puretype.session_file_changes import (
 
 # Type → 稳定名（保存时使用）
 typespace: dict[Type, str] = {
+    AgentLoopSettingsData: f"{AgentLoopSettings_Type_Version}::AgentLoopSettingsData",
     SessionFileChangesData: f"{SessionFileChanges_Type_Version}::SessionFileChangesData",
     SessionFileChangeEntry: f"{SessionFileChanges_Type_Version}::SessionFileChangeEntry",
     SessionFileChangeActor: f"{SessionFileChanges_Type_Version}::SessionFileChangeActor",
@@ -44,6 +47,7 @@ typespace: dict[Type, str] = {
 
 # 稳定名 → Type（加载时使用）
 namespace: dict[str, Type] = {
+    f"{AgentLoopSettings_Type_Version}::AgentLoopSettingsData": AgentLoopSettingsData,
     f"{SessionFileChanges_Type_Version}::SessionFileChangesData": SessionFileChangesData,
     f"{SessionFileChanges_Type_Version}::SessionFileChangeEntry": SessionFileChangeEntry,
     f"{SessionFileChanges_Type_Version}::SessionFileChangeActor": SessionFileChangeActor,
