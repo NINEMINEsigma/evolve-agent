@@ -37,7 +37,6 @@ export default function MediaInputTab({ ctx }: { ctx: TabRenderContext }): React
   }, [selectedMediaId, selected, closeDetails]);
 
   return <div className="session-media-tab">
-    <div className="tab-panel-safe-top" aria-hidden="true" />
     {active && <div className="session-media-content">
       <header className="session-media-toolbar">
         <div>

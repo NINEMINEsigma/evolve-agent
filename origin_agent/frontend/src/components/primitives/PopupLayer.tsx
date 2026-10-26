@@ -1,4 +1,4 @@
-import { CSSProperties, MutableRefObject, ReactNode, Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CSSProperties, MutableRefObject, ReactNode, Ref, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface PopupLayerProps {
@@ -10,6 +10,7 @@ interface PopupLayerProps {
   className?: string;                   // 修饰类（.context-menu / .mention-menu / .agentspace-context-menu）
   style?: CSSProperties;                // 透传到容器（MentionMenu 的 translateY 用）；不得传 left/top（定位归基元）
   containerRef?: Ref<HTMLDivElement>;   // 容器引用通道（React 18 无 ref-as-prop，用命名 prop）
+  excludeRefs?: readonly RefObject<HTMLElement>[]; // 触发元素引用，外部点击判断时视为浮层内部
 }
 
 // 弹出浮层基元：fixed 定位 + 硬性防越界 + portal 到 body + 默认宽松关闭。
@@ -23,6 +24,7 @@ export default function PopupLayer({
   className,
   style,
   containerRef,
+  excludeRefs,
 }: PopupLayerProps) {
   // React 18 的 useRef<HTMLDivElement>(null) 命中 RefObject 重载（current readonly），
   // 显式带 null 联合使 current 可写
@@ -52,7 +54,11 @@ export default function PopupLayer({
   useEffect(() => {
     if (!onClose) return;
     const onMouseDown = (e: MouseEvent) => {
-      if (elRef.current && !elRef.current.contains(e.target as Node)) onClose();
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (elRef.current?.contains(target)) return;
+      if (excludeRefs?.some((ref) => ref.current?.contains(target))) return;
+      onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -63,7 +69,7 @@ export default function PopupLayer({
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [onClose, closeOnOutsideClick, closeOnEsc]);
+  }, [onClose, closeOnOutsideClick, closeOnEsc, excludeRefs]);
 
   return createPortal(
     <div

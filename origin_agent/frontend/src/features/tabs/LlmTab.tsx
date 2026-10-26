@@ -24,7 +24,6 @@ export default function LlmTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="llm-tab" data-tour="llm-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
       <div className="llm-tab-body">
         {manager == null ? (
           <div className="drawer-empty">正在加载模型配置…</div>

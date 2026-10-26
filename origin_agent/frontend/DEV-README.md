@@ -96,14 +96,14 @@ frontend/
 | 组件 | 职责 |
 |---|---|
 | `App.tsx` | 根组件，组合 Sidebar / Header / Tab 系统 / 各类弹窗 |
-| `Layout.tsx` | 布局容器；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`），会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单任一） |
+| `Layout.tsx` | 布局容器；`.app-layout` 纵向排列常驻 Header 与 `.app-body`，`.app-body` 横向承载 Sidebar 与 `.main-content`；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`）；会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单/命令菜单任一） |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
-| `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用”；`modelMenuBlocked` 仅由性能遥测、灯箱与引导向导触发 |
+| `Header.tsx` | 28px 结构性常驻顶部栏；左侧显示会话标题/会话 ID，右侧直角梯形容纳主徽章、上下文进度徽章和连接健康灯；审批模式与命令菜单位于右侧 Tab 栏底部；`modelMenuBlocked` 由性能遥测、灯箱、引导、会话导出和命令菜单触发 |
 | `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 十条目（chat/resources/changes/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
 | `features/tabs/sessionTabCapabilitiesApi.ts` | 会话 Tab 能力 REST DTO/严格解码器/请求适配：只返回媒体数量和变量可见内容标志，不读取完整载荷 |
 
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 的会话网页 HEAD 探测与 `useSessionTabCapabilities` 的媒体/变量内容能力探测；禁用 tab 切换静默忽略 |
-| `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：图标 + tooltip + 激活指示条；无内容或能力未确认的 Tab 使用原生 `disabled` 禁用不可点击；对启用且非当前图标接入只读悬停/聚焦预览（`useAnchoredHoverPreview` + `useTabPreview`），窗口显示时 `aria-describedby` 指向小窗，预览与名称 tooltip 互斥 |
+| `features/tabs/TabRail.tsx` | 右侧 Tab 栏立柱（44px，移动端 40px）：上方是可滚动图标区，下方是固定 footer；图标 + tooltip + 激活指示条；无内容或能力未确认的 Tab 使用原生 `disabled` 禁用不可点击；对启用且非当前图标接入只读悬停/聚焦预览（`useAnchoredHoverPreview` + `useTabPreview`），命令菜单打开时预览被阻断 |
 | `features/tabs/TabStage.tsx` | 主界面区域：grid 叠放全部 tab 外层，`visibility` 切换不卸载（保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活后才创建，SiteTab 仅随 sessionId key 变化或外层卸载重建；切换时对 site iframe 执行 blur 兜底 |
 | `features/tabs/TabDataContext.tsx` | 无 DOM 的唯一 Provider：持有 `useCharacterProfiles`/`useDynamicSandboxSpaces`/`useSessionMedia`/`useSessionVariables` 各一份，供正式 Tab 与只读预览共享同一快照；不随普通 Tab/会话切换重建，仅随锁定分支卸载；缺 Provider 时 `useTabData` 快速失败 |
 | `features/tabs/useDynamicSandboxSpaces.ts` | 动态沙盒空间列表唯一持有者：只读列表与手动 `refresh`，不自动读取（激活读取仍由 SandboxTab effect 驱动） |
@@ -115,7 +115,7 @@ frontend/
 | `features/tabs/SubagentsTab.tsx` | 子会话 Tab：内部子级 tab 行（头像/名称/状态点）+ 单 `SubagentCard`，活跃项按会话持久化 |
 | `features/tabs/CharactersTab.tsx` | 角色档案 Tab：全部子Agent 角色档案的只读配置目录；roleplay/task 分组列表 + 展开式详情（profile.md 全文、`[profile]` 引用提示词文件、LLM Profile 名称、错误全文），错误条目高亮、空态引导与“如需修改请在聊天中让主Agent操作”提示；运行状态仅当前会话视角（按角色名匹配 `subagentSessions`，优先 running）；提示词条目由 `buildPromptItems` 尽力对齐（正文与路径不保证一一对应）；档案数据从共享 `TabDataContext` 读取（唯一 hook 实例在 Provider，激活条件 `activeTab==="characters"`），不再直接调用 hook |
 | `features/tabs/useCharacterProfiles.ts` | 角色档案数据 hook（Provider 内唯一实例）：激活即重拉 `GET /api/characters/profiles`（完整 JSON 截止 + 卸载取消）、`characters/` 相关 Agentspace 事件 1s 去抖刷新、请求代际控制防旧响应覆盖；载荷缺失或非数组按错误处理，不成功返回 `[]`；不依赖会话 ID（档案为全局数据） |
-| `features/tabs/SiteTab.tsx` | 会话网页 Tab：首次激活且入口 ready、URL 可用时才创建 iframe/工具栏，未激活时只有外壳，不加载网页正文或脚本；局部 `hasBeenActivated` 在同会话切 Tab 后保留，registry 的 sessionId key 在切会话时重置，返回原会话也重新等待点击；首次加载后隐藏 Tab 仍沿用热刷新，入口删除后同会话重部署可自动重建。iframe 占剩余高度，刷新／全屏／新标签页／下载按钮栏在可视底部常驻并独占一行，不遮挡网页；不渲染顶部 56px 安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 状态经 ctx 注入（提前运行的 HEAD 探测唯一源在 `useTabSystem`），全屏目标仍仅为网页视口 |
+| `features/tabs/SiteTab.tsx` | 会话网页 Tab：首次激活且入口 ready、URL 可用时才创建 iframe/工具栏，未激活时只有外壳，不加载网页正文或脚本；局部 `hasBeenActivated` 在同会话切 Tab 后保留，registry 的 sessionId key 在切会话时重置，返回原会话也重新等待点击；首次加载后隐藏 Tab 仍沿用热刷新，入口删除后同会话重部署可自动重建。iframe 占剩余高度，刷新／全屏／新标签页／下载按钮栏在可视底部常驻并独占一行，不遮挡网页；不再渲染通用顶部安全留白，依赖结构性 28px Header 的布局占位；site 状态经 ctx 注入（提前运行的 HEAD 探测唯一源在 `useTabSystem`），全屏目标仍仅为网页视口 |
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留；列表改从共享 `TabDataContext` 读取（`spaces` 初次为 null 表示未读，成功 `[]` 才为空），本地 `operationError` 与列表 `error` 分开显示 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
@@ -133,7 +133,7 @@ frontend/
 
 解锁且`ws.isReady`的当前会话在页面可见时串行探测摘要，每请求结算后等3秒；归档也可查询，不依赖主History或ws:监听。Tab按钮始终可进入；摘要和完整树分别显示加载中、读取失败、当前没有可显示文件或过期状态。分页默认100行，仅激活时读取，切回Tab必重拉；摘要revision不变不重复拉正文。页面隐藏取消请求并暂停计时，恢复后刷新。主会话ID、请求代际、offset和单调revision共同阻止迟到覆盖；同类刷新最多合并一个pending请求。404使两链失效并清空，保留摘要再探测以覆盖删除取消；其他错误保留明确过期的同会话快照，不返回假零。
 
-`FileChangesTab.tsx`沿用56px安全区和常驻挂载规则；共享CSS位于`session-file-changes.css`并由main.tsx导入，窄屏折行。当前页失败不撤销可用摘要，切页时旧offset正文不冒充新页。摘要selector只消费已有快照，即使未加载完整页也能显示真实总数；悬停/聚焦不发请求或建立计时器。
+`FileChangesTab.tsx`沿用常驻挂载规则，不再渲染旧的 56px 顶部安全区；共享CSS位于`session-file-changes.css`并由main.tsx导入，窄屏折行。当前页失败不撤销可用摘要，切页时旧offset正文不冒充新页。摘要selector只消费已有快照，即使未加载完整页也能显示真实总数；悬停/聚焦不发请求或建立计时器。
 
 该功能仅做源码与定向只读审阅，未执行类型检查、构建或应用；中文、翻页、首个Move、多Agent独立写入、切会话、隐藏恢复及StrictMode生命周期需用户人工验收。
 
@@ -273,7 +273,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
-| `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
+| `useEdgeDrawer.ts` | 左侧导航栏边缘抽屉三态状态机（hidden/peek/open）；`pinned` 选项在左侧导航栏弹出层展开期间钉住抽屉 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `features/characterAvatars/characterAvatarStore.ts` | 角色名 → 头像 URL 的 zustand 低频 store；主Agent条目优先防同名覆盖，`useCharacterAvatarUrl` selector 供消息与子会话组件订阅 |
 | `features/characterAvatars/useCharacterAvatarSync.ts` | 挂载时拉取 `GET /api/characters/avatars`，订阅聊天页 Agentspace 事件（`SOUL.md.meta` / `characters/` 命中或 `resync`）后去抖重拉；失败静默保留旧映射 |
@@ -286,11 +286,11 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 “模型配置”Tab（`features/tabs/LlmTab.tsx`，去模态化、无遮罩与焦点陷阱）由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在 Tab 内保持挂载；编辑草稿跨 tab 与跨会话保留（内存态），`beforeunload` 刷新守卫保留。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。推理深度提供协议无关的常见值 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；`none` 显示为“不启用”，所有值均直接提交给 Provider，不在前端按客户端过滤。Provider 或协议拒绝时沿现有错误链路记录日志并向当前会话推送系统状态消息。全局页分别显示审批/元数据用途卡和图片/音频/视频三张独立全局回退卡片；每张卡片使用独立的可用状态、保存状态、错误状态和清空确认。多模态卡片明确说明活动 Profile 引用优先，活动引用失败时不切换全局回退。引用选择立即保存到服务端，状态由 REST 响应与 WebSocket 广播收敛。
 
-会话待用 Profile 选择只通过顶部栏修改。`useSessionLlmSelection` 使用 `evolve_session_llm_profile:<encoded sessionId>` 每会话键保存名称，本地明确选择优先；缺失时读取 `GET /api/sessions/{id}/llm-profile`。空sessionId不继承旧会话值；读失败不写空名称；目录加载失败不误判名称已删除。旧 `evolve_active_llm_profile` 全局键不再读取，也不猜测迁移。新建/分支/合并/旋转按新ID恢复服务端指针，不复制父会话未提交选择。发送消息与重新生成才提交名称，resume不受待用选择影响。读取请求完整覆盖响应正文的15秒截止，切会话/用户重选/名称广播使旧请求失效。
+会话待用 Profile 选择只通过顶部栏主徽章修改。`useSessionLlmSelection` 使用 `evolve_session_llm_profile:<encoded sessionId>` 每会话键保存名称，本地明确选择优先；缺失时读取 `GET /api/sessions/{id}/llm-profile`。空sessionId不继承旧会话值；读失败不写空名称；目录加载失败不误判名称已删除。旧 `evolve_active_llm_profile` 全局键不再读取，也不猜测迁移。新建/分支/合并/旋转按新ID恢复服务端指针，不复制父会话未提交选择。发送消息与重新生成才提交名称，resume不受待用选择影响。读取请求完整覆盖响应正文的15秒截止，切会话/用户重选/名称广播使旧请求失效。
 
 编辑草稿由 `useLlmProfileEditor` 持有且只驻留内存，切分页/搜索不会丢失；切Profile、收起编辑祖先、取消统一通过离开守卫（Tab 化后无遮罩/关闭按钮/Escape 关闭路径，`beforeunload` 刷新守卫保留）。外部变更不覆盖草稿，提示另存或放弃；写成功后的目录刷新失败显示警告，不再次创建；网络不确定保存先刷新确认。密钥不出现在只读详情或浏览器存储中。Tab 样式独立为 `llm-profile.css`（外壳由 `tabs.css` 的 `.llm-tab` 承载），不重写其他弹窗共享表单类。
 
-顶部 `ModelProfileMenu` 通过 `PopupLayer` 挂到body，以fixed浮层和真实按钮支持触摸/键盘；触摸与折叠顶部栏均不依赖hover。pointerdown只判断外部关闭，选项通过click提交以保留触摸滚动；菜单追踪锚点与visualViewport变化，层级高于聊天但低于模态。仅选取/Escape关闭时归还触发按钮焦点，外部点击和新模态不抢焦点。
+顶部 `ModelProfileMenu` 通过 `PopupLayer` 挂到body，以fixed浮层和真实按钮支持触摸/键盘；常驻 28px 顶部栏不依赖 hover。pointerdown只判断外部关闭，选项通过click提交以保留触摸滚动；菜单追踪锚点与visualViewport变化，层级高于聊天但低于模态。仅选取/Escape关闭时归还触发按钮焦点，外部点击和新模态不抢焦点。
 
 审批 Profile与会话审批模式是两个独立状态：清空、删除或改坏审批 Profile只改变 Profile名称/模型/可用性，不把当前会话改为手动模式。已有脱手模式继续显示，实际审批后端不可用时由服务端返回审批失败；YOLO不受影响。会话模式切换继续采用非乐观更新，只有专用权威回执到达后才解除“加载中”。
 
@@ -308,7 +308,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ### system 角色用户消息显示开关
 
-顶部栏“⋮”命令菜单在桌面端和移动端提供“system 角色用户消息：显示／隐藏”开关。默认显示，以 `STORAGE_KEYS.SHOW_SYSTEM_USER_MESSAGES` 保存到浏览器 localStorage，所有会话共用；`chatRuntimeStore` 在初始化时恢复该偏好，切换、重置或重新加载会话时不重置，存储不可用时仍可在当前页面切换。
+右侧 Tab 栏底部命令菜单在桌面端和移动端提供“system 角色用户消息：显示／隐藏”开关。默认显示，以 `STORAGE_KEYS.SHOW_SYSTEM_USER_MESSAGES` 保存到浏览器 localStorage，所有会话共用；`chatRuntimeStore` 在初始化时恢复该偏好，切换、重置或重新加载会话时不重置，存储不可用时仍可在当前页面切换。
 
 - `features/chat/messageVisibility.ts::isMessageVisible` 统一判断，仅隐藏 Role 为 `user` 且角色名为 `system` 的消息；普通用户消息、Agent 回复、工具卡片、系统状态和错误提示保持原有行为。
 - 主聊天区在 `selectChatRenderRows` 完成历史与实时行关联之后过滤展示行。完整骨架、正文缓存、原始 History 索引、实时行和正典交接保持不变，重新打开即可恢复显示；空态和顶部/底部留白依据过滤后的展示行计算，不生成零高度占位行。
@@ -341,7 +341,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ## 会话离线导出
 
-顶部栏命令菜单的“导出离线网页”面向当前已恢复且空闲的主会话。流程为捕获完整现存 History、收集有界资源、准备 ZIP、服务端最终复核后才下载。展示不受在线分页、滚动、折叠或 system 消息隐藏偏好影响；包含思考、上下文扩展、工具请求/结果及嵌入消息，分享前明确提示敏感内容风险。子会话、会话变量、会话网页和普通非媒体下载附件不打包，原 History 不修改，也不调用模型。
+右侧 Tab 栏底部命令菜单的“导出离线网页”面向当前已恢复且空闲的主会话。流程为捕获完整现存 History、收集有界资源、准备 ZIP、服务端最终复核后才下载。展示不受在线分页、滚动、折叠或 system 消息隐藏偏好影响；包含思考、上下文扩展、工具请求/结果及嵌入消息，分享前明确提示敏感内容风险。子会话、会话变量、会话网页和普通非媒体下载附件不打包，原 History 不修改，也不调用模型。
 
 `features/sessionExport/` 包含严格协议适配、有界依赖扫描/资源队列、离线打包和单次导出controller；`SessionExportDialog`提供确认、进度、缺失数量、失败和取消。切会话、锁定或开始处理会取消导出；全部异步终态按sessionId/generation核对，只有ZIP准备后verify成功才触发下载。资源明确不可用时占位并列清单，未知协议/服务故障和整体预算超限则整体失败，不截断历史冒充成功。
 
@@ -362,7 +362,7 @@ Controller持有当前重载Promise与最新待同步计数；旧REST即使忽�
 
 ## 本地性能遥测
 
-顶部栏命令菜单可打开本地性能遥测。默认关闭；开启后只记录批次数、字符数、请求耗时、逻辑范围、追底状态、长任务和 DOM/iframe 数量，最多保留 5000 条事件并导出 JSON，不上传消息正文、附件、工具参数或密钥。关闭时断开全部 observer 和采样 timer。
+右侧 Tab 栏底部命令菜单可打开本地性能遥测。默认关闭；开启后只记录批次数、字符数、请求耗时、逻辑范围、追底状态、长任务和 DOM/iframe 数量，最多保留 5000 条事件并导出 JSON，不上传消息正文、附件、工具参数或密钥。关闭时断开全部 observer 和采样 timer。
 
 ## Agentspace 编辑器行为
 
@@ -397,7 +397,7 @@ Controller持有当前重载Promise与最新待同步计数；旧REST即使忽�
 | `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |
 | `drawer.css` | Tab 化后保留的共享区块样式：折叠区块、空态、任务/Cron 列表、资源网格、子会话子级 tab 行、site 工具栏 |
-| `tabs.css` | Tab 导航体系：`.tab-body` 水平容器、`.tab-stage` grid 叠放、`.tab-panel-layer` visibility 切换、`.tab-rail` 右侧 Tab 栏、`.tab-panel-safe-top` 安全区、各 tab 内容层与 `dynamic-sandbox-*` 类族（动态沙盒空间 Tab） |
+| `tabs.css` | Tab 导航体系：`.tab-body` 水平容器、`.tab-stage` grid 叠放、`.tab-panel-layer` visibility 切换、`.tab-rail-column` 右侧 Tab 栏列容器、`.tab-rail` 可滚动图标区、`.tab-rail-footer` 固定底部控制区与各 tab 内容层 |
 | `llm-profile.css` | 模型配置 Tab分页、纵向分组、只读详情/编辑、用途卡与窄屏适配布局 |
 | `panels.css` | 任务进度/子代理面板 |
 | `sidebar.css` | 侧边栏 |

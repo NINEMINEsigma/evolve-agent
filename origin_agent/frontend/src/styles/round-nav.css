@@ -8,7 +8,7 @@
   position: relative;
   box-sizing: border-box;
   /* 顶部安全区仅用于限制列表最大高度的量测，不参与居中（居中相对整条轨） */
-  padding-top: var(--header-height);
+  padding-top: 0;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border);
   user-select: none;

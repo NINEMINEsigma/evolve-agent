@@ -103,6 +103,8 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 | `entity/` | 常量与消息体系：`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
 | `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
 
+前端布局约定：`Layout` 以 `.app-layout` 纵向排列 28px 结构性常驻 `Header` 和 `.app-body`；`.app-body` 横向承载左侧导航栏与主内容区，右侧 Tab 栏由可滚动图标区和固定底部控制区组成。命令菜单和审批模式入口位于右侧 Tab 栏底部，顶部栏不再使用浮层热区或 56px 顶部安全区。详细组件、样式与人工验收边界见 `origin_agent/frontend/DEV-README.md`。
+
 ---
 
 ## 端到端数据流
@@ -151,8 +153,8 @@ sequenceDiagram
 - 主聊天区被动追底由 `useChatScrollController` 统一协调：实时提交、正典交接的布局提交和列表总高度变化只提交可取消的单帧追底请求，执行时以 Virtuoso scroller 的物理底部为唯一锚点；最新流式消息超过视口时不定位到消息顶部。用户主动滚动、主动改变消息高度或会话状态离开 `following` 时取消待执行追底；`atBottomStateChange(false)` 不独立触发反馈循环。物理指标继续驱动底部状态、自动追底和显式回底动作；回到底部按钮由 `ChatArea` 挂载时常驻，不受内容数量、初始化、物理离底或 `followMode` 控制。异步回底按动作序号和会话代际取消，过期请求不得接管新操作。
 - 快速滚动占位沿用 Virtuoso 原行高度，避免展开长消息在正文与占位之间切换时发生高度跳变。无 History 索引且非业务状态的握手欢迎文本仅作为连接通知，不进入聊天 Footer；其他系统消息及顶部连接状态保持不变。
 - 流式结束时位于聊天视口内的普通长回复保留展开；后端在存入 History 后、对应 `history_sync` 前通过 `system.stream_meta` 发送 `stream_id`、History 索引和可选 `live_history_links`权威关联，前端在 skeleton 已包含目标行时先提升到正典位置，REST 内容页到达后覆盖临时内容并原子传递展开选择。缺失关联时保留实时行并记录诊断，不按正文或顺序猜测。
-- 主聊天区右侧为轮次导航条（`RoundNavRail`）：每条目对应一条 Role 为 `user` 的展示行，点击跳转到该消息（目标消息顶部落在视口中部略偏上），当前轮高亮并自动保持可见；骨架 user 行由后端投影附带 `content_excerpt` 摘要。本地性能遥测由用户在顶部栏命令菜单手动启用，默认关闭且不上传消息正文。
-- 顶部栏命令菜单提供 system 角色用户消息显示开关，默认显示并保存为浏览器全局偏好。关闭时仅隐藏 Role 为 `user` 且角色名为 `system` 的消息，覆盖主聊天历史/实时行、子会话及工具结果嵌入消息；轮次导航条和分页/滚动定位使用过滤后的展示行顺序，完整 History、原始索引、正典交接与模型上下文保持不变，系统状态和错误提示不受影响。
+- 主聊天区右侧为轮次导航条（`RoundNavRail`）：每条目对应一条 Role 为 `user` 的展示行，点击跳转到该消息（目标消息顶部落在视口中部略偏上），当前轮高亮并自动保持可见；骨架 user 行由后端投影附带 `content_excerpt` 摘要。本地性能遥测由右侧 Tab 栏底部的命令菜单手动启用，默认关闭且不上传消息正文。
+- 右侧 Tab 栏底部的命令菜单提供 system 角色用户消息显示开关，默认显示并保存为浏览器全局偏好。关闭时仅隐藏 Role 为 `user` 且角色名为 `system` 的消息，覆盖主聊天历史/实时行、子会话及工具结果嵌入消息；轮次导航条和分页/滚动定位使用过滤后的展示行顺序，完整 History、原始索引、正典交接与模型上下文保持不变，系统状态和错误提示不受影响。
 
 ---
 
@@ -259,7 +261,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - **会话变量池**：`ws:sessions/<主会话ID>/variables/`中的数字/字符串JSON标量与同级.meta，文件是唯一真相。ReadSessionVariables在filesystem工具集safe全量读取，与只读会话变量Tab的REST共用解析服务；Tab位于媒体输入后，注册表共十项。meta支持label/description/min/max/integer/percent/display，percent=true仅显示×100，约束违规保留真实值。AgentspaceService持有无缓存叶服务，不新增System、watcher或WS类型。自动旋转/单源分支独立复制，多父合并按sources/<父ID>分组；捕获/复核受预算限制，无法完整继承时明确拒绝并要求修复，来源不提前归档。普通子Agent保留旋转前父ID，晚到写入不自动同步；读改写非原子，主Agent统一结算，重新生成不回滚，删除会话后文件保留。池限512变量/4096节点/16层/单文件64KiB/逻辑512KiB/响应1MiB/2秒软截止，继承另有512KiB复核额度。右侧会话变量 Tab 使用同一会话 Tab 能力探测；存在变量条目或可展示问题时启用，普通空目录或无问题的普通 `.meta` 不启用，完整变量池仍在进入 Tab 后读取。
 - **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测并订阅聊天 WebSocket扇出的 Agentspace事件，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。`resync` 和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
 - **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端提前用 HEAD 探测入口并监听聊天 WebSocket中的该目录 Agentspace事件，部署完成后启用右侧会话网页 Tab。首次点击该 Tab 后才创建 iframe、加载网页正文及引用资源，悬停/仅聚焦不触发加载；同会话切 Tab 保留网页，切会话、返回原会话或刷新页面后重新等待点击。首次激活后资源连续变化仍等待 1 秒安静窗口后热刷新 iframe，隐藏 Tab 也可刷新；入口文件或整个目录被删除/移走后禁用 Tab 并回聊天，已激活的同会话重新部署后可自动重建 iframe。未激活会话部署/更新只改变探测状态，不创建 iframe。
-- **会话聊天区自定义样式**：会话级聊天区 CSS 覆盖层。Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入 CSS，前端探测并经 PostCSS 作用域处理后注入 `<style>` 标签，仅作用于 `.chat-area` 聊天区。禁止 `@import`，允许 `@font-face`（`ChatStyle-` 前缀）和 `@keyframes`。CSS 缺失、超限（256 KiB）或作用域处理失败时恢复默认样式。用户可通过顶部栏命令菜单独立暂停 Agent 舞台层和聊天区自定义样式。系统提示词通过 `build_session_chat_style_block()` 注入。
+- **会话聊天区自定义样式**：会话级聊天区 CSS 覆盖层。Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入 CSS，前端探测并经 PostCSS 作用域处理后注入 `<style>` 标签，仅作用于 `.chat-area` 聊天区。禁止 `@import`，允许 `@font-face`（`ChatStyle-` 前缀）和 `@keyframes`。CSS 缺失、超限（256 KiB）或作用域处理失败时恢复默认样式。用户可通过右侧 Tab 栏底部命令菜单独立暂停 Agent 舞台层和聊天区自定义样式。系统提示词通过 `build_session_chat_style_block()` 注入。
 
 ---
 

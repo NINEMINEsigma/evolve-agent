@@ -234,7 +234,7 @@
 
 ```
 ┌──────────┬────────────────────────────────────────────┬──────┐
-│          │  顶部栏 (Header，浮层)                      │      │
+│          │  顶部栏 (Header，28px 常驻)                  │      │
 │  左侧    ├────────────────────────────────────────────┤  右  │
 │  导航栏  │  主界面区域 (TabStage)                      │  侧  │
 │          │  ├ 聊天 Tab（ChatArea + 输入栏）            │  Tab │
@@ -256,7 +256,7 @@
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
 |---|---|---|---|
 | 会话 Tab 能力探测 | `useSessionTabCapabilities` / `GET /api/sessions/{id}/tab-capabilities` | 不读取完整媒体载荷或变量正文的只读能力链路；返回当前 History 媒体实例数量和变量 Tab 是否有可展示内容。首次未知、会话切换或失败时目标 Tab 禁用；同一会话后台 refreshing 保留已确认快照，成功确认空内容后禁用 | session tab capability probe |
-| 右侧 Tab 栏 | `TabRail` / `.tab-rail` | 屏幕右缘 44px 常驻竖排图标栏（移动端 40px）；全部 tab 图标常驻显示，无内容或能力未确认的 tab 为禁用态不可点击 | tab rail |
+| 右侧 Tab 栏 | `TabRail` / `.tab-rail-column` | 屏幕右缘 44px 常驻竖排 Tab 列（移动端 40px），由可滚动图标区和固定底部控制区组成；图标无内容或能力未确认时为禁用态不可点击，底部控制区上方为审批模式三态切换、下方为命令菜单 | tab rail |
 | Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十个 Tab，顺序为聊天、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、剪贴板面板、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
@@ -269,10 +269,10 @@
 | 会话变量 Tab | `VariablesTab` / `[data-tab-panel="variables"]` | 只有会话 Tab 能力探测确认存在变量条目或可展示问题时右侧图标可用；进入后只读展示会话变量池，支持目录分组、数值、进度条、环形仪表及纯文本；普通空目录或无问题的普通 `.meta` 不启用；通过会话 REST 与现有 Agentspace 事件同步 | session variables tab |
 | 子会话 Tab | `SubagentsTab` / `[data-tab-panel="subagents"]` | 单个顶层 tab，多个子会话作为其内部子级 tab 切换；无子会话时禁用 | subagents tab |
 | 角色档案 Tab | `CharactersTab` / `[data-tab-panel="characters"]` | 全部子Agent 角色档案的只读配置目录（列表+展开详情，含错误条目与提示词全文）；无角色时空态引导；数据源 `GET /api/characters/profiles`，按 tab 激活重拉并经 Agentspace 事件去抖刷新 | character profiles tab |
-| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览，首次激活且入口可用时才加载正文；同会话切 Tab 保留 iframe，切会话/刷新后重新等待点击；首次激活后隐藏 Tab 仍可热刷新，入口删除后同会话重部署可自动重建。按钮栏在可视底部常驻并独占一行、不遮挡网页，不使用顶部安全留白，接受现有桌面顶部栏浮层覆盖网页顶部；site 未部署时禁用；提前运行的 HEAD 探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
+| 会话网页 Tab | `SiteTab` / `[data-tab-panel="site"]` | 会话网页 iframe 预览，首次激活且入口可用时才加载正文；同会话切 Tab 保留 iframe，切会话/刷新后重新等待点击；首次激活后隐藏 Tab 仍可热刷新，入口删除后同会话重部署可自动重建。按钮栏在可视底部常驻并独占一行、不遮挡网页；页面依赖结构性 28px 顶部栏，不再接受浮层顶部覆盖；site 未部署时禁用；提前运行的 HEAD 探测唯一源在 `useTabSystem` 的 `useSessionSite` | session site tab |
 | 模型配置 Tab | `LlmTab` / `[data-tab-panel="llm"]` | 去模态化的模型配置面板（无遮罩/焦点陷阱/关闭按钮）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 | LLM profiles tab |
 | 动态沙盒空间 Tab | `SandboxTab` / `[data-tab-panel="sandbox"]` | 去模态化的全局动态沙盒空间管理面板（自命令菜单弹窗迁移）；列表按 `activeTab` 懒加载（切入即重拉）；编辑草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫仅编辑态生效；会话锁定期间随 Tab 栏不可达 | dynamic sandbox spaces tab |
-| Tab 安全区 | `.tab-panel-safe-top` | 使用此安全区的非聊天 Tab 顶部保留 56px 安全留白，避开顶部栏浮层热区；会话网页 Tab 例外，不渲染该安全留白，按钮栏位于底部 | tab safe area |
+| Tab 顶部安全区 | `--header-height` | 结构性顶部栏已占据页面顶部空间，Tab 内容不再额外渲染 56px 浮层避让空白；会话网页 Tab 的底部按钮栏保持独立布局 | tab top safe area |
 | 右侧 Tab 预览小窗 | `TabHoverPreview` / `.tab-hover-preview` | 鼠标悬停或键盘聚焦启用且非当前的 Tab 图标时，在图标左侧显示的只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 Tab；点击卡片不切 Tab，Escape 关闭且同次悬停不重开；与名称 tooltip 互斥 | tab rail hover preview |
 | 只读已有数据 | — | 预览只读取各 Tab 已取得的完整快照（`data` 为 null 表示尚未读取，`[]` 才是已知空）；媒体输入/会话变量 Tab 还受会话 Tab 能力探测控制，能力未知或失败时不启用、不悬停预览；未知不伪装为 0，读取中/旧快照/读取失败分项表达 | read-only loaded data |
 
@@ -327,7 +327,7 @@
 | 侧栏遮罩 | `.sidebar-backdrop` | 移动端侧栏浮层展开时的背景遮罩 |
 | 抽屉热区 | `.sidebar-hotzone` | 桌面端屏幕左缘 24px 隐形触发区，鼠标靠近时抽屉微微拉出 |
 | 抽屉状态 | `.drawer-hidden` / `.drawer-peek` / `.drawer-open` | 桌面端侧栏三态：隐藏 / 微微拉出 / 彻底拉出（磨砂玻璃浮层） |
-| 抽屉状态机 | `useEdgeDrawer` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用；`pinned` 选项在弹出层展开期间钉住抽屉 |
+| 抽屉状态机 | `useEdgeDrawer` | 左侧导航栏边缘抽屉三态状态机（hidden/peek/open）；`pinned` 选项在左侧导航栏弹出层展开期间钉住抽屉 |
 
 ### 顶部栏（Header）
 
@@ -337,22 +337,21 @@
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 顶部栏 / 页头 | `Header` / `.app-header` | 三栏 grid：左 / 中 / 右；桌面端为顶部覆盖抽屉，移动端为流内页头 |
-| 顶部栏覆盖层 | `.header-layer` | 桌面端 absolute 覆盖容器（z-index 90），自身不响应指针，子元素按需恢复 |
-| 顶部栏热区 | `.header-hotzone` | 桌面端顶部 20px 隐形触发区，鼠标靠近时抽屉拉出 |
-| 主徽章 dock | `.header-pill-dock` | 桌面端常驻的状态胶囊容器，bar 隐藏时 pill 依然可见可交互 |
-| 顶部抽屉状态 | `.header-drawer-hidden` / `.header-drawer-peek` / `.header-drawer-open` | 桌面端顶部栏三态：隐藏 / 探出 12px / 完全展开（磨砂玻璃浮层，背景板由 `::before` 承载） |
+| 顶部栏 / 页头 | `Header` / `.app-header` | 28px 结构性常驻顶部栏，跨越视口从左到右；左侧是会话标题/ID内陷区域，右侧是直角梯形容器，内部依次为主徽章、上下文进度徽章和连接健康灯 |
+| 顶部栏覆盖层 | — | 已退役；常驻 Header 通过结构性布局占据顶部空间，不使用 absolute 浮层 |
+| 顶部栏热区 | — | 已退役；常驻 Header 不通过顶部隐形热区召唤 |
+| 主徽章 | `HeaderPill` / `.header-pill` | 顶部栏右侧梯形中的圆角矩形主徽章；保留连接上下文和当前会话待用模型选择入口，模型菜单由独立浮层承载 |
+| 顶部抽屉状态 | — | 已退役；Header 始终常驻，不再隐藏、探出或展开 |
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
-| 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
-| 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、system 角色用户消息显示开关与会话视觉开关；展开期间钉住顶部抽屉 |
+| 会话身份区域 | `SessionIdentity` / `.session-identity` | 顶部栏左侧内陷蚀刻区域；默认显示会话标题，悬停或聚焦显示完整会话 ID，激活后复制 ID |
+| 连接健康灯 | `ConnectionStatusLight` / `.connection-status-light` | 顶部栏梯形中的纯色实心圆；绿色表示接收和心跳正常，黄色表示警告，红色表示连接或接收故障；详细诊断通过 tooltip 展示 |
+| 命令菜单 | `CommandMenu` / `.cmd-menu-dropdown` | 右侧 Tab 栏底部最下方的按钮触发；提供本地性能遥测、system 角色用户消息显示开关和会话视觉开关 |
 | system 角色用户消息显示开关 | `showSystemUserMessages` | 控制 Role 为 `user` 且角色名为 `system` 的消息是否显示；默认显示，作为浏览器全局偏好保存，覆盖主聊天区、子会话和工具结果嵌入消息；不影响 History、模型上下文或系统状态提示（英文锚点：system-character user message visibility toggle） |
-| 状态胶囊 | `HeaderPill` / `.header-pill` | 居中状态胶囊，桌面支持hover/焦点展开；触摸与折叠顶部栏常显待用模型按钮，模型选择由独立浮层承载 |
+| 状态胶囊 | `HeaderPill` / `.header-pill` | 顶部栏右侧梯形中的圆角矩形主徽章；保留待用模型入口，连接健康由独立亮灯表达 |
 | 模型选择菜单 | `ModelProfileMenu` / `.model-profile-menu` | 顶部栏唯一的会话待用 Profile 选择入口，body独立浮层；选择仅更新当前会话浏览器值，发送或重新生成时提交 |
-| 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |
-| 令牌徽章 | `.token-badge` | token 统计文本，≤900px 隐藏 |
-| 令牌环 | `TokenRing` / `.token-ring` | 上下文用量环形图，≤900px 显示 |
-| 顶部栏折叠按钮 | `.header-collapse-btn` | 仅移动端出现的顶部栏折叠开关 |
+| 审批模式切换 | `ApprovalModeBadge` / `.approval-model-badge` | 右侧 Tab 栏底部固定控制区上方的手动/脱手/YOLO 三态切换入口；没有会话时显示不可操作状态 |
+| 上下文进度徽章 | `ContextProgressBadge` / `.context-progress-badge` | 顶部栏右侧梯形中的进度条，显示上下文使用百分比；悬停显示累计 token、已用上下文和上限 |
+| 顶部栏折叠按钮 | — | 已退役；顶部栏常驻，不再提供移动端折叠入口 |
 
 ### 主内容区（Layout 其余区域）
 
@@ -360,7 +359,7 @@
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 主内容区 | `.main-content` | 顶部栏以右的全部内容；内部为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`） |
+| 主内容区 | `.main-content` | 位于常驻顶部栏和左侧导航栏主体之后的主界面区域；内部为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`） |
 | 任务进度面板 | `TaskProgressPanel` | 输入栏抽屉面内（聊天 Tab），仅非空会话显示 |
 | 统一面板（剪贴板） | `UnifiedPanel` | 剪贴板面板 `ClipboardPanel`，归属聊天 Tab，随 tab 隐藏（保持挂载） |
 | 聊天区 | `ChatArea` | 消息流；归属聊天 Tab（`ChatTab` 包裹） |
@@ -456,8 +455,8 @@
 | 会话视觉资源重定向 | 由会话源目录同级 `stage.meta`、`site.meta` 或 `chat-style.meta` 的 `[redirect]` 指定带沙盒命名空间的目标目录。服务端仅解释源目录配置一层；缺失时保持原目录，非法时静默回退，Read 不跟随目标。此为已批准设计约定，运行时接入进度见任务文件 | session visual resource redirect |
 | 会话视觉资源状态 | 服务端按需提供的 stage、site、chat_style 三项非持久化会话快照，包含资源可用状态、源目录、有效目录、是否实际重定向和错误原因；不表示浏览器已渲染成功，不随分支或合并复制。此为已批准设计约定，运行时接入进度见任务文件 | session visual resource state |
 | 会话聊天区自定义样式 | 会话级 CSS 覆盖层，Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入，仅作用于 `.chat-area` 聊天区；变化事件通过已有会话 WebSocket接收 | Session Chat Style |
-| 聊天区样式暂停开关 | 用户在顶部栏命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
-| 舞台层暂停开关 | 用户在顶部栏命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |
+| 聊天区样式暂停开关 | 用户在右侧 Tab 栏底部命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
+| 舞台层暂停开关 | 用户在右侧 Tab 栏底部命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |
 | 公开样式选择器契约 | 以 `data-chat-scope` 和 `data-message-role` 属性构成的稳定选择器集合，向 Evolve Agent 承诺跨版本兼容 | public style selector contract |
 
 ---

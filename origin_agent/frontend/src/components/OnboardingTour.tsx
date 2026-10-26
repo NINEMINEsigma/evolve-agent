@@ -9,7 +9,6 @@ interface OnboardingTourProps {
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   switchTab: (id: TabId) => void;
   onPinSidebarChange: (pinned: boolean) => void;
-  onPinHeaderChange: (pinned: boolean) => void;
 }
 
 export default function OnboardingTour({
@@ -19,7 +18,6 @@ export default function OnboardingTour({
   setSidebarCollapsed,
   switchTab,
   onPinSidebarChange,
-  onPinHeaderChange,
 }: OnboardingTourProps) {
   const steps = useMemo<Step[]>(() => {
     const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -52,7 +50,7 @@ export default function OnboardingTour({
       {
         target: '[data-tour="header"]',
         title: "顶部栏",
-        content: "这里显示连接状态、审批模式切换（手动/脱手/YOLO）、Token 用量统计。",
+        content: "这里显示会话标题、待用模型、上下文进度和连接健康状态。命令菜单与审批模式切换位于右侧 Tab 栏底部。",
         placement: "bottom",
       },
       // 步骤 3：输入栏
@@ -69,7 +67,14 @@ export default function OnboardingTour({
         content: "屏幕右缘的右侧 Tab 栏切换主界面视图：聊天、资源、子会话、会话网页、模型配置、动态沙盒空间。",
         placement: "left",
       },
-      // 步骤 5：资源 Tab
+      // 步骤 5：右侧 Tab 栏底部控制
+      {
+        target: '[data-tour="tab-rail-footer"]',
+        title: "全局控制",
+        content: "右侧 Tab 栏底部固定显示审批模式三态切换和命令菜单，不会随 Tab 图标滚动。",
+        placement: "left",
+      },
+      // 步骤 6：资源 Tab
       {
         target: '[data-tour="resources-tab"]',
         title: "资源 / 任务",
@@ -83,7 +88,7 @@ export default function OnboardingTour({
           switchTab("chat");
         },
       },
-      // 步骤 6：模型配置
+      // 步骤 7：模型配置
       {
         target: '[data-tour="llm-tab"]',
         title: "模型配置",
@@ -108,7 +113,6 @@ export default function OnboardingTour({
       onEvent={(data) => {
         if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
           onPinSidebarChange(false);
-          onPinHeaderChange(false);
           onClose();
         }
         // 步骤 1（导航栏）前后钉住/释放 Sidebar
@@ -117,13 +121,6 @@ export default function OnboardingTour({
         }
         if (data.type === EVENTS.STEP_AFTER && data.index === 1) {
           onPinSidebarChange(false);
-        }
-        // 步骤 2（顶部栏）前后钉住/释放 Header
-        if (data.type === EVENTS.STEP_BEFORE && data.index === 2) {
-          onPinHeaderChange(true);
-        }
-        if (data.type === EVENTS.STEP_AFTER && data.index === 2) {
-          onPinHeaderChange(false);
         }
       }}
       options={{

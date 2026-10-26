@@ -168,7 +168,6 @@ export default function SandboxTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="sandbox-tab" data-tour="sandbox-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
       <div className="sandbox-tab-body">
         <header className="llm-drawer-heading"><div><span className="llm-eyebrow">全局沙盒</span><h2>动态沙盒空间</h2></div></header>
         <div className="llm-page-scroll">

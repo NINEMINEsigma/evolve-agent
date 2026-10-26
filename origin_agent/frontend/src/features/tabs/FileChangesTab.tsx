@@ -88,7 +88,6 @@ export default function FileChangesTab({ ctx }: { ctx: TabRenderContext }): Reac
   const visibleCount = summary === null ? 0 : summary.file_count + summary.directory_count;
 
   return <div className="file-changes-tab">
-    <div className="tab-panel-safe-top" aria-hidden="true" />
     <div className="file-changes-content">
       <header className="file-changes-toolbar">
         <div className="file-changes-heading">

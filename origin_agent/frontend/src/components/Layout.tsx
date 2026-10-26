@@ -6,10 +6,12 @@ import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
 import PerformanceTelemetryDialog from "./PerformanceTelemetryDialog";
 import NoticeBanner from "./primitives/NoticeBanner";
+import CommandMenu from "./CommandMenu";
 import SessionExportDialog from "../features/sessionExport/SessionExportDialog";
 import { useSessionExport } from "../features/sessionExport/useSessionExport";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
+import { COLLOQUY_SID } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
@@ -20,6 +22,7 @@ import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { TAB_REGISTRY } from "../features/tabs/registry";
 import { useTabSystem } from "../features/tabs/useTabSystem";
 import TabRail from "../features/tabs/TabRail";
+import TabRailFooter from "../features/tabs/TabRailFooter";
 import TabStage from "../features/tabs/TabStage";
 import { TabDataProvider } from "../features/tabs/TabDataContext";
 import type { TabRenderContext } from "../features/tabs/registry";
@@ -35,7 +38,7 @@ interface LayoutProps {
 export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingRun, onOnboardingClose }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [pinSidebar, setPinSidebar] = useState(false);
-  const [pinHeader, setPinHeader] = useState(false);
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [targetSessions, setTargetSessions] = usePersistentSessionState<string[]>(
@@ -45,13 +48,11 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [responseCharacters, setResponseCharacters] = usePersistentSessionState<string[]>(
     STORAGE_KEYS.RESPONSE_CHARACTERS, ws.sessionId, []);
 
-  // 会话视觉暂停开关（按会话持久化）
   const [stagePaused, setStagePaused] = usePersistentSessionState<boolean>(
     STORAGE_KEYS.STAGE_PAUSED, ws.sessionId, false);
   const [chatStylePaused, setChatStylePaused] = usePersistentSessionState<boolean>(
     STORAGE_KEYS.CHAT_STYLE_PAUSED, ws.sessionId, false);
 
-  // Layout 层直接调用 hook，避免 Header 和 ChatArea 重复探测
   const exportProcessing = useChatRuntimeStore((state) => state.processing);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   useEffect(() => setExportNotice(null), [ws.sessionId]);
@@ -62,15 +63,11 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   });
   const stageState = useSessionStage(ws.sessionId, stagePaused);
   const chatStyleState = useSessionChatStyle(ws.sessionId, chatStylePaused);
-
-  // 派生显示状态文本（供 Header 开关展示）
   const stageStatusText = stagePaused ? "已暂停" : stageState.status === "ready" ? "已启用" : stageState.status === "idle" ? "未配置" : "未配置";
   const chatStyleStatusText = chatStylePaused ? "已暂停" : chatStyleState.status === "ready" ? "已启用" : chatStyleState.status === "error" ? "加载失败" : "未配置";
 
-  // 子会话 tab 的活跃子会话（按会话持久化）
   const [activeSubagentId, setActiveSubagentId] = usePersistentSessionState<string | null>(
     STORAGE_KEYS.ACTIVE_SUBAGENT_ID, ws.sessionId, null);
-
   const [sidebarWidth, setSidebarWidth] = usePersistentState<number>(
     STORAGE_KEYS.SIDEBAR_WIDTH, DIMENSIONS.SIDEBAR_DEFAULT);
   const sidebarResize = useResizable({
@@ -84,26 +81,19 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = usePersistentState(STORAGE_KEYS.CLIPBOARD_COLLAPSED, false);
-  const [headerCollapsed, setHeaderCollapsed] = usePersistentState(STORAGE_KEYS.HEADER_COLLAPSED, false);
 
-  // 移动端默认折叠侧边栏
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`);
     setIsMobile(mq.matches);
-    if (mq.matches) {
-      setSidebarCollapsed(true);
-    }
+    if (mq.matches) setSidebarCollapsed(true);
     const onChange = (e: MediaQueryListEvent) => {
       setIsMobile(e.matches);
-      if (e.matches) {
-        setSidebarCollapsed(true);
-      }
+      if (e.matches) setSidebarCollapsed(true);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // 子 Agent 停止或完成后，清理 targetSessions 中已失效的 session id
   useEffect(() => {
     const currentIds = new Set(Object.keys(ws.subagentSessions));
     const prevIds = prevSubagentIdsRef.current[ws.sessionId] || new Set();
@@ -115,17 +105,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     setTargetSessions((prev) => {
       const activeIds = new Set(["main", ...Object.keys(ws.subagentSessions)]);
       const cleaned = prev.filter((id) => activeIds.has(id));
-      if (cleaned.length === 0 || !cleaned.includes("main")) {
-        return ["main"];
-      }
+      if (cleaned.length === 0 || !cleaned.includes("main")) return ["main"];
       return cleaned;
     });
   }, [ws.sessionId, ws.subagentSessions]);
 
   const onToggleAgentState = (agentName: string) => {
-    let curVisible = visibleCharacters.includes("all-agents")
-      ? ws.agents
-      : [...visibleCharacters];
+    let curVisible = visibleCharacters.includes("all-agents") ? ws.agents : [...visibleCharacters];
     let curResponse = [...responseCharacters];
     const vis = curVisible.includes(agentName);
     const res = curResponse.includes(agentName);
@@ -148,10 +134,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const handleToggleMessageVisibility = useCallback((messageId: string, agentName: string) => {
     const msg = useChatRuntimeStore.getState().contentByRowId[messageId];
     if (msg == null || typeof msg.messageIndex !== "number") return;
-    let curVisible = [...(msg.visibleCharacters || ["all-agents"])];
+    let curVisible = [...(msg.visibleCharacters || ["all-agents"])] as string[];
     let curResponse = [...(msg.responseCharacters || [])];
     if (curVisible.includes("all-agents")) {
-      curVisible = (ws.agents.length > 0 ? ws.agents : curVisible.filter((a) => a !== "all-agents"));
+      curVisible = ws.agents.length > 0 ? [...ws.agents] : curVisible.filter((a) => a !== "all-agents");
     }
     const vis = curVisible.includes(agentName);
     const res = curResponse.includes(agentName);
@@ -175,9 +161,12 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     }));
   }, [ws.agents, ws.updateMessageVisibility]);
 
-  const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
+  const currentSession = ws.sessions.find((session) => session.id === ws.sessionId);
+  const currentSessionArchived = currentSession?.status === "archived";
+  const sessionTitle = ws.sessionId === COLLOQUY_SID
+    ? "随意聊聊"
+    : currentSession?.title || "未命名会话";
 
-  // Tab system: active tab state, site probe source and enablement derivation.
   const tabSystem = useTabSystem(ws);
   const onToggleClipboardCollapse = useCallback(() => setClipboardCollapsed((v) => !v), [setClipboardCollapsed]);
 
@@ -205,107 +194,121 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     setActiveSubagentId,
   };
 
+  const commandMenu = (
+    <CommandMenu
+      open={commandMenuOpen}
+      onOpenChange={setCommandMenuOpen}
+      sessionExportDisabled={exportDisabled || exportProcessing || sessionExport.busy}
+      onOpenSessionExport={sessionExport.open}
+      onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
+      stagePaused={stagePaused}
+      onToggleStagePaused={() => setStagePaused((v) => !v)}
+      stageStatusText={stageStatusText}
+      chatStylePaused={chatStylePaused}
+      onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
+      chatStyleStatusText={chatStyleStatusText}
+    />
+  );
+  const tabRailFooter = (
+    <TabRailFooter
+      hasSession={Boolean(ws.sessionId)}
+      approvalMode={ws.approvalMode}
+      approvalModeSyncStatus={ws.approvalModeSyncStatus}
+      approvalModelAvailable={ws.approvalModelAvailable}
+      approvalModelName={ws.approvalModelName}
+      onSetApprovalMode={ws.setApprovalMode}
+      commandMenu={commandMenu}
+    />
+  );
+  const previewBlocked = performanceTelemetryOpen || !!lightboxSrc || onboardingRun
+    || contextMenuOpen || sessionExport.isOpen || commandMenuOpen;
+
   return (
-    <>
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        isMobile={isMobile}
-        sessions={ws.sessions}
+    <div className="app-layout">
+      <Header
+        status={ws.status}
         sessionId={ws.sessionId}
-        searchQuery={ws.searchQuery}
-        setSearchQuery={ws.setSearchQuery}
-        allTags={ws.allTags}
-        mergeMode={ws.mergeMode}
-        selectedForMerge={ws.selectedForMerge}
-        onToggleMergeMode={() => {
-          ws.setMergeMode(!ws.mergeMode);
-          ws.setSelectedForMerge(new Set());
-        }}
-        onToggleMergeSelect={ws.toggleMergeSelect}
-        onNewChat={ws.newChat}
-        onEnterColloquy={ws.enterColloquy}
-        onSwitchSession={ws.switchSession}
-        onContextMenu={onContextMenu}
-        contextMenuOpen={contextMenuOpen}
-        renamingSessionId={ws.renamingSessionId}
-        setRenamingSessionId={ws.setRenamingSessionId}
-        renameSession={ws.renameSession}
-        onMergeSessions={(sources) => {
-          ws.mergeSessions(sources);
-          ws.setMergeMode(false);
-          ws.setSelectedForMerge(new Set());
-        }}
-        sidebarItems={ws.sidebarItems}
-        expandedClusters={ws.expandedClusters}
-        toggleCluster={ws.toggleCluster}
-        isReady={ws.isReady}
-        width={sidebarWidth}
-        isResizing={sidebarResize.isResizing}
-        onResizePointerDown={sidebarResize.onPointerDown}
-        forcePin={pinSidebar}
+        sessionTitle={sessionTitle}
+        tokenUsage={ws.tokenUsage}
+        contextTokens={ws.contextTokens}
+        llmMaxContextTokens={ws.llmMaxContextTokens}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        agents={ws.agents}
+        isMobile={isMobile}
+        llmProfiles={ws.llmProfiles}
+        modelMenuBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || sessionExport.isOpen || commandMenuOpen}
       />
-
-      {isMobile && !sidebarCollapsed && (
-        <div className="sidebar-backdrop" onClick={() => setSidebarCollapsed(true)} />
-      )}
-
-      <div className="main-content">
-        <Header
-          status={ws.status}
-          sessionId={ws.sessionId}
-          tokenUsage={ws.tokenUsage}
-          contextTokens={ws.contextTokens}
-          llmMaxContextTokens={ws.llmMaxContextTokens}
-          approvalMode={ws.approvalMode}
-          approvalModeSyncStatus={ws.approvalModeSyncStatus}
-          approvalModelAvailable={ws.approvalModelAvailable}
-          approvalModelName={ws.approvalModelName}
-          llmModelName={ws.llmModelName}
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-          onSetApprovalMode={ws.setApprovalMode}
-          agents={ws.agents}
-          collapsed={headerCollapsed}
-          onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
+      <div className="app-body">
+        <Sidebar
+          collapsed={sidebarCollapsed}
           isMobile={isMobile}
-          llmProfiles={ws.llmProfiles}
-          modelMenuBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || sessionExport.isOpen}
-          forcePin={pinHeader}
-          stagePaused={stagePaused}
-          onToggleStagePaused={() => setStagePaused((v) => !v)}
-          stageStatusText={stageStatusText}
-          chatStylePaused={chatStylePaused}
-          onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
-          chatStyleStatusText={chatStyleStatusText}
-          onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
-          onOpenSessionExport={sessionExport.open}
-          sessionExportDisabled={exportDisabled || exportProcessing || sessionExport.busy}
+          sessions={ws.sessions}
+          sessionId={ws.sessionId}
+          searchQuery={ws.searchQuery}
+          setSearchQuery={ws.setSearchQuery}
+          allTags={ws.allTags}
+          mergeMode={ws.mergeMode}
+          selectedForMerge={ws.selectedForMerge}
+          onToggleMergeMode={() => {
+            ws.setMergeMode(!ws.mergeMode);
+            ws.setSelectedForMerge(new Set());
+          }}
+          onToggleMergeSelect={ws.toggleMergeSelect}
+          onNewChat={ws.newChat}
+          onEnterColloquy={ws.enterColloquy}
+          onSwitchSession={ws.switchSession}
+          onContextMenu={onContextMenu}
+          contextMenuOpen={contextMenuOpen}
+          renamingSessionId={ws.renamingSessionId}
+          setRenamingSessionId={ws.setRenamingSessionId}
+          renameSession={ws.renameSession}
+          onMergeSessions={(sources) => {
+            ws.mergeSessions(sources);
+            ws.setMergeMode(false);
+            ws.setSelectedForMerge(new Set());
+          }}
+          sidebarItems={ws.sidebarItems}
+          expandedClusters={ws.expandedClusters}
+          toggleCluster={ws.toggleCluster}
+          isReady={ws.isReady}
+          width={sidebarWidth}
+          isResizing={sidebarResize.isResizing}
+          onResizePointerDown={sidebarResize.onPointerDown}
+          forcePin={pinSidebar}
         />
 
-        <div className="tab-body">
-          {ws.sessionLocked ? (
-            <SessionLockOverlay onRetry={ws.retryConnect} />
-          ) : (
-            <TabDataProvider
-              activeTab={tabSystem.activeTab}
-              sessionId={ws.sessionId}
-              currentSessionArchived={currentSessionArchived}
-            >
-              <TabStage
-                tabs={TAB_REGISTRY}
+        {isMobile && !sidebarCollapsed && (
+          <div className="sidebar-backdrop" onClick={() => setSidebarCollapsed(true)} />
+        )}
+
+        <div className="main-content">
+          <div className="tab-body">
+            {ws.sessionLocked ? (
+              <SessionLockOverlay onRetry={ws.retryConnect} />
+            ) : (
+              <TabDataProvider
                 activeTab={tabSystem.activeTab}
-                renderContext={tabRenderContext}
-              />
-              <TabRail
-                tabs={TAB_REGISTRY}
-                activeTab={tabSystem.activeTab}
-                enabledTabs={tabSystem.enabledTabs}
-                onSwitch={tabSystem.switchTab}
-                renderContext={tabRenderContext}
-                previewBlocked={performanceTelemetryOpen || !!lightboxSrc || onboardingRun || contextMenuOpen || sessionExport.isOpen}
-              />
-            </TabDataProvider>
-          )}
+                sessionId={ws.sessionId}
+                currentSessionArchived={currentSessionArchived}
+              >
+                <TabStage
+                  tabs={TAB_REGISTRY}
+                  activeTab={tabSystem.activeTab}
+                  renderContext={tabRenderContext}
+                />
+                <TabRail
+                  tabs={TAB_REGISTRY}
+                  activeTab={tabSystem.activeTab}
+                  enabledTabs={tabSystem.enabledTabs}
+                  onSwitch={tabSystem.switchTab}
+                  renderContext={tabRenderContext}
+                  previewBlocked={previewBlocked}
+                  footer={tabRailFooter}
+                />
+              </TabDataProvider>
+            )}
+          </div>
         </div>
       </div>
 
@@ -331,8 +334,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         setSidebarCollapsed={setSidebarCollapsed}
         switchTab={tabSystem.switchTab}
         onPinSidebarChange={setPinSidebar}
-        onPinHeaderChange={setPinHeader}
       />
-    </>
+    </div>
   );
 }

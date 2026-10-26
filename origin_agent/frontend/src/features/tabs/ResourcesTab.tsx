@@ -32,7 +32,6 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="resources-tab" data-tour="resources-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
       <div className="resources-tab-content">
         {/* Resources section */}
         <div className="drawer-section">

@@ -39,7 +39,6 @@ export default function VariablesTab({ ctx }: { ctx: TabRenderContext }): ReactE
   });
 
   return <div className="variables-tab">
-    <div className="tab-panel-safe-top" aria-hidden="true" />
     <div className="variables-tab-content">
       <header className="session-variable-toolbar">
         <div><h2 data-tooltip="此 Tab 为只读。请在聊天中让主Agent创建或修改 JSON 变量及同级 .meta 配置。重新生成回复或删除消息不会回滚变量。">会话变量</h2><span>{pool?.variables.length ?? 0} 个变量</span></div>

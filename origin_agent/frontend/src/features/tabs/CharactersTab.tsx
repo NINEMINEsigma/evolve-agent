@@ -114,8 +114,7 @@ export default function CharactersTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="characters-tab" data-tour="characters-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
-      <div className="characters-tab-content">
+            <div className="characters-tab-content">
         <div className="characters-hint">
           此面板为只读。如需创建或修改角色档案，请在聊天中让主Agent操作。
         </div>

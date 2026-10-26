@@ -6,7 +6,6 @@ export const STORAGE_KEYS = {
 
   // 全局 UI 偏好
   SIDEBAR_COLLAPSED:           "evolve_sidebar_collapsed",
-  HEADER_COLLAPSED:            "evolve_header_collapsed",
   // system 角色用户消息是否显示；默认 true，所有会话共用。
   SHOW_SYSTEM_USER_MESSAGES:   "evolve_show_system_user_messages",
   CLIPBOARD_COLLAPSED:         "evolve_clipboard_collapsed",

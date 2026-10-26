@@ -23,8 +23,7 @@ export default function SubagentsTab({ ctx }: { ctx: TabRenderContext }) {
 
   return (
     <div className="subagents-tab">
-      <div className="tab-panel-safe-top" aria-hidden="true" />
-      <div className="subagents-tab-content">
+            <div className="subagents-tab-content">
         <div className="subagent-panel-header">
           <div className="subagent-tabs">
             {items.map((s) => (

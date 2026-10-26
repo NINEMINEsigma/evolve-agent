@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MessageContent } from "../types";
-import { CHAT_TOP_SAFE_SPACE_PX } from "../constants/history";
-import { DIMENSIONS } from "../constants/dimensions";
 import { ROUND_NAV_JUMP_OFFSET_RATIO } from "../constants/roundNav";
 import RoundNavRail from "./RoundNavRail";
 import AgentStageLayer from "./AgentStageLayer";
@@ -45,17 +43,13 @@ export default function ChatArea({
   chatStyleStatus,
   chatStyleReloadKey,
 }: ChatAreaProps) {
-  const isMobileQuery = `(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`;
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia(isMobileQuery).matches,
-  );
   const listRef = useRef<ChatVirtualListHandle>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const runtime = useChatRuntimeStore();
   const renderRows = selectChatRenderRows(runtime);
   const processing = runtime.processing;
   const isEmpty = renderRows.length === 0 && !processing;
-  const topSafeSpacePx = isMobile ? 0 : CHAT_TOP_SAFE_SPACE_PX;
+  const topSafeSpacePx = 0;
   const roundNavEntries = useMemo(() => buildRoundNavEntries(renderRows), [renderRows]);
   const renderRowIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -85,16 +79,6 @@ export default function ChatArea({
     const next = resolveCurrentRoundEntryId(roundNavEntries, referenceRowIndex);
     setCurrentRoundEntryId((previous) => (previous === next ? previous : next));
   }, [scrollMetrics, roundNavEntries, renderRowIndexById]);
-
-  useEffect(() => {
-    const media = window.matchMedia(isMobileQuery);
-    const onChange = (event: MediaQueryListEvent) => {
-      setIsMobile(event.matches);
-    };
-    setIsMobile(media.matches);
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, [isMobileQuery]);
 
   return (
     <div className="chat-area-wrapper" ref={wrapperRef}>

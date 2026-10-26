@@ -1,457 +1,84 @@
-import { useRef, useState, useEffect, useCallback, useId } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ModelProfileMenu from "./ModelProfileMenu";
-import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
-import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
-import { COLLOQUY_SID } from "../constants/session";
-import { TIMING } from "../constants/timing";
+import SessionIdentity from "./SessionIdentity";
+import ContextProgressBadge from "./ContextProgressBadge";
+import ConnectionStatusLight from "./ConnectionStatusLight";
 import type { LlmProfileManager } from "../hooks/useLlmProfiles";
-import type { ApprovalMode, ApprovalModeSyncStatus } from "../types";
-import TokenRing from "./TokenRing";
-import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
-import { exportLabels } from "../features/sessionExport/labels";
 
 interface HeaderProps {
   status: string;
   sessionId: string;
+  sessionTitle: string;
   tokenUsage: number;
   contextTokens: number;
   llmMaxContextTokens: number;
-  approvalMode: ApprovalMode;
-  approvalModeSyncStatus: ApprovalModeSyncStatus;
-  approvalModelAvailable: boolean;
-  approvalModelName: string;
-  llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  onSetApprovalMode: (mode: ApprovalMode) => void;
   agents?: string[];
-  collapsed?: boolean;
-  onToggleCollapse?: () => void;
   isMobile?: boolean;
   llmProfiles?: LlmProfileManager;
-  forcePin?: boolean;
   modelMenuBlocked?: boolean;
-  // 会话视觉暂停开关
-  stagePaused: boolean;
-  onToggleStagePaused: () => void;
-  stageStatusText: string;
-  chatStylePaused: boolean;
-  onToggleChatStylePaused: () => void;
-  chatStyleStatusText: string;
-  onOpenPerformanceTelemetry: () => void;
-  onOpenSessionExport: () => void;
-  sessionExportDisabled: boolean;
 }
 
 export default function Header({
   status,
   sessionId,
+  sessionTitle,
   tokenUsage,
   contextTokens,
   llmMaxContextTokens,
-  approvalMode,
-  approvalModeSyncStatus,
-  approvalModelAvailable,
-  approvalModelName,
-  llmModelName,
   sidebarCollapsed,
   onToggleSidebar,
-  onSetApprovalMode,
-  agents,
-  collapsed,
-  onToggleCollapse,
-  isMobile,
+  isMobile = false,
   llmProfiles,
-  forcePin,
   modelMenuBlocked = false,
-  stagePaused,
-  onToggleStagePaused,
-  stageStatusText,
-  chatStylePaused,
-  onToggleChatStylePaused,
-  chatStyleStatusText,
-  onOpenPerformanceTelemetry,
-  onOpenSessionExport,
-  sessionExportDisabled,
 }: HeaderProps) {
-  const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const cmdBtnRef = useRef<HTMLButtonElement>(null);
-  // 桌面端顶部抽屉状态机；菜单展开期间钉住，断点切到移动端时强制归位
-  const drawer = useEdgeDrawer({ active: !isMobile, pinned: cmdMenuOpen || !!forcePin });
-
-  useEffect(() => {
-    if (!cmdMenuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (cmdBtnRef.current?.contains(target)) return;
-      setCmdMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCmdMenuOpen(false);
-    };
-    document.addEventListener("click", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("click", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [cmdMenuOpen]);
-
-  const toggleCmdMenu = () => {
-    setCmdMenuOpen((open) => {
-      if (open) {
-        setMenuPos(null);
-        return false;
-      }
-      const rect = cmdBtnRef.current?.getBoundingClientRect();
-      if (rect) {
-        setMenuPos({ top: rect.bottom + 6, left: rect.left });
-      }
-      return true;
-    });
-  };
-
-  const sessionExportItem = (
-    <button
-      type="button"
-      className="context-menu-item session-export-menu-button"
-      disabled={sessionExportDisabled}
-      data-tooltip={sessionExportDisabled ? exportLabels.busy : exportLabels.offline}
-      onClick={() => {
-        setCmdMenuOpen(false);
-        setMenuPos(null);
-        cmdBtnRef.current?.focus();
-        onOpenSessionExport();
-      }}
-    >
-      {exportLabels.title}
-    </button>
-  );
-
-  // 移动端折叠态：只显示精简条
-  if (isMobile && collapsed) {
-    return (
-      <header className="app-header app-header-collapsed" data-tour="header">
-        <div className="header-left">
-          <button
-            className="sidebar-toggle"
-            onClick={onToggleSidebar}
-            data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
-          >
-            {sidebarCollapsed ? (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            )}
-          </button>
-        </div>
-        <div className="header-center">
-          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} compact />
-        </div>
-        <div className="header-right">
-          <button
-            className="header-collapse-btn"
-            onClick={onToggleCollapse}
-            data-tooltip="展开顶部栏"
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 15l-6-6-6 6" />
-            </svg>
-          </button>
-        </div>
-      </header>
-    );
-  }
-
-  // 桌面端：顶部覆盖抽屉——常驻 pill + 热区召唤的滑出 bar
-  if (!isMobile) {
-    return (
-      <div className="header-layer">
-        <div className="header-hotzone" {...drawer.hotzoneProps} />
-        <div className="header-pill-dock">
-          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} />
-        </div>
-        <header
-          data-tour="header"
-          className={`app-header header-drawer header-drawer-${drawer.phase}`}
-          {...drawer.drawerProps}
-        >
-          <div className="header-left">
-            {sessionId && (
-              <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-                {sessionId === COLLOQUY_SID ? "随意聊聊" : sessionId}
-              </span>
-            )}
-            <DebugBadges />
-            <button
-              ref={cmdBtnRef}
-              className="header-action-btn"
-              onClick={toggleCmdMenu}
-              data-tooltip="命令菜单"
-            >
-              ⋮
-            </button>
-            {cmdMenuOpen && menuPos && (
-              <div
-                className="context-menu cmd-menu-dropdown"
-                style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
-              >
-                {sessionExportItem}
-                <div
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCmdMenuOpen(false);
-                    setMenuPos(null);
-                    onOpenPerformanceTelemetry();
-                  }}
-                  data-tooltip="打开本地聊天性能遥测"
-                >
-                  性能遥测
-                </div>
-                <SystemUserMessagesToggle />
-                <div
-                  className="context-menu-item"
-                  onClick={() => { onToggleStagePaused(); }}
-                  data-tooltip={stageStatusText === "未配置" ? "Agent 舞台层未配置" : stagePaused ? "恢复 Agent 舞台层" : "暂停 Agent 舞台层"}
-                >
-                  Agent 舞台层：{stageStatusText}
-                </div>
-                <div
-                  className="context-menu-item"
-                  onClick={() => { onToggleChatStylePaused(); }}
-                  data-tooltip={chatStyleStatusText === "未配置" ? "聊天区自定义样式未配置" : chatStylePaused ? "恢复聊天区自定义样式" : "暂停聊天区自定义样式"}
-                >
-                  聊天区样式：{chatStyleStatusText}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 中栏留空保持 1fr auto 1fr 网格平衡，pill 由 header-pill-dock 常驻 */}
-          <div className="header-center" />
-
-          {sessionId && (
-            <div className="header-right">
-              <ApprovalModeBadge
-                mode={approvalMode}
-                syncStatus={approvalModeSyncStatus}
-                approvalModelAvailable={approvalModelAvailable}
-                approvalModelName={approvalModelName}
-                onSetApprovalMode={onSetApprovalMode}
-              />
-              <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
-                累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
-              </span>
-              <TokenRing
-                contextTokens={contextTokens}
-                llmMaxContextTokens={llmMaxContextTokens}
-                tokenUsage={tokenUsage}
-              />
-            </div>
-          )}
-        </header>
-      </div>
-    );
-  }
-
-  // 移动端全量（未折叠）：流内 header
   return (
-    <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`} data-tour="header">
-      <div className="header-left">
+    <header className="app-header" data-tour="header">
+      <div className="header-session-area">
         {isMobile && (
           <button
             className="sidebar-toggle"
             onClick={onToggleSidebar}
             data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+            aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
           >
             {sidebarCollapsed ? (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 18l6-6-6-6" />
               </svg>
             ) : (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M15 18l-6-6 6-6" />
               </svg>
             )}
           </button>
         )}
-        {sessionId && (
-          <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-            {sessionId === COLLOQUY_SID ? "随意聊聊" : sessionId}
-          </span>
-        )}
-        <DebugBadges />
-        <button
-          ref={cmdBtnRef}
-          className="header-action-btn"
-          onClick={toggleCmdMenu}
-          data-tooltip="命令菜单"
-        >
-          ⋮
-        </button>
-        {cmdMenuOpen && menuPos && (
-          <div
-            className="context-menu cmd-menu-dropdown"
-            style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
-          >
-            {sessionExportItem}
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                setCmdMenuOpen(false);
-                setMenuPos(null);
-                onOpenPerformanceTelemetry();
-              }}
-              data-tooltip="打开本地聊天性能遥测"
-            >
-              性能遥测
-            </div>
-            <SystemUserMessagesToggle />
-            <div
-              className="context-menu-item"
-              onClick={() => { onToggleStagePaused(); }}
-              data-tooltip={stageStatusText === "未配置" ? "Agent 舞台层未配置" : stagePaused ? "恢复 Agent 舞台层" : "暂停 Agent 舞台层"}
-            >
-              Agent 舞台层：{stageStatusText}
-            </div>
-            <div
-              className="context-menu-item"
-              onClick={() => { onToggleChatStylePaused(); }}
-              data-tooltip={chatStyleStatusText === "未配置" ? "聊天区自定义样式未配置" : chatStylePaused ? "恢复聊天区自定义样式" : "暂停聊天区自定义样式"}
-            >
-              聊天区样式：{chatStyleStatusText}
-            </div>
-          </div>
-        )}
+        <SessionIdentity title={sessionTitle} sessionId={sessionId} />
       </div>
-
-      <div className="header-center">
-        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} />
+      <div className="header-trapezoid">
+        <ContextProgressBadge
+          contextTokens={contextTokens}
+          llmMaxContextTokens={llmMaxContextTokens}
+          tokenUsage={tokenUsage}
+        />
+        <HeaderPill
+          status={status}
+          llmModelName={llmProfiles?.activeProfile?.model ?? ""}
+          llmProfiles={llmProfiles}
+          modelMenuBlocked={modelMenuBlocked}
+        />
+        <ConnectionStatusLight status={status} />
       </div>
-
-      {sessionId && (
-        <div className="header-right">
-          <ApprovalModeBadge
-            mode={approvalMode}
-            syncStatus={approvalModeSyncStatus}
-            approvalModelAvailable={approvalModelAvailable}
-            approvalModelName={approvalModelName}
-            onSetApprovalMode={onSetApprovalMode}
-          />
-          <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
-            累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
-          </span>
-          <TokenRing
-            contextTokens={contextTokens}
-            llmMaxContextTokens={llmMaxContextTokens}
-            tokenUsage={tokenUsage}
-          />
-        </div>
-      )}
-      {isMobile && onToggleCollapse && (
-        <button
-          className="header-collapse-btn"
-          onClick={onToggleCollapse}
-          data-tooltip="收起顶部栏"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-      )}
     </header>
   );
 }
 
-function SystemUserMessagesToggle() {
-  const show = useChatRuntimeStore((state) => state.showSystemUserMessages);
-  const setShow = useChatRuntimeStore((state) => state.setShowSystemUserMessages);
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={show}
-      aria-label="显示 system 角色用户消息"
-      className="context-menu-item context-menu-toggle"
-      onClick={() => setShow(!show)}
-      data-tooltip="仅切换 system 角色用户消息的显示，不影响历史记录、模型上下文和系统状态提示"
-    >
-      system 角色用户消息：{show ? "显示" : "隐藏"}
-    </button>
-  );
-}
-
-function ApprovalModeBadge({
-  mode,
-  syncStatus,
-  approvalModelAvailable,
-  approvalModelName,
-  onSetApprovalMode,
-}: {
-  mode: ApprovalMode;
-  syncStatus: ApprovalModeSyncStatus;
-  approvalModelAvailable: boolean;
-  approvalModelName: string;
-  onSetApprovalMode: (mode: ApprovalMode) => void;
-}) {
-  if (syncStatus === "ready" && mode === "manual" && !approvalModelAvailable) {
-    return null;
-  }
-
-  const disabled = syncStatus !== "ready";
-  const label = syncStatus === "loading"
-    ? "加载中"
-    : syncStatus === "unavailable"
-      ? "不可用"
-      : mode === "yolo"
-        ? "YOLO"
-        : mode === "handsfree"
-          ? approvalModelName || "自动审批"
-          : "手动";
-  const tooltip = syncStatus === "loading"
-    ? "正在同步当前会话的审批模式"
-    : syncStatus === "unavailable"
-      ? "连接不可用，无法确认当前会话的审批模式"
-      : mode === "yolo"
-        ? "YOLO 模式 — 所有工具调用自动批准（含 critical）"
-        : mode === "handsfree"
-          ? "脱手模式 — 工具调用由 AI 自动审批"
-          : "手动模式 — 工具调用需用户审批";
-  const stateClass = syncStatus === "ready"
-    ? mode !== "manual" ? "handsfree-on" : "handsfree-off"
-    : syncStatus === "loading" ? "sync-loading" : "sync-unavailable";
-
-  const cycleMode = () => {
-    if (mode === "manual") onSetApprovalMode(approvalModelAvailable ? "handsfree" : "yolo");
-    else if (mode === "handsfree") onSetApprovalMode("yolo");
-    else onSetApprovalMode("manual");
-  };
-
-  return (
-    <button
-      type="button"
-      className={`approval-model-badge ${stateClass}`}
-      data-tooltip={tooltip}
-      onClick={cycleMode}
-      disabled={disabled}
-    >
-      {label}
-    </button>
-  );
-}
-
-function HeaderPill({ status, agents, llmModelName, llmProfiles, modelMenuBlocked = false, compact = false }: {
+function HeaderPill({ status, llmModelName, llmProfiles, modelMenuBlocked = false }: {
   status: string;
-  agents?: string[];
   llmModelName: string;
   llmProfiles?: LlmProfileManager;
   modelMenuBlocked?: boolean;
-  compact?: boolean;
 }) {
   const [menuSession, setMenuSession] = useState<string | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -460,80 +87,32 @@ function HeaderPill({ status, agents, llmModelName, llmProfiles, modelMenuBlocke
   const menuOpen = menuSession !== null && menuSession === sid && !modelMenuBlocked;
   const closeMenu = useCallback(() => setMenuSession(null), []);
   useEffect(() => { setMenuSession(null); }, [sid, modelMenuBlocked]);
-  const modelLabel = llmProfiles?.selectionStatus === "loading" ? "读取模型中…"
-    : llmProfiles?.selectionStatus === "error" ? "选择模型（读取失败）"
-      : llmProfiles?.activeProfileName ? `待用：${llmProfiles.activeProfileName}` : "选择模型";
 
-  return <div className={[
-    "header-pill", compact ? "header-pill--compact" : "", menuOpen ? "header-pill--menu-open" : "",
-    status === "已连接" ? "connected" : "", status.startsWith("重连中") ? "reconnecting" : "",
-    status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
-    agents && agents.length > 0 ? "multi-agent" : "",
-  ].filter(Boolean).join(" ")}>
-    <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
-    <span className="pill-detail">
-      {!compact && <span className="pill-status">{status}</span>}
-      {llmProfiles ? <button type="button" ref={anchorRef} className="pill-model pill-model-button" aria-expanded={menuOpen}
-        aria-controls={menuId} aria-label={`${modelLabel}，选择当前会话待用模型`} disabled={modelMenuBlocked || !sid}
-        onClick={() => setMenuSession((previous) => previous === sid ? null : sid)}>{modelLabel}</button>
-        : <span className="pill-model">{llmModelName || "未配置模型"}</span>}
-      {!compact && agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
-    </span>
-    {llmProfiles && <ModelProfileMenu open={menuOpen} anchorRef={anchorRef} manager={llmProfiles} onClose={closeMenu} />}
-    <span className="pill-ripple" aria-hidden />
-    <span className="pill-ripple" aria-hidden />
-  </div>;
-}
-
-function DebugBadges() {
-  const { pendingConfirm, ignoreStaleRef, lastRecvAtRef, lastPongAtRef, recvTick, now } =
-    useConnectionDiagnostics();
-  const waiting = useChatRuntimeStore((state) => state.processing);
-  const currentStreamId = useChatRuntimeStore((state) => state.currentStreamId);
-
-  const lastRecv = lastRecvAtRef?.current ?? now;
-  const lastPong = lastPongAtRef?.current ?? now;
-  const recvStall = now - lastRecv;
-  const pongStall = now - lastPong;
-  const active = waiting || !!currentStreamId;
-  const recvStallThreshold = active ? TIMING.RECV_STALL_ACTIVE : TIMING.RECV_STALL_INACTIVE;
+  const profileLabel = llmProfiles?.selectionStatus === "loading"
+    ? "读取中…"
+    : llmProfiles?.selectionStatus === "error"
+      ? "读取失败"
+      : llmProfiles?.activeProfileName || llmModelName || "未配置";
 
   return (
-    <span className="debug-badges" key={recvTick}>
-      {waiting && (
-        <span className="debug-badge pulse" title="waiting=true">
-          处理中 ⚡
-        </span>
-      )}
-      {currentStreamId && (
-        <span className="debug-badge ok" title={`stream id=${currentStreamId}`}>
-          流式 ✍️
-        </span>
-      )}
-      {pendingConfirm && (
-        <span className="debug-badge danger" title={`confirm id=${pendingConfirm.request_id}`}>
-          待审批 ⏳
-        </span>
-      )}
-      {ignoreStaleRef?.current && (
-        <span className="debug-badge warn" title="ignoreStaleRef=true">
-          IGN
-        </span>
-      )}
-      {recvStall >= recvStallThreshold ? (
-        <span className="debug-badge danger" title={`last recv ${(recvStall / 1000).toFixed(1)}s ago`}>
-          接收停滞 🛑 {Math.floor(recvStall / 1000)}s
-        </span>
+    <div className={`header-pill ${menuOpen ? "header-pill--menu-open" : ""} ${status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : status.startsWith("重连中") ? "reconnecting" : ""}`}>
+      {llmProfiles ? (
+        <button
+          type="button"
+          ref={anchorRef}
+          className="pill-profile-button"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
+          aria-label={`${profileLabel}，选择当前会话待用模型`}
+          disabled={modelMenuBlocked || !sid}
+          onClick={() => setMenuSession((previous) => previous === sid ? null : sid)}
+        >
+          {profileLabel}
+        </button>
       ) : (
-        <span className="debug-badge ok" title={`last recv ${recvStall}ms ago`}>
-          接收正常
-        </span>
+        <span className="pill-profile-label">{profileLabel}</span>
       )}
-      {pongStall >= TIMING.PONG_STALL && (
-        <span className="debug-badge warn" title={`last pong ${(pongStall / 1000).toFixed(1)}s ago`}>
-          心跳异常
-        </span>
-      )}
-    </span>
+      {llmProfiles && <ModelProfileMenu open={menuOpen} anchorRef={anchorRef} manager={llmProfiles} onClose={closeMenu} />}
+    </div>
   );
 }
