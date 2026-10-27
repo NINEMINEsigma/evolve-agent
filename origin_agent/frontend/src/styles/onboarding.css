@@ -1,25 +1,82 @@
-/* ── Onboarding Tour (react-joyride 样式覆盖) ── */
-/* 主要主题适配通过 Joyride options/styles props 完成，
-   此文件仅用于 CSS 层面的微调，如字体继承、圆角等。
-   react-joyride v3 的 CSS 类名前缀在运行时确认，
-   如类名不匹配则此文件内容无效（由 styles prop 承担）。 */
-
-.joyride-tooltip {
+/* 引导自有内容；Joyride 使用正式 styles 接口，不依赖库内部类名。 */
+.onboarding-root {
   font-family: inherit;
 }
 
-.joyride-tooltip__title {
-  font-size: 16px;
-  font-weight: 600;
+.onboarding-copy {
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
-.joyride-tooltip__content {
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.joyride-tooltip__button--primary,
-.joyride-tooltip__button--back,
-.joyride-tooltip__button--skip {
+.onboarding-copy p { margin: 0 0 12px; }
+.onboarding-copy p:last-child { margin-bottom: 0; }
+.onboarding-callout {
+  padding: 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elevated);
   border-radius: var(--radius-sm);
+}
+
+.onboarding-tab-groups { margin: 14px 0 0; }
+.onboarding-tab-groups > div + div { margin-top: 10px; }
+.onboarding-tab-groups dt { font-weight: 600; color: var(--text-primary); }
+.onboarding-tab-groups dd { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0 0; }
+.onboarding-tab-groups dd span {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.onboarding-preparing {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--onboarding-z-index) + 1);
+  display: grid;
+  place-items: center;
+  padding: var(--onboarding-margin);
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+
+.onboarding-preparing-card {
+  box-sizing: border-box;
+  width: min(var(--onboarding-max-width), 100%);
+  max-height: calc(100dvh - 2 * var(--onboarding-margin));
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--onboarding-radius);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.onboarding-preparing-card h2 { margin: 0; font-size: 16px; }
+.onboarding-preparing-card p { font-size: 14px; line-height: 1.6; }
+.onboarding-preparing-card button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.onboarding-root button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.onboarding-notice {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  max-width: min(540px, calc(100vw - 72px));
+  z-index: var(--z-overlay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-root *, .onboarding-root *::before, .onboarding-root *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }

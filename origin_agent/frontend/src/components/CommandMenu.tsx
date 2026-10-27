@@ -2,10 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import PopupLayer from "./primitives/PopupLayer";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { exportLabels } from "../features/sessionExport/labels";
+import { onboardingLabels } from "../features/onboarding/labels";
 
 export interface CommandMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onReplayOnboarding: () => void;
+  onboardingDisabled: boolean;
+  onboardingDisabledReason: string;
   sessionExportDisabled: boolean;
   onOpenSessionExport: () => void;
   onOpenPerformanceTelemetry: () => void;
@@ -22,6 +26,9 @@ type CloseReason = "toggle" | "escape" | "menu-item" | "outside" | "scope-change
 export default function CommandMenu({
   open,
   onOpenChange,
+  onReplayOnboarding,
+  onboardingDisabled,
+  onboardingDisabledReason,
   sessionExportDisabled,
   onOpenSessionExport,
   onOpenPerformanceTelemetry,
@@ -100,6 +107,7 @@ export default function CommandMenu({
     <>
       <button
         ref={triggerRef}
+        data-tour="command-menu"
         type="button"
         className="header-action-btn tab-rail-footer-button tab-rail-command-button"
         onClick={handleToggle}
@@ -118,6 +126,15 @@ export default function CommandMenu({
           style={{ transform: "translate(-100%, -100%)" }}
           excludeRefs={excludeRefs}
         >
+          <button
+            type="button"
+            className="context-menu-item"
+            disabled={onboardingDisabled}
+            data-tooltip={onboardingDisabled ? onboardingDisabledReason : onboardingLabels.replay}
+            onClick={() => closeForMenuItem(onReplayOnboarding)}
+          >
+            {onboardingLabels.replay}
+          </button>
           <button
             type="button"
             className="context-menu-item session-export-menu-button"

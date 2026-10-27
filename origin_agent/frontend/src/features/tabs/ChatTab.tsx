@@ -37,6 +37,7 @@ export default function ChatTab({ ctx }: { ctx: TabRenderContext }) {
         />
 
         <InputBar
+          forceExpanded={ctx.inputTourPinned}
           uploading={ws.uploading}
           archived={ctx.currentSessionArchived}
           hasActiveProfile={!!ws.llmProfiles?.activeProfile || (ctx.targetSessions.length > 0 && !ctx.targetSessions.includes("main"))}

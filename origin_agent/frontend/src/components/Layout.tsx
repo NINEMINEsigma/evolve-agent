@@ -26,18 +26,27 @@ import TabRailFooter from "../features/tabs/TabRailFooter";
 import TabStage from "../features/tabs/TabStage";
 import { TabDataProvider } from "../features/tabs/TabDataContext";
 import type { TabRenderContext } from "../features/tabs/registry";
+import { useOnboardingTour } from "../features/onboarding/useOnboardingTour";
+
+const onboardingTabs = TAB_REGISTRY.map(({ id, title }) => ({ id, title }));
 
 interface LayoutProps {
   ws: WebSocketState;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   contextMenuOpen: boolean;
-  onboardingRun: boolean;
-  onOnboardingClose: () => void;
+  onboardingReady: boolean;
+  blockingDialogOpen: boolean;
 }
 
-export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingRun, onOnboardingClose }: LayoutProps) {
+export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingReady, blockingDialogOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [pinSidebar, setPinSidebar] = useState(false);
+  const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState === "visible");
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
@@ -167,8 +176,26 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     : currentSession?.title || "未命名会话";
 
   const tabSystem = useTabSystem(ws);
+  const onboarding = useOnboardingTour({
+    ready: ws.isReady && pageVisible,
+    sessionId: ws.sessionId,
+    locked: ws.sessionLocked,
+    busy: exportProcessing,
+    hasPendingInteraction: ws.pendingAsks.length > 0 || ws.pendingConfirms.length > 0,
+    blocked: contextMenuOpen || blockingDialogOpen || !!lightboxSrc || performanceTelemetryOpen || sessionExport.isOpen,
+    commandMenuOpen,
+    archived: currentSessionArchived,
+    isMobile,
+    activeTab: tabSystem.activeTab,
+    enabledTabs: tabSystem.enabledTabs,
+  }, { switchTab: tabSystem.switchTab, onNotice: setOnboardingNotice }, onboardingReady);
+  const onboardingRun = onboarding.run !== null;
+  const effectiveSidebarCollapsed = onboardingRun
+    ? onboarding.presentation.expandSidebar ? false : isMobile ? true : sidebarCollapsed
+    : sidebarCollapsed;
   const tabRenderContext: TabRenderContext = {
     ws,
+    inputTourPinned: onboarding.presentation.expandInput,
     activeTab: tabSystem.activeTab,
     siteStatus: tabSystem.siteStatus,
     fileChanges: tabSystem.fileChanges,
@@ -193,6 +220,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     <CommandMenu
       open={commandMenuOpen}
       onOpenChange={setCommandMenuOpen}
+      onReplayOnboarding={onboarding.requestReplay}
+      onboardingDisabled={!onboarding.canReplay}
+      onboardingDisabledReason={onboarding.replayDisabledReason}
       sessionExportDisabled={exportDisabled || exportProcessing || sessionExport.busy}
       onOpenSessionExport={sessionExport.open}
       onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
@@ -221,7 +251,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         tokenUsage={ws.tokenUsage}
         contextTokens={ws.contextTokens}
         llmMaxContextTokens={ws.llmMaxContextTokens}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={effectiveSidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
         agents={ws.agents}
         isMobile={isMobile}
@@ -230,7 +260,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
       />
       <div className="app-body">
         <Sidebar
-          collapsed={sidebarCollapsed}
+          collapsed={effectiveSidebarCollapsed}
           isMobile={isMobile}
           sessions={ws.sessions}
           sessionId={ws.sessionId}
@@ -264,10 +294,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           width={sidebarWidth}
           isResizing={sidebarResize.isResizing}
           onResizePointerDown={sidebarResize.onPointerDown}
-          forcePin={pinSidebar}
+          forcePin={onboarding.presentation.expandSidebar}
         />
 
-        {isMobile && !sidebarCollapsed && (
+        {isMobile && !effectiveSidebarCollapsed && (
           <div className="sidebar-backdrop" onClick={() => setSidebarCollapsed(true)} />
         )}
 
@@ -316,13 +346,16 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         </div>
       )}
 
+      {onboardingNotice && (
+        <div className="onboarding-notice">
+          <NoticeBanner notice={{ kind: "error", message: onboardingNotice }} onDismiss={() => setOnboardingNotice(null)} />
+        </div>
+      )}
       <OnboardingTour
-        run={onboardingRun}
-        onClose={onOnboardingClose}
+        controller={onboarding}
         isMobile={isMobile}
-        setSidebarCollapsed={setSidebarCollapsed}
-        switchTab={tabSystem.switchTab}
-        onPinSidebarChange={setPinSidebar}
+        archived={currentSessionArchived}
+        tabs={onboardingTabs}
       />
     </div>
   );

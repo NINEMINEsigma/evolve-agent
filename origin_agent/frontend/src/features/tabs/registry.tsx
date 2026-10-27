@@ -35,6 +35,7 @@ export interface TabRenderContext {
   fileChanges: UseSessionFileChangesState;
   sessionId: string;
   // chat tab
+  inputTourPinned: boolean;
   targetSessions: string[];
   setTargetSessions: React.Dispatch<React.SetStateAction<string[]>>;
   visibleCharacters: string[];

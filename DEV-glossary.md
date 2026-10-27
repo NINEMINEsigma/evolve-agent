@@ -259,7 +259,7 @@
 |---|---|---|---|
 | 会话 Tab 能力探测 | `useSessionTabCapabilities` / `GET /api/sessions/{id}/tab-capabilities` | 不读取完整媒体载荷或变量正文的只读能力链路；返回当前 History 媒体实例数量和变量 Tab 是否有可展示内容。首次未知、会话切换或失败时目标 Tab 禁用；同一会话后台 refreshing 保留已确认快照，成功确认空内容后禁用 | session tab capability probe |
 | 右侧 Tab 栏 | `TabRail` / `.tab-rail-column` | 屏幕右缘 44px 常驻竖排 Tab 列（移动端 40px），由可滚动图标区和固定底部控制区组成；图标无内容或能力未确认时为禁用态不可点击，底部控制区仅保留命令菜单 | tab rail |
-| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十个 Tab，顺序为聊天、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生和必要的数据能力来源 | tab registry |
+| Tab 注册表 | `features/tabs/registry.tsx::TAB_REGISTRY` | 声明式注册表（id/标题/图标/render）；当前共十一个 Tab，顺序为聊天、活动大盘、资源、文件修改、媒体输入、会话变量、子会话、角色档案、会话网页、模型配置、动态沙盒空间；新增 tab 需要注册条目、`useTabSystem` 启用派生、必要的数据能力来源及初始引导分组 | tab registry |
 | 主界面区域 | `TabStage` / `.tab-stage` | `.tab-body` 内的 grid 叠放容器，全部 tab 外层常驻挂载、`visibility` 切换（禁用 `display:none`，保护聊天滚动与已加载 iframe 生命周期）；会话网页内部 iframe 首次激活才创建，SiteTab 按 sessionId key 重置 | tab stage |
 | 聊天 Tab | `ChatTab` / `[data-tab-panel="chat"]` | 默认激活 tab；ChatArea、倒计时条与输入栏全部归属此 tab，随 tab 隐藏（保持挂载） | chat tab |
 | 文件修改 Tab | `FileChangesTab` / `[data-tab-panel="changes"]` | 按主会话汇总内置五种文件工具成功目标操作的只读目录树；显示当前可见文件和目录条目，父目录仅为结构节点；首次创建绿色、已有路径修改黄色、已有路径删除红色，会话新增路径删除后隐藏；每个可见条目附最后操作徽章 | session file changes tab |
@@ -288,6 +288,13 @@
 | 文件锁 | `AgentspaceLockRegistry` | Agent 在单次回复轮次中明确接触 `ws:` 路径后持有的路径锁；轮次收尾时释放 | file lock |
 
 > 「导航栏」仍然只指聊天页面左侧 Sidebar。Agentspace 文件树与导航栏是两个不同区域。
+
+### 初始引导
+
+| 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
+|---|---|---|---|
+| 初始引导 | `features/onboarding/` / `OnboardingTour` | 首次访问时，在开屏退场、会话就绪且无阻挡交互后展示的可跳过界面介绍；临时展开目标区域，不修改模型、审批模式、输入草稿或导航栏持久化偏好 | onboarding tour |
+| 重新查看引导 | `CommandMenu` | 从命令菜单主动重新打开初始引导；旧完成标记继续有效，更新后不自动打断旧用户 | replay onboarding |
 
 ### 应用框架与加载层
 

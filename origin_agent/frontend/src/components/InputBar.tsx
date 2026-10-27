@@ -70,6 +70,7 @@ const ICONS = {
 };
 
 interface InputBarProps {
+  forceExpanded?: boolean;
   uploading: boolean;
   archived: boolean;
   hasActiveProfile: boolean;
@@ -131,6 +132,7 @@ function useActionsCollapsed() {
 }
 
 export default function InputBar({
+  forceExpanded = false,
   uploading,
   archived,
   hasActiveProfile,
@@ -297,7 +299,7 @@ export default function InputBar({
   const inputBarAtBottom = followMode === "following";
   const inputDrawer = useEdgeDrawer({
     active: inputBarAutoHide,
-    pinned: inputFocused || (inputBarAutoHide && inputBarAtBottom),
+    pinned: forceExpanded || inputFocused || (inputBarAutoHide && inputBarAtBottom),
   });
 
   if (archived) return null;
@@ -408,6 +410,7 @@ export default function InputBar({
       <div
         ref={surfaceRef}
         className="input-bar-drawer-surface"
+        data-tour="input-surface"
         {...(inputBarAutoHide ? inputDrawer.drawerProps : {})}
       >
         {!chatEmpty && (
@@ -595,7 +598,7 @@ export default function InputBar({
             )}
           </div>
           
-          <div className="input-bar-actions-right">
+          <div className="input-bar-actions-right" data-tour="approval-mode">
             <ApprovalModeBadge
               className="input-approval-mode"
               mode={approvalMode}

@@ -15,7 +15,8 @@ frontend/
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
 │   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
-│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与十个 tab 内容层；含会话 Tab 能力探测 API/hook
+│   ├── features/tabs/          ← Tab 导航体系：注册表、状态机、右侧 Tab 栏、主界面区域与十一个 tab 内容层；含会话 Tab 能力探测 API/hook
+│   ├── features/onboarding/    ← 初始引导：中文文案、步骤、有限目标准备、模态阻挡与运行生命周期
 │   ├── features/sessionMedia/ ← 中文相册、文案资源、共享预览与媒体详情窗
 │   ├── features/characterAvatars/ ← 角色头像映射：zustand store、同步 hook 与子会话头像组件
 │   ├── pages/
@@ -98,7 +99,7 @@ frontend/
 | `Layout.tsx` | 布局容器；`.app-layout` 纵向排列常驻 Header 与 `.app-body`，`.app-body` 横向承载 Sidebar 与 `.main-content`；`.main-content` 内为 `.tab-body`（主界面区域 `TabStage` + 右侧 Tab 栏 `TabRail`）；会话锁定时整体替换为 `SessionLockOverlay`；组装 `TabRenderContext` 并持有 tab 状态机；非锁定分支以无 DOM `TabDataProvider` 包裹舞台与立柱并注入 `renderContext`/`previewBlocked`（性能遥测/灯箱/引导/右键菜单/命令菜单任一） |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 28px 结构性常驻顶部栏；左侧显示会话标题/会话 ID，右侧直角梯形容纳主徽章、上下文进度徽章和连接健康灯；主徽章右侧边缘与右侧 Tab 栏左边界对齐，连接健康灯在主徽章右侧、屏幕右缘与顶部栏底边围成的矩形中心；命令菜单位于右侧 Tab 栏底部，审批模式切换入口位于聊天 Tab 输入栏右侧操作区；`modelMenuBlocked` 由性能遥测、灯箱、引导、会话导出和命令菜单触发 |
-| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 十条目（chat/resources/changes/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生以及必要的数据能力来源 |
+| `features/tabs/registry.tsx` | Tab 注册表：`TabId` / `TabDefinition` / `TabRenderContext` 类型与 `TAB_REGISTRY` 十一条目（chat/activity/resources/changes/media/variables/subagents/characters/site/llm/sandbox），内联 SVG 图标；新增 tab 需要注册条目、启用派生、必要的数据能力来源及初始引导分组 |
 | `features/tabs/sessionTabCapabilitiesApi.ts` | 会话 Tab 能力 REST DTO/严格解码器/请求适配：只返回媒体数量和变量可见内容标志，不读取完整载荷 |
 
 | `features/tabs/useTabSystem.ts` | 纯内存 tab 状态机：默认聊天 Tab、会话切换/刷新回聊天、活跃 tab 禁用自动回退；活跃状态携带 sessionId，render 同步将旧会话状态派生为聊天 Tab，避免新会话首次 render 误激活会话网页；持有 `useSessionSite` 的会话网页 HEAD 探测与 `useSessionTabCapabilities` 的媒体/变量内容能力探测；禁用 tab 切换静默忽略 |
@@ -118,11 +119,29 @@ frontend/
 | `features/tabs/LlmTab.tsx` | 模型配置 Tab：去模态化（无遮罩/焦点陷阱/关闭按钮）；二级分页与 editor 状态机完整保留，草稿跨 tab 与跨会话保留，`beforeunload` 刷新守卫保留 |
 | `features/tabs/SandboxTab.tsx` | 动态沙盒空间 Tab：全局动态沙盒空间管理，自命令菜单弹窗去模态化迁移；`activeTab` 懒加载键（切入即重拉列表）、viewing/editing 状态机与 REST 语义原样保留、`deleteTarget` 受控删除确认（复用 `LlmConfirmation`）、编辑态 `beforeunload` 刷新守卫、草稿跨 tab 与跨会话保留；列表改从共享 `TabDataContext` 读取（`spaces` 初次为 null 表示未读，成功 `[]` 才为空），本地 `operationError` 与列表 `error` 分开显示 |
 | `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
-| `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动；步骤 4-6 锚定右侧 Tab 栏与资源/模型配置 Tab，经 `switchTab` 程序性切换 |
+| `OnboardingTour.tsx` | 初始引导的薄 Joyride 适配层；按运行代际挂载十一项步骤、自有 Portal 与准备期退出遮罩；状态与取消唯一归属 `features/onboarding/useOnboardingTour`，不在 after 回调切换布局 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
+
+### 初始引导与重新查看引导（2026-10-27）
+
+`features/onboarding/` 将正式中文资源 `zh-CN.json`、步骤声明、目标定位、局部模态检测和运行生命周期分开。`Layout` 持有唯一 `useOnboardingTour`；`App` 仅在开屏退场完成后提供 `onboardingReady` 和标签编辑器阻挡状态，完成标记读写统一在 `storage.ts`。继续使用 `evolve_onboarding_completed=true`，不新增版本键、不清旧标记，旧用户升级后不会自动弹出。命令菜单提供“重新查看引导”，先关闭菜单再启动；菜单自身不禁用这个入口。
+
+十一项顺序为欢迎、导航栏、顶部栏、模型配置、会话待用模型选择、输入栏、审批模式、右侧 Tab 栏、资源/任务、动态沙盒空间、命令菜单。右侧 Tab 栏介绍从正式注册表投影标题，并以固定分组覆盖十一项（含活动大盘）；新增 Tab 必须同步 `ONBOARDING_TAB_GROUPS`。模型配置说明三个二级分页；审批入口准确锚定输入栏右侧。归档会话的输入和审批步骤改为居中只读说明，不伪造控件或修改会话状态。
+
+模型配置、资源/任务和动态沙盒空间这三个完整面板步骤在桌面与移动端均使用 `placement="center"`：卡片按视口中心固定定位，真实面板继续作为高亮目标。完整面板几乎占满主界面，不再尝试将卡片放到面板左侧，避免四周空间不足时卡片落到视口之外。其余紧凑目标保留定向定位；Portal挂载、按钮、进度及取消逻辑不变。本次定位修订仅完成源码与只读审阅，仍需用户复验三步卡片与“下一步”是否可见、可操作。
+
+首次自动展示等待开屏完全退场、非空且就绪的会话、页面可见，并避开锁定、处理中、待审批/提问和其他覆盖层。一次运行开始即消费本页自动尝试资格；断线、会话切换、锁定、归档或移动断点改变、新交互、页面隐藏及外部模态出现都会中断，同页不自动重开。完成、跳过、关闭或 Escape 才保存完成标记；失败/中断不写完成，重看也不先清除旧值。存储被浏览器禁止时本页仍可正常退出，跨刷新可能再次自动展示。
+
+每一步 `before` 由控制器统一替换临时展示，前进/后退同构，不再使用固定300ms等待或不阻塞的 `after` 切Tab。导航栏使用渲染覆盖和 `forcePin`，不写持久化折叠偏好；输入栏经 `TabRenderContext.inputTourPinned → ChatTab → InputBar.forceExpanded` 复用已有抽屉钉住机制，不聚焦输入框、不改草稿或滚动。实际Tab提交和目标稳定等待共享2秒总截止及取消信号，目标需真实可见且连续两帧几何稳定；准备期提供可键盘操作的跳过遮罩，Escape在准备和展示阶段均明确结束。
+
+`useOnboardingBlockers` 仅在首次候选、待重看或引导运行期间观察可见模态，排除 `data-onboarding-root` 内所有自有Portal内容和隐藏Tab中的对话框；观察器、监听器和rAF对称释放。Hook以运行/准备/资源租约隔离迟到结果，终结先失效再取消；StrictMode重建保留起始快照并递增渲染代际。退出在同会话且可恢复时返回起始Tab，已禁用则回聊天；焦点恢复等待布局提交且遇到新交互即取消，不恢复旧会话状态。
+
+引导不创建会话、不发消息、不切模型或审批、不保存沙盒授权、不修改History；只可能触发资源、模型配置、动态沙盒空间Tab原有的只读加载，不激活会话网页或活动大盘。可关闭的失败通知不进入聊天History。依赖版本与后端协议均不变。
+
+仅完成源码和定向只读审阅，未执行类型检查、Lint、测试、构建或应用。用户需按 `.tasks/2026-10-27_1_onboarding-redesign.md` 人工验收首次/旧标记/重复重看、逐步前后退与退出、无模型/空资源/归档、准备期取消和迟到事件、StrictMode、外部模态、断线与切会话、320px窄屏/短视口/缩放、键盘与减少动画、存储不可用、原Tab/偏好/草稿不变及无业务写入。
 
 ### 文件修改 Tab
 
@@ -160,7 +179,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 
 ## 会话变量 Tab
 
-右侧Tab注册表共十项，会话变量位于媒体输入Tab之后；只有会话 Tab 能力探测确认存在变量条目或可展示问题时可打开，探测未知/失败或确认空目录且无问题时禁用。进入后才读取完整变量池；`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
+右侧Tab注册表共十一项（含活动大盘），会话变量位于媒体输入Tab之后；只有会话 Tab 能力探测确认存在变量条目或可展示问题时可打开，探测未知/失败或确认空目录且无问题时禁用。进入后才读取完整变量池；`features/tabs/VariablesTab.tsx`使用既有TabRenderContext，不修改TabStage常驻挂载；目录折叠仅内存态，切会话清空。独立`session-variables.css`由main.tsx导入，TabRail纵向滚动保证短视口全部图标可达。
 
 `features/sessionVariables/`包含types.ts、api.ts、useSessionVariables.ts、presentation.ts及VariableCard.tsx。typed GET `/api/sessions/<id>/variables`严格解码，15秒截止覆盖fetch与响应正文，解析前后检查时长（不能实时中断同步JSON.parse）；退出Tab/切会话取消请求，代际防旧响应覆盖。激活必重拉，现有chatAgentspaceEventBus文件/移动祖先路径命中后1秒去抖刷新，resync重拉，watcher_error提示降级；不新增长连接/轮询。刷新失败保留同会话旧数据并标过期，404清空旧池。
 
@@ -424,7 +443,7 @@ Controller持有当前重载Promise与最新待同步计数；旧REST即使忽�
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |
 | `skeleton.css` | 组件级骨架占位样式（shimmer 动画） |
-| `onboarding.css` | 引导向导样式覆盖（react-joyride 主题微调） |
+| `onboarding.css` | 初始引导自有正文、Tab分组、准备期退出遮罩与通知；Joyride外观通过正式styles接口配置，不依赖库内部CSS类名 |
 
 ---
 

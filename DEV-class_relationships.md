@@ -1565,6 +1565,14 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 前端独立agentLoopSettings功能hook管理权威快照、草稿基线、单请求代际与不确定保存，SettingsPage唯一注册beforeunload；LlmTab新增runtime二级分页，Profile hook保持挂载，不增加聊天Store字段/广播/轮询。共享损坏配置或正式备份会使新fast/fallback均严格失败，恢复由用户停机后人工处理。仅源码实施与只读审阅，未运行校验、构建、导入或应用，用户人工验收待完成。
 
+### 初始引导前端状态归属（2026-10-27）
+
+`Layout` 内唯一 `features/onboarding/useOnboardingTour` 持有当前运行、步骤临时展示、准备取消、资源租约及退出后恢复任务；`OnboardingTour` 只适配 Joyride、隔离自有Portal与准备期退出。`App` 只提供开屏退场完成和标签编辑器阻挡状态，不再直接读写引导完成标记。`useOnboardingBlockers` 是仅候选/运行期间启用的局部可见模态检测，不新增全局模态注册框架。
+
+`OnboardingRun`、`OnboardingPresentation` 和环境/适配器接口仅为前端内存TypeScript类型。控制器公开 `requestReplay`、`prepareStep`、`finish`、`reportFailure`，公开回调绑定运行及渲染代际，防止旧实例影响下一次重看。准备共享有限截止，run/prepare/lease核对异步所有权；终结先失效后取消，StrictMode资源重建不标记用户完成。`TabRenderContext.inputTourPinned` 经 `ChatTab` 传至 `InputBar.forceExpanded`，只复用 `useEdgeDrawer.pinned`。导航栏展开采用临时渲染覆盖，不更新持久化偏好。
+
+唯一持久化仍是原浏览器 `evolve_onboarding_completed` 布尔标记；旧用户不自动弹出，命令菜单提供主动重看。无后端类图、System、Loop protected字段、跨类私有访问、History模型、easysave key或协议变化。已完成源码与定向只读审阅，未运行类型检查、构建或应用，用户人工验收待完成。
+
 
 
 

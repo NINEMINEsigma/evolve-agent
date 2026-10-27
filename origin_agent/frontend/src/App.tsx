@@ -13,14 +13,15 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import NoticeBanner from "./components/primitives/NoticeBanner";
 import Agentspace from "./pages/Agentspace";
 import { SessionInfo } from "./types";
-import { STORAGE_KEYS } from "./constants/storage";
 
 function ChatApp() {
   useGlobalTooltip();
   useCharacterAvatarSync();
   const ws = useWebSocket();
   const [showSplash, setShowSplash] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingReady, setOnboardingReady] = useState(false);
+  const handleSplashFinish = useCallback(() => setShowSplash(false), []);
+  const handleSplashExit = useCallback(() => setOnboardingReady(true), []);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
 
@@ -57,15 +58,8 @@ function ChatApp() {
             ws={ws}
             onContextMenu={handleContextMenu}
             contextMenuOpen={contextMenu !== null}
-            onboardingRun={showOnboarding}
-            onOnboardingClose={() => {
-              try {
-                localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, "true");
-              } catch {
-                // localStorage 不可用时静默失败
-              }
-              setShowOnboarding(false);
-            }}
+            onboardingReady={onboardingReady}
+            blockingDialogOpen={tagEditorSession !== null}
           />
         </ConnectionDiagnosticsProvider>
         <ChatContextMenu
@@ -104,21 +98,9 @@ function ChatApp() {
       </div>
 
       {/* 开屏动画覆盖层 */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="wait" onExitComplete={handleSplashExit}>
         {showSplash && (
-          <SplashScreen
-            key="splash"
-            onFinish={() => {
-              setShowSplash(false);
-              try {
-                if (localStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED) !== "true") {
-                  setShowOnboarding(true);
-                }
-              } catch {
-                // localStorage 不可用时静默失败
-              }
-            }}
-          />
+          <SplashScreen key="splash" onFinish={handleSplashFinish} />
         )}
       </AnimatePresence>
     </ErrorBoundary>

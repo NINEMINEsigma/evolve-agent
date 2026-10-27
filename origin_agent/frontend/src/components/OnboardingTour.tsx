@@ -1,212 +1,141 @@
-import { useMemo } from "react";
-import { Joyride, STATUS, EVENTS, type Step } from "react-joyride";
-import type { TabId } from "../features/tabs/registry";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { Joyride, STATUS, EVENTS } from "react-joyride";
+import { ONBOARDING } from "../features/onboarding/constants";
+import { onboardingLabels as labels } from "../features/onboarding/labels";
+import { buildOnboardingSteps } from "../features/onboarding/steps";
+import OnboardingPreparing from "../features/onboarding/OnboardingPreparing";
+import type { OnboardingStepsOptions, OnboardingTourController } from "../features/onboarding/types";
 
 interface OnboardingTourProps {
-  run: boolean;
-  onClose: () => void;
+  controller: OnboardingTourController;
   isMobile: boolean;
-  setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  switchTab: (id: TabId) => void;
-  onPinSidebarChange: (pinned: boolean) => void;
+  archived: boolean;
+  tabs: OnboardingStepsOptions["tabs"];
 }
 
-export default function OnboardingTour({
-  run,
-  onClose,
-  isMobile,
-  setSidebarCollapsed,
-  switchTab,
-  onPinSidebarChange,
-}: OnboardingTourProps) {
-  const steps = useMemo<Step[]>(() => {
-    const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export default function OnboardingTour(props: OnboardingTourProps) {
+  const { controller } = props;
+  if (!controller.run) return null;
+  return <ActiveTour key={`${controller.run.id}:${controller.renderEpoch}`} {...props} />;
+}
 
-    return [
-      // 步骤 0：欢迎
-      {
-        target: "body",
-        title: "欢迎使用 Evolve Agent",
-        content: "Evolve Agent 是一个具备运行时自我代码进化能力的 AI。接下来带你快速了解界面布局。",
-        placement: "center",
-        hideOverlay: false,
-        skipBeacon: true,
-      },
-      // 步骤 1：导航栏
-      {
-        target: '[data-tour="sidebar"]',
-        title: "导航栏",
-        content: "这里管理所有会话。可以搜索历史、新建会话、合并归档会话。",
-        placement: "right",
-        before: async () => {
-          setSidebarCollapsed(false);
-          await wait(300);
-        },
-        after: () => {
-          if (isMobile) setSidebarCollapsed(true);
-        },
-      },
-      // 步骤 2：顶部栏
-      {
-        target: '[data-tour="header"]',
-        title: "顶部栏",
-        content: "这里显示会话标题、待用模型、上下文进度和连接健康状态。命令菜单与审批模式切换位于右侧 Tab 栏底部。",
-        placement: "bottom",
-      },
-      // 步骤 3：输入栏
-      {
-        target: '[data-tour="input-bar"]',
-        title: "输入栏",
-        content: "在这里输入消息与 Agent 对话。支持文件上传、@提及、/命令、录音等。",
-        placement: "top",
-      },
-      // 步骤 4：右侧 Tab 栏（仅展示，不切换）
-      {
-        target: '[data-tour="tab-rail"]',
-        title: "右侧 Tab 栏",
-        content: "屏幕右缘的右侧 Tab 栏切换主界面视图：聊天、资源、子会话、会话网页、模型配置、动态沙盒空间。",
-        placement: "left",
-      },
-      // 步骤 5：右侧 Tab 栏底部控制
-      {
-        target: '[data-tour="tab-rail-footer"]',
-        title: "全局控制",
-        content: "右侧 Tab 栏底部固定显示审批模式三态切换和命令菜单，不会随 Tab 图标滚动。",
-        placement: "left",
-      },
-      // 步骤 6：资源 Tab
-      {
-        target: '[data-tour="resources-tab"]',
-        title: "资源 / 任务",
-        content: "这里展示当前会话的图片、下载文件、Shell 会话和定时任务。",
-        placement: "left",
-        before: async () => {
-          switchTab("resources");
-          await wait(300);
-        },
-        after: () => {
-          switchTab("chat");
-        },
-      },
-      // 步骤 7：模型配置
-      {
-        target: '[data-tour="llm-tab"]',
-        title: "模型配置",
-        content: "模型配置页按客户端和端点管理连接、参数；全局配置引用页选择审批与元数据模型。当前会话的待用模型从顶部栏切换。",
-        placement: "left",
-        before: async () => {
-          switchTab("llm");
-          await wait(300);
-        },
-        after: () => {
-          switchTab("chat");
-        },
-      },
-    ];
-  }, [isMobile, setSidebarCollapsed, switchTab]);
+function ActiveTour({ controller, isMobile, archived, tabs }: OnboardingTourProps) {
+  const [portal, setPortal] = useState<HTMLDivElement | null>(null);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const activeRef = useRef(false);
+  const prepareToken = useRef(0);
+  const ignoredErrors = useRef(new Set<unknown>());
+  const latest = useRef(controller);
+  latest.current = controller;
+  // 每个实例固定内容与 before；环境变化由控制器中断，不替换步骤数组。
+  const [steps] = useState(() => buildOnboardingSteps({
+    archived, isMobile, tabs,
+    prepare: async (id) => {
+      const token = ++prepareToken.current;
+      try {
+        await controller.prepareStep(id);
+      } catch (error) {
+        if (!activeRef.current || token !== prepareToken.current
+          || (error instanceof DOMException && error.name === "AbortError")) {
+          ignoredErrors.current.add(error);
+        }
+        throw error;
+      }
+    },
+  }));
 
-  return (
-    <Joyride
-      continuous
-      run={run}
-      steps={steps}
-      onEvent={(data) => {
-        if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
-          onPinSidebarChange(false);
-          onClose();
-        }
-        // 步骤 1（导航栏）前后钉住/释放 Sidebar
-        if (data.type === EVENTS.STEP_BEFORE && data.index === 1) {
-          onPinSidebarChange(true);
-        }
-        if (data.type === EVENTS.STEP_AFTER && data.index === 1) {
-          onPinSidebarChange(false);
-        }
-      }}
-      options={{
-        primaryColor: "#a78bfa",
-        backgroundColor: "#131319",
-        textColor: "#e6e6ec",
-        arrowColor: "#131319",
-        overlayColor: "rgba(0, 0, 0, 0.6)",
-        zIndex: 10000,
-        spotlightPadding: 8,
-        spotlightRadius: 14,
-        showProgress: true,
-        width: 380,
-        closeButtonAction: "skip",
-        overlayClickAction: false,
-        scrollDuration: 300,
-        targetWaitTimeout: 2000,
-      }}
-      styles={{
-        tooltip: {
-          backgroundColor: "#131319",
-          color: "#e6e6ec",
-          borderRadius: "14px",
-          fontSize: "14px",
-          fontFamily: "inherit",
-        },
-        tooltipContainer: {
-          backgroundColor: "#131319",
-          color: "#e6e6ec",
-        },
-        tooltipContent: {
-          backgroundColor: "#131319",
-          color: "#e6e6ec",
-          fontSize: "14px",
-          lineHeight: 1.6,
-        },
-        tooltipTitle: {
-          backgroundColor: "#131319",
-          color: "#e6e6ec",
-          fontSize: "16px",
-          fontWeight: 600,
-        },
-        tooltipFooter: {
-          backgroundColor: "#131319",
-        },
-        arrow: {
-          color: "#131319",
-          backgroundColor: "#131319",
-        },
-        buttonPrimary: {
-          backgroundColor: "#a78bfa",
-          color: "#ffffff",
-          borderRadius: "8px",
-          fontSize: "14px",
-          padding: "8px 16px",
-        },
-        buttonBack: {
-          backgroundColor: "#232330",
-          color: "#e6e6ec",
-          borderRadius: "8px",
-          fontSize: "14px",
-          padding: "8px 16px",
-        },
-        buttonSkip: {
-          backgroundColor: "#1a1a22",
-          color: "#9a9aa8",
-          borderRadius: "8px",
-          fontSize: "14px",
-          padding: "8px 16px",
-        },
-        buttonClose: {
-          color: "#9a9aa8",
-        },
-        overlay: {
-          backgroundColor: "rgba(0, 0, 0, 0.6)",
-        },
-      }}
-      locale={{
-        back: "上一步",
-        close: "关闭",
-        last: "完成",
-        next: "下一步",
-        nextWithProgress: "下一步 ({current}/{total})",
-        open: "打开",
-        skip: "跳过",
-      }}
-    />
+  useLayoutEffect(() => {
+    activeRef.current = true;
+    const root = document.createElement("div");
+    root.className = "onboarding-root";
+    root.setAttribute("data-onboarding-root", "");
+    root.style.setProperty("--onboarding-max-width", `${ONBOARDING.MAX_WIDTH_PX}px`);
+    root.style.setProperty("--onboarding-margin", `${ONBOARDING.VIEWPORT_MARGIN_PX}px`);
+    root.style.setProperty("--onboarding-radius", `${ONBOARDING.RADIUS_PX}px`);
+    root.style.setProperty("--onboarding-z-index", String(ONBOARDING.Z_INDEX));
+    document.body.appendChild(root);
+    setPortal(root);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      latest.current.finish("skipped");
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      activeRef.current = false;
+      prepareToken.current += 1;
+      document.removeEventListener("keydown", onKeyDown, true);
+      root.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const change = () => setReducedMotion(query.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+
+  if (!portal || !portal.isConnected) return null;
+  const buttonStyle: CSSProperties = {
+    borderRadius: "var(--radius-sm)", fontSize: 13, padding: "8px 10px", minHeight: 40,
+  };
+  return createPortal(
+    <>
+      <Joyride
+        continuous
+        run
+        steps={steps}
+        portalElement={portal}
+        loaderComponent={null}
+        onEvent={(data) => {
+          if (!activeRef.current) return;
+          if (data.type === EVENTS.ERROR || data.type === EVENTS.TARGET_NOT_FOUND) {
+            if (ignoredErrors.current.has(data.error)) {
+              ignoredErrors.current.delete(data.error);
+              return;
+            }
+            latest.current.reportFailure(data.error);
+            return;
+          }
+          if (data.status === STATUS.FINISHED) latest.current.finish("completed");
+          else if (data.status === STATUS.SKIPPED) latest.current.finish("skipped");
+        }}
+        options={{
+          buttons: ["back", "skip", "close", "primary"],
+          primaryColor: "var(--accent)", backgroundColor: "var(--bg-secondary)",
+          textColor: "var(--text-primary)", arrowColor: "var(--bg-secondary)",
+          overlayColor: "rgba(0, 0, 0, 0.6)", zIndex: ONBOARDING.Z_INDEX,
+          spotlightPadding: ONBOARDING.SPOTLIGHT_PADDING_PX, spotlightRadius: ONBOARDING.RADIUS_PX,
+          showProgress: true, skipBeacon: true,
+          width: `min(${ONBOARDING.MAX_WIDTH_PX}px, calc(100vw - ${ONBOARDING.VIEWPORT_MARGIN_PX * 2}px))`,
+          closeButtonAction: "skip", dismissKeyAction: false, overlayClickAction: false,
+          blockTargetInteraction: true,
+          scrollDuration: reducedMotion ? 0 : ONBOARDING.SCROLL_DURATION_MS,
+          beforeTimeout: ONBOARDING.BEFORE_TIMEOUT_MS, targetWaitTimeout: ONBOARDING.TARGET_TIMEOUT_MS,
+        }}
+        styles={{
+          tooltip: {
+            backgroundColor: "var(--bg-secondary)", color: "var(--text-primary)",
+            borderRadius: ONBOARDING.RADIUS_PX, fontFamily: "inherit", fontSize: 14,
+            maxHeight: `calc(100dvh - ${ONBOARDING.VIEWPORT_MARGIN_PX * 2}px)`,
+            display: "flex", flexDirection: "column", overflow: "hidden",
+          },
+          tooltipContainer: { display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" },
+          tooltipTitle: { fontSize: 16, fontWeight: 600, flexShrink: 0 },
+          tooltipContent: { fontSize: 14, lineHeight: 1.6, minHeight: 0, overflowY: "auto", padding: "12px 0" },
+          tooltipFooter: { flexShrink: 0, flexWrap: "wrap", gap: 6 },
+          buttonPrimary: { ...buttonStyle, backgroundColor: "var(--accent)", color: "var(--bg-primary)" },
+          buttonBack: { ...buttonStyle, backgroundColor: "var(--bg-hover)", color: "var(--text-primary)" },
+          buttonSkip: { ...buttonStyle, color: "var(--text-secondary)" },
+          buttonClose: { color: "var(--text-secondary)" },
+        }}
+        locale={labels.buttons}
+      />
+      {controller.preparing && <OnboardingPreparing onSkip={() => latest.current.finish("skipped")} />}
+    </>,
+    portal,
   );
 }

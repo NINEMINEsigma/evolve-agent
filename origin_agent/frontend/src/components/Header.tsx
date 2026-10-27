@@ -95,7 +95,7 @@ function HeaderPill({ status, llmModelName, llmProfiles, modelMenuBlocked = fals
       : llmProfiles?.activeProfileName || llmModelName || "未配置";
 
   return (
-    <div className={`header-pill ${menuOpen ? "header-pill--menu-open" : ""} ${status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : status.startsWith("重连中") ? "reconnecting" : ""}`}>
+    <div data-tour="model-selection" className={`header-pill ${menuOpen ? "header-pill--menu-open" : ""} ${status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : status.startsWith("重连中") ? "reconnecting" : ""}`}>
       {llmProfiles ? (
         <button
           type="button"
