@@ -272,7 +272,7 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
 | `useEdgeDrawer.ts` | 左侧导航栏边缘抽屉三态状态机（hidden/peek/open）；`pinned` 选项在左侧导航栏弹出层展开期间钉住抽屉 |
-| `useGlobalTooltip.ts` | 全局 tooltip 管理 |
+| `useGlobalTooltip.ts` | 全局 tooltip 管理：内容宽度独立于触发位置，按未缩放布局尺寸测量后执行视口边缘避让及箭头定位 |
 | `features/characterAvatars/characterAvatarStore.ts` | 角色名 → 头像 URL 的 zustand 低频 store；主Agent条目优先防同名覆盖，`useCharacterAvatarUrl` selector 供消息与子会话组件订阅 |
 | `features/characterAvatars/useCharacterAvatarSync.ts` | 挂载时拉取 `GET /api/characters/avatars`，订阅聊天页 Agentspace 事件（`SOUL.md.meta` / `characters/` 命中或 `resync`）后去抖重拉；失败静默保留旧映射 |
 | `features/characterAvatars/SubagentAvatar.tsx` | 子会话 Tab子级 tab 与卡片标题的小尺寸头像；无 URL 或加载失败时不渲染 |
@@ -350,6 +350,14 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 整体预算包括64MiB原History、96MiB捕获响应、20,000消息/40,000行、32MiB单资源、128MiB资源总计、1,024资源/16层依赖、192MiB归档输入；资源级超限明确占位，整体超限拒绝。单请求30秒、全导出180秒；客户端取消覆盖资源请求、队列、ZIP worker与Blob URL。源码已完成接入与定向静态审阅，尚未由开发助手AI运行构建、类型检查或离线验收。
 
 全局tooltip的document捕获监听器必须先用`instanceof Element`校验event.target；mouseleave同时校验relatedTarget为Node或按离开视口隐藏，禁止用TypeScript断言把Document当HTMLElement再调用closest。该修复覆盖导出Portal窗口及既有tooltip，不改变视觉资源404探测语义。
+
+### 全局 tooltip 宽度与边缘避让（2026-10-27）
+
+普通 tooltip 使用 `width: max-content` 按内容确定宽度，最大为 320px，并受视口扣除左右安全间距后的宽度限制；保留原文显式换行，仅在超过宽度上限时自动折行，连续英文或路径允许断行，不设固定最小宽度。上下文用量变体保留 252px 设计宽度并遵守相同视口限制。`DIMENSIONS` 集中登记 10px 视口安全间距、含箭头空间的 16px 触发元素间距和 16px 箭头中心边缘间距；Hook 将视口安全间距通过 CSS 自定义属性传给样式，避免两处维护同一值。
+
+`useGlobalTooltip` 每次悬停时先准备内容与变体、重置旧定位，再通过 `offsetWidth` / `offsetHeight` 读取不受显隐缩放动画影响的最终布局尺寸，最后定位并显示。默认下方居中；下方不足时仅在上方空间更大时改到上方，随后按视口安全边界限制主体坐标。靠近左右边缘通过平移避让，不通过压缩剩余空间内的自动宽度避让；垂直定位使用宽度约束生效后的真实换行高度。箭头按最终主体位置对准触发中心，并限制在左右圆角以内；半宽仅补偿一次，CSS 不再叠加负外边距。
+
+公开 Hook 签名、document 捕获监听器、延迟隐藏、显隐动画及上下文数据无效时的普通文本降级保持不变。本次不新增打开期间的滚动/缩放/尺寸观察，也不提供内容高于整个视口时的滚动交互；每次重新悬停才重新计算。源码已实施并做定向只读审阅，未运行类型检查、Lint、构建、测试或应用。用户需部署更新后人工验收连接健康灯重复悬停、短长提示交替、四角/底部、长中文/英文/路径、上下文变体、窄窗口/缩放后重新悬停及 Portal 弹窗内提示。
 
 
 ## 历史更新指令与完整重载（2026-10-15）

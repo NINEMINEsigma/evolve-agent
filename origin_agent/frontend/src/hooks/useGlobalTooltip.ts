@@ -1,8 +1,7 @@
 import { useEffect } from "react";
+import { DIMENSIONS } from "../constants/dimensions";
 import { TIMING } from "../constants/timing";
 
-const TOOLTIP_MARGIN = 10;
-const TOOLTIP_ARROW = 6;
 const CONTEXT_TOOLTIP_VARIANT = "context-usage";
 
 function readTooltipNumber(host: HTMLElement, attribute: string): number | null {
@@ -87,6 +86,7 @@ export function useGlobalTooltip() {
   useEffect(() => {
     const tooltip = document.createElement("div");
     tooltip.className = "global-tooltip";
+    tooltip.style.setProperty("--tooltip-viewport-margin", `${DIMENSIONS.TOOLTIP_VIEWPORT_MARGIN}px`);
     const arrow = document.createElement("div");
     arrow.className = "global-tooltip-arrow";
     tooltip.appendChild(arrow);
@@ -105,46 +105,41 @@ export function useGlobalTooltip() {
         && renderContextUsageTooltip(tooltip, target);
       if (!renderedContextUsage) tooltip.textContent = text;
       tooltip.appendChild(arrow);
+      // 在中性坐标按最终宽度布局，避免继承上一次靠边位置的可用空间。
+      tooltip.style.top = "0px";
+      tooltip.style.left = "0px";
+      tooltip.style.right = "";
+      tooltip.style.bottom = "";
       tooltip.style.maxWidth = "";
-      tooltip.classList.add("visible");
 
       const rect = target.getBoundingClientRect();
-      const tipRect = tooltip.getBoundingClientRect();
+      // offset 尺寸不包含显隐动画的 transform，且已包含最终换行后的高度。
+      const tipWidth = tooltip.offsetWidth;
+      const tipHeight = tooltip.offsetHeight;
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-
-      let top = rect.bottom + TOOLTIP_MARGIN + TOOLTIP_ARROW;
-      let left = rect.left + rect.width / 2 - tipRect.width / 2;
-      let arrowDir: "top" | "bottom" = "top";
-
-      if (top + tipRect.height > vh - TOOLTIP_MARGIN) {
-        top = rect.top - tipRect.height - TOOLTIP_MARGIN - TOOLTIP_ARROW;
-        arrowDir = "bottom";
-      }
-      if (left < TOOLTIP_MARGIN) left = TOOLTIP_MARGIN;
-      if (left + tipRect.width > vw - TOOLTIP_MARGIN) {
-        left = vw - tipRect.width - TOOLTIP_MARGIN;
-      }
-      if (tipRect.width > vw - TOOLTIP_MARGIN * 2) {
-        left = TOOLTIP_MARGIN;
-        tooltip.style.maxWidth = `${vw - TOOLTIP_MARGIN * 2}px`;
-      }
+      const margin = DIMENSIONS.TOOLTIP_VIEWPORT_MARGIN;
+      const gap = DIMENSIONS.TOOLTIP_ANCHOR_GAP;
+      const anchorCenter = rect.left + rect.width / 2;
+      const spaceBelow = vh - margin - rect.bottom - gap;
+      const spaceAbove = rect.top - gap - margin;
+      const placeAbove = tipHeight > spaceBelow && spaceAbove > spaceBelow;
+      const preferredTop = placeAbove ? rect.top - tipHeight - gap : rect.bottom + gap;
+      const top = Math.max(margin, Math.min(preferredTop, vh - margin - tipHeight));
+      const left = Math.max(margin, Math.min(anchorCenter - tipWidth / 2, vw - margin - tipWidth));
 
       tooltip.style.top = `${top}px`;
       tooltip.style.left = `${left}px`;
 
-      arrow.className = `global-tooltip-arrow ${arrowDir}`;
-      if (arrowDir === "top") {
-        arrow.style.top = "-5px";
-        arrow.style.left = `${rect.left + rect.width / 2 - left - 5}px`;
-        arrow.style.bottom = "";
-        arrow.style.right = "";
-      } else {
-        arrow.style.bottom = "-5px";
-        arrow.style.left = `${rect.left + rect.width / 2 - left - 5}px`;
-        arrow.style.top = "";
-        arrow.style.right = "";
-      }
+      const arrowInset = Math.min(DIMENSIONS.TOOLTIP_ARROW_EDGE_INSET, tipWidth / 2);
+      const arrowCenter = Math.max(arrowInset, Math.min(anchorCenter - left, tipWidth - arrowInset));
+      arrow.className = `global-tooltip-arrow ${placeAbove ? "bottom" : "top"}`;
+      arrow.style.top = "";
+      arrow.style.bottom = "";
+      arrow.style.right = "";
+      // 仅在此补偿一次箭头半宽，并将主体边框坐标换算到绝对定位包含块。
+      arrow.style.left = `${arrowCenter - tooltip.clientLeft - arrow.offsetWidth / 2}px`;
+      tooltip.classList.add("visible");
     };
 
     const hideTooltip = () => {

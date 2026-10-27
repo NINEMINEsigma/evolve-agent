@@ -5,6 +5,9 @@ export const DIMENSIONS = {
   SIDEBAR_MAX:            560,   // 侧边栏最大宽度
   TAB_RAIL_WIDTH:         44,    // 右侧 Tab 栏立柱宽度 (px)
   TAB_RAIL_WIDTH_MOBILE:  40,    // 右侧 Tab 栏立柱移动端宽度 (px)
+  TOOLTIP_VIEWPORT_MARGIN: 10,   // 全局 tooltip 与视口边缘的安全间距 (px)
+  TOOLTIP_ANCHOR_GAP:     16,    // 全局 tooltip 主体与触发元素的间距，含箭头空间 (px)
+  TOOLTIP_ARROW_EDGE_INSET: 16,  // 全局 tooltip 箭头中心距主体左右边缘的最小间距 (px)
   INPUT_MAX_SCROLL:       200,   // 输入框最大滚动高度
   MENU_MAX_HEIGHT:        244,   // 提及菜单最大高度
   MOBILE_BREAKPOINT:      768,   // 移动端断点 (px)
