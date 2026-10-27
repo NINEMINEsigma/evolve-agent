@@ -1,0 +1,13 @@
+/* 仅 visual 场景通过正式会话样式作用域处理器加载；默认场景不启用。 */
+[data-chat-scope="message"] {
+  border-radius: 14px;
+  border-color: rgba(129, 211, 184, 0.2);
+}
+[data-message-role="assistant"] {
+  --accent-color: #91d9bd;
+  border-inline-start: 2px solid rgba(129, 211, 184, 0.42);
+  background: linear-gradient(115deg, rgba(42, 87, 70, 0.1), transparent 70%);
+}
+[data-chat-scope="message"] blockquote {
+  border-inline-start-color: #7ebf9f;
+}

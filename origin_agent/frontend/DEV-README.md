@@ -472,6 +472,12 @@ Controller持有当前重载Promise与最新待同步计数；旧REST即使忽�
 
 资源 Tab 的 Shell 停止按钮使用 `services/shellResourcesApi.ts` 解码真实停止结果。cleanup 未完成时保留该行并显示“资源清理待完成”，不把 HTTP 200 当成释放成功。文案来自 `resourceCleanupLabels.json`，不新增弹窗或自动轮询。
 
+## 独立前端预览的只读复用边界（2026-10-27）
+
+根目录 `preview/frontend_page/` 直接引用本前端的 `src/main.tsx`、组件、样式、资源文案和类型，不向正式组件添加预览分支。独立Vite工程将裸包解析到自身node_modules，并按明确源文件绝对路径替代storage常量、媒体API URL、会话网页ZIP、录音hook及会话导出hook；HTTP/WebSocket/EventSource由预览入口在正式模块求值前安装浏览器内模拟。原生图片/iframe/Worker不依赖fetch拦截覆盖，而使用登记的本地静态资源与独立安全策略。
+
+固定数据和虚拟文件均为展示材料，不读取workspace或真实会话，不调用后端/模型、不触发设备采集或真实进程；普通UI仍执行原组件的交互与能力判断。演示导出不冒充正式完整离线导出。预览专属偏好有独立前缀，刷新恢复基线，不清除正式浏览器偏好。正式前端的构建/复制/部署语义不变；预览依赖只能在预览目录安装。具体操作、场景和人工验收见根目录 `preview/frontend_page/README.md`、`COVERAGE.md`。本次未执行安装、类型检查、Lint、测试、构建、应用或浏览器验收。
+
 ## 构建与开发注意事项
 
 - 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`<pkg_mgr> install && <pkg_mgr> run build`（包管理器优先 pnpm，回退 npm），运行在 `workspace/fast_agent_space/frontend/` 副本中。

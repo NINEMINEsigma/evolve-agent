@@ -1,0 +1,64 @@
+.preview-controls {
+  position: fixed;
+  inset: auto auto 18px 18px;
+  z-index: 2147483000;
+  width: min(330px, calc(100vw - 36px));
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 18px;
+  border: 1px solid #42566a;
+  border-radius: 12px;
+  background: #101b29f5;
+  box-shadow: 0 12px 48px #0007;
+  color: #dce8f5;
+  font: 13px/1.5 system-ui, sans-serif;
+  color-scheme: dark;
+}
+.preview-controls[hidden], .preview-faults[hidden] { display: none; }
+.preview-controls h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+.preview-controls-status { margin: 0 0 14px; color: #a7ddc8; overflow-wrap: anywhere; }
+.preview-controls label { display: grid; gap: 6px; }
+.preview-controls select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #42566a;
+  border-radius: 6px;
+  background: #192939;
+  color: inherit;
+  font: inherit;
+}
+.preview-controls-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.preview-controls button {
+  padding: 8px;
+  border: 1px solid #42566a;
+  border-radius: 6px;
+  background: #1b3043;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.preview-controls button:hover { background: #28465d; }
+.preview-controls button:focus-visible, .preview-controls select:focus-visible { outline: 2px solid #9bdfc5; outline-offset: 2px; }
+.preview-controls-scope { margin: 12px 0 0; color: #9eaec0; font-size: 11px; }
+.preview-canvas-frame { display: block; user-select: none; }
+.preview-faults {
+  position: fixed;
+  inset: 12px 12px auto auto;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  width: min(600px, calc(100vw - 24px));
+  max-height: min(45vh, 360px);
+  overflow: auto;
+  padding: 14px 18px;
+  border: 1px solid #d99287;
+  border-radius: 8px;
+  background: #321b20fa;
+  color: #ffe1da;
+  font: 13px/1.6 system-ui, sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 0 8px 32px #0005;
+}
+.preview-faults > div + div { margin-top: 8px; padding-top: 8px; border-top: 1px solid #794841; }

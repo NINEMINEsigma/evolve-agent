@@ -439,6 +439,12 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 
 模型配置 Tab 提供协议无关的常见推理深度值 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其中 `none` 是“不启用”的显式值。值不按客户端过滤；当前 Profile 的 `reasoning_effort` 会由 OpenAI-compatible、Anthropic-compatible 与 KSCC 客户端无条件透传给 Provider 或协议。旧 Profile 的空字符串在客户端构造时归一为 `none`。无效值由 Provider 或协议返回错误，沿现有 LLM 错误处理记录日志并向会话前端推送系统状态消息。
 
+## 独立前端预览（2026-10-27）
+
+`preview/frontend_page/` 是面向展示与官网截图的独立前端预览工程。开发时只读引用origin仓库前端的真实入口、组件、样式与类型，预览专属模块仅替代浏览器内通信、存储命名空间、媒体URL、录音与演示导出；固定会话、模型配置和虚拟文件不来自运行时数据。业务交互只改变页面内存，不启动后端或调用模型，不写宿主文件。其依赖和构建产物只放在预览目录，构建后的dist可独立HTTP静态托管，不改变正式前端必须在fast仓库构建的约定。
+
+预览包含十一项Tab与独立Agentspace编辑器，默认复用原界面且不显示辅助面板。URL可选固定场景，`controls=1`显示场景/重置/动画定格工具；定格不等于停止全部DOM更新。临时会话不跨标签页恢复，导出明确为演示内容而非正式会话备份。用法和用户人工验收见 `preview/frontend_page/README.md`、`COVERAGE.md`；当前仅源码实施与只读复核，未由开发助手AI安装、启动、构建或运行校验，视觉一致性仍待用户验收。
+
 ## 开发者阅读顺序建议
 
 1. 先通读本文件，建立整体架构认知。

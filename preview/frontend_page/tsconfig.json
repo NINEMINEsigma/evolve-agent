@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["vite/client", "node", "react", "react-dom"],
+    "paths": {
+      "@origin/*": ["../../origin_agent/frontend/src/*"],
+      "@preview-original/storage": ["../../origin_agent/frontend/src/constants/storage.ts"],
+      "@preview-original/media-api": ["../../origin_agent/frontend/src/features/sessionMedia/api.ts"],
+      "@preview-original/session-site": ["../../origin_agent/frontend/src/hooks/useSessionSite.ts"],
+      "@preview-original/audio-recorder": ["../../origin_agent/frontend/src/hooks/useAudioRecorder.ts"],
+      "@preview-original/session-export": ["../../origin_agent/frontend/src/features/sessionExport/useSessionExport.ts"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom/index.d.ts"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"],
+      "*": ["./node_modules/*"]
+    }
+  },
+  "include": [
+    "src", "build", "vite.config.ts",
+    "../../origin_agent/frontend/src/declarations.d.ts",
+    "../../origin_agent/frontend/src/vite-env.d.ts"
+  ]
+}

@@ -278,6 +278,12 @@
 | 右侧 Tab 预览小窗 | `TabHoverPreview` / `.tab-hover-preview` | 鼠标悬停或键盘聚焦启用且非当前的 Tab 图标时，在图标左侧显示的只读摘要小窗；只消费页面已加载快照，不发请求、不刷新、不切换 Tab；点击卡片不切 Tab，Escape 关闭且同次悬停不重开；与名称 tooltip 互斥 | tab rail hover preview |
 | 只读已有数据 | — | 预览只读取各 Tab 已取得的完整快照（`data` 为 null 表示尚未读取，`[]` 才是已知空）；媒体输入/会话变量 Tab 还受会话 Tab 能力探测控制，能力未知或失败时不启用、不悬停预览；未知不伪装为 0，读取中/旧快照/读取失败分项表达 | read-only loaded data |
 
+### 独立前端预览
+
+| 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
+|---|---|---|---|
+| 独立前端预览 | `preview/frontend_page/` | 直接复用origin仓库真实前端组件与样式、以浏览器内固定数据和通信替代真实后端的展示工程；操作只影响内存，用于效果预览与官网截图。开发时依赖源码，构建产物可独立静态托管；不属于fast/slow/fallback仓库或工作空间，不等于会话离线导出 | standalone frontend preview |
+
 ### Agentspace 编辑器
 
 | 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
