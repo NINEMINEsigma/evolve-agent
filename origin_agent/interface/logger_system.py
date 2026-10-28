@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import * # type: ignore
 import asyncio
 from abc import ABC, abstractmethod
 
@@ -11,7 +12,11 @@ class ILoggerSystem(AsyncSystem, ABC):
     """Declare structured process activity logging and subscription."""
 
     @abstractmethod
-    def log(self, level: str, message: str) -> None:
+    def log(
+        self, 
+        level: str, 
+        message: str
+        ) -> None:
         """Dispatch a compatibility text log to Logger components."""
         ...
 
@@ -39,3 +44,25 @@ class ILoggerSystem(AsyncSystem, ABC):
     def unsubscribe_activity_events(self, subscription_id: str) -> None:
         """Remove one live subscription idempotently."""
         ...
+
+
+class ILoggableSystem(AsyncSystem):
+    def __init__(
+        self, 
+        dependencies: Iterable[type[AsyncSystem]] = []
+        ) -> None:
+        super().__init__(
+            list(dependencies) + [ILoggerSystem]
+            )
+
+    def log(self, level: str, message: str) -> None:
+        """Dispatch a compatibility text log to Logger components."""
+        self.get_system(ILoggerSystem).log(level, message)
+
+    def record_activity(self, draft: ActivityEventDraft) -> ActivityEvent:
+        """Record one Draft on the owning event loop and return its final event."""
+        return self.get_system(ILoggerSystem).record_activity(draft)
+
+    def record_activity_threadsafe(self, draft: ActivityEventDraft) -> None:
+        """Queue one Draft from a non-owning thread without blocking it."""
+        self.get_system(ILoggerSystem).record_activity_threadsafe(draft)
