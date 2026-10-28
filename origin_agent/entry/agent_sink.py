@@ -92,6 +92,7 @@ class FrontendSink(IFrontendSink):
         self._send_closed: bool = False
         self._interaction_closed: bool = False
         self._close_task: asyncio.Task[None] | None = None
+        self._connection_close_tasks: dict[str, asyncio.Task[None]] = {}
         self._send_deadlines: set[asyncio.Timeout] = set()
 
     async def virtual_awake(self) -> None:
@@ -232,6 +233,14 @@ class FrontendSink(IFrontendSink):
             )
         await asyncio.shield(self._close_task)
 
+    def _observe_connection_close(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            self._runtime.record_failure(LifecycleFailure("Frontend connection close was cancelled"))
+            return
+        error = task.exception()
+        if error is not None and not isinstance(error, (WebSocketDisconnect, ConnectionResetError, BrokenPipeError)):
+            self._runtime.record_failure(error)
+
     async def _close_connections(self) -> None:
         failures: list[BaseException] = []
         try:
@@ -240,21 +249,31 @@ class FrontendSink(IFrontendSink):
             if not self._requests.is_idle:
                 raise
             failures.append(exc)
-        for session_id, entry in tuple(self._ws_sinks.items()):
+        entries = tuple(self._ws_sinks.items())
+        for session_id, entry in entries:
+            if entry.ws.application_state != WebSocketState.DISCONNECTED:
+                key = f"{session_id}:{id(entry)}"
+                if key not in self._connection_close_tasks:
+                    task = asyncio.create_task(entry.ws.close(code=1001, reason="going_away"), name="frontend-close-connection")
+                    self._connection_close_tasks[key] = task
+                    task.add_done_callback(self._observe_connection_close)
+        for session_id, entry in entries:
+            key = f"{session_id}:{id(entry)}"
+            task = self._connection_close_tasks.get(key)
             try:
-                if entry.ws.application_state != WebSocketState.DISCONNECTED:
-                    async with asyncio.timeout(SYSTEM_QUIESCE_TIMEOUT_SECONDS):
-                        await entry.ws.close(code=1001, reason="going_away")
+                if task is not None:
+                    done, _ = await asyncio.wait({task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+                    if not done:
+                        logger.warning("Frontend WebSocket cleanup is still pending | session=%s", session_id)
+                    await asyncio.shield(task)
             except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError):
                 pass
-            except TimeoutError:
-                logger.warning("Frontend WebSocket cleanup is still pending | session=%s", session_id)
-                continue
             except BaseException as exc:
                 failures.append(exc)
                 continue
             if self._ws_sinks.get(session_id) is entry:
                 self._ws_sinks.pop(session_id)
+            self._connection_close_tasks.pop(key, None)
         if failures:
             raise BaseExceptionGroup("Frontend connection cleanup failed", failures)
 

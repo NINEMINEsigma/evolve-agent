@@ -22,6 +22,7 @@ from entity.puretype import (
     AgentspaceEventSource,
 )
 from system.lifecycle import LifecycleFailure
+from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from .event_hub import AgentspaceEventHub
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,11 @@ class AgentspaceWatcher:
         if observer is not None:
             observer.stop()
         await asyncio.to_thread(self._join_native, observer, timers)
+
+    async def wait_stopped(self) -> None:
+        """最终注销等待真实线程结束，期限由Runtime硬截止控制。"""
+        while not self.is_stopped():
+            await asyncio.sleep(RESOURCE_CLEANUP_POLL_SECONDS)
 
     def _join_native(self, observer: Any, timers: tuple[threading.Timer, ...]) -> None:
         if observer is not None and observer.ident is not None:

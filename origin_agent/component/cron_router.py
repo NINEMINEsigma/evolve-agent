@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
+import logging
 import math
 import subprocess
 import threading
@@ -32,6 +33,8 @@ from interface.subprocess_runner import ISubprocessRunner
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import BaseAgentLoop
+
+logger = logging.getLogger(__name__)
 
 
 class CronRouter(ICronRouter):
@@ -245,6 +248,16 @@ class CronRouter(ICronRouter):
                 for task in tasks.values():
                     task.cancel_timer()
 
+    def _log_task_failure(self, task: _CronTask) -> None:
+        try:
+            logger.error(
+                "Cron task failed | session=%s task=%s is_wait=%s",
+                task.session_id, task.task_id, task.is_wait,
+            )
+        except Exception:
+            # 原异常已经交Runtime记录；附加定位日志失败不得覆盖它。
+            pass
+
     def _timer_callback(self, task: _CronTask) -> None:
         entered = False
         try:
@@ -265,6 +278,7 @@ class CronRouter(ICronRouter):
             return
         except BaseException as error:
             self._record_failure(error)
+            self._log_task_failure(task)
         finally:
             if entered:
                 with self._lock:

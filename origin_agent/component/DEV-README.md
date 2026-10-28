@@ -351,3 +351,11 @@ ModalityCapabilitySystem新 `describe_media_block`返回结构化成功描述/�
 ## System 接口槽位约定（2026-10-20）
 
 ApprovalSystem、BrowserSystem、CronRouter 和 DynamicEndpointSystem 分别使用 `IApprovalSystem`、`IBrowserSystem`、`ICronRouter` 和 `IDynamicEndpointSystem` 作为依赖、查询和 Application 注册槽位。工具模块只通过这些接口访问运行期服务；审批、浏览器、Timer 与动态端点的资源所有权仍由具体实现持有。
+
+## Cron故障诊断与最终资源等待（2026-10-28）
+
+命令型Cron仍在Timer线程调用同步Runner，Runner通过线程安全提交将清理交给Runtime loop；不在Timer线程直接create_task。wait任务不创建子进程，不会进入这条清理路径。命令非零退出仍作为任务结果，成功返回后才更新计数/should_schedule并保存；不增加自动重试或更改持久化格式。
+
+Timer回调意外失败先交Runtime即时记录完整栈并请求失败关闭，再追加session_id/task_id/is_wait安全定位，不新增命令正文日志。附加诊断失败不覆盖原异常；真实持久化或内部错误不降级。资源清理观察超时仍维持pending，不据此单独关闭应用。
+
+Browser最终注销对已登记的自有无头Popen只请求一次终止，再观察同一实例退出；不因短窗口返回就宣称收回、不重复taskkill，不杀用户浏览器。CDP/driver真实释放仍归清理登记器。当前仅源码实施与只读审阅，未运行校验、构建或应用；用户需部署后验收。

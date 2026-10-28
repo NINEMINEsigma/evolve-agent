@@ -58,7 +58,11 @@ class IRuntimeSystem(AsyncSystem, ABC):
     @property
     @abstractmethod
     def loop(self) -> asyncio.AbstractEventLoop:
-        """Return the event loop captured during awake; usable only on that loop."""
+        """Return the captured runtime loop.
+
+        Async operations execute on this loop; ordinary threads may submit
+        callbacks through call_soon_threadsafe, never call create_task directly.
+        """
         ...
 
     @property
@@ -129,7 +133,12 @@ class IRuntimeSystem(AsyncSystem, ABC):
 
     @abstractmethod
     def record_failure(self, error: BaseException) -> None:
-        """Store a failure and request a failure-driven shutdown; never re-raises."""
+        """Store the original failure, close admission and immediately log its traceback.
+
+        Repeated reports of the same original object are idempotent. Explicit
+        resource cleanup timeouts remain diagnostics, not application failures.
+        Diagnostic handler errors never replace the original failure.
+        """
         ...
 
     @abstractmethod

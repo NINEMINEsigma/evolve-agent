@@ -45,7 +45,11 @@ class ISubprocessRunner(AsyncSystem, ABC):
         extra_env: dict[str, str] | None = None,
         session_id: str = ""
         ) -> subprocess.CompletedProcess[str]:
-        """Run a blocking subprocess with session ownership."""
+        """Run a blocking subprocess from a non-event-loop thread.
+
+        The runtime loop owns cleanup. Calling this on any running event-loop
+        thread is rejected before creation; use run_async on the runtime loop.
+        """
         ...
 
     @abstractmethod

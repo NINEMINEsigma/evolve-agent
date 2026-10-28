@@ -402,3 +402,7 @@ InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用
 
 配置不进入History、LLM Profile或客户端参数；存储/默认/恢复语义见system文档。仅源码实施与只读审阅，未运行校验、构建或应用，动态边界与原计数兼容性待用户人工验收。
 
+## 全应用连接最终关闭（2026-10-28）
+
+FrontendSink的close_all_connections继续由唯一_close_task持有；每条连接实例的实际ws.close另由_connection_close_tasks强引用。软观察超时只记录pending，不用asyncio.timeout取消真实close，最终等待同一task终结再删除匹配连接。不同连接实例以身份区分，旧连接清理不能删除已替换项。明确网络断开仍按既有规则处理；非网络清理错误立即交Runtime记录，应用不会提前结束loop并取消剩余释放。单会话close_session、消息协议和History提交顺序不变。本次未运行校验或应用，等待用户人工验收。
+

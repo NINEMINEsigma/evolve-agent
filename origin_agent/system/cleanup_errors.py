@@ -62,18 +62,18 @@ def split_cleanup_timeouts(
     if isinstance(error, ResourceCleanupTimeout):
         return (error,), None
     if isinstance(error, BaseExceptionGroup):
+        matched, remaining = error.split(ResourceCleanupTimeout)
+        if matched is None:
+            return (), error
         timeouts: list[ResourceCleanupTimeout] = []
-        remaining: list[BaseException] = []
-        for member in error.exceptions:
-            member_timeouts, member_remaining = split_cleanup_timeouts(member)
-            timeouts.extend(member_timeouts)
-            if member_remaining is not None:
-                remaining.append(member_remaining)
-        if not remaining:
-            return tuple(timeouts), None
-        if len(remaining) == 1 and not isinstance(remaining[0], BaseExceptionGroup):
-            rebuilt: BaseException = remaining[0]
-        else:
-            rebuilt = BaseExceptionGroup(error.message, remaining)
-        return tuple(timeouts), rebuilt
+
+        def collect(member: BaseException) -> None:
+            if isinstance(member, ResourceCleanupTimeout):
+                timeouts.append(member)
+            elif isinstance(member, BaseExceptionGroup):
+                for child in member.exceptions:
+                    collect(child)
+
+        collect(matched)
+        return tuple(timeouts), remaining
     return (), error

@@ -66,7 +66,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 3. 停止各会话在途生成与工具调用，取消路由后台任务；解除待审批/提问等待。
 4. 子Agent未消费 Inbox 落各自 History 并保存（临时Agent不持久化），未交接反馈经专用接口并入父会话关闭批次；主/多会话按 sequence 只落 History 一次，严格写盘，不触发模型、标题、摘要或旋转（D4/D5）。
 5. History 刷新完成后才结束 SSE/WS（1001）与 uvicorn serve 任务。
-6. 按装配逆序逐一 `unregister` 全部 System；任一必要写盘或资源释放失败合并上抛，进程以退出码 1 结束，绝不返回进化成功 -1（D6）。关闭硬截止 60 秒由 RuntimeSystem 的 daemon watchdog 兜底，超时 `os._exit(1)`；成功路径由 `__main__` 在 `asyncio.run` 及其线程池结束后解除 watchdog。
+6. 按装配逆序逐一 `unregister` 全部 System；任一必要写盘或资源释放失败合并上抛，进程以退出码 1 结束，绝不返回进化成功 -1（D6）。关闭硬截止 5 秒由 RuntimeSystem 的 daemon watchdog 兜底，超时 `os._exit(1)`；成功路径由 `__main__` 在 `asyncio.run` 及其线程池结束后解除 watchdog。
 
 Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；单条命令完成或当前回复结束不触发停止，未完成任务或后续可复用时保留 Shell会话，只有明确需要销毁整个 Shell 时才调用 `StopShell`。WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。单个 Shell会话的原生 PTY 访问通过生命周期同步边界收敛，停止流程先等待 reader 收尾再关闭原生对象，并保留超时兜底日志；该防御性处理不等同于已确认 `0xC0000005` 根因。
 
@@ -472,3 +472,13 @@ RuntimeSystem持有独立AgentLoopSettingsStore叶服务，经IRuntimeSystem公�
 各Loop每次下一迭代条件检查使用最新值，当前模型/审批/整批工具继续完成；只改变上限来源，保留原计数周期、提问工具重置和多Agent级联深度，循环次数不等于单批工具数量。提高额度不自动恢复已终结回复。前端无新增广播/轮询，跨页面通过再进入或主动重读同步；网络超时保存要先确认当前状态，GET不是旧PUT结束屏障，最后成功提交生效。
 
 加载未知key/损坏/正式.bak直接失败，不能用90掩盖；共享文件错误可能同时阻断新fast/fallback启动，用户停机后人工处理，开发助手AI不操作运行时文件。保存采用外层临时easysave、正式原子替换、同步发布缓存，失败不覆盖旧有效值。仅完成源码与只读审阅，未运行校验、构建、应用或实际导入，人工验收见任务文件 `.tasks/2026-10-26_1_global-max-tool-turns.md`。
+
+## Cron子进程清理与关闭诊断修订（2026-10-28，当前约定）
+
+命令型Cron在Timer普通线程执行同步SubprocessRunner；同步入口只允许无运行中事件循环的线程。每次操作在进程创建前取得清理预约，创建结果、业务消费者和唯一真实清理任务由 `SubprocessOperation` 交接；正常收尾、会话中断和应用停止共享同一清理申请。清理在Runtime所属loop安排，普通线程使用线程安全提交，不再要求Timer线程存在事件循环。异步取消不丢失迟到创建结果，管道读取实际交接后才接管剩余输出；命令非零退出仍是任务结果，纯wait不创建子进程。
+
+Runtime首次收到非清理超时故障时立即记录完整异常栈与关闭原因，不再依赖最终注销返回才能诊断。日志错误不覆盖已提交的原故障；Cron追加session/task/is_wait定位，不记录新的命令正文。最终强制退出保持无业务锁/日志锁回调，硬截止按用户2026-10-28明确要求设为5秒；子进程5秒仍是独立的清理观察预算，观察超时保留真实任务，但全局期限到达会直接结束进程。
+
+关闭先停止业务并提交History，再按逆拓扑注销非Runtime所有者，使其有机会安排释放；之后封闭全部清理producer并最终drain，Runtime最后注销。确定清理失败即时上报，但其他真实清理仍须完成；未知资源继续等待到硬截止。业务或所有者未安全收尾时保留依赖和主loop，不继续拆依赖或提前返回给asyncio.run。Gateway、全应用WebSocket关闭、watcher与自有浏览器进程的最终等待不再把短观察窗口返回当作物理释放。既有21个System槽位（含LoggerSystem）不变，无新持久化格式。
+
+本轮仅源码实施与只读审阅；未运行校验、构建、脚本、导入或应用，用户需部署后人工验收。前端全局故障通知、Grep超长行和Cron自动重试不在本次范围；实际任务配置没有自动暂停或恢复。规范与验收矩阵见 `.tasks/2026-10-27_3_cron-subprocess-silent-shutdown.md` PLAN v2.1。

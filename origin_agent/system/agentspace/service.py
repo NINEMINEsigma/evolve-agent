@@ -770,8 +770,10 @@ class AgentspaceService(IAgentspaceService):
         try:
             self.watcher.request_stop()
             await self.watcher.stop()
+            await self.watcher.wait_stopped()
         except TimeoutError:
             logger.warning("Agentspace watcher cleanup is still pending")
+            await self.watcher.wait_stopped()
         except BaseException as exc:
             failures.append(exc)
         # EventHub 最终释放。

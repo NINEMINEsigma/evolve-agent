@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Sequence
 from graphlib import CycleError, TopologicalSorter
 import logging
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Never
 
 from framework import AsyncArchitecture, AsyncSystem
 
@@ -18,6 +18,15 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
+
+
+def _is_port_busy_rejection(error: BaseException) -> bool:
+    from gateway.system import GatewayPortBusyError
+    if isinstance(error, GatewayPortBusyError):
+        return True
+    return isinstance(error, BaseExceptionGroup) and all(
+        _is_port_busy_rejection(member) for member in error.exceptions
+    )
 
 
 def _build_system_manifest(
@@ -106,6 +115,8 @@ class Application(AsyncArchitecture):
         self._registered_types: list[type[AsyncSystem]] = []
         self._shutdown_task: asyncio.Task[None] | None = None
         self._runtime_ref: IRuntimeSystem | None = None
+        self._failed_owner_refs: list[AsyncSystem] = []
+        self._shutdown_failures: list[BaseException] = []
         Application._current = self
 
     @classmethod
@@ -181,15 +192,11 @@ class Application(AsyncArchitecture):
                     raise LifecycleFailure(
                         f"System {system_type.__name__} was not awakened after registration"
                     )
+                if system_type is IRuntimeSystem:
+                    self._runtime_ref = AsyncArchitecture.get_system(self, IRuntimeSystem)
         except BaseException as startup_error:
             self._state = ApplicationState.FAILED
-            try:
-                await self._unregister_systems()
-            except BaseException as cleanup_error:
-                raise BaseExceptionGroup(
-                    "Application startup failed and cleanup also failed",
-                    [startup_error, cleanup_error],
-                ) from startup_error
+            await self._cleanup_startup_failure(startup_error)
             raise
         try:
             runtime = AsyncArchitecture.get_system(self, IRuntimeSystem)
@@ -198,37 +205,73 @@ class Application(AsyncArchitecture):
             AsyncArchitecture.get_system(self, ICronRouter).activate()
         except BaseException as startup_error:
             self._state = ApplicationState.FAILED
-            try:
-                await self._unregister_systems()
-            except BaseException as cleanup_error:
-                raise BaseExceptionGroup(
-                    "Application startup failed and cleanup also failed",
-                    [startup_error, cleanup_error],
-                ) from startup_error
+            await self._cleanup_startup_failure(startup_error)
             raise
         self._state = ApplicationState.RUNNING
         logger.info("Application started | systems=%d", len(order))
 
-    async def _unregister_systems(self) -> None:
-        """按装配逆序逐一注销；失败节点仍被移除，错误合并保留。"""
-        failures: list[BaseException] = []
+    async def _cleanup_startup_failure(self, error: BaseException) -> None:
         runtime = self._runtime_ref
+        ordinary_rejection = _is_port_busy_rejection(error)
         if runtime is not None:
-            try:
-                await runtime.cleanup.drain()
-            except BaseException as exc:
-                failures.append(exc)
+            if ordinary_rejection:
+                runtime.request_shutdown(ShutdownReason.NORMAL)
+            else:
+                runtime.record_failure(error)
+        try:
+            await self._unregister_systems()
+        except BaseException as cleanup_error:
+            combined = BaseExceptionGroup("Application startup and cleanup failed", [error, cleanup_error])
+            # owner尚未收尾时_unregister_systems已进入保留路径；能返回的组保留原因并失败退出。
+            raise LifecycleFailure("Application startup cleanup failed") from combined
+        if not ordinary_rejection:
+            # 统一为失败启动；原组保留为cause，避免混合端口异常被外层any匹配误报退出0。
+            raise LifecycleFailure("Application startup failed") from error
+
+    async def _hold_failed_shutdown(self, error: BaseException) -> Never:
+        self._shutdown_failures.append(error)
+        runtime = self._runtime_ref
+        if runtime is None:
+            raise error
+        runtime.record_failure(error)
+        runtime.request_shutdown(ShutdownReason.FAILURE)
+        # 保留尚在使用的依赖和主loop，硬截止由独立daemon Timer执行。
+        await asyncio.get_running_loop().create_future()
+        raise LifecycleFailure("Failed shutdown hold unexpectedly completed")
+
+    async def _unregister_systems(self) -> None:
+        """资源所有者先安排释放，最终封闭/drain后才注销Runtime。"""
+        from interface.runtime_system import IRuntimeSystem
+        runtime = self._runtime_ref
+        if runtime is not None and runtime.shutdown_reason is None:
+            runtime.request_shutdown(ShutdownReason.NORMAL)
         for system_type in reversed(self._registered_types):
+            if system_type is IRuntimeSystem:
+                continue
+            owner = self.has_system(system_type)
+            if owner is None:
+                continue
             try:
                 removed = await self.unregister(system_type)
                 if not removed:
-                    # framework 拒绝（例如仍有依赖未注销）时保留并上报。
-                    if self.has_system(system_type) is not None:
-                        failures.append(LifecycleFailure(
-                            f"System {system_type.__name__} could not be unregistered"
-                        ))
-            except BaseException as exc:
-                failures.append(exc)
+                    raise LifecycleFailure(f"System {system_type.__name__} could not be unregistered")
+            except BaseException as error:
+                self._failed_owner_refs.append(owner)
+                await self._hold_failed_shutdown(error)
+        failures: list[BaseException] = []
+        if runtime is not None:
+            runtime.cleanup.close_producers()
+            try:
+                await runtime.cleanup.drain()
+            except BaseException as error:
+                runtime.record_failure(error)
+                failures.append(error)
+        if self.has_system(IRuntimeSystem) is not None:
+            try:
+                if not await self.unregister(IRuntimeSystem):
+                    raise LifecycleFailure("RuntimeSystem could not be unregistered")
+            except BaseException as error:
+                await self._hold_failed_shutdown(error)
         if failures:
             raise BaseExceptionGroup("Application system unregistration failed", failures)
 
@@ -320,7 +363,7 @@ class Application(AsyncArchitecture):
         try:
             await self._stop_business()
         except BaseException as exc:
-            failures.append(exc)
+            await self._hold_failed_shutdown(exc)
         try:
             await self._unregister_systems()
         except BaseException as exc:

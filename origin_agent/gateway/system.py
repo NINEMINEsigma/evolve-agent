@@ -287,6 +287,13 @@ class GatewaySystem(IGatewaySystem):
     async def virtual_shotdown(self) -> None:
         self.stop_accepting()
         await self.stop_server()
-        if self.task_owner.is_idle and self._session_exports is not None:
+        serve_task = self._serve_task
+        if serve_task is not None:
+            await asyncio.shield(serve_task)
+            self._serve_task = None
+            self._server = None
+        if not self.task_owner.is_idle:
+            raise LifecycleFailure("Gateway requests have not finished before removal")
+        if self._session_exports is not None:
             await self._session_exports.close()
             self._session_exports = None

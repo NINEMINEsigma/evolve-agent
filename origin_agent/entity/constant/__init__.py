@@ -55,7 +55,8 @@ from .session_variables import (
     SESSION_VARIABLE_DISPLAYS, SESSION_VARIABLE_NUMERIC_META_KEYS,
     SESSION_VARIABLE_ISSUE_MESSAGES,
 )
-from .resource_cleanup import CleanupState
+from .resource_cleanup import CleanupReservationState, CleanupState
+from .subprocess import SubprocessCreationState
 from .activity import (
     ACTIVITY_EVENT_BUFFER_SIZE,
     ACTIVITY_EVENT_QUEUE_SIZE,
@@ -439,6 +440,8 @@ __all__ = [
     "SHUTDOWN_SEND_TIMEOUT_SECONDS",
     "GATEWAY_START_TIMEOUT_SECONDS",
     "CleanupState",
+    "CleanupReservationState",
+    "SubprocessCreationState",
     "RESOURCE_CLEANUP_POLL_SECONDS",
     "SESSION_VISUAL_LAYOUT",
     "VISUAL_REDIRECT_KEY",

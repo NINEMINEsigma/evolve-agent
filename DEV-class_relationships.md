@@ -1573,6 +1573,21 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 唯一持久化仍是原浏览器 `evolve_onboarding_completed` 布尔标记；旧用户不自动弹出，命令菜单提供主动重看。无后端类图、System、Loop protected字段、跨类私有访问、History模型、easysave key或协议变化。已完成源码与定向只读审阅，未运行类型检查、构建或应用，用户人工验收待完成。
 
+### 同步子进程与最终关闭所有权（2026-10-28，当前约定）
+
+| 归属 | 新字段/运行时对象 | 外部契约与生命周期 |
+|---|---|---|
+| SubprocessRunner | `_operations`、`_active_procs`、`_retained_operations`、`_settled_operations`、`_spawning` | 唯一Runner锁维护执行/释放双向终局；未登记成功的真实进程也必须保留。公开run/async/kill接口签名不变，同步run限普通线程 |
+| SubprocessOperation | 新运行时类；真实process/identity、reservation、io_tasks/io_join_task、cleanup_submission/handle、资源完成事实 | 有方法、不持久化、不进入entity纯类型；Runner持有，独立对象锁保护一次性交接，Future通知锁外完成 |
+| CleanupReservation / CleanupProducer | UNUSED/BOUND/RETURNED状态、唯一handle绑定、空闲Future | 创建前reserve；只有无资源失败可直接release，消费后由所属handle归还；封闭不取消已有释放 |
+| ResourceCleanupHandle | `owns_cleanup`、`terminal_error`、`release_observed` | 区分自有清理错误和adopted业务错误；物理释放通知不表示业务成功；其他System只通过公开入口交接 |
+| ResourceCleanupRegistry | `_sealed`、`_terminal_failures`；close_producers/drain | 所有者安排释放后最终封闭；确定失败立即上报，最终等待其他真实工作，不扫描进程或全局task |
+| RuntimeSystem | `_reported_failure_objects`；锁内关闭转换/锁外安全诊断 | 原输入异常按身份去重，首次完整栈即时输出；无新增System/持久化字段 |
+| Application | `_failed_owner_refs`、`_shutdown_failures` | 唤醒Runtime即保存引用；非Runtime先注销，最终封闭/drain，Runtime最后；未安全结束则保留依赖与loop到硬截止 |
+| FrontendSink | `_connection_close_tasks` | 全应用关闭按连接实例保存唯一真实close task；观察超时不取消它，运行期close_session不变 |
+
+创建状态与预约状态枚举分别位于constant/subprocess.py和constant/resource_cleanup.py，显式导出，不进入typeref。现有21槽位与依赖图不变；新增模块不创建Application或后台单例。registry内部的预约/handle协作属于同一生命周期实现边界，业务模块不跨类修改其内部表。Watcher.wait_stopped、Browser最终退出观察和Gateway真实serve等待只补全最终注销，不引入业务重试或新协议。本轮未运行校验、导入或应用，等待用户人工验收。
+
 
 
 

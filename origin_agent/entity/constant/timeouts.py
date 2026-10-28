@@ -13,7 +13,7 @@ SUBPROCESS_TIMEOUT_DEFAULT: int = 120
 # 子进程短超时 (秒) - 用于检查版本的指令等
 SUBPROCESS_SHORT_TIMEOUT_DEFAULT: int = 5
 
-# 子进程软清理等待时间, 到时后强杀进程
+# 子进程清理观察预算（秒）；超时保留真实释放任务，不取消或重复终止进程
 SUBPROCESS_SOFT_CLEANUP_WAIT_TIME: int = 5
 
 # 审批请求等待超时（秒）— 等待用户在前端确认工具调用

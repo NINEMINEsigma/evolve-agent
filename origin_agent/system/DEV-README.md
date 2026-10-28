@@ -239,3 +239,13 @@ capture使用Loop公开分段隔离输入，线程读取严格metrics并计算�
 
 所有Loop每次循环检查读取内存有效值，不反复读盘。文件不放进会话、LLM Profile或派生源码副本；重启/正常进化保留，不改变既有计数周期。仅完成源码与只读审阅，未运行校验、构建、应用或导入验证，需用户人工验收。
 
+## 子进程清理修订（2026-10-28，覆盖前文旧关闭顺序）
+
+SubprocessRunner同步run只允许普通线程；异步入口只在Runtime loop执行。SubprocessOperation持有创建前预约、真实进程、原始身份、消费者task、唯一清理submission及handle。执行调用离开与物理释放各发布一次索引事实，任何绑定后登记失败或提交失败都保留operation，不会误报idle。创建完成回调与等待方放弃共同结算迟到结果，不能只依赖其中一方。
+
+kill_active/terminate_all/正常收尾复用同一资源清理；先终止可证明身份的自有进程，再等真实消费者完成交接，最后排空输出并wait。无身份只观察自然退出，不按裸PID补杀；异步残余输出按块丢弃。同步Popen超时后沿同一实例复用标准库communicate收尾，不新建竞争reader。5秒是观察窗口，不取消真实清理。
+
+清理预约显式区分UNUSED/BOUND/RETURNED；自有cleanup task的错误立即传播，adopted业务task错误仍归原业务所有者。release_observed仅表达物理已收回；清理失败不能改成成功。registry先封闭producer再最终drain，drain必须在非Runtime所有者注销安排释放之后；失败未知资源保留到按用户明确要求设置的5秒硬截止。业务或owner注销失败则Application保留依赖和主loop，不以asyncio.run取消剩余任务冒充释放。
+
+Runtime对原输入异常对象去重并立即打印完整栈，关闭状态和硬截止先提交、日志锁外进行；日志handler错误不会替代原故障。watchdog不做额外日志I/O。Agentspace最终注销在关闭EventHub前等待watcher.is_stopped，避免短join结束但线程仍活。本轮未执行校验、脚本、导入、构建或应用，人工验收见对应Cron关闭任务文件。
+

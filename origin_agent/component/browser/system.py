@@ -22,6 +22,7 @@ from system.lifecycle import (
 from interface.browser_system import IBrowserSystem
 from interface.runtime_system import IRuntimeSystem
 from system.cleanup_errors import ResourceCleanupPendingError
+from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
 from entity.puretype.browser import HeadlessCleanupResult
 from entity.puretype.resource_cleanup import CleanupReport
@@ -142,18 +143,22 @@ class BrowserSystem(IBrowserSystem):
             loop=asyncio.get_running_loop(),
         ).reserve()
 
+        released = False
+
         async def release() -> None:
+            nonlocal released
             if browser is not None:
                 await browser.close()
             if driver is not None:
                 await driver.stop()
+            released = True
 
         handle = self.runtime.cleanup.begin(
             reservation,
             resource_id=f"browser:{id(browser)}:{id(driver)}",
             phase="disconnect",
             factory=release,
-            is_released=lambda: browser is None or not browser.is_connected(),
+            is_released=lambda: released and (browser is None or not browser.is_connected()),
             kill_authorized=False,
         )
         handle.retain((browser, driver))
@@ -213,6 +218,15 @@ class BrowserSystem(IBrowserSystem):
             cleanup=CleanupReport(complete=not pending, pending_resources=pending),
         )
 
+    async def _wait_headless_exit(self) -> None:
+        """只观察已请求终止的自有实例，不重复taskkill或按PID重新查询。"""
+        while self._headless_procs:
+            for pid, proc in tuple(self._headless_procs.items()):
+                if proc.poll() is not None and self._headless_procs.get(pid) is proc:
+                    self._headless_procs.pop(pid)
+            if self._headless_procs:
+                await asyncio.sleep(RESOURCE_CLEANUP_POLL_SECONDS)
+
     def close_admission(self) -> None:
         self._closed = True
 
@@ -227,7 +241,9 @@ class BrowserSystem(IBrowserSystem):
             await self.teardown()
 
         async def release_processes() -> None:
-            await self.cleanup_headless_browser()
+            result = await self.cleanup_headless_browser()
+            if not result.cleanup.complete:
+                await self._wait_headless_exit()
 
         await close_resources((stop_requests, release_connections, release_processes))
         if self._cleanup_failures:

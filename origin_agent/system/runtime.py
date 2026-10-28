@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -78,6 +79,7 @@ class RuntimeSystem(IRuntimeSystem):
         self._shutdown_event: asyncio.Event | None = None
         self._shutdown_reason: ShutdownReason | None = None
         self._failures: list[BaseException] = []
+        self._reported_failure_objects: list[BaseException] = []
         self._cleanup = ResourceCleanupRegistry(self.record_failure)
         self._agent_loop_settings: AgentLoopSettingsStore | None = None
         self._input_sequence = 0
@@ -209,33 +211,66 @@ class RuntimeSystem(IRuntimeSystem):
             self._input_sequence += 1
             return self._input_sequence
 
+    def _log_diagnostic(
+        self, level: int, message: str, *args: object,
+        error: BaseException | None = None,
+    ) -> None:
+        try:
+            logger.log(level, message, *args,
+                       exc_info=(type(error), error, error.__traceback__) if error is not None else None)
+        except Exception:
+            # 仅保护诊断出口；关闭状态与原始故障已提交，不能被handler故障覆盖。
+            try:
+                sys.stderr.write("Evolve Agent lifecycle diagnostic logging failed.\n")
+            except Exception:
+                pass
+
+    def _request_shutdown_locked(self, reason: ShutdownReason) -> bool:
+        if self._state in (ApplicationState.CLOSED, ApplicationState.FAILED):
+            return False
+        changed = self._shutdown_reason is None or (
+            reason is ShutdownReason.FAILURE and self._shutdown_reason is not ShutdownReason.FAILURE
+        )
+        if self._shutdown_reason is None or reason is ShutdownReason.FAILURE:
+            self._shutdown_reason = reason
+        self._state = ApplicationState.STOPPING
+        self.arm_shutdown_deadline()
+        if self._loop is not None and self._shutdown_event is not None:
+            self._loop.call_soon_threadsafe(self._shutdown_event.set)
+        return changed
+
     def request_shutdown(self, reason: ShutdownReason) -> None:
         with self._lock:
-            if self._state in (ApplicationState.CLOSED, ApplicationState.FAILED):
-                return
-            if self._shutdown_reason is None or reason == ShutdownReason.FAILURE:
-                self._shutdown_reason = reason
-            self._state = ApplicationState.STOPPING
-            self.arm_shutdown_deadline()
-            loop = self._loop
-            event = self._shutdown_event
-            if loop is not None and event is not None:
-                loop.call_soon_threadsafe(event.set)
+            changed = self._request_shutdown_locked(reason)
+        if changed:
+            self._log_diagnostic(
+                logging.ERROR if reason is ShutdownReason.FAILURE else logging.INFO,
+                "Application shutdown requested | reason=%s thread=%s",
+                reason.value, threading.current_thread().name,
+            )
 
     def record_failure(self, error: BaseException) -> None:
-        """Store only failures that are not explicit resource-cleanup timeouts."""
-        _timeouts, remaining = split_cleanup_timeouts(error)
-        if _timeouts:
-            logger.warning(
-                "Ignored %s explicit resource cleanup timeout(s) in failure reporting",
-                len(_timeouts),
-            )
-        if remaining is None:
-            return
+        """Report the first original exception immediately, before shutdown finishes."""
         with self._lock:
-            if not any(existing is remaining for existing in self._failures):
+            if any(existing is error for existing in self._reported_failure_objects):
+                return
+            self._reported_failure_objects.append(error)
+            timeouts, remaining = split_cleanup_timeouts(error)
+            changed = False
+            if remaining is not None:
                 self._failures.append(remaining)
-            self.request_shutdown(ShutdownReason.FAILURE)
+                changed = self._request_shutdown_locked(ShutdownReason.FAILURE)
+        if remaining is not None:
+            self._log_diagnostic(
+                logging.CRITICAL, "Application failure reported | thread=%s",
+                threading.current_thread().name, error=remaining,
+            )
+        if changed:
+            self._log_diagnostic(logging.ERROR, "Application shutdown requested | reason=failure")
+        if timeouts:
+            self._log_diagnostic(
+                logging.WARNING, "External resource cleanup still pending | count=%d", len(timeouts),
+            )
 
     def arm_shutdown_deadline(self) -> None:
         with self._lock:
