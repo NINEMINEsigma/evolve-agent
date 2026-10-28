@@ -459,7 +459,7 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 
 ## Logger System 与全局活动事件
 
-`Application` 新增 `ILoggerSystem`/`LoggerSystem` 槽位，LoggerSystem 依赖 `IRuntimeSystem`，内部装配 `ActivityLoggerComponent`。组件同时实现第三方 `BaseLoggerComponent` 与异步 framework `Component`；LoggerSystem 通过第三方 `BaseLogger` 分发兼容文本入口，结构化活动事件经 `ActivityEventDraft` 业务校验后在 Runtime 事件循环分配 sequence/timestamp。
+`Application` 新增 `ILoggerSystem`/`LoggerSystem` 槽位，LoggerSystem 无其他 System 依赖，内部装配 `ActivityLoggerComponent`。`ILoggerSystem` 只暴露日志与活动事件契约，不提供 `IRuntimeSystem` 获取入口；需要运行时能力的调用方直接经 `app.get_system(IRuntimeSystem)` 获取。组件同时实现第三方 `BaseLoggerComponent` 与异步 framework `Component`；LoggerSystem 通过第三方 `BaseLogger` 分发兼容文本入口，结构化活动事件经 `ActivityEventDraft` 业务校验后在组件初始化时绑定的所属事件循环分配 sequence/timestamp。
 
 `ActivityEvent` 仅携带主会话消息接收、Agent response stream、tool call 的安全元数据。`message_received` 是单条 observed 事实事件；Agent response/tool call 有 started/completed 生命周期。Gateway 通过 LoggerSystem 订阅活动 SSE，前端 Activity Tab 不直接读取混合日志或内部 protected 字段。
 

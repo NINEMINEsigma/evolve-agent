@@ -6,17 +6,9 @@ from abc import ABC, abstractmethod
 from entity.puretype import ActivityEvent, ActivityEventDraft, ActivityStreamItem
 from framework import AsyncSystem
 
-from .runtime_system import IRuntimeSystem
-
 
 class ILoggerSystem(AsyncSystem, ABC):
     """Declare structured process activity logging and subscription."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the owning runtime lifecycle service."""
-        ...
 
     @abstractmethod
     def log(self, level: str, message: str) -> None:

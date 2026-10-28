@@ -223,7 +223,7 @@ capture使用Loop公开分段隔离输入，线程读取严格metrics并计算�
 
 ## Logger System
 
-`LoggerSystem` 是 Application 持有的进程级结构化活动事件 System，依赖 RuntimeSystem。它内部持有 `ActivityLoggerComponent`，组件实现第三方 `BaseLoggerComponent` 与异步 framework `Component`，保存最近256条非持久化活动事件并管理有界订阅队列。标准 Python `logging` 仍独立负责诊断日志。
+`LoggerSystem` 是 Application 持有的进程级结构化活动事件 System，无其他 System 依赖，不持有或暴露 `IRuntimeSystem`。`ILoggerSystem` 只声明日志与活动事件契约；需要运行时能力的调用方直接经 `app.get_system(IRuntimeSystem)` 获取。它内部持有 `ActivityLoggerComponent`，组件实现第三方 `BaseLoggerComponent` 与异步 framework `Component`，初始化时自行绑定所属事件循环，保存最近256条非持久化活动事件并管理有界订阅队列。标准 Python `logging` 仍独立负责诊断日志。
 
 `ActivityEventDraft`/`ActivityEvent` 位于 `entity.puretype`，跨字段事件矩阵校验位于 `system/logger.py`，不把业务 validator 放入 puretype。活动发布入口位于 Gateway 消息接收、Parent/MultiAgent LLM stream 和主会话 ToolExecutor；LoggerSystem不创建或终结主会话 activity ID。
 

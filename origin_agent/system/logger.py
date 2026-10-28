@@ -26,7 +26,6 @@ from entity.puretype import (
     ActivityStreamItem,
 )
 from interface.logger_system import ILoggerSystem
-from interface.runtime_system import IRuntimeSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 
 
@@ -231,15 +230,8 @@ class LoggerSystem(ILoggerSystem, BaseLogger):
     """Application System hosting the structured activity Logger component."""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem,))
-        self._runtime: IRuntimeSystem | None = None
+        super().__init__()
         self._activity_component: ActivityLoggerComponent | None = None
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("LoggerSystem has not been awakened")
-        return self._runtime
 
     @property
     def _activity(self) -> ActivityLoggerComponent:
@@ -249,7 +241,6 @@ class LoggerSystem(ILoggerSystem, BaseLogger):
         return component
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         component = ActivityLoggerComponent()
         self.add_component(component)
         await component.init_component()
