@@ -210,3 +210,7 @@ custom_models/*.gguf
 desktop/node_modules/
 desktop/dist/
 desktop/desktop-settings.json
+
+# perview
+!/preview/frontend_page/build/
+!/preview/frontend_page/build/**
