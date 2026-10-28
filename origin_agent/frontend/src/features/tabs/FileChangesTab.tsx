@@ -25,7 +25,7 @@ function EntryMeta({ entry }: { entry: SessionFileChangeEntryDto }): ReactElemen
     <span>{entry.operation_count}</span>
     <span>{actorTexts(entry.actors).join(L.actorSeparator)}</span>
     <time dateTime={entry.last_operated_at} title={entry.last_operated_at}>{formatOperatedAt(entry.last_operated_at)}</time>
-    {transfer && <span title={L.moveTooltip}>{entry.source_path} → {entry.destination_path}</span>}
+    {transfer && <span className="file-changes-transfer" title={L.moveTooltip}>{entry.source_path} → {entry.destination_path}</span>}
   </span>;
 }
 

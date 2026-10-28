@@ -15,17 +15,20 @@
 .file-changes-state { padding: 32px 12px; color: var(--text-secondary); text-align: center; }
 .file-changes-state.is-error { color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); overflow-wrap: anywhere; }
 .file-changes-tree { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-secondary); }
-.file-changes-folder { display: flex; align-items: center; width: 100%; min-height: 34px; gap: 7px; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); text-align: left; cursor: pointer; }
+.file-changes-folder { display: grid; grid-template-columns: 14px 14px minmax(0, 1fr) auto auto; align-items: center; width: 100%; min-height: 34px; gap: 7px; padding: 6px 12px; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); text-align: left; cursor: pointer; }
 .file-changes-folder:hover { background: var(--bg-tertiary, var(--bg-secondary)); }
 .file-changes-folder-chevron { width: 14px; color: var(--text-secondary); }
 .file-changes-folder-icon { color: var(--text-secondary); font-size: 12px; }
-.file-changes-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.file-changes-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
 .file-changes-file:hover { background: var(--bg-elevated); }
 .file-changes-file-icon { color: var(--text-secondary); }
-.file-changes-path { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
-.file-changes-file-meta, .file-changes-entry-meta { min-width: 0; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
-.file-changes-entry-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; text-align: right; }
-.file-changes-folder-name { min-width: 0; overflow-wrap: anywhere; }
+.file-changes-path, .file-changes-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-changes-path { font-size: 13px; }
+/* 操作信息独占下一行，完整路径不得参与文件名所在行的列宽分配。 */
+.file-changes-entry-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; min-width: 0; gap: 6px; color: var(--text-secondary); font-size: 11px; text-align: left; overflow-wrap: anywhere; }
+.file-changes-folder .file-changes-entry-meta { grid-column: 3 / -1; }
+.file-changes-entry-meta > * { min-width: 0; max-width: 100%; }
+.file-changes-transfer { flex-basis: 100%; }
 .file-changes-folder .file-changes-operation, .file-changes-folder .file-changes-state-badge { color: currentColor; }
 .file-changes-operation, .file-changes-state-badge { flex-shrink: 0; padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; cursor: help; }
 .file-changes-file-created { color: #67d391; }
@@ -37,10 +40,6 @@
 .file-changes-file-modified .file-changes-state-badge { color: #e8c45a; }
 .file-changes-file-deleted .file-changes-operation,
 .file-changes-file-deleted .file-changes-state-badge { color: #e87575; }
-@media (max-width: 900px) {
-  .file-changes-file { grid-template-columns: 14px minmax(0, 1fr) auto auto; }
-  .file-changes-file-meta { grid-column: 2 / -1; }
-}
 @media (max-width: 768px) {
   .file-changes-content { padding: 12px 12px 24px; }
   .file-changes-toolbar { flex-direction: column; }
