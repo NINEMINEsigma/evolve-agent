@@ -137,7 +137,7 @@ export default function CommandMenu({
           </button>
           <button
             type="button"
-            className="context-menu-item session-export-menu-button"
+            className="context-menu-item"
             disabled={sessionExportDisabled}
             data-tooltip={sessionExportDisabled ? exportLabels.busy : exportLabels.offline}
             onClick={() => closeForMenuItem(onOpenSessionExport)}

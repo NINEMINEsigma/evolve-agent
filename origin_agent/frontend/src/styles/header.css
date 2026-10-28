@@ -314,8 +314,6 @@
 .token-ring-progress { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 75.4; transition: stroke-dashoffset var(--duration-normal) var(--ease-out); filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.4)); }
 .token-ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 9px; font-weight: 600; color: var(--accent); font-family: "SF Mono", "Fira Code", monospace; }
 
-.cmd-menu-dropdown { min-width: 180px; }
-
 .model-profile-menu {
   z-index: var(--z-header);
   box-sizing: border-box;

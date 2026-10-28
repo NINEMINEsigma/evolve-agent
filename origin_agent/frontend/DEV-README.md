@@ -234,6 +234,14 @@ MediaInputTab只存selectedMediaId与焦点锚点，详情每次从当前权威�
 | `primitives/PopupLayer.tsx` | 弹出层基础原语 |
 | `primitives/NoticeBanner.tsx` | 用户触发操作的持久错误/警告横幅；不会写入聊天 History，需用户关闭 |
 
+#### 命令菜单样式约定
+
+右侧 Tab 栏底部的 `CommandMenu` 继续复用 `PopupLayer`，按钮基础外观统一由 `context-menu.css` 的 `button.context-menu-item` 维护：整行等宽、透明背景、左对齐、完整折行，并统一启用项的悬停、键盘可见焦点和原生 `disabled` 样式。共享重置仅作用于按钮，保留会话右键菜单中 `div` 菜单项的原有规则；导出按钮和 system 消息开关不再单独维护外观重置。
+
+命令菜单专属尺寸也归 `context-menu.css`：按内容宽度布局，最小宽度取 280px 与布局视口宽度减 16px 的较小值，最大宽度不超过后者；依赖全局 `border-box`，宽高上限包含边框和内边距。窄屏文字完整换行，短视口纵向滚动，高度使用 `vh` 回退及 `dvh` 上限。菜单按钮桌面最小高度为 36px，布局视口不超过 768px 或粗指针时为 44px；浏览器缩放后按实际媒体查询条件决定高度。现有定位、动作、状态、关闭和焦点返回逻辑不变。
+
+本次仅完成源码实施和只读审阅，未运行校验、构建或应用；桌面、窄屏、短视口、缩放、键盘及禁用态的运行验收由用户完成，详见 `.tasks/2026-10-28_1_command-menu-ui.md`。
+
 ### 面板与倒计时
 
 子会话状态与后端统一为 `running` / `completed` / `terminated`。数量限制移除后不再保留旧 `waiting` 排队状态、标签或样式；输入栏只将 `running` 且可交互的子会话列为消息目标。此状态保存在页面内存并通过 WebSocket/快照同步，不涉及持久化迁移。
