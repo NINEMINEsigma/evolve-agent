@@ -7,14 +7,15 @@ from typing import TYPE_CHECKING
 
 from entity.constant import ApplicationState, ShutdownReason
 from entity.puretype.agent_settings import AgentLoopSettingsState
-from framework import AsyncSystem
 from system.context import RuntimeContext
+
+from .logger_system import ILoggableSystem
 
 if TYPE_CHECKING:
     from system.resource_cleanup import ResourceCleanupRegistry
 
 
-class IRuntimeSystem(AsyncSystem, ABC):
+class IRuntimeSystem(ILoggableSystem, ABC):
     """Declare the process-wide runtime contract for state, admission and shutdown.
 
     Every other System reads lifecycle state through this slot; the concrete

@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 
 from entity.constant import SEARCH_PROCESS_STDERR_MAX_BYTES, Namespace
 from entity.puretype import DynamicSandboxSpace, ProcessLineStreamResult
-from framework import AsyncSystem
+from .logger_system import ILoggableSystem
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.sandbox import Access, ResolvedPath
 
 
-class ISandbox(AsyncSystem, ABC):
+class ISandbox(ILoggableSystem, ABC):
     """Declare logical path, dynamic-space and subprocess sandbox operations."""
 
     @property

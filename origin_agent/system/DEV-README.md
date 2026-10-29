@@ -8,14 +8,14 @@
 
 ## 迁移状态
 
-本包已按 `.tasks/2026-10-07_1_async-architecture-system-lifecycle.md` 完成 framework 迁移：20 个 AsyncSystem（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem）由 `Application.start()` 按固定拓扑顺序串行注册，先用 graphlib 校验依赖图；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`Application.shutdown()` 是唯一关闭协调任务：先冻结输入并停止生成，子会话输入与反馈交接后主/多会话按 sequence 只落 History 并严格写盘，随后结束 SSE/WS 与 uvicorn，最后按装配逆序注销；必要写盘或资源释放失败合并上抛（退出码 1，绝不返回进化成功 -1）。S16/S17 的 InputDelivery、退役 Loop 与反馈交接、S21 的 Gateway 接收登记均已接入。上述均为源码实施与定向静态审阅结果，尚未运行验证。
+本包已完成 framework 迁移；当前由 `Application.start()` 串行登记21个 System 接口槽位（含 Logger），graphlib 只检查图完整性，登记顺序不约束唤醒顺序，framework 在依赖就绪后唤醒节点。20个业务接口经 `ILoggableSystem` 间接继承 `AsyncSystem`，在原依赖中自动加入 `ILoggerSystem`。全部注册完成后获取 Runtime、调用 `mark_running()` 并激活 Cron，输入接收才开放。`Application.shutdown()` 先冻结输入并停止生成，子会话输入与反馈交接后主/多会话按 sequence 只落 History 并严格写盘，再结束 SSE/WS 与 uvicorn；随后通过一次 `shoudown_system(ILoggerSystem)` 从根级联注销，不再按清单倒序逐项 unregister。必要失败沿现有异常边界传播（退出码1，绝不返回进化成功-1），运行验收尚未执行。
 
 ## 已实现的所有权
 
-| 类型 | 职责 | 依赖 |
+| 类型 | 职责 | 依赖（下列业务节点均另经 ILoggableSystem 自动依赖 LoggerSystem） |
 |---|---|---|
 | Application | 唯一AsyncArchitecture实例及完整依赖图检查；最终装配另阶段接通 | 注册表由framework持有 |
-| RuntimeSystem | 唯一RuntimeContext、主事件循环、输入接收锁、序号、关闭信号和失败记录 | 无 |
+| RuntimeSystem | 唯一RuntimeContext、主事件循环、输入接收锁、序号、关闭信号和失败记录 | LoggerSystem |
 | SubprocessRunner | 同步/异步内部子进程、正在创建的进程及实际操作完成记录 | RuntimeSystem |
 | Sandbox | 固定命名空间、全局动态空间、文件I/O及子进程委托 | RuntimeSystem、SubprocessRunner |
 | ShellManager | Shell会话、原生PTY、reader线程和业务/原生/关闭任务 | RuntimeSystem、Sandbox |
@@ -268,6 +268,21 @@ Runtime对原输入异常对象去重并立即打印完整栈，关闭状态和�
 启动失败可能发生在 Runtime 注册之前或唤醒期间，因此失败入口用 `has_system()` 取得可选实例：未注册不使用，部分初始化仍按 Runtime 的关闭与清理契约收尾。注销入口同样区分该状态，只有已唤醒实例才经 `get_system()` 查询；不为未注册状态创建备用 Runtime。
 
 `Application.start(*, shutdown_callbacks: ExitStack)` 接收 App 持有的退出回调栈，在正常启动完成或失败清理前登记 Runtime 的硬截止解除绑定方法。该方法按必要生命周期保留实例，但 App 不增加可供业务使用的 Runtime 服务字段。`App.disarm_watchdog()` 仅关闭回调栈，调用位置仍在 `__main__` 的 `asyncio.run()` 与线程池结束之后；Runtime 注销不提前取消硬截止。未取得 Runtime 的启动失败保留空栈。注册清单与倒序注销策略、资源清理 drain 和实际异常传播保持，未运行校验或应用。
+
+## 注销失败实例保留字段移除（2026-10-30）
+
+删除 `Application._failed_owner_refs` 字段与注销异常时的追加操作，该字段原本没有读取方；注销异常分支仍调用 `_hold_failed_shutdown(error, runtime)`。本节更新前文“注销异常仍保留 owner”中通过实例字段保留的部分，不改变函数局部引用、持久化保存、注销顺序或资源清理流程。未运行校验或应用。
+
+## 日志能力继承与 Logger 根级联关闭（2026-10-30，当前约定）
+
+`interface/` 中20个非 Logger System 接口统一继承 `ILoggableSystem`，具体实现和原业务构造保持不变；FrontendSink 继续通过 IFrontendSink 取得 IAgentSink 事件契约。能力基类只自动增加 `ILoggerSystem` 依赖并提供现有转发方法，不新增服务槽位、Logger 缓存或日志输出。`ILoggerSystem` 自身仍直接继承 `AsyncSystem`，LoggerSystem 不依赖 Runtime，是所有业务 System 的依赖根；21个槽位不变。
+
+Application 不再保存 `_registered_types`，`_unregister_systems()` 统一等待 `shoudown_system(ILoggerSystem)`。framework 在关闭根前递归关闭依赖方，不以登记清单倒序代替依赖图，也不逐节点重试注销；正常关闭和启动失败回收共用这个入口。根级联失败直接进入既有外层异常边界，不再转交逐节点失败保留逻辑，且跳过其后的最终 drain。尚未完成 awake 的节点不执行 framework 关闭钩子，本次不重写其资源协议。
+
+级联成功后使用现有 Runtime 局部对象封闭并等待资源清理；drain 失败只加入关闭异常组，不调用已注销后的 Runtime 诊断方法补日志。`ILoggerSystem` 开始自身注销后日志能力结束，不增加缓存 Logger、备用日志出口或直接终端输出，错误只通过异常传播。现有入口、Runtime 和资源清理模块的标准日志调用尚未迁移，本阶段不声称全面完成日志终止边界；活动事件、History 和其他持久化不变。
+
+本节替代前文逆清单逐节点注销和相关局部异常保留的旧描述，不恢复 `_runtime_ref` 或 `_failed_owner_refs`，不改变业务停止顺序、ExitStack 与5秒硬截止。仅完成源码和只读差异审阅，未运行测试、校验、实际导入、构建或应用，待用户完整部署验收。
+
 
 
 

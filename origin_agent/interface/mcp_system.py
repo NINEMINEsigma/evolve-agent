@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
-from framework import AsyncSystem
 
 
-class IMCPSystem(AsyncSystem, ABC):
+class IMCPSystem(ILoggableSystem, ABC):
     """Declare MCP refresh, status and shutdown admission operations."""
 
     @property

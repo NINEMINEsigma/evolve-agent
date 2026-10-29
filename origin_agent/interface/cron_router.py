@@ -4,8 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from entity.puretype.extools import CronTaskInfo
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 from .sandbox import ISandbox
 from .subprocess_runner import ISubprocessRunner
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import BaseAgentLoop
 
 
-class ICronRouter(AsyncSystem, ABC):
+class ICronRouter(ILoggableSystem, ABC):
     """Declare scheduled-task routing, persistence and shutdown operations."""
 
     @property

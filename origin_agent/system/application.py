@@ -113,9 +113,7 @@ class Application(AsyncArchitecture):
         super().__init__()
         self._startup_context = runtime_context
         self._state = ApplicationState.NEW
-        self._registered_types: list[type[AsyncSystem]] = []
         self._shutdown_task: asyncio.Task[None] | None = None
-        self._failed_owner_refs: list[AsyncSystem] = []
         self._shutdown_failures: list[BaseException] = []
         Application._current = self
 
@@ -171,13 +169,10 @@ class Application(AsyncArchitecture):
         self._state = ApplicationState.STARTING
         systems = _build_system_manifest(self._startup_context)
         order = self._validate_system_graph(systems)
-        self._registered_types = []
         from interface.cron_router import ICronRouter
         from interface.runtime_system import IRuntimeSystem
         try:
             for system_type, system in systems:
-                # Record every attempted slot so an awake failure is explicitly unregistered.
-                self._registered_types.append(system_type)
                 registered = await self.register(system, system_type=system_type)
                 if not registered:
                     raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
@@ -209,7 +204,7 @@ class Application(AsyncArchitecture):
             await self._unregister_systems()
         except BaseException as cleanup_error:
             combined = BaseExceptionGroup("Application startup and cleanup failed", [error, cleanup_error])
-            # owner尚未收尾时_unregister_systems已进入保留路径；能返回的组保留原因并失败退出。
+            # 根级联或最终清理失败时，保留启动错误和清理错误并一同传播。
             raise LifecycleFailure("Application startup cleanup failed") from combined
         if not ordinary_rejection:
             # 统一为失败启动；原组保留为cause，避免混合端口异常被外层any匹配误报退出0。
@@ -228,32 +223,24 @@ class Application(AsyncArchitecture):
         raise LifecycleFailure("Failed shutdown hold unexpectedly completed")
 
     async def _unregister_systems(self) -> None:
-        """按注册清单倒序注销所有System，再封闭并等待资源清理。"""
+        """从 Logger 根节点级联注销，再封闭并等待资源清理。"""
+        from interface.logger_system import ILoggerSystem
         from interface.runtime_system import IRuntimeSystem
 
         # 启动失败可能没有Runtime或只有未唤醒实例；正常路径通过get_system获取。
         runtime = self.has_system(IRuntimeSystem)
         if runtime is not None and runtime.is_awake:
             runtime = self.get_system(IRuntimeSystem)
-        # 注销可能先移除Runtime，后续失败处理与资源清理只使用这个局部引用。
+        # NOTE: 根级联会移除Runtime，后续资源清理只使用这个局部引用，不再输出日志。
         if runtime is not None and runtime.shutdown_reason is None:
             runtime.request_shutdown(ShutdownReason.NORMAL)
-        for system_type in reversed(self._registered_types):
-            owner = self.has_system(system_type)
-            if owner is None:
-                continue
-            try:
-                await self.unregister(system_type)
-            except BaseException as error:
-                self._failed_owner_refs.append(owner)
-                await self._hold_failed_shutdown(error, runtime)
+        await self.shoudown_system(ILoggerSystem)
         failures: list[BaseException] = []
         if runtime is not None:
             runtime.cleanup.close_producers()
             try:
                 await runtime.cleanup.drain()
             except BaseException as error:
-                runtime.record_failure(error)
                 failures.append(error)
         if failures:
             raise BaseExceptionGroup("Application system unregistration failed", failures)
@@ -326,7 +313,7 @@ class Application(AsyncArchitecture):
         await gateway.stop_server()
 
     async def shutdown(self) -> None:
-        """单一协调任务：业务停止 → 按注册清单倒序注销；重复请求等待同一任务。"""
+        """单一协调任务：业务停止 → 从 Logger 根节点级联注销；重复请求等待同一任务。"""
         task = self._shutdown_task
         if task is None:
             task = asyncio.create_task(self._shutdown_impl(), name="application-shutdown")

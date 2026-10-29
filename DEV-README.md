@@ -55,7 +55,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 2. 启动 `fast_agent_space/__main__.py`。
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端，随后 `asyncio.run(App(ctx).run())`；返回后由 App 解除关闭硬截止 watchdog。
 4. `main.py::App` 只负责创建唯一 `Application`、平台信号处理（统一经 `RuntimeSystem.request_shutdown`）、等待关闭事件与退出码映射；不再持有 Gateway 实例、第二份关闭事件或各子系统清理逻辑。
-5. `Application` 继承 `AsyncArchitecture`，`start()` 按固定拓扑顺序串行注册 20 个 `AsyncSystem`（RuntimeSystem→…→ToolDiscoverySystem→GatewaySystem），先用 graphlib 校验依赖图完整性，注册失败即按逆序注销已注册节点并传播；全部唤醒后 `RuntimeSystem.mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
+5. `Application` 继承 `AsyncArchitecture`，`start()` 串行登记21个 System 接口槽位（含 `ILoggerSystem`），登记顺序不要求按依赖排列；graphlib 仅校验依赖图完整性，实际唤醒由 framework 在依赖就绪后完成。其余20个业务 System 接口通过 `ILoggableSystem` 间接继承 `AsyncSystem`，自动声明 `ILoggerSystem` 依赖。注册失败进入同一 Logger 根节点级联回收入口并传播；全部注册完成后获取 Runtime，调用 `mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
 6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只含静态 `APIRouter` 与 `build_router_app()` 工厂，运行实例、socket、serve 任务与 ready 事件均由 `GatewaySystem`（最后唤醒、首先注销）持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
@@ -66,7 +66,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 3. 停止各会话在途生成与工具调用，取消路由后台任务；解除待审批/提问等待。
 4. 子Agent未消费 Inbox 落各自 History 并保存（临时Agent不持久化），未交接反馈经专用接口并入父会话关闭批次；主/多会话按 sequence 只落 History 一次，严格写盘，不触发模型、标题、摘要或旋转（D4/D5）。
 5. History 刷新完成后才结束 SSE/WS（1001）与 uvicorn serve 任务。
-6. 按装配逆序逐一 `unregister` 全部 System；任一必要写盘或资源释放失败合并上抛，进程以退出码 1 结束，绝不返回进化成功 -1（D6）。关闭硬截止 5 秒由 RuntimeSystem 的 daemon watchdog 兜底，超时 `os._exit(1)`；成功路径由 `__main__` 在 `asyncio.run` 及其线程池结束后解除 watchdog。
+6. 通过一次 `shoudown_system(ILoggerSystem)` 从 Logger 根节点级联注销：framework 先关闭依赖该根的业务 System，再移除 Logger 槽位并执行其关闭钩子；Application 不维护逆清单或逐个调用 `unregister()`。级联成功后使用 Runtime 局部引用封闭并等待最终资源清理；级联失败直接向外传播，不再执行其后的最终清理。最终清理错误保留在异常组中，不通过已注销的 Logger 或 Runtime 诊断入口补打。必要关闭失败以退出码1结束，绝不返回进化成功-1（D6）。关闭硬截止5秒由 RuntimeSystem 的 daemon watchdog 兜底，超时 `os._exit(1)`；成功路径由 `__main__` 在 `asyncio.run` 及其线程池结束后解除 watchdog。
 
 Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；单条命令完成或当前回复结束不触发停止，未完成任务或后续可复用时保留 Shell会话，只有明确需要销毁整个 Shell 时才调用 `StopShell`。WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。单个 Shell会话的原生 PTY 访问通过生命周期同步边界收敛，停止流程先等待 reader 收尾再关闭原生对象，并保留超时兜底日志；该防御性处理不等同于已确认 `0xC0000005` 根因。
 
@@ -502,5 +502,20 @@ Runtime首次收到非清理超时故障时立即记录完整异常栈与关闭�
 硬截止解除仍必须晚于 `asyncio.run()` 及默认线程池结束。为此，App 持有标准库 `ExitStack`，经 `Application.start(shutdown_callbacks=...)` 传入，正常启动完成或失败清理前登记 Runtime 的 `disarm_shutdown_deadline` 绑定方法；`App.disarm_watchdog()` 在既有外层位置关闭回调栈。回调按必要生命周期保留实例，但 App 不持有可供业务查询的 Runtime 服务字段；Application 的同名硬截止转发方法随字段一起移除。既有 `App.run()` 局部 Runtime 引用继续负责信号处理与注销后的退出码读取。
 
 本节更新前文“已持有的 Runtime 引用”的具体来源；不改变注册清单、倒序注销及 framework 返回值语义，不涉及持久化格式或术语变更。仅完成源码与只读审阅，未运行校验、构建、导入或应用。
+
+## 注销失败实例保留字段移除（2026-10-30）
+
+移除仅被写入、没有读取方的 `Application._failed_owner_refs` 及注销异常分支中的追加操作；注销异常仍交给现有 `_hold_failed_shutdown(error, runtime)`，不改变注销顺序、History 保存、资源清理等待或错误传播策略。前文失败实例保留专指该字段的描述由本节更新。未运行校验或应用。
+
+## 日志能力继承与 Logger 根节点级联注销（2026-10-30，当前约定）
+
+现有20个非 Logger System 接口统一继承 `ILoggableSystem`，具体实现仍只继承各自接口；`IFrontendSink` 额外保留 `IAgentSink` 事件契约。能力基类自动在原依赖集合中加入 `ILoggerSystem`，不新增注册槽位或覆盖原业务依赖。`ILoggerSystem` 自身直接继承 `AsyncSystem`，LoggerSystem 无 Runtime 依赖，作为21个槽位的共同依赖根；`ILoggableSystem` 不是另一个服务实例。
+
+Application 移除 `_registered_types` 及逐节点注销循环，普通关闭和启动失败回收共用一次 `shoudown_system(ILoggerSystem)`。登记仍可 Runtime 在前、Logger 在后，由 framework 处理延迟唤醒；关闭则由 framework 递归处理依赖方后再关闭根，不以清单倒序代替依赖遍历。本节覆盖前文所有当前注销顺序、逆清单与失败节点保留路径中不再适用的描述，历史记录保留。
+
+`ILoggerSystem` 开始自身注销后不再提供日志能力；不缓存 Logger、不使用备用日志或直接终端输出补打，错误通过异常向外传播。本阶段保留既有文本日志与活动事件调用，未实现 Rich、标准日志桥接或现有全部日志入口的迁移；入口、Runtime 和资源清理模块的旧标准日志残留由后续任务处理，因此不声称全局日志终止边界已完成运行验收。
+
+根级联抛错时直接交给现有外层异常边界，不重新逐节点注销，也不继续其后的最终 drain；成功后仍使用 Runtime 局部对象完成现有清理。最终 drain 抛错保留原异常组，不再调用 Runtime 诊断入口补日志。未完成 awake 的节点不会执行 framework 的关闭钩子，本次不扩大为 failed-awake 资源协议改造。System 数量、History/配置/持久化格式、业务停止顺序及5秒硬截止不变。仅完成源码和只读差异审阅，未运行校验、导入、构建或应用，部署验收由用户执行。
+
 
 

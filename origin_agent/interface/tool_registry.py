@@ -9,9 +9,9 @@ from entity.puretype import (
     ToolCallRequest,
     ToolDangerLevel,
 )
-from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ JSONValue: TypeAlias = (
 ToolPayload: TypeAlias = dict[str, JSONValue]
 
 
-class IToolRegistry(AsyncSystem, ABC):
+class IToolRegistry(ILoggableSystem, ABC):
     """Declare object-tool registration, filtering, execution and cleanup."""
 
     @property

@@ -10,12 +10,11 @@ from entity.puretype import (
     ToolchainSummaryProfileState,
 )
 from fastapi import WebSocket
-from framework import AsyncSystem
-
 from .agent_sink import IAgentSink
+from .logger_system import ILoggableSystem
 
 
-class IFrontendSink(AsyncSystem, IAgentSink, ABC):
+class IFrontendSink(ILoggableSystem, IAgentSink, ABC):
     """Declare frontend-specific connection, broadcast and interaction resolution.
 
     The upward event contract comes from ``IAgentSink``; this interface only adds

@@ -13,16 +13,15 @@ from entity.puretype import (
     ShutdownInputReport,
     SubAgentFeedbackDelivery,
 )
-from framework import AsyncSystem
-
 from .frontend_sink import IFrontendSink
+from .logger_system import ILoggableSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
     from gateway.chat import SessionManager as ChatSessionManager
 
 
-class ISessionManager(AsyncSystem, ABC):
+class ISessionManager(ILoggableSystem, ABC):
     """Declare session index, Loop ownership and shutdown coordination."""
 
     @property

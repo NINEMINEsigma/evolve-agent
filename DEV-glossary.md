@@ -503,7 +503,9 @@
 
 | 规范称谓 | 定义 | 英文锚点 |
 |---|---|---|
-| Logger System | Application 注册的进程级结构化活动事件 System；与标准 Python `logging` 并存，首版仅保存有界内存活动事件，不替代诊断日志 | Logger System |
+| Logger System | Application 注册的进程级结构化活动事件 System；公共接口及槽位为 `ILoggerSystem`，与标准 Python `logging` 并存，当前仅保存有界内存活动事件，不替代诊断日志 | Logger System |
+| 日志能力公共基类 | `ILoggableSystem`：继承 `AsyncSystem`，为业务 System 自动声明 `ILoggerSystem` 依赖并提供日志及活动事件转发；自身不是注册槽位，区别于 `ILoggerSystem` 服务契约 | ILoggableSystem |
+| 日志终止边界 | `ILoggerSystem` 开始自身注销后，日志能力结束；不通过缓存 Logger、备用日志出口或直接终端输出补打日志，错误只以异常向外传播。当前继承结构迁移不等于现有标准日志调用已全面迁移 | logger shutdown boundary |
 | 结构化活动事件 | 主会话消息接收、Agent 响应流和工具调用的安全元数据事件；不包含用户正文、Agent 正文、工具参数、工具结果或密钥 | structured activity event |
 | 全局活动状态看板 Tab | 右侧 Tab 栏中的只读进程级活动视效 Tab；使用当前 KPI 快照和打开后的活动事件增量，不提供导航或业务控制 | global activity dashboard tab |
 | 活动事件 SSE | Activity Tab 使用的单一全局 Server-Sent Events 连接；只发送订阅建立后的事件，不发送历史快照或断线期间事件 | activity event SSE |
