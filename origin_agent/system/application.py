@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from contextlib import ExitStack
 from graphlib import CycleError, TopologicalSorter
 import logging
 from typing import TYPE_CHECKING, ClassVar, Never
@@ -114,7 +115,6 @@ class Application(AsyncArchitecture):
         self._state = ApplicationState.NEW
         self._registered_types: list[type[AsyncSystem]] = []
         self._shutdown_task: asyncio.Task[None] | None = None
-        self._runtime_ref: IRuntimeSystem | None = None
         self._failed_owner_refs: list[AsyncSystem] = []
         self._shutdown_failures: list[BaseException] = []
         Application._current = self
@@ -164,8 +164,8 @@ class Application(AsyncArchitecture):
 
     # -- 装配与关闭（P22）--
 
-    async def start(self) -> None:
-        """构造完整清单、串行注册、确认全部唤醒后开放输入。"""
+    async def start(self, *, shutdown_callbacks: ExitStack) -> None:
+        """串行注册并开放输入；将硬截止解除回调交给 asyncio.run 外层。"""
         if self._state is not ApplicationState.NEW:
             raise LifecycleFailure(f"Application cannot start from state {self._state}")
         self._state = ApplicationState.STARTING
@@ -181,26 +181,24 @@ class Application(AsyncArchitecture):
                 registered = await self.register(system, system_type=system_type)
                 if not registered:
                     raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
-                if system_type is IRuntimeSystem:
-                    self._runtime_ref = AsyncArchitecture.get_system(self, IRuntimeSystem)
-        except BaseException as startup_error:
-            self._state = ApplicationState.FAILED
-            await self._cleanup_startup_failure(startup_error)
-            raise
-        try:
-            runtime = AsyncArchitecture.get_system(self, IRuntimeSystem)
+            runtime = self.get_system(IRuntimeSystem)
             runtime.mark_running()
-            self._runtime_ref = runtime
             AsyncArchitecture.get_system(self, ICronRouter).activate()
         except BaseException as startup_error:
             self._state = ApplicationState.FAILED
-            await self._cleanup_startup_failure(startup_error)
+            # 注册失败时允许取得尚未完成唤醒的实例；Runtime尚未注册则不使用它。
+            runtime = self.has_system(IRuntimeSystem)
+            if runtime is not None:
+                shutdown_callbacks.callback(runtime.disarm_shutdown_deadline)
+            await self._cleanup_startup_failure(startup_error, runtime)
             raise
+        shutdown_callbacks.callback(runtime.disarm_shutdown_deadline)
         self._state = ApplicationState.RUNNING
         logger.info("Application started | systems=%d", len(order))
 
-    async def _cleanup_startup_failure(self, error: BaseException) -> None:
-        runtime = self._runtime_ref
+    async def _cleanup_startup_failure(
+        self, error: BaseException, runtime: IRuntimeSystem | None,
+    ) -> None:
         ordinary_rejection = _is_port_busy_rejection(error)
         if runtime is not None:
             if ordinary_rejection:
@@ -217,9 +215,10 @@ class Application(AsyncArchitecture):
             # 统一为失败启动；原组保留为cause，避免混合端口异常被外层any匹配误报退出0。
             raise LifecycleFailure("Application startup failed") from error
 
-    async def _hold_failed_shutdown(self, error: BaseException) -> Never:
+    async def _hold_failed_shutdown(
+        self, error: BaseException, runtime: IRuntimeSystem | None,
+    ) -> Never:
         self._shutdown_failures.append(error)
-        runtime = self._runtime_ref
         if runtime is None:
             raise error
         runtime.record_failure(error)
@@ -230,7 +229,13 @@ class Application(AsyncArchitecture):
 
     async def _unregister_systems(self) -> None:
         """按注册清单倒序注销所有System，再封闭并等待资源清理。"""
-        runtime = self._runtime_ref
+        from interface.runtime_system import IRuntimeSystem
+
+        # 启动失败可能没有Runtime或只有未唤醒实例；正常路径通过get_system获取。
+        runtime = self.has_system(IRuntimeSystem)
+        if runtime is not None and runtime.is_awake:
+            runtime = self.get_system(IRuntimeSystem)
+        # 注销可能先移除Runtime，后续失败处理与资源清理只使用这个局部引用。
         if runtime is not None and runtime.shutdown_reason is None:
             runtime.request_shutdown(ShutdownReason.NORMAL)
         for system_type in reversed(self._registered_types):
@@ -241,7 +246,7 @@ class Application(AsyncArchitecture):
                 await self.unregister(system_type)
             except BaseException as error:
                 self._failed_owner_refs.append(owner)
-                await self._hold_failed_shutdown(error)
+                await self._hold_failed_shutdown(error, runtime)
         failures: list[BaseException] = []
         if runtime is not None:
             runtime.cleanup.close_producers()
@@ -320,11 +325,6 @@ class Application(AsyncArchitecture):
         await sink.close_all_connections()
         await gateway.stop_server()
 
-    def disarm_shutdown_deadline(self) -> None:
-        """仅由 App 在 asyncio.run 及其线程池结束后调用（RV7）。"""
-        if self._runtime_ref is not None:
-            self._runtime_ref.disarm_shutdown_deadline()
-
     async def shutdown(self) -> None:
         """单一协调任务：业务停止 → 按注册清单倒序注销；重复请求等待同一任务。"""
         task = self._shutdown_task
@@ -335,13 +335,13 @@ class Application(AsyncArchitecture):
 
     async def _shutdown_impl(self) -> None:
         from interface.runtime_system import IRuntimeSystem
-        runtime = AsyncArchitecture.get_system(self, IRuntimeSystem)
+        runtime = self.get_system(IRuntimeSystem)
         self._state = ApplicationState.STOPPING
         failures: list[BaseException] = []
         try:
             await self._stop_business()
         except BaseException as exc:
-            await self._hold_failed_shutdown(exc)
+            await self._hold_failed_shutdown(exc, runtime)
         try:
             await self._unregister_systems()
         except BaseException as exc:

@@ -1596,6 +1596,16 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 `_unregister_systems()` 移除注销返回值校验及 Runtime 专属的最后注销分支；Runtime 与其他 System 一样进入注册清单倒序遍历。循环后仍使用 `_runtime_ref` 封闭并等待资源清理，实际注销/清理异常维持既有失败处理。本节替代前文 Runtime 必须在最终 drain 后注销的约定；未新增字段、继承关系或跨类 protected 访问，不修改 framework 的依赖拒绝语义，也未新增拓扑排序或级联注销。现有清单仍将 Runtime 放在首位，返回 False 不再转为 Application 异常，其他注册顺序适配尚未实施。未运行校验或应用。
 
+### Application Runtime 引用移除（2026-10-29，后续修订）
+
+移除 `Application._runtime_ref` 与 `Application.disarm_shutdown_deadline()`。正常启动在注册循环结束后通过 `get_system(IRuntimeSystem)` 获取已唤醒实例；正常关闭与注销流程在函数内提前取得局部引用，注销后的 drain、失败记录及失败关闭保留路径只使用该引用，`_hold_failed_shutdown(error, runtime)` 显式接收它，不重新查询注册表。
+
+启动失败使用 `has_system(IRuntimeSystem)` 区分未注册与已注册但可能未唤醒的实例：未注册时不使用 Runtime，部分初始化时仍执行其内存级关闭与清理契约，不把未唤醒实例交给 `get_system()`。注销函数仅在实例已唤醒时再通过 `get_system()` 取得它。
+
+`App` 新增 `_shutdown_callbacks: ExitStack`，经 `Application.start(shutdown_callbacks=...)` 交入；Application 在正常启动完成或启动失败清理前，登记 Runtime 的 `disarm_shutdown_deadline` 绑定方法。回调按必要生命周期保留所属实例，但不提供 Runtime 服务查询入口，也不在 App 增加 Runtime 服务镜像字段。`__main__` 仍在 `asyncio.run()` 与默认线程池结束后调用 `App.disarm_watchdog()`，由它关闭回调栈，保持硬截止覆盖范围；注册前失败时栈为空。既有 `App.run()` 函数内的 Runtime 局部引用继续用于信号处理及注销后的退出码读取。
+
+本节覆盖前节对 `_runtime_ref` 的描述；不改变 System 清单、framework 注销返回值语义、资源所有权或持久化格式，保留用户已有的 `_wake_task: asyncio.Task[bool] | None` 修改。仅完成源码与只读差异审阅，未运行校验、构建、导入或应用。
+
 
 
 

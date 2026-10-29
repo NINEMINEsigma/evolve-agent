@@ -495,4 +495,12 @@ Runtime首次收到非清理超时故障时立即记录完整异常栈与关闭�
 
 注册清单当前仍将 Runtime 放在首位，因而它仍会在现有倒序遍历中最后被尝试注销，但已无专属分支保证该位置。本轮不新增拓扑排序或级联注销，不改变 framework 自身的依赖拒绝规则；返回 False 不再被 Application 转为异常，也不代表全部注销成功。未运行校验或应用。
 
+## Application Runtime 引用移除（2026-10-29，后续修订）
+
+移除 `Application._runtime_ref`；正常启动在注册完成后经 `get_system(IRuntimeSystem)` 获取 Runtime，正常关闭和注销函数在注销前取得局部引用，注销后的清理与失败处理使用已有局部引用或显式参数，不再查询已注销的槽位。启动失败通过 `has_system()` 处理尚未注册或尚未唤醒的实际状态，未注册时不使用 Runtime，不建立备用实例。
+
+硬截止解除仍必须晚于 `asyncio.run()` 及默认线程池结束。为此，App 持有标准库 `ExitStack`，经 `Application.start(shutdown_callbacks=...)` 传入，正常启动完成或失败清理前登记 Runtime 的 `disarm_shutdown_deadline` 绑定方法；`App.disarm_watchdog()` 在既有外层位置关闭回调栈。回调按必要生命周期保留实例，但 App 不持有可供业务查询的 Runtime 服务字段；Application 的同名硬截止转发方法随字段一起移除。既有 `App.run()` 局部 Runtime 引用继续负责信号处理与注销后的退出码读取。
+
+本节更新前文“已持有的 Runtime 引用”的具体来源；不改变注册清单、倒序注销及 framework 返回值语义，不涉及持久化格式或术语变更。仅完成源码与只读审阅，未运行校验、构建、导入或应用。
+
 

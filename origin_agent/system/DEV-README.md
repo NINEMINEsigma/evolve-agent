@@ -261,5 +261,13 @@ Runtime对原输入异常对象去重并立即打印完整栈，关闭状态和�
 
 本节替代前文“最终 drain 后才注销 Runtime”的顺序约定。当前清单仍使 Runtime 在倒序循环中最后被尝试注销，本轮未重排清单或加入拓扑/级联注销；framework 仍可因存活依赖拒绝注销并返回 False，Application 不再为该返回值抛错，不能据此宣称完整适配了任意注册顺序。未运行校验或应用。
 
+## Application Runtime 引用移除（2026-10-29，后续修订）
+
+`Application` 不再持有 `_runtime_ref`，也不提供 `disarm_shutdown_deadline()` 转发方法。正常启动在全部注册完成后经 `get_system(IRuntimeSystem)` 获取 Runtime；`_shutdown_impl()` 与 `_unregister_systems()` 在注销前将引用缓存在函数内，注销后的清理、失败记录和失败关闭保留路径显式传递或使用同一局部引用，不重新查询已移除的槽位。
+
+启动失败可能发生在 Runtime 注册之前或唤醒期间，因此失败入口用 `has_system()` 取得可选实例：未注册不使用，部分初始化仍按 Runtime 的关闭与清理契约收尾。注销入口同样区分该状态，只有已唤醒实例才经 `get_system()` 查询；不为未注册状态创建备用 Runtime。
+
+`Application.start(*, shutdown_callbacks: ExitStack)` 接收 App 持有的退出回调栈，在正常启动完成或失败清理前登记 Runtime 的硬截止解除绑定方法。该方法按必要生命周期保留实例，但 App 不增加可供业务使用的 Runtime 服务字段。`App.disarm_watchdog()` 仅关闭回调栈，调用位置仍在 `__main__` 的 `asyncio.run()` 与线程池结束之后；Runtime 注销不提前取消硬截止。未取得 Runtime 的启动失败保留空栈。注册清单与倒序注销策略、资源清理 drain 和实际异常传播保持，未运行校验或应用。
+
 
 
