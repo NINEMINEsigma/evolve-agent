@@ -1588,6 +1588,16 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 创建状态与预约状态枚举分别位于constant/subprocess.py和constant/resource_cleanup.py，显式导出，不进入typeref。现有21槽位与依赖图不变；新增模块不创建Application或后台单例。registry内部的预约/handle协作属于同一生命周期实现边界，业务模块不跨类修改其内部表。Watcher.wait_stopped、Browser最终退出观察和Gateway真实serve等待只补全最终注销，不引入业务重试或新协议。本轮未运行校验、导入或应用，等待用户人工验收。
 
+### Application 注册校验收窄（2026-10-29）
+
+`Application._validate_system_graph()` 移除依赖必须排在注册清单前面的检查；`start()` 移除单次注册后当前实例必须立即唤醒的检查。重复槽位、实现类型、依赖缺失和循环依赖检查保留，framework 继续负责依赖就绪后的唤醒。本轮未新增字段或外部 protected 访问，未改变继承关系、依赖声明、Runtime 引用获取及关闭编排；其他注册顺序适配尚未实施。未运行校验或应用。
+
+### Application 关闭约束移除（2026-10-29，后续修订）
+
+`_unregister_systems()` 移除注销返回值校验及 Runtime 专属的最后注销分支；Runtime 与其他 System 一样进入注册清单倒序遍历。循环后仍使用 `_runtime_ref` 封闭并等待资源清理，实际注销/清理异常维持既有失败处理。本节替代前文 Runtime 必须在最终 drain 后注销的约定；未新增字段、继承关系或跨类 protected 访问，不修改 framework 的依赖拒绝语义，也未新增拓扑排序或级联注销。现有清单仍将 Runtime 放在首位，返回 False 不再转为 Application 异常，其他注册顺序适配尚未实施。未运行校验或应用。
+
+
+
 
 
 

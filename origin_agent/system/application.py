@@ -137,7 +137,7 @@ class Application(AsyncArchitecture):
         self,
         systems: Sequence[tuple[type[AsyncSystem], AsyncSystem]],
     ) -> tuple[type[AsyncSystem], ...]:
-        """Validate the interface-slot dependency graph and explicit order."""
+        """Validate the interface-slot dependency graph independently of manifest order."""
         system_types = tuple(system_type for system_type, _ in systems)
         if len(set(system_types)) != len(system_types):
             raise LifecycleFailure("Application contains duplicate System slots")
@@ -160,13 +160,6 @@ class Application(AsyncArchitecture):
             TopologicalSorter(graph).prepare()
         except CycleError as exc:
             raise LifecycleFailure("Application System dependency graph contains a cycle") from exc
-        preceding: set[type[AsyncSystem]] = set()
-        for system_type, system in systems:
-            if not system.dependencies.issubset(preceding):
-                raise LifecycleFailure(
-                    f"System slot {system_type.__name__} precedes one of its dependencies"
-                )
-            preceding.add(system_type)
         return system_types
 
     # -- 装配与关闭（P22）--
@@ -188,10 +181,6 @@ class Application(AsyncArchitecture):
                 registered = await self.register(system, system_type=system_type)
                 if not registered:
                     raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
-                if not system.is_awake:
-                    raise LifecycleFailure(
-                        f"System {system_type.__name__} was not awakened after registration"
-                    )
                 if system_type is IRuntimeSystem:
                     self._runtime_ref = AsyncArchitecture.get_system(self, IRuntimeSystem)
         except BaseException as startup_error:
@@ -240,21 +229,16 @@ class Application(AsyncArchitecture):
         raise LifecycleFailure("Failed shutdown hold unexpectedly completed")
 
     async def _unregister_systems(self) -> None:
-        """资源所有者先安排释放，最终封闭/drain后才注销Runtime。"""
-        from interface.runtime_system import IRuntimeSystem
+        """按注册清单倒序注销所有System，再封闭并等待资源清理。"""
         runtime = self._runtime_ref
         if runtime is not None and runtime.shutdown_reason is None:
             runtime.request_shutdown(ShutdownReason.NORMAL)
         for system_type in reversed(self._registered_types):
-            if system_type is IRuntimeSystem:
-                continue
             owner = self.has_system(system_type)
             if owner is None:
                 continue
             try:
-                removed = await self.unregister(system_type)
-                if not removed:
-                    raise LifecycleFailure(f"System {system_type.__name__} could not be unregistered")
+                await self.unregister(system_type)
             except BaseException as error:
                 self._failed_owner_refs.append(owner)
                 await self._hold_failed_shutdown(error)
@@ -266,12 +250,6 @@ class Application(AsyncArchitecture):
             except BaseException as error:
                 runtime.record_failure(error)
                 failures.append(error)
-        if self.has_system(IRuntimeSystem) is not None:
-            try:
-                if not await self.unregister(IRuntimeSystem):
-                    raise LifecycleFailure("RuntimeSystem could not be unregistered")
-            except BaseException as error:
-                await self._hold_failed_shutdown(error)
         if failures:
             raise BaseExceptionGroup("Application system unregistration failed", failures)
 
@@ -348,7 +326,7 @@ class Application(AsyncArchitecture):
             self._runtime_ref.disarm_shutdown_deadline()
 
     async def shutdown(self) -> None:
-        """单一协调任务：业务停止 → 逆拓扑注销；重复请求等待同一任务。"""
+        """单一协调任务：业务停止 → 按注册清单倒序注销；重复请求等待同一任务。"""
         task = self._shutdown_task
         if task is None:
             task = asyncio.create_task(self._shutdown_impl(), name="application-shutdown")

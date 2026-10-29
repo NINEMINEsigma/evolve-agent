@@ -482,3 +482,17 @@ Runtime首次收到非清理超时故障时立即记录完整异常栈与关闭�
 关闭先停止业务并提交History，再按逆拓扑注销非Runtime所有者，使其有机会安排释放；之后封闭全部清理producer并最终drain，Runtime最后注销。确定清理失败即时上报，但其他真实清理仍须完成；未知资源继续等待到硬截止。业务或所有者未安全收尾时保留依赖和主loop，不继续拆依赖或提前返回给asyncio.run。Gateway、全应用WebSocket关闭、watcher与自有浏览器进程的最终等待不再把短观察窗口返回当作物理释放。既有21个System槽位（含LoggerSystem）不变，无新持久化格式。
 
 本轮仅源码实施与只读审阅；未运行校验、构建、脚本、导入或应用，用户需部署后人工验收。前端全局故障通知、Grep超长行和Cron自动重试不在本次范围；实际任务配置没有自动暂停或恢复。规范与验收矩阵见 `.tasks/2026-10-27_3_cron-subprocess-silent-shutdown.md` PLAN v2.1。
+
+## Application 注册校验收窄（2026-10-29）
+
+`_validate_system_graph()` 保留重复槽位、实现类型、依赖缺失和循环依赖检查，移除依赖必须出现在清单前面的顺序检查；`start()` 移除每次 `register()` 返回后当前实例必须立即唤醒的检查，依赖就绪与延迟唤醒继续由 framework 处理。前文“固定拓扑顺序”不再表示 Application 对清单顺序的强制校验。
+
+本轮仅移除这两项校验；清单顺序、Runtime 引用获取、输入开放和关闭流程保持原样，尚未完成 Application 对任意注册顺序的完整适配。未运行校验或应用。
+
+## Application 关闭约束移除（2026-10-29，后续修订）
+
+`_unregister_systems()` 移除 `unregister()` 返回 False 时主动抛错的额外校验，并取消跳过 Runtime、资源清理 drain 后再单独注销 Runtime 的特殊安排。所有 System（含 Runtime）统一按注册清单倒序调用 `unregister()`；循环后仍通过已持有的 Runtime 引用封闭并等待资源清理，保留实际异常的传播和失败处理。此处更新前文“Runtime 最后注销”的约定。
+
+注册清单当前仍将 Runtime 放在首位，因而它仍会在现有倒序遍历中最后被尝试注销，但已无专属分支保证该位置。本轮不新增拓扑排序或级联注销，不改变 framework 自身的依赖拒绝规则；返回 False 不再被 Application 转为异常，也不代表全部注销成功。未运行校验或应用。
+
+

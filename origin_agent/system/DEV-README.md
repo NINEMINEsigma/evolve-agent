@@ -249,3 +249,17 @@ kill_active/terminate_all/正常收尾复用同一资源清理；先终止可证
 
 Runtime对原输入异常对象去重并立即打印完整栈，关闭状态和硬截止先提交、日志锁外进行；日志handler错误不会替代原故障。watchdog不做额外日志I/O。Agentspace最终注销在关闭EventHub前等待watcher.is_stopped，避免短join结束但线程仍活。本轮未执行校验、脚本、导入、构建或应用，人工验收见对应Cron关闭任务文件。
 
+## Application 注册校验收窄（2026-10-29）
+
+依赖图检查不再要求依赖位于注册清单前面，启动循环不再要求当前实例在单次 `register()` 返回后立即唤醒。重复槽位、实现类型、依赖缺失与循环依赖仍快速失败；依赖就绪和延迟唤醒由 framework 处理。
+
+本轮未调整注册清单、Runtime 引用获取、输入开放或注销流程。前文固定拓扑顺序描述的是现有清单排列，不再是校验要求；Application 对任意注册顺序的其他适配尚未实施。未运行校验或应用。
+
+## Application 关闭约束移除（2026-10-29，后续修订）
+
+`_unregister_systems()` 对所有 System（含 Runtime）统一按注册清单倒序调用 `unregister()`，不再检查其返回值，也不再跳过 Runtime 并在 drain 后单独注销它。循环后通过已持有的 Runtime 引用执行 `cleanup.close_producers()` 与 `cleanup.drain()`；实际抛出的注销异常仍保留 owner 并进入既有失败处理，资源清理异常仍记录并上抛。业务停止、History 提交与关闭硬截止保持原样。
+
+本节替代前文“最终 drain 后才注销 Runtime”的顺序约定。当前清单仍使 Runtime 在倒序循环中最后被尝试注销，本轮未重排清单或加入拓扑/级联注销；framework 仍可因存活依赖拒绝注销并返回 False，Application 不再为该返回值抛错，不能据此宣称完整适配了任意注册顺序。未运行校验或应用。
+
+
+
