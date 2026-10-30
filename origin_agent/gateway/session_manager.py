@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -18,7 +20,6 @@ from interface.cron_router import ICronRouter
 from interface.frontend_sink import IFrontendSink
 from interface.llm_profile_store import ILLMProfileStore
 from interface.modality_capability_system import IModalityCapabilitySystem
-from interface.runtime_system import IRuntimeSystem
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
 from interface.shell_manager import IShellManager
@@ -60,7 +61,6 @@ class SessionManager(ISessionManager):
             IShellManager, IModalityCapabilitySystem,
         ))
         self._chat_sm: ChatSessionManager
-        self._runtime: IRuntimeSystem
         self._loops: dict[str, IMainSessionLoop] = {}
         self._store_path: str | None = None
         self._client_infos: dict[str, ClientInfo] = {}
@@ -75,12 +75,11 @@ class SessionManager(ISessionManager):
     async def virtual_awake(self) -> None:
         from system.application import Application
         self._app = Application.current()
-        self._runtime = self.get_system(IRuntimeSystem)
-        self._store_path = str(self._runtime.context.workspace / SESSIONS_DIR_NAME)
+        self._store_path = str(self.runtime.context.workspace / SESSIONS_DIR_NAME)
         self._chat_sm = ChatSessionManager(self._store_path)
         self.ensure_colloquy_session()
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         await self.stop_rounds()
         if any(loop.loop.message_queue is not None and loop.loop.message_queue.pending_deliveries()
                for loop in self._owned_loops() if loop not in self._discarded_loops):
@@ -281,23 +280,27 @@ class SessionManager(ISessionManager):
         self.freeze_inputs()
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(self._stop_rounds(), name="main-session-stop")
-            self._stop_task.add_done_callback(self._observe_stop)
+            self._stop_task.add_done_callback(partial(
+                self._observe_stop, on_failure=self.runtime.record_failure,
+            ))
         await asyncio.shield(self._stop_task)
 
-    def _observe_stop(self, task: asyncio.Task[None]) -> None:
+    def _observe_stop(
+        self, task: asyncio.Task[None], *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         if task.cancelled():
-            self._runtime.record_failure(LifecycleFailure("Session shutdown coordination cancelled"))
+            on_failure(LifecycleFailure("Session shutdown coordination cancelled"))
         else:
             error = task.exception()
             if error is not None:
-                self._runtime.record_failure(error)
+                on_failure(error)
 
     def accept_shutdown_feedback(
         self,
         parent_session_id: str,
         items: list[SubAgentFeedbackDelivery]
         ) -> None:
-        if not self._inputs_frozen or asyncio.get_running_loop() is not self._runtime.loop:
+        if not self._inputs_frozen or asyncio.get_running_loop() is not self.runtime.loop:
             raise LifecycleFailure("Shutdown feedback requires the frozen owning loop")
         managed = self._loops.get(parent_session_id)
         if managed is None or self.is_session_deleting(parent_session_id) or not self.exists(parent_session_id):
@@ -376,7 +379,7 @@ class SessionManager(ISessionManager):
         可能是 ParentAgentLoop 或 MultiAgentLoop），否则根据索引
         中的 loop_type 创建对应的 loop 实例。
         """
-        self._runtime.require_running()
+        self.runtime.require_running()
         if self._inputs_frozen:
             raise ApplicationStoppingError("SessionManager no longer accepts loop creation")
         # 已有 loop 则复用（可能是 MultiAgentLoop，因 replace_loop 已替换）
@@ -621,7 +624,7 @@ class SessionManager(ISessionManager):
             logger.warning("Loop replace rejected for colloquy session | id=%s", session_id)
             return
 
-        self._runtime.require_running()
+        self.runtime.require_running()
         if self._inputs_frozen:
             raise ApplicationStoppingError("Loop replacement has been closed")
         old_loop = self._loops.get(session_id)
@@ -640,7 +643,9 @@ class SessionManager(ISessionManager):
 
             handoff = asyncio.create_task(complete_handoff(), name=f"loop-handoff-{session_id}")
             self._retirement_tasks.add(handoff)
-            handoff.add_done_callback(self._retirement_done)
+            handoff.add_done_callback(partial(
+                self._retirement_done, on_failure=self.runtime.record_failure,
+            ))
             # 标记旧队列停止但不取消 consumer task——让当前 run_pending_round
             # 自然完成（含 tool_result 追加和 LLM 过渡回复）后再退出。
             old_loop.loop.mark_queue_stopped()
@@ -699,14 +704,16 @@ class SessionManager(ISessionManager):
             except Exception:
                 logger.warning("Failed to push agents clear for session=%s", session_id, exc_info=True)
 
-    def _retirement_done(self, task: asyncio.Task[None]) -> None:
+    def _retirement_done(
+        self, task: asyncio.Task[None], *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         self._retirement_tasks.discard(task)
         if task.cancelled():
-            self._runtime.record_failure(LifecycleFailure("Loop handoff was cancelled"))
+            on_failure(LifecycleFailure("Loop handoff was cancelled"))
         else:
             error = task.exception()
             if error is not None:
-                self._runtime.record_failure(error)
+                on_failure(error)
 
     def rotate_session(
         self,

@@ -282,5 +282,11 @@ TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe�
 
 具体编排器的 `_runtime` 字段、`virtual_awake` 赋值、缓存 `runtime` 覆写及 `virtual_shotdown` 完成后清空引用均保留。framework 在关闭钩子前解除架构绑定，关闭任务继续使用已有缓存，不改为动态 `get_system()` 查询。`_OrchestratorContext`、SubAgentLoop 和 TaskAgentLoop 仍非 System，不加入此继承链；子会话输入、反馈交接、停止与 History 保存不改。未运行校验、构建、实际导入或应用。
 
+## 编排器 Runtime 缓存移除（2026-10-30，当前约定）
+
+SubAgentOrchestrator删除`_runtime`及具体`runtime`覆写，继承公共查询能力；前节缓存保留约定由本节覆盖。原关闭主体移到`virtual_prepare_shutdown`，在架构绑定期间等待shutdown_all和后台任务，然后才清空`_session_manager`。真正framework钩子由公共基类仅核对准备结果，不在解绑后再执行编排工作或查Runtime。
+
+_OrchestratorContext、SubAgentLoop、TaskAgentLoop继续不是System，既有Runtime注入/显式查询、History/反馈交接、临时Agent不持久化及权限语义均保持。无新槽位、依赖、配置或持久化格式，未运行校验、导入、测试、构建或应用。
+
 
 

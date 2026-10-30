@@ -31,7 +31,6 @@ from system.lifecycle import (
 )
 from interface.frontend_sink import IFrontendSink
 from interface.llm_profile_store import ILLMProfileStore
-from interface.runtime_system import IRuntimeSystem
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
 from system.session_store import SessionStore
@@ -65,7 +64,6 @@ class SessionMetadataService(ISessionMetadataService):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(ILLMProfileStore,))
-        self._runtime: IRuntimeSystem | None = None
         self._llm_profile_store: ILLMProfileStore | None = None
         self._session_store: SessionStore | None = None
         self._task_owner: TaskOwner | None = None
@@ -74,20 +72,13 @@ class SessionMetadataService(ISessionMetadataService):
         self._first_title_pending: set[str] = set()
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._llm_profile_store = self.get_system(ILLMProfileStore)
-        ctx = self._runtime.context
+        ctx = self.runtime.context
         self._session_store = SessionStore(ctx.workspace / SESSIONS_DIR_NAME)
         self._task_owner = TaskOwner(
             "SessionMetadataService",
-            self._runtime.record_failure,
+            self.runtime.record_failure,
         )
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("SessionMetadataService has not been awakened")
-        return self._runtime
 
     @property
     def llm_profile_store(self) -> ILLMProfileStore:
@@ -124,8 +115,8 @@ class SessionMetadataService(ISessionMetadataService):
         self.close_admission()
         await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
-    async def virtual_shotdown(self) -> None:
-        """解绑后仍通过已持有的 Owner 核对失败及结果交接，不仅检查活任务。"""
+    async def virtual_prepare_shutdown(self) -> None:
+        """解绑前通过 Owner 核对失败及结果交接，不仅检查活任务。"""
         await self.cancel_pending()
 
     @staticmethod

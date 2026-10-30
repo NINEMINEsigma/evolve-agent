@@ -414,3 +414,9 @@ FrontendSink的close_all_connections继续由唯一_close_task持有；每条连
 
 FrontendSink 现有 `_runtime` 赋值、发送/交互任务、关闭连接及错误处理不改，关闭期继续使用已有引用，不依赖解绑后不可用的默认 `runtime` 动态查询。`ParentAgentSink`、各 Loop、工具执行器和消息队列均不加入 System 继承，保留原有引用与查询方式。无消息协议、History 或持久化变化；未运行校验、构建、实际导入或应用。
 
+## FrontendSink 无 Runtime 缓存（2026-10-30，当前约定）
+
+FrontendSink删除`_runtime`，发送/交互及初始化通过继承`runtime`访问。原关闭主体移至绑定期间执行的`virtual_prepare_shutdown`；真正解绑钩子由公共基类核对准备结果。本节覆盖前节缓存保留约定。每连接close完成观察在注册时绑定`on_failure`，不在迟到回调执行时查询System；仍等待真实close与请求交接，保持1秒发送期限、1001应用关闭和4004删除语义。
+
+ParentAgentSink、各Loop、工具执行器和消息队列不是本次System迁移对象，原显式Runtime引用/注入保持。History、事件协议、审批及21个System槽位不变；未运行校验、导入、测试、构建或应用，需用户部署后验收。
+

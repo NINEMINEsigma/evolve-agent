@@ -16,6 +16,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import copy_context
+from functools import partial
 from typing import Any, Callable
 
 from framework import AsyncSystem
@@ -32,7 +33,6 @@ from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner,
     close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
 )
-from interface.runtime_system import IRuntimeSystem
 from interface.tool_registry import IToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -88,21 +88,13 @@ class ToolRegistry(IToolRegistry):
         self._task_owner: TaskOwner | None = None
         self._executor_shutdown_task: asyncio.Task[None] | None = None
         self._dispatch_closed: bool = False
-        self._runtime: IRuntimeSystem | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._task_owner = TaskOwner("tool-registry", self.runtime.record_failure)
         self._sync_changed = asyncio.Event()
         self._executor = concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix="tool-handler",
         )
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("ToolRegistry has not been awakened")
-        return self._runtime
 
     # -- check_fn 缓存（实例级） -------------------------------------------
 
@@ -565,7 +557,13 @@ class ToolRegistry(IToolRegistry):
         with self._sync_calls_lock:
             self._dispatch_closed = True
 
-    def _settle_sync(self, record: SyncToolCallRecord) -> None:
+    def _settle_sync(
+        self,
+        record: SyncToolCallRecord,
+        *,
+        on_failure: Callable[[BaseException], None],
+        loop: asyncio.AbstractEventLoop,
+        ) -> None:
         """由真实 Future 结局与请求交接共同决定回收，可由工作线程调用。"""
         failure: BaseException | None = None
         with self._sync_calls_lock:
@@ -595,10 +593,10 @@ class ToolRegistry(IToolRegistry):
                     self._sync_calls.pop(future, None)
         # 不在登记锁内取得 Runtime 锁；接收的锁顺序是 Runtime -> 登记表。
         if failure is not None:
-            self.runtime.record_failure(failure)
+            on_failure(failure)
         changed = self._sync_changed
         if changed is not None:
-            self.runtime.loop.call_soon_threadsafe(changed.set)
+            loop.call_soon_threadsafe(changed.set)
 
     def _release_sync(
         self,
@@ -606,12 +604,18 @@ class ToolRegistry(IToolRegistry):
         *,
         cancelled: bool
         ) -> None:
+        runtime = self.runtime
+        on_failure = runtime.record_failure
+        loop = runtime.loop
         with self._sync_calls_lock:
             record.request_released = True
             record.cancelled_while_running = cancelled and not record.future.done()
-        self._settle_sync(record)
+        self._settle_sync(record, on_failure=on_failure, loop=loop)
 
     def _submit_sync(self, operation: Callable[[], Any]) -> SyncToolCallRecord:
+        runtime = self.runtime
+        on_failure = runtime.record_failure
+        loop = runtime.loop
         context = copy_context()
         # 门闩保证线程即使立即调度，也先完成真实 Future 登记。
         ready = threading.Event()
@@ -629,7 +633,9 @@ class ToolRegistry(IToolRegistry):
             future = executor.submit(invoke)
             record = SyncToolCallRecord(future=future)
             self._sync_calls[future] = record
-            future.add_done_callback(lambda done: self._settle_sync(record))
+            future.add_done_callback(
+                lambda done: self._settle_sync(record, on_failure=on_failure, loop=loop)
+            )
             ready.set()
         return record
 
@@ -943,11 +949,14 @@ class ToolRegistry(IToolRegistry):
         if executor is None:
             return
         if self._executor_shutdown_task is None:
+            on_failure = self.runtime.record_failure
             self._executor_shutdown_task = asyncio.create_task(
                 asyncio.to_thread(executor.shutdown, wait=True),
                 name="tool-executor-shutdown",
             )
-            self._executor_shutdown_task.add_done_callback(self._observe_executor_shutdown)
+            self._executor_shutdown_task.add_done_callback(
+                partial(self._observe_executor_shutdown, on_failure=on_failure)
+            )
         task = self._executor_shutdown_task
         done, _ = await asyncio.wait({task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
         if not done:
@@ -959,15 +968,20 @@ class ToolRegistry(IToolRegistry):
                 raise error
         self._executor = None
 
-    def _observe_executor_shutdown(self, task: asyncio.Task[None]) -> None:
+    def _observe_executor_shutdown(
+        self,
+        task: asyncio.Task[None],
+        *,
+        on_failure: Callable[[BaseException], None],
+        ) -> None:
         if task.cancelled():
-            self.runtime.record_failure(LifecycleFailure("Tool executor shutdown was cancelled"))
+            on_failure(LifecycleFailure("Tool executor shutdown was cancelled"))
         else:
             error = task.exception()
             if error is not None:
-                self.runtime.record_failure(error)
+                on_failure(error)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         """工作实际结束后在线程中 join；失败保留依赖和活资源记录。"""
         self.close_dispatch()
         await close_resources((self.wait_idle, self._shutdown_executor))

@@ -272,3 +272,11 @@ EmptyResponseRetryClient两种方法在每次底层调用中保留参数，仍�
 
 `IToolRegistry`、`IMCPSystem` 移除重复抽象 `runtime` 声明，具体实现保留 `_runtime`、唤醒赋值和缓存属性覆写，保证 framework 解绑后的关闭钩子仍使用已有引用；ToolDiscoverySystem 原有局部查询不改。对象工具注册、发现、MCP 连接和原生资源清理行为均不变，不新增依赖或持久化格式。仅完成源码及只读审阅，未运行校验、构建、实际导入或应用。
 
+## Runtime 属性与关闭准备（2026-10-30，当前约定）
+
+Registry/Discovery/MCP统一使用继承`runtime`，删除具体Runtime缓存和覆写；本节覆盖前节保留约定。原关闭主体迁至`virtual_prepare_shutdown`，在架构绑定期间执行，真正`virtual_shotdown`只由公共基类核对准备完成。Application在释放其他工具服务前先封闭Registry、取消请求并等待真实工作；依赖图与对象工具四阶段不改。
+
+Registry的真实Future结算显式接收创建时捕获的`on_failure`及loop；请求释放路径在发布可回收事实前取得能力。executor关闭观察同样预绑定，既有软观察pending仍持有原task/执行器，不能等同物理释放，也不声称Runtime drain覆盖它。MCP停止/关闭观察预绑定失败能力，失败awake从首项外部资源开始由唯一准备任务收尾，部分初始化明确检查已创建对象；必要清理未完成时保持绑定。Discovery仅前移已有记录/导入路径释放。
+
+无新服务槽位、Runtime/架构镜像或持久化格式，不改third、非System MCPCore/Owner注入和既存日志退出限制。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。
+

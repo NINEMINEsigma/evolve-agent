@@ -13,6 +13,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from contextlib import contextmanager
+from functools import partial
 from collections.abc import Iterator
 from typing import * # type: ignore
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -45,7 +46,6 @@ from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwn
 from interface.agent_sink import IAgentSink
 from interface.frontend_sink import IFrontendSink
 from interface.tool_registry import IToolRegistry
-from interface.runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -87,7 +87,6 @@ class FrontendSink(IFrontendSink):
         self._pending_asks: dict[str, asyncio.Future] = {}
         # {request_id: session_id}
         self._ask_session_map: dict[str, str] = {}
-        self._runtime: IRuntimeSystem
         self._requests: TaskOwner
         self._send_closed: bool = False
         self._interaction_closed: bool = False
@@ -96,8 +95,7 @@ class FrontendSink(IFrontendSink):
         self._send_deadlines: set[asyncio.Timeout] = set()
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
-        self._requests = TaskOwner("FrontendSink", self._runtime.record_failure)
+        self._requests = TaskOwner("FrontendSink", self.runtime.record_failure)
 
     # -- 接收边界 --
 
@@ -113,7 +111,7 @@ class FrontendSink(IFrontendSink):
 
     @contextmanager
     def _admit_interaction(self) -> Iterator[None]:
-        with self._runtime.admission():
+        with self.runtime.admission():
             if self._interaction_closed:
                 raise ApplicationStoppingError("Frontend interaction admission is closed")
             yield
@@ -122,7 +120,7 @@ class FrontendSink(IFrontendSink):
     def _admit_send(self) -> Iterator[None]:
         if self._send_closed:
             raise ApplicationStoppingError("Frontend output is closed")
-        if self._runtime.state not in (ApplicationState.RUNNING, ApplicationState.STOPPING):
+        if self.runtime.state not in (ApplicationState.RUNNING, ApplicationState.STOPPING):
             raise LifecycleFailure("Frontend output requires a running or stopping application")
         yield
 
@@ -137,7 +135,7 @@ class FrontendSink(IFrontendSink):
             return False
         timeout = (
             SHUTDOWN_SEND_TIMEOUT_SECONDS
-            if self._interaction_closed or self._runtime.state == ApplicationState.STOPPING
+            if self._interaction_closed or self.runtime.state == ApplicationState.STOPPING
             else None
         )
         scope = asyncio.timeout(timeout)
@@ -172,7 +170,7 @@ class FrontendSink(IFrontendSink):
         token: str
         ) -> None:
         import time
-        with self._runtime.admission():
+        with self.runtime.admission():
             if self._interaction_closed:
                 raise ApplicationStoppingError("Frontend connection admission is closed")
             self._ws_sinks[session_id] = WsConnectionEntry(
@@ -233,13 +231,15 @@ class FrontendSink(IFrontendSink):
             )
         await asyncio.shield(self._close_task)
 
-    def _observe_connection_close(self, task: asyncio.Task[None]) -> None:
+    def _observe_connection_close(
+        self, task: asyncio.Task[None], *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         if task.cancelled():
-            self._runtime.record_failure(LifecycleFailure("Frontend connection close was cancelled"))
+            on_failure(LifecycleFailure("Frontend connection close was cancelled"))
             return
         error = task.exception()
         if error is not None and not isinstance(error, (WebSocketDisconnect, ConnectionResetError, BrokenPipeError)):
-            self._runtime.record_failure(error)
+            on_failure(error)
 
     async def _close_connections(self) -> None:
         failures: list[BaseException] = []
@@ -256,7 +256,9 @@ class FrontendSink(IFrontendSink):
                 if key not in self._connection_close_tasks:
                     task = asyncio.create_task(entry.ws.close(code=1001, reason="going_away"), name="frontend-close-connection")
                     self._connection_close_tasks[key] = task
-                    task.add_done_callback(self._observe_connection_close)
+                    task.add_done_callback(partial(
+                        self._observe_connection_close, on_failure=self.runtime.record_failure,
+                    ))
         for session_id, entry in entries:
             key = f"{session_id}:{id(entry)}"
             task = self._connection_close_tasks.get(key)
@@ -993,7 +995,7 @@ class FrontendSink(IFrontendSink):
             cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
         )
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         """所有System业务收尾完成之后，等待实际输出资源关闭。"""
         await self.close_all_connections()
 

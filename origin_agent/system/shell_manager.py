@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import uuid
-from functools import wraps
+from functools import partial, wraps
 from types import CoroutineType
 from typing import Any, Callable, Concatenate, ParamSpec, TypeVar
 
@@ -39,7 +39,6 @@ from framework import AsyncSystem
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from system.process_termination import OwnedProcessIdentity
 from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.shell_manager import IShellManager
 from system.sandbox import SandboxError
@@ -281,7 +280,6 @@ class ShellManager(IShellManager):
     def __init__(self) -> None:
         super().__init__(dependencies=(ISandbox,))
         self._sandbox: ISandbox | None = None
-        self._runtime: IRuntimeSystem | None = None
         self._conpty_spawn_lock = threading.Lock()
         self._operations: set[asyncio.Task[Any]] = set()
         self._native_tasks: set[asyncio.Task[Any]] = set()
@@ -294,18 +292,11 @@ class ShellManager(IShellManager):
         self._cleanup_producer: CleanupProducer | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._sandbox = self.get_system(ISandbox)
         self._cleanup_producer = self.runtime.cleanup.open_producer(
             owner="ShellManager",
             loop=asyncio.get_running_loop(),
         )
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("ShellManager has not been awakened")
-        return self._runtime
 
     async def _native_call(
         self,
@@ -313,6 +304,7 @@ class ShellManager(IShellManager):
         *args: Any,
         report_failure: bool = True
         ) -> ShellResult:
+        on_failure = self.runtime.record_failure
         task = asyncio.create_task(asyncio.to_thread(fn, *args), name="shell-native-call")
         self._native_tasks.add(task)
         try:
@@ -322,23 +314,24 @@ class ShellManager(IShellManager):
                 self._native_tasks.discard(task)
             else:
                 task.add_done_callback(
-                    lambda done: self._native_finished(done, report_failure=report_failure)
+                    partial(self._native_finished, report_failure=report_failure, on_failure=on_failure)
                 )
 
     def _native_finished(
         self,
         task: asyncio.Task[Any],
         *,
-        report_failure: bool = True
+        report_failure: bool = True,
+        on_failure: Callable[[BaseException], None],
         ) -> None:
         self._native_tasks.discard(task)
         if task.cancelled():
             if report_failure:
-                self.runtime.record_failure(LifecycleFailure("Shell native operation was cancelled"))
+                on_failure(LifecycleFailure("Shell native operation was cancelled"))
             return
         error = task.exception()
         if report_failure and error is not None and not isinstance(error, (EOFError, ApplicationStoppingError)):
-            self.runtime.record_failure(error)
+            on_failure(error)
 
     @property
     def sandbox(self) -> ISandbox:
@@ -371,6 +364,7 @@ class ShellManager(IShellManager):
         cwd: str,
         command: str
         ) -> tuple[ShellInfo, ShellOutputSlice, dict[str, str]]:
+        on_failure = self.runtime.record_failure
         with self._registry_lock:
             if self._admission_closed:
                 raise ShellError("Shell admission has been closed")
@@ -468,7 +462,7 @@ class ShellManager(IShellManager):
             if startup.done():
                 self._native_tasks.discard(startup)
             else:
-                startup.add_done_callback(self._native_finished)
+                startup.add_done_callback(partial(self._native_finished, on_failure=on_failure))
 
         try:
             await self._wait_for_startup_quiet(state)
@@ -711,6 +705,18 @@ class ShellManager(IShellManager):
                     state.shell_id,
                     exc_info=True,
                 )
+        with self._registry_lock:
+            retained_states = tuple(self._shells.values())
+        for state in retained_states:
+            physically_released = (
+                state.native_closed.is_set()
+                and state.reader_exited.is_set()
+                and (state.reader_thread is None or not state.reader_thread.is_alive())
+            )
+            if state.cleanup_handle is None and not physically_released:
+                failures.append(LifecycleFailure(
+                    f"Shell resource cleanup has not been handed off: {state.shell_id}",
+                ))
         for error in self._cleanup_failures:
             logger.warning(
                 "Shell cleanup failure was contained | error=%s",
@@ -720,7 +726,7 @@ class ShellManager(IShellManager):
         if failures:
             raise BaseExceptionGroup("ShellManager shutdown failed", failures)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         """关闭：禁止新 Shell，等待操作退出并尽力释放全部 PTY。"""
         await self.stop_operations()
 

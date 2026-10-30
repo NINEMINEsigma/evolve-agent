@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
+from functools import partial
 from typing import * # type: ignore
 
 from entity.constant import ApplicationState, ShutdownReason
 from entity.puretype.agent_settings import AgentLoopSettingsState
 from system.context import RuntimeContext
+from system.lifecycle_errors import LifecycleFailure
 from framework import AsyncSystem
 
 from .logger_system import ILoggableSystem
@@ -162,7 +164,77 @@ class IDPRuntimeSystem(ILoggableSystem):
         super().__init__(
             list(dependencies) + [IRuntimeSystem]
             )
+        self._shutdown_preparation_task: asyncio.Task[None] | None = None
+        self._startup_cleanup_task: asyncio.Task[None] | None = None
 
     @property
     def runtime(self) -> IRuntimeSystem:
         return self.get_system(IRuntimeSystem)
+
+    @staticmethod
+    def _observe_preparation(
+        task: asyncio.Task[None],
+        *,
+        on_failure: Callable[[BaseException], None],
+    ) -> None:
+        if task.cancelled():
+            on_failure(LifecycleFailure("System preparation task was cancelled"))
+        elif (error := task.exception()) is not None:
+            on_failure(error)
+
+    async def prepare_shutdown(self) -> None:
+        """Complete dependency-using cleanup before framework detaches this System."""
+        loop = asyncio.get_running_loop()
+        task = self._shutdown_preparation_task
+        if task is None:
+            if not self.is_awake:
+                raise RuntimeError("Shutdown preparation requires an awakened System")
+            runtime = self.runtime
+            if loop is not runtime.loop:
+                raise RuntimeError("Shutdown preparation requires the runtime loop")
+            task = asyncio.create_task(
+                self.virtual_prepare_shutdown(), name="system-shutdown-preparation",
+            )
+            self._shutdown_preparation_task = task
+            task.add_done_callback(partial(
+                self._observe_preparation, on_failure=runtime.record_failure,
+            ))
+        elif loop is not task.get_loop():
+            raise RuntimeError("Shutdown preparation used from a foreign loop")
+        await asyncio.shield(task)
+
+    async def virtual_prepare_shutdown(self) -> None:
+        """Release or hand off owned work while dependencies remain bound."""
+
+    async def prepare_failed_startup(self) -> None:
+        """Own partial-initialization cleanup without cancelling it with a waiter."""
+        loop = asyncio.get_running_loop()
+        task = self._startup_cleanup_task
+        if task is None:
+            if self.is_awake or self.system_slot is None:
+                raise RuntimeError("Startup cleanup requires a bound, unawakened System")
+            runtime = self.runtime
+            if loop is not runtime.loop:
+                raise RuntimeError("Startup cleanup requires the runtime loop")
+            task = asyncio.create_task(
+                self.virtual_prepare_failed_startup(), name="system-startup-cleanup",
+            )
+            self._startup_cleanup_task = task
+            task.add_done_callback(partial(
+                self._observe_preparation, on_failure=runtime.record_failure,
+            ))
+        elif loop is not task.get_loop():
+            raise RuntimeError("Startup cleanup used from a foreign loop")
+        await asyncio.shield(task)
+
+    async def virtual_prepare_failed_startup(self) -> None:
+        """Release resources acquired by a failed awake, if any."""
+
+    async def virtual_shotdown(self) -> None:
+        """Only verify the previously completed preparation after detachment."""
+        task = self._shutdown_preparation_task
+        if task is None or not task.done():
+            raise RuntimeError("System shutdown preparation has not completed")
+        if task.cancelled():
+            raise LifecycleFailure("System shutdown preparation was cancelled")
+        task.result()

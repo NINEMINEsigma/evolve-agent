@@ -31,7 +31,6 @@ from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.lsp_manager import ILSPManager
 from interface.mcp_system import IMCPSystem
 from interface.modality_capability_system import IModalityCapabilitySystem
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
@@ -188,7 +187,7 @@ class ToolDiscoverySystem(IToolDiscoverySystem):
         if self._started:
             raise LifecycleFailure("Tool discovery cannot be restarted")
         self._started = True
-        runtime = self.get_system(IRuntimeSystem)
+        runtime = self.runtime
         registry = self.get_system(IToolRegistry)
         sandbox = self.get_system(ISandbox)
         if runtime.state != ApplicationState.STARTING:
@@ -233,6 +232,6 @@ class ToolDiscoverySystem(IToolDiscoverySystem):
             sys.path.remove(self._import_root)
             self._import_root = None
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self._loaded_modules.clear()
         self._release_import_root()

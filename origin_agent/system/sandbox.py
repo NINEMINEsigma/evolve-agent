@@ -50,7 +50,6 @@ from entity.puretype import (
 from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
 from util.pathutils import find_repo_root
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.subprocess_runner import ISubprocessRunner
 from util.text_codec import decode_text, split_lf_lines
@@ -157,7 +156,7 @@ class Sandbox(ISandbox):
         self._dynamic_spaces_data: DynamicSandboxSpaceData = DynamicSandboxSpaceData()
 
     async def virtual_awake(self) -> None:
-        runtime = self.get_system(IRuntimeSystem)
+        runtime = self.runtime
         runner = self.get_system(ISubprocessRunner)
         self._ctx = runtime.context
         self._runner = runner
@@ -182,10 +181,11 @@ class Sandbox(ISandbox):
     def context(self) -> RuntimeContext:
         return self._ctx
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         """关闭：Sandbox 无外部线程/进程/句柄资源，子进程归 SubprocessRunner。
         不删除动态空间数据或映射文件。动态空间锁不需释放。
         """
+        pass
 
     # -- 动态空间持久化与校验 --------------------------------------
 

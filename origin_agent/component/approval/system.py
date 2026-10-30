@@ -15,7 +15,6 @@ from entity.messages import BaseMessage
 from system.lifecycle import ApplicationStoppingError, TaskOwner
 from interface.approval_system import IApprovalSystem
 from interface.llm_profile_store import ILLMProfileStore
-from interface.runtime_system import IRuntimeSystem
 
 
 class ApprovalSystem(IApprovalSystem):
@@ -23,7 +22,6 @@ class ApprovalSystem(IApprovalSystem):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(ILLMProfileStore,))
-        self._runtime: IRuntimeSystem
         self._mode_store: ApprovalModeStore
         self._backend_manager: ApprovalBackendManager
         self._allowlist: ToolAllowlistStore
@@ -31,13 +29,12 @@ class ApprovalSystem(IApprovalSystem):
         self._admission_closed = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         profiles = self.get_system(ILLMProfileStore)
-        ctx = self._runtime.context
+        ctx = self.runtime.context
         self._mode_store = ApprovalModeStore(ctx.workspace / SESSIONS_DIR_NAME)
         self._backend_manager = ApprovalBackendManager(ctx, profiles)
         self._allowlist = ToolAllowlistStore(ctx.workspace)
-        self._requests = TaskOwner("ApprovalSystem", self._runtime.record_failure)
+        self._requests = TaskOwner("ApprovalSystem", self.runtime.record_failure)
 
     @property
     def mode_store(self) -> ApprovalModeStore:
@@ -53,7 +50,7 @@ class ApprovalSystem(IApprovalSystem):
 
     @contextmanager
     def _admit_request(self) -> Iterator[None]:
-        with self._runtime.admission():
+        with self.runtime.admission():
             if self._admission_closed:
                 raise ApplicationStoppingError("Approval request admission is closed")
             yield
@@ -77,7 +74,7 @@ class ApprovalSystem(IApprovalSystem):
         self.close_admission()
         await self._requests.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         # 未退出的请求仍可能使用后端；先等待，成功退出后才释放缓存。
         try:
             await self.cancel_pending()

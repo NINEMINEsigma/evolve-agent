@@ -20,7 +20,6 @@ from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources,
 )
 from interface.browser_system import IBrowserSystem
-from interface.runtime_system import IRuntimeSystem
 from system.cleanup_errors import ResourceCleanupPendingError
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
@@ -36,7 +35,6 @@ class BrowserSystem(IBrowserSystem):
 
     def __init__(self) -> None:
         super().__init__()
-        self._runtime: IRuntimeSystem | None = None
         self._owner: TaskOwner | None = None
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
@@ -50,14 +48,7 @@ class BrowserSystem(IBrowserSystem):
         self._teardown_task: asyncio.Task[None] | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._owner = TaskOwner("browser-requests", self.runtime.record_failure)
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("BrowserSystem has not been awakened")
-        return self._runtime
 
     @property
     def task_owner(self) -> TaskOwner:
@@ -230,7 +221,7 @@ class BrowserSystem(IBrowserSystem):
     def close_admission(self) -> None:
         self._closed = True
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self.close_admission()
         async def stop_requests() -> None:
             await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)

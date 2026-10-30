@@ -11,8 +11,9 @@ import subprocess
 import threading
 import time
 import uuid
+from functools import partial
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 from framework import AsyncSystem
 
@@ -27,7 +28,6 @@ from entity.puretype import CronTaskInfo
 from util.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from interface.cron_router import ICronRouter
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.subprocess_runner import ISubprocessRunner
 
@@ -42,7 +42,6 @@ class CronRouter(ICronRouter):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(ISandbox, ISubprocessRunner))
-        self._runtime: IRuntimeSystem | None = None
         self._sandbox: ISandbox | None = None
         self._runner: ISubprocessRunner | None = None
         self._routes: dict[str, BaseAgentLoop] = {}
@@ -57,16 +56,9 @@ class CronRouter(ICronRouter):
         self._stop_task: asyncio.Task[None] | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._sandbox = self.get_system(ISandbox)
         self._runner = self.get_system(ISubprocessRunner)
         self._load_all_tasks()
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("CronRouter has not been awakened")
-        return self._runtime
 
     @property
     def sandbox(self) -> ISandbox:
@@ -80,12 +72,17 @@ class CronRouter(ICronRouter):
             raise LifecycleFailure("CronRouter has not been awakened")
         return self._runner
 
-    def _record_failure(self, error: BaseException) -> None:
+    def _record_failure(
+        self,
+        error: BaseException,
+        *,
+        on_failure: Callable[[BaseException], None],
+        ) -> None:
         with self._lock:
             if not any(item is error for item in self._failures):
                 self._failures.append(error)
         # 统一锁顺序 Runtime -> Cron，不在 Cron 锁内取得 Runtime 锁。
-        self.runtime.record_failure(error)
+        on_failure(error)
 
     def _require_open(self) -> None:
         if self._frozen:
@@ -150,7 +147,7 @@ class CronRouter(ICronRouter):
         except Exception as error:
             failure = LifecycleFailure("Failed to persist cron tasks")
             failure.__cause__ = error
-            self._record_failure(failure)
+            self._record_failure(failure, on_failure=self.runtime.record_failure)
             raise failure
 
     @staticmethod
@@ -235,7 +232,7 @@ class CronRouter(ICronRouter):
         except Exception as error:
             failure = LifecycleFailure("Failed to start cron Timer")
             failure.__cause__ = error
-            self._record_failure(failure)
+            self._record_failure(failure, on_failure=self.runtime.record_failure)
             raise failure
 
     def freeze(self) -> None:
@@ -277,7 +274,7 @@ class CronRouter(ICronRouter):
             # 原生执行前被停止拒绝，不消耗持久化的一次执行机会。
             return
         except BaseException as error:
-            self._record_failure(error)
+            self._record_failure(error, on_failure=self.runtime.record_failure)
             self._log_task_failure(task)
         finally:
             if entered:
@@ -361,27 +358,35 @@ class CronRouter(ICronRouter):
         if failures:
             raise BaseExceptionGroup("Cron shutdown failed", failures)
 
-    def _observe_stop(self, task: asyncio.Task[None]) -> None:
+    def _observe_stop(
+        self,
+        task: asyncio.Task[None],
+        *,
+        on_failure: Callable[[BaseException], None],
+        ) -> None:
         if task.cancelled():
-            self._record_failure(LifecycleFailure("Cron native cleanup was cancelled"))
+            self._record_failure(
+                LifecycleFailure("Cron native cleanup was cancelled"), on_failure=on_failure,
+            )
         else:
             error = task.exception()
             if error is not None:
-                self._record_failure(error)
+                self._record_failure(error, on_failure=on_failure)
 
     async def stop_running(self) -> None:
         self.freeze()
         if self._stop_task is None:
+            on_failure = self.runtime.record_failure
             self._stop_task = asyncio.create_task(asyncio.to_thread(self._stop_blocking), name="cron-stop")
-            self._stop_task.add_done_callback(self._observe_stop)
+            self._stop_task.add_done_callback(partial(self._observe_stop, on_failure=on_failure))
         done, _ = await asyncio.wait({self._stop_task}, timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
         if not done:
             failure = LifecycleFailure("Cron native cleanup exceeded its deadline")
-            self._record_failure(failure)
+            self._record_failure(failure, on_failure=self.runtime.record_failure)
             raise failure
         self._stop_task.result()
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         await self.stop_running()
         with self._lock:
             self._routes.clear()

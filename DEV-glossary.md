@@ -473,7 +473,8 @@
 | 规范称谓 | 定义 | 英文锚点 |
 |---|---|---|
 | 运行时系统 | Application 内的唯一配置与进程生命周期系统；持有运行状态、输入接收同步边界、关闭信号及失败记录，不代替各业务 System 的资源所有权 | RuntimeSystem |
-| Runtime 依赖公共基类 | `IDPRuntimeSystem`：继承 `ILoggableSystem`，为依赖运行时系统的 System 自动声明 `IRuntimeSystem` 依赖并提供只读 `runtime` 访问；自身不是注册槽位，也不是 `IRuntimeSystem` 服务实现。默认属性通过所属架构查询，解绑后的关闭阶段仍由具体实现使用已有缓存引用 | IDPRuntimeSystem |
+| Runtime 依赖公共基类 | `IDPRuntimeSystem`：继承 `ILoggableSystem`，自动声明 `IRuntimeSystem` 依赖，并在架构绑定期间通过只读 `runtime` 属性查询唯一运行时系统；自身不是注册槽位或运行时服务实现。具体 System 不缓存 Runtime 或覆写该属性；公共基类持有关闭准备和失败启动清理的任务，真正解绑后的钩子只核对准备结果 | IDPRuntimeSystem |
+| 关闭准备 | 在 framework 解除架构绑定前，由各 System 完成依赖查询、业务工作退出及必要资源释放或纯资源交接的阶段；Application 先处理失败唤醒清理和真实工具工作屏障，再逆依赖等待准备。准备成功不等于所有允许 pending 的纯资源已经物理释放 | shutdown preparation |
 | 输入投递记录 | 关闭前已接受输入的非持久化提交记录，包含进程内序号、原始消息、准备状态和 History 提交状态；不同于 client_message_id，也不是可在重启后自动执行的持久队列 | InputDelivery |
 | 只落历史关闭 | 停止新工作与模型生成，把已接受但未提交的输入加入所属会话 History 并按原约定保存；重启不自动补跑，临时Agent不新增持久化 | history-only shutdown |
 | 资源清理待完成 | 外部资源清理已超过前台观察期限，但进程、线程、连接或 SDK 上下文尚未证明释放。应用停用该旧实例并保留引用继续收尾，不因该明确清理超时请求全应用失败；持久化失败、内部逻辑错误、必要业务交接失败和 60 秒最终退出保护不降级。自动收尾只记录日志；显式停止操作返回真实未完成状态，不宣称释放成功 | resource cleanup pending |

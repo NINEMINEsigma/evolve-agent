@@ -537,5 +537,17 @@ Application 移除 `_registered_types` 及逐节点注销循环，普通关闭�
 
 12个接口重复声明的抽象 `runtime` 属性已移除，公共只读属性统一来自 `IDPRuntimeSystem`。具体实现中的 `_runtime` 引用、唤醒初始化、`runtime` 覆写和关闭后清空行为保留：framework 在调用 `virtual_shotdown()` 前已解除架构绑定，关闭期不能用基类的 `get_system()` 查询代替已有引用。非 System 对象仍使用原显式查询或注入，不加入此继承链。无持久化、前端或业务调用变更；仅完成源码和只读差异审阅，未运行校验、构建、实际导入或应用。
 
+## Runtime 属性访问与关闭准备（2026-10-30，当前约定）
+
+19个 Runtime 依赖 System 统一使用继承的 `IDPRuntimeSystem.runtime`；移除15个 `_runtime` 字段和12个具体属性覆写。初始化需要的 Runtime 可以是函数局部引用，但不在 System 实例上保存另一份服务或架构镜像。非 System 的 Loop、TaskOwner、MCPCore、GatewayAdmission 和导出叶服务保留原显式注入。本节覆盖前节“缓存保留”的当前约定，历史记录保留。
+
+framework 仍先解绑再调用 `virtual_shotdown()`，`third/` 不改。公共基类持有 `_shutdown_preparation_task` 与 `_startup_cleanup_task` 两个非持久化动作任务：首次准备核对唤醒/绑定状态及所属 loop，重复等待同一任务且不重新查询 Runtime；等待方取消不取消真实清理，创建时绑定的失败观察方持续取得终局。18个具体关闭主体移到 `virtual_prepare_shutdown()`，真正 framework 钩子只核对准备结果。
+
+Application 的正常退出和部分启动回收共用：先等待实际失败 awake 节点的受持有清理，再封闭并等待已唤醒 ToolRegistry 的真实工具工作，随后用继承的 `_get_system_stack()` 局部逆依赖快照逐项准备，最后仍只执行一次 Logger 根级联。准备失败保持绑定并沿原失败等待与5秒硬截止处理；根级联或根后 drain 失败保持原异常传播，不补打已结束的 Logger。原 History/反馈提交及最后关闭输出的业务顺序保持。
+
+Gateway/MCP/Agentspace 的失败 awake 不能只因 framework 跳过钩子就丢掉工作；Agentspace 另持有真实恢复任务，watcher 结束后才关闭事件总线。LSP准备核对进程/读线程终局，Shell区分已登记释放与尚未可靠交接，子进程准备确认消费者交接后才允许纯物理释放留给最终 drain。完成观察回调提前绑定失败能力；工具 Future 结算同时绑定 loop，且在发布请求释放事实之前取得能力。
+
+ToolRegistry线程池关闭的既有软观察 pending 仍由原任务/执行器持有，由既有线程退出阶段承接，不属于 Runtime.cleanup.drain 的覆盖范围；本轮不宣称修复全部线程池退出和日志终止边界。21槽位、依赖集合、持久化格式、前端和硬截止不变。仅实施源码及开发文档并做只读审阅，未运行测试、校验、导入、构建或应用，运行验收由用户执行。
+
 
 

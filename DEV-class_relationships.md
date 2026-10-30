@@ -1632,6 +1632,25 @@ Runtime 只以现有函数局部引用参与根注销后的清理，drain 失败
 
 本节覆盖前文20个业务接口直接继承 `ILoggableSystem` 的当前描述；历史段落保留。Application、Logger 根级联、非 System 对象、资源所有权、持久化和5秒硬截止不改。仅完成源码及只读审阅，未运行校验、构建、实际导入或应用。
 
+### Runtime 无缓存与关闭动作归属（2026-10-30，当前约定）
+
+19个 Runtime 依赖实现统一继承公共 `runtime` 查询，15个 `_runtime` 字段、12个具体同名属性覆写及编排器的Runtime清空动作移除。此前“缓存保留”的表述由本节覆盖；继承链、接口槽位、依赖集合和非System显式Runtime注入不变。
+
+| 归属 | 字段/契约 | 生命周期 |
+|---|---|---|
+| IDPRuntimeSystem | `_shutdown_preparation_task`、`_startup_cleanup_task` | 两个非持久化唯一动作task，不是Runtime、Logger或架构镜像；shield保护真实工作，创建时绑定失败能力观察 |
+| IDPRuntimeSystem | `prepare_shutdown` / `virtual_prepare_shutdown` | 首次只允许已唤醒节点在所属loop准备；18个具体关闭主体前移到后者；重复等待不再查询Runtime |
+| IDPRuntimeSystem | `prepare_failed_startup` / `virtual_prepare_failed_startup` | 只为已绑定但awake失败节点收尾；Gateway/MCP/Agentspace明确处理部分初始化，普通无外部资源初始化默认空处理 |
+| IDPRuntimeSystem | `virtual_shotdown` | framework解绑后只核对已完成准备的真实结果，不重新查询服务或执行释放 |
+| Application | `_prepare_system_shutdown`、失败awake函数局部元组 | 失败awake清理→真实工具工作屏障→继承的依赖栈局部逆序准备→原Logger根级联；不维护第二份注册清单字段 |
+| AgentspaceService | `_recovery_task` | 持有同一真实恢复线程包装task，成功或实际清理完成后才清空；watcher真实结束后才close EventHub |
+
+观察回调的`on_failure`是创建时捕获的受限能力，不是执行回调时再查询System的lambda。ToolRegistry._settle_sync另显式接收所属loop，_release_sync在发布request_released之前取得这两项能力；SubprocessRunner的跨线程提交和晚创建native清理回调同样显式绑定登记器/失败能力，不往SubprocessOperation搬Runtime。
+
+LSP准备增加物理终局检查；Shell只允许已释放或可靠交给登记器的状态完成必要交接；Runner使用原wait_idle预算确认I/O消费者和交接退出。准备期间保留绑定只保证依赖查询，不表示已关闭的业务资源仍可使用。纯资源仍由原所有者/登记器承接，ToolRegistry线程池软观察pending不被宣称为Runtime drain已覆盖；既存退出错误和日志边界限制保留。
+
+未新增System、持久化字段或type token，不修改third、前端、业务History/反馈顺序和5秒硬截止。本轮仅源码、文档及只读差异审阅，未运行校验、测试、导入、构建或应用。
+
 
 
 

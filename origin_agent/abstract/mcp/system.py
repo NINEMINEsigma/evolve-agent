@@ -8,8 +8,9 @@ import logging
 import math
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from framework import AsyncSystem
 
@@ -18,7 +19,6 @@ from abstract.mcp.client import (
 )
 from abstract.mcp.work import MCPThreadWork
 from interface.mcp_system import IMCPSystem
-from interface.runtime_system import IRuntimeSystem
 from interface.tool_registry import IToolRegistry
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources
@@ -137,7 +137,6 @@ def _validate_servers(raw: Any) -> tuple[dict[str, dict[str, Any]], dict[str, st
 class MCPSystem(IMCPSystem):
     def __init__(self) -> None:
         super().__init__(dependencies=(IToolRegistry,))
-        self._runtime: IRuntimeSystem | None = None
         self._core: MCPCore | None = None
         self._work: MCPThreadWork | None = None
         self._requests: TaskOwner | None = None
@@ -146,12 +145,6 @@ class MCPSystem(IMCPSystem):
         self._rejected: dict[str, str] = {}
         self._stop_task: asyncio.Task[None] | None = None
         self._close_task: asyncio.Task[None] | None = None
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("MCPSystem has not been awakened")
-        return self._runtime
 
     @property
     def core(self) -> MCPCore:
@@ -172,24 +165,47 @@ class MCPSystem(IMCPSystem):
         return self._requests
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
-        self._core = MCPCore(self.runtime.context, self.get_system(IToolRegistry), self.runtime)
-        self._requests = TaskOwner("mcp-system", self.runtime.record_failure)
-        self._work = MCPThreadWork("mcp-core-work", self.runtime.record_failure)
-        self._work.start()
         try:
+            runtime = self.runtime
+            self._core = MCPCore(runtime.context, self.get_system(IToolRegistry), runtime)
+            self._requests = TaskOwner("mcp-system", runtime.record_failure)
+            self._work = MCPThreadWork("mcp-core-work", runtime.record_failure)
+            self._work.start()
             config, self._rejected = await self.work.run(self._load_config)
             enabled = {name: value for name, value in config.items() if value.get("enabled", True)}
             if enabled:
                 await self.work.run(lambda: self.core.register(enabled))
         except BaseException as original:
-            # framework 不调用失败awake节点的正常shotdown，此处必须自行清理。
-            self.close_admission()
+            # 失败 awake 的真实清理由公共准备任务持有，重复等待不重新释放。
             try:
-                await self._close()
+                await self.prepare_failed_startup()
             except BaseException as cleanup:
                 raise BaseExceptionGroup("MCP startup and cleanup failed", [original, cleanup])
             raise
+
+    async def virtual_prepare_failed_startup(self) -> None:
+        self.close_admission()
+        requests = self._requests
+        core = self._core
+        work = self._work
+        if requests is not None and core is not None and work is not None and not work.is_idle:
+            await self._close()
+            return
+
+        async def stop_requests() -> None:
+            if requests is not None:
+                await requests.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+
+        async def close_core() -> None:
+            if core is not None:
+                # 工作执行器尚未取得资源时 Core 尚无连接；仍释放其已有资源。
+                await asyncio.to_thread(core.shutdown)
+
+        async def close_work() -> None:
+            if work is not None:
+                await work.close()
+
+        await close_resources((stop_requests, close_core, close_work))
 
     def _load_config(self) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
         """Read the config file; unusable entries never abort application startup.
@@ -292,17 +308,23 @@ class MCPSystem(IMCPSystem):
         if self._core is not None:
             self._core.close_admission()
 
-    def _observe_cleanup(self, task: asyncio.Task[None]) -> None:
+    def _observe_cleanup(
+        self,
+        task: asyncio.Task[None],
+        *,
+        on_failure: Callable[[BaseException], None],
+        ) -> None:
         if task.cancelled():
-            self.runtime.record_failure(LifecycleFailure("MCPSystem cleanup was cancelled"))
+            on_failure(LifecycleFailure("MCPSystem cleanup was cancelled"))
         elif (error := task.exception()) is not None:
-            self.runtime.record_failure(error)
+            on_failure(error)
 
     async def stop_calls(self) -> None:
         self.close_admission()
         if self._stop_task is None:
+            on_failure = self.runtime.record_failure
             self._stop_task = asyncio.create_task(self._stop(), name="mcp-system-stop")
-            self._stop_task.add_done_callback(self._observe_cleanup)
+            self._stop_task.add_done_callback(partial(self._observe_cleanup, on_failure=on_failure))
         await asyncio.shield(self._stop_task)
 
     async def _stop(self) -> None:
@@ -314,8 +336,9 @@ class MCPSystem(IMCPSystem):
 
     async def _close(self) -> None:
         if self._close_task is None:
+            on_failure = self.runtime.record_failure
             self._close_task = asyncio.create_task(self._shutdown(), name="mcp-system-close")
-            self._close_task.add_done_callback(self._observe_cleanup)
+            self._close_task.add_done_callback(partial(self._observe_cleanup, on_failure=on_failure))
         await asyncio.shield(self._close_task)
 
     async def _shutdown(self) -> None:
@@ -325,6 +348,6 @@ class MCPSystem(IMCPSystem):
             self.work.close,
         ))
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self.close_admission()
         await self._close()

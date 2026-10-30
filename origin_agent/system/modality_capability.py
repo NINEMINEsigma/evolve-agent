@@ -28,7 +28,6 @@ from contextlib import contextmanager
 
 from interface.llm_profile_store import ILLMProfileStore
 from interface.modality_capability_system import IModalityCapabilitySystem
-from interface.runtime_system import IRuntimeSystem
 from system.lifecycle import (
     ApplicationStoppingError, LifecycleFailure, TaskOwner, requires_lifecycle_propagation,
 )
@@ -460,7 +459,6 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(ILLMProfileStore,))
-        self._runtime: IRuntimeSystem | None = None
         self._profiles: ILLMProfileStore | None = None
         self._owner: TaskOwner | None = None
         self._cache_file: Path | None = None
@@ -470,18 +468,11 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
         self._closed = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._profiles = self.get_system(ILLMProfileStore)
         self._owner = TaskOwner("modality-capability", self.runtime.record_failure)
         self._cache_file = self.runtime.context.workspace / MODALITY_CAPABILITY_ES_FILENAME
         self._wav = _generate_dummy_wav_b64()
         self._mp4 = _load_dummy_mp4_b64()
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("ModalityCapabilitySystem has not been awakened")
-        return self._runtime
 
     @property
     def task_owner(self) -> TaskOwner:
@@ -509,7 +500,7 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
         self.close_admission()
         await self.task_owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         await self.cancel_pending()
         self._probe_locks.clear()
         self._wav = self._mp4 = ""

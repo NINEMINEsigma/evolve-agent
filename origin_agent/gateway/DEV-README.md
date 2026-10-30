@@ -413,4 +413,12 @@ stop_server仍提供既有软观察窗口；virtual_shotdown在serve仍pending�
 
 `GatewayAdmission` 和 `SessionExportService` 保持显式 Runtime 注入，MessageRouter 保留原有查询方式，均不是本次公共基类的继承对象。路由、History 提交、导出、WebSocket、SSE 和端口占用分流不改；未运行校验、构建、实际导入或应用。
 
+## Runtime 无缓存与绑定期间关闭（2026-10-30，当前约定）
+
+SessionManager/GatewaySystem删除`_runtime`，Gateway的具体属性覆写也移除；System业务访问继承`runtime`，初始化向GatewayAdmission/TaskOwner/SessionExportService传入的Runtime只作函数局部引用。前节缓存保留约定由本节覆盖。Session停止/Loop退役完成观察在创建时绑定失败能力，不在迟到回调重新查System。
+
+原关闭主体移至`virtual_prepare_shutdown`，在架构仍绑定时等待回复/队列/History交接、serve终局及导出线程池close；framework真正关闭钩子仅核对准备结果。Gateway的失败awake从叶服务资源创建起进入异常边界，`prepare_failed_startup`持有唯一真实清理：端口预检失败也释放先前创建的导出服务，serve/Owner/socket/导出独立必要释放保持可审查，原始错误与清理失败保留为异常组。单纯端口占用仍是普通拒绝；未确认安全的清理不继续拆依赖。
+
+Application仍先业务停止和History刷新、最后结束输出，再执行关闭准备与原Logger根级联。非System注入、MessageRouter查询、21槽位、协议/持久化和5秒硬截止不变；未运行校验、导入、测试、构建或应用。
+
 

@@ -5,7 +5,7 @@
 ``LSPSymbols``、``LSPRefresh`` 等查询能力。
 
 无 ``lsp_stop``；重复 ``LSPStart`` 直接替换根目录并重启 pyright 进程。
-最终关闭由 framework 的 ``virtual_shotdown`` 确认进程与读取线程均已结束。
+最终关闭在 ``virtual_prepare_shutdown`` 中确认进程与读取线程结束，解绑钩子只核对准备完成。
 
 通信模型：JSON-RPC 2.0 over stdio，帧格式 ``Content-Length: N\\r\\n\\r\\n{json}``。
 独立的 daemon 线程持续读取 pyright stdout，按 ``id`` 分发响应，按 ``method`` 路由通知。
@@ -20,14 +20,14 @@ import shutil
 import subprocess  # nosec
 import sys
 import threading
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
 from interface.lsp_manager import ILSPManager
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from system.sandbox import SandboxError
 
@@ -81,7 +81,6 @@ class LSPManager(ILSPManager):
         self._lock = threading.RLock()
         self._operation_lock = threading.Lock()
         self._admission_closed = threading.Event()
-        self._runtime: IRuntimeSystem | None = None
         self._request_waiters: set[asyncio.Task[Any]] = set()
         self._cleanup_task: asyncio.Task[int] | None = None
         self._state: LSPState = LSPState.IDLE
@@ -97,15 +96,8 @@ class LSPManager(ILSPManager):
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._sandbox = self.get_system(ISandbox)
-        self._loop = self._runtime.loop
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("LSPManager has not been awakened")
-        return self._runtime
+        self._loop = self.runtime.loop
 
     @property
     def sandbox(self) -> ISandbox:
@@ -125,23 +117,42 @@ class LSPManager(ILSPManager):
                 pending["error"] = "LSP is stopping"
                 pending["event"].set()
 
-    def _observe_waiter(self, task: asyncio.Task[Any]) -> None:
+    def _observe_waiter(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        on_failure: Callable[[BaseException], None],
+    ) -> None:
         self._request_waiters.discard(task)
         if task.cancelled():
-            self.runtime.record_failure(LifecycleFailure("Native LSP wait was cancelled"))
+            on_failure(LifecycleFailure("Native LSP wait was cancelled"))
         else:
             error = task.exception()
             if error is not None:
-                self.runtime.record_failure(error)
+                on_failure(error)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self.close_admission()
         if self._cleanup_task is None:
+            on_failure = self.runtime.record_failure
             self._cleanup_task = asyncio.create_task(
                 asyncio.to_thread(self._cleanup), name="lsp-native-cleanup",
             )
-            self._cleanup_task.add_done_callback(self._observe_cleanup)
+            self._cleanup_task.add_done_callback(
+                partial(self._observe_cleanup, on_failure=on_failure),
+            )
         await close_resources((self._wait_cleanup, self._wait_response_threads))
+        self._assert_cleanup_complete()
+
+    def _assert_cleanup_complete(self) -> None:
+        """Require the process and reader threads to have actually exited."""
+        with self._operation_lock:
+            with self._lock:
+                if self._process is not None:
+                    raise LifecycleFailure("LSP process cleanup is incomplete")
+                for thread in (self._reader_thread, self._stderr_thread):
+                    if thread is not None and thread.is_alive():
+                        raise LifecycleFailure(f"LSP thread {thread.name} is still alive")
 
     async def _wait_cleanup(self) -> None:
         task = self._cleanup_task
@@ -175,13 +186,18 @@ class LSPManager(ILSPManager):
                     self.runtime.record_failure(failure)
                 raise BaseExceptionGroup("LSP response cleanup failed", failures)
 
-    def _observe_cleanup(self, task: asyncio.Task[int]) -> None:
+    def _observe_cleanup(
+        self,
+        task: asyncio.Task[int],
+        *,
+        on_failure: Callable[[BaseException], None],
+    ) -> None:
         if task.cancelled():
-            self.runtime.record_failure(LifecycleFailure("LSP cleanup was cancelled"))
+            on_failure(LifecycleFailure("LSP cleanup was cancelled"))
         else:
             error = task.exception()
             if error is not None:
-                self.runtime.record_failure(error)
+                on_failure(error)
 
     # -- 公开属性 --------------------------------------------------
 
@@ -587,9 +603,10 @@ class LSPManager(ILSPManager):
                     self._pending.pop(msg_id, None)
                 return None
 
+        on_failure = self.runtime.record_failure
         task = asyncio.create_task(asyncio.to_thread(_wait), name=f"lsp-response-{msg_id}")
         self._request_waiters.add(task)
-        task.add_done_callback(self._observe_waiter)
+        task.add_done_callback(partial(self._observe_waiter, on_failure=on_failure))
         return await asyncio.shield(task)
 
     def _notify(

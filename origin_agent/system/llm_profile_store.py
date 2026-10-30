@@ -29,7 +29,6 @@ from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
 from system.lifecycle import LifecycleFailure
 from interface.llm_profile_store import ILLMProfileStore
-from interface.runtime_system import IRuntimeSystem
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ class LLMProfileStore(ILLMProfileStore):
 
     async def virtual_awake(self) -> None:
         """取得 RuntimeContext，确定 agentspace 路径并加载 v2 根对象。"""
-        ctx: RuntimeContext = self.get_system(IRuntimeSystem).context
+        ctx: RuntimeContext = self.runtime.context
         self._agentspace_dir = ctx.agentspace
         self._path = self._agentspace_dir / LLM_PROFILES_ES_FILENAME
         with self._lock:

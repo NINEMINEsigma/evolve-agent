@@ -15,7 +15,6 @@ from entity.puretype import DynamicEndpointInfo
 from util.atomic_io import write_text_atomic
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure
 from interface.dynamic_endpoint_system import IDynamicEndpointSystem
-from interface.runtime_system import IRuntimeSystem
 from interface.session_manager import ISessionManager
 
 
@@ -24,7 +23,6 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(ISessionManager,))
-        self._runtime: IRuntimeSystem | None = None
         self._session_manager: ISessionManager | None = None
         self._store_path: Path | None = None
         self._endpoints: dict[str, DynamicEndpointInfo] = {}
@@ -32,19 +30,12 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
         self._frozen = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._session_manager = self.get_system(ISessionManager)
-        self._store_path = self._runtime.context.workspace / DYNAMIC_ENDPOINTS_STORE_FILENAME
+        self._store_path = self.runtime.context.workspace / DYNAMIC_ENDPOINTS_STORE_FILENAME
         self._load_all_endpoints()
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self.close_admission()
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("DynamicEndpointSystem has not been awakened")
-        return self._runtime
 
     @property
     def session_manager(self) -> ISessionManager:

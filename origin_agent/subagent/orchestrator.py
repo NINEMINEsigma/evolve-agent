@@ -1025,28 +1025,19 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
             IToolRegistry, ICronRouter, IAgentspaceService,
             ISandbox, ILLMProfileStore, IModalityCapabilitySystem,
         ))
-        self._runtime: IRuntimeSystem | None = None
         self._session_manager: ISessionManager | None = None
         self._contexts: dict[str, _OrchestratorContext] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._frozen = False
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._session_manager = self.get_system(ISessionManager)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         await self.shutdown_all()
         if self._background_tasks:
             await asyncio.gather(*tuple(self._background_tasks))
-        self._runtime = None
         self._session_manager = None
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("SubAgentOrchestrator has not been awakened")
-        return self._runtime
 
     @property
     def session_manager(self) -> ISessionManager:

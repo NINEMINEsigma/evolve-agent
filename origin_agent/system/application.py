@@ -15,7 +15,7 @@ from entity.constant import ApplicationState, ShutdownReason
 from system.lifecycle import LifecycleFailure, close_resources
 
 if TYPE_CHECKING:
-    from interface.runtime_system import IRuntimeSystem
+    from interface.runtime_system import IDPRuntimeSystem, IRuntimeSystem
     from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
@@ -170,12 +170,11 @@ class Application(AsyncArchitecture):
         systems = _build_system_manifest(self._startup_context)
         order = self._validate_system_graph(systems)
         from interface.cron_router import ICronRouter
-        from interface.runtime_system import IRuntimeSystem
+        from interface.runtime_system import IDPRuntimeSystem, IRuntimeSystem
         try:
             for system_type, system in systems:
-                registered = await self.register(system, system_type=system_type)
-                if not registered:
-                    raise LifecycleFailure(f"Duplicate System slot: {system_type.__name__}")
+                # NOTE: 逻辑上不应该重复注册, 重复的也不会以返回值false完成调用
+                await self.register(system, system_type=system_type)
             runtime = self.get_system(IRuntimeSystem)
             runtime.mark_running()
             AsyncArchitecture.get_system(self, ICronRouter).activate()
@@ -185,7 +184,16 @@ class Application(AsyncArchitecture):
             runtime = self.has_system(IRuntimeSystem)
             if runtime is not None:
                 shutdown_callbacks.callback(runtime.disarm_shutdown_deadline)
-            await self._cleanup_startup_failure(startup_error, runtime)
+            failed_awake_systems = tuple(
+                instance for slot, instance in systems
+                if isinstance(instance, IDPRuntimeSystem)
+                and self.has_system(slot) is instance
+                and instance.system_slot is not None
+                and not instance.is_awake
+            )
+            await self._cleanup_startup_failure(
+                startup_error, runtime, failed_awake_systems=failed_awake_systems,
+            )
             raise
         shutdown_callbacks.callback(runtime.disarm_shutdown_deadline)
         self._state = ApplicationState.RUNNING
@@ -193,6 +201,7 @@ class Application(AsyncArchitecture):
 
     async def _cleanup_startup_failure(
         self, error: BaseException, runtime: IRuntimeSystem | None,
+        *, failed_awake_systems: Sequence[IDPRuntimeSystem],
     ) -> None:
         ordinary_rejection = _is_port_busy_rejection(error)
         if runtime is not None:
@@ -201,7 +210,7 @@ class Application(AsyncArchitecture):
             else:
                 runtime.record_failure(error)
         try:
-            await self._unregister_systems()
+            await self._unregister_systems(failed_awake_systems=failed_awake_systems)
         except BaseException as cleanup_error:
             combined = BaseExceptionGroup("Application startup and cleanup failed", [error, cleanup_error])
             # 根级联或最终清理失败时，保留启动错误和清理错误并一同传播。
@@ -222,8 +231,25 @@ class Application(AsyncArchitecture):
         await asyncio.get_running_loop().create_future()
         raise LifecycleFailure("Failed shutdown hold unexpectedly completed")
 
-    async def _unregister_systems(self) -> None:
-        """从 Logger 根节点级联注销，再封闭并等待资源清理。"""
+    async def _prepare_system_shutdown(self) -> None:
+        """Quiesce real tool work before preparing resource owners in dependency order."""
+        from interface.runtime_system import IDPRuntimeSystem
+        from interface.tool_registry import IToolRegistry
+
+        systems = tuple(self._get_system_stack())
+        for system in systems:
+            if isinstance(system, IToolRegistry):
+                system.close_dispatch()
+                await system.cancel_pending_calls()
+                await system.wait_idle()
+        for system in reversed(systems):
+            if isinstance(system, IDPRuntimeSystem):
+                await system.prepare_shutdown()
+
+    async def _unregister_systems(
+        self, *, failed_awake_systems: Sequence[IDPRuntimeSystem] = (),
+    ) -> None:
+        """Prepare while bound, cascade from Logger, then drain resource cleanup."""
         from interface.logger_system import ILoggerSystem
         from interface.runtime_system import IRuntimeSystem
 
@@ -234,6 +260,12 @@ class Application(AsyncArchitecture):
         # NOTE: 根级联会移除Runtime，后续资源清理只使用这个局部引用，不再输出日志。
         if runtime is not None and runtime.shutdown_reason is None:
             runtime.request_shutdown(ShutdownReason.NORMAL)
+        try:
+            for system in failed_awake_systems:
+                await system.prepare_failed_startup()
+            await self._prepare_system_shutdown()
+        except BaseException as error:
+            await self._hold_failed_shutdown(error, runtime)
         await self.shoudown_system(ILoggerSystem)
         failures: list[BaseException] = []
         if runtime is not None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager, contextmanager
+from functools import partial
 import locale
 import logging
 import os
@@ -22,12 +23,11 @@ from entity.constant import (
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from entity.puretype import ProcessLineStreamResult
 from entity.puretype.resource_cleanup import CleanupReport, CleanupWarning
-from interface.runtime_system import IRuntimeSystem
 from interface.subprocess_runner import ISubprocessRunner
 from system.cleanup_errors import split_cleanup_timeouts
 from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
 from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
-from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle
+from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle, ResourceCleanupRegistry
 from system.subprocess_operation import SubprocessOperation
 
 logger = logging.getLogger(__name__)
@@ -125,18 +125,10 @@ class SubprocessRunner(ISubprocessRunner):
         self._idle.set()
         self._cleanup_failures: list[BaseException] = []
         self._admission_closed = False
-        self._runtime: IRuntimeSystem | None = None
         self._cleanup_producer: CleanupProducer | None = None
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
         self._cleanup_producer = self.runtime.cleanup.open_producer(owner="SubprocessRunner", loop=asyncio.get_running_loop())
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("SubprocessRunner has not been awakened")
-        return self._runtime
 
     def _refresh_idle_locked(self) -> None:
         if self._operations or self._active_procs or self._retained_operations or self._spawning:
@@ -211,14 +203,16 @@ class SubprocessRunner(ISubprocessRunner):
             closing = self._admission_closed
         return closing or self.runtime.state is not ApplicationState.RUNNING
 
-    def _record_cleanup_failure(self, error: BaseException) -> None:
+    def _record_cleanup_failure(
+        self, error: BaseException, *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         _timeouts, remaining = split_cleanup_timeouts(error)
         if remaining is None:
             return
         with self._procs_lock:
             if not any(item is error for item in self._cleanup_failures):
                 self._cleanup_failures.append(error)
-        self.runtime.record_failure(error)
+        on_failure(error)
 
     def _process_key(self, operation: SubprocessOperation) -> str:
         proc = operation.process
@@ -230,27 +224,42 @@ class SubprocessRunner(ISubprocessRunner):
         submission, claimed = operation.claim_cleanup_submission()
         if not claimed:
             return submission
+        runtime = self.runtime
+        loop = runtime.loop
+        cleanup = runtime.cleanup
+        on_failure = runtime.record_failure
         try:
             try:
                 running = asyncio.get_running_loop()
             except RuntimeError:
                 running = None
-            if running is self.runtime.loop:
-                self._start_process_cleanup(operation, submission)
+            start_cleanup = partial(
+                self._start_process_cleanup, operation, submission,
+                cleanup=cleanup, on_failure=on_failure,
+            )
+            if running is loop:
+                start_cleanup()
             else:
-                self.runtime.loop.call_soon_threadsafe(self._start_process_cleanup, operation, submission)
+                loop.call_soon_threadsafe(start_cleanup)
         except BaseException as error:
             if not submission.done():
                 submission.set_exception(error)
-            self._record_cleanup_failure(error)
+            self._record_cleanup_failure(error, on_failure=on_failure)
         return submission
 
-    def _start_process_cleanup(self, operation: SubprocessOperation,
-                               submission: Future[ResourceCleanupHandle]) -> None:
+    def _start_process_cleanup(
+        self,
+        operation: SubprocessOperation,
+        submission: Future[ResourceCleanupHandle],
+        *,
+        cleanup: ResourceCleanupRegistry,
+        on_failure: Callable[[BaseException], None],
+    ) -> None:
         try:
-            handle = self.runtime.cleanup.begin(
+            handle = cleanup.begin(
                 operation.reservation, resource_id=self._process_key(operation), phase="terminate",
-                factory=lambda: self._release_process(operation), is_released=operation.is_released,
+                factory=partial(self._release_process, operation, on_failure=on_failure),
+                is_released=operation.is_released,
                 kill_authorized=operation.identity is not None,
             )
             handle.retain(operation)
@@ -258,11 +267,13 @@ class SubprocessRunner(ISubprocessRunner):
             handle.release_observed.add_done_callback(lambda _done: self._on_process_released(operation))
         except BaseException as error:
             submission.set_exception(error)
-            self._record_cleanup_failure(error)
+            self._record_cleanup_failure(error, on_failure=on_failure)
         else:
             submission.set_result(handle)
 
-    async def _release_process(self, operation: SubprocessOperation) -> None:
+    async def _release_process(
+        self, operation: SubprocessOperation, *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         proc = operation.process
         if proc is None:
             raise LifecycleFailure("Cannot clean up an uncreated subprocess")
@@ -284,7 +295,9 @@ class SubprocessRunner(ISubprocessRunner):
                     if stream is not None:
                         stream.close()
             operation.native_cleanup_task = asyncio.create_task(asyncio.to_thread(finish_native), name="subprocess-native-cleanup")
-            operation.native_cleanup_task.add_done_callback(self._observe_cleanup_task)
+            operation.native_cleanup_task.add_done_callback(
+                partial(self._observe_cleanup_task, on_failure=on_failure),
+            )
             await asyncio.shield(operation.native_cleanup_task)
         else:
             async def discard(reader: asyncio.StreamReader | None) -> None:
@@ -300,13 +313,17 @@ class SubprocessRunner(ISubprocessRunner):
                 group.create_task(proc.wait())
         operation.mark_resources_closed()
 
-    def _observe_cleanup_task(self, task: asyncio.Task[None]) -> None:
+    def _observe_cleanup_task(
+        self, task: asyncio.Task[None], *, on_failure: Callable[[BaseException], None],
+    ) -> None:
         if task.cancelled():
-            self._record_cleanup_failure(LifecycleFailure("Subprocess cleanup task was cancelled"))
+            self._record_cleanup_failure(
+                LifecycleFailure("Subprocess cleanup task was cancelled"), on_failure=on_failure,
+            )
         else:
             error = task.exception()
             if error is not None:
-                self._record_cleanup_failure(error)
+                self._record_cleanup_failure(error, on_failure=on_failure)
 
     def _pending_report(self, operation: SubprocessOperation) -> CleanupReport:
         warning = CleanupWarning(owner="SubprocessRunner", resource_id=self._process_key(operation), phase="submit",
@@ -357,9 +374,12 @@ class SubprocessRunner(ISubprocessRunner):
 
     def _start_io_handoff(self, operation: SubprocessOperation, *, cancel_readers: bool) -> asyncio.Task[None]:
         if operation.io_join_task is None:
+            on_failure = self.runtime.record_failure
             operation.io_join_task = asyncio.create_task(
                 self._join_io_tasks(operation, cancel_readers=cancel_readers), name="subprocess-io-handoff")
-            operation.io_join_task.add_done_callback(self._observe_cleanup_task)
+            operation.io_join_task.add_done_callback(
+                partial(self._observe_cleanup_task, on_failure=on_failure),
+            )
         return operation.io_join_task
 
     async def _join_io_tasks(self, operation: SubprocessOperation, *, cancel_readers: bool) -> None:
@@ -404,7 +424,7 @@ class SubprocessRunner(ISubprocessRunner):
         error = operation.creation_error
         if error is not None and not isinstance(error, (ApplicationStoppingError, asyncio.CancelledError)):
             # 完成回调可能已先执行；放弃方也负责补交付无人接收的原创建错误。
-            self._record_cleanup_failure(error)
+            self._record_cleanup_failure(error, on_failure=self.runtime.record_failure)
 
     def _spawn_finished(self, operation: SubprocessOperation, task: asyncio.Task[asyncio.subprocess.Process]) -> None:
         error = LifecycleFailure("Subprocess creation task was cancelled") if task.cancelled() else task.exception()
@@ -416,9 +436,9 @@ class SubprocessRunner(ISubprocessRunner):
             self._spawning.discard(task)
             self._refresh_idle_locked()
         if error is not None and operation.abandoned and not isinstance(error, (ApplicationStoppingError, asyncio.CancelledError)):
-            self._record_cleanup_failure(error)
+            self._record_cleanup_failure(error, on_failure=self.runtime.record_failure)
         elif error is not None and task.cancelled():
-            self._record_cleanup_failure(error)
+            self._record_cleanup_failure(error, on_failure=self.runtime.record_failure)
 
     async def _spawn_async(self, args: list[str], popen_kwargs: dict,
                            operation: SubprocessOperation) -> asyncio.subprocess.Process:
@@ -465,7 +485,7 @@ class SubprocessRunner(ISubprocessRunner):
                     operation.mark_io_finished()
                     self._observe_process_release_sync(operation)
             except BaseException as error:
-                self._record_cleanup_failure(error)
+                self._record_cleanup_failure(error, on_failure=self.runtime.record_failure)
                 if original is not None and original is not error:
                     raise BaseExceptionGroup("Subprocess cleanup failed", [original, error]) from None
                 raise
@@ -488,7 +508,7 @@ class SubprocessRunner(ISubprocessRunner):
                 # 创建/消费者/释放由各自持有者继续收尾，不能把再次取消当成释放完成。
                 raise
             except BaseException as error:
-                self._record_cleanup_failure(error)
+                self._record_cleanup_failure(error, on_failure=self.runtime.record_failure)
                 if original is not None and original is not error:
                     raise BaseExceptionGroup("Subprocess cleanup failed", [original, error]) from None
                 raise
@@ -653,17 +673,54 @@ class SubprocessRunner(ISubprocessRunner):
             if failures:
                 raise BaseExceptionGroup("Subprocess termination failed", failures)
 
+    async def _wait_consumer_handoffs(
+        self, operations: tuple[SubprocessOperation, ...], *, deadline: float,
+    ) -> None:
+        loop = asyncio.get_running_loop()
+        waiters: set[asyncio.Future[Any]] = set()
+        for operation in operations:
+            if not operation.io_finished.done():
+                adapted = asyncio.wrap_future(operation.io_finished)
+                adapted.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+                waiters.add(adapted)
+            waiters.update(task for task in operation.io_tasks if not task.done())
+            if operation.io_join_task is not None and not operation.io_join_task.done():
+                waiters.add(operation.io_join_task)
+        if waiters:
+            _done, pending = await asyncio.wait(
+                waiters, timeout=max(0.0, deadline - loop.time()),
+            )
+            if pending:
+                raise LifecycleFailure("Subprocess consumers did not hand off before the deadline")
+        for operation in operations:
+            if not operation.io_finished.done() or any(not task.done() for task in operation.io_tasks):
+                raise LifecycleFailure("Subprocess consumer handoff is incomplete")
+            operation.io_finished.result()
+            if operation.io_join_task is not None:
+                if not operation.io_join_task.done():
+                    raise LifecycleFailure("Subprocess I/O handoff task has not finished")
+                operation.io_join_task.result()
+
     async def wait_idle(self) -> None:
         self.close_admission()
-        await asyncio.to_thread(self._idle.wait, SYSTEM_QUIESCE_TIMEOUT_SECONDS)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + SYSTEM_QUIESCE_TIMEOUT_SECONDS
+        await asyncio.to_thread(self._idle.wait, max(0.0, deadline - loop.time()))
         with self._procs_lock:
             failures = list(self._cleanup_failures)
             active = bool(self._operations or self._spawning)
+            operations = tuple(self._operations | self._retained_operations)
         if active:
             failures.append(LifecycleFailure("Subprocess operations did not finish before the deadline"))
+        try:
+            await self._wait_consumer_handoffs(operations, deadline=deadline)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:
+            failures.append(error)
         if failures:
             raise BaseExceptionGroup("Subprocess cleanup failed", failures)
         # 只剩纯资源pending时由registry最终drain继续等真实清理。
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         await close_resources((self.terminate_all, self.wait_idle))

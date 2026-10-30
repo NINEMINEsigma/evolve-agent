@@ -289,6 +289,16 @@ Application 不再保存 `_registered_types`，`_unregister_systems()` 统一等
 
 12个接口的重复抽象 `runtime` 属性收敛至公共基类，具体实现中的缓存属性覆写不删除。framework 在调用 `virtual_shotdown()` 前解除架构绑定，基类默认 `runtime` 通过 `get_system()` 查询只适用于架构仍绑定的阶段；关闭钩子和迟到回调保留现有 `_runtime`、绑定方法或局部引用。Agentspace、Sandbox、Profile 等原有上下文访问不因新基类而改写，叶服务及非 System 对象保持显式注入或查询。无资源所有权、持久化或硬截止变更；未运行校验、构建、实际导入或应用。
 
+## Runtime 无缓存与绑定期间关闭（2026-10-30，后续修订）
+
+本节覆盖前节缓存保留约定：基础设施System移除Runtime实例缓存和同名属性覆写，统一使用继承`runtime`，Sandbox/Profile/Agentspace初始化也用此属性。已有RuntimeContext、Runner、Sandbox及叶服务职责不变，非System注入不改。
+
+`IDPRuntimeSystem`持有关闭准备和失败启动清理的唯一task。Application先等待实际failed-awake清理，再等待已唤醒Registry的真实工作，使用继承依赖栈的局部逆序快照完成各节点`prepare_shutdown`，然后仍只做一次Logger根级联；解绑后公共钩子只检查准备结果。准备失败保留绑定及主loop到原硬截止，根级联/最终drain的原异常边界不扩大。
+
+Agentspace恢复task由实例持有，部分初始化失败也等待恢复线程与watcher真实结束后才close EventHub。LSP核对进程/读线程终局；Shell区分登记前必要交接失败与已登记的可选释放错误；Runner在原wait_idle预算内确认消费者和I/O交接，跨线程清理及native观察提前绑定能力。元数据/模态请求仍由原TaskOwner取消和结算。
+
+子进程/PTY/浏览器连接的已登记纯释放继续由Runtime清理登记器最终drain。工具线程池原软观察pending仍按既有task/线程退出阶段持有，不在本轮扩大改造或宣称由drain覆盖；日志退出边界既存限制保留。21槽位、依赖、持久化、History顺序、ExitStack与5秒硬截止不变。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。
+
 
 
 

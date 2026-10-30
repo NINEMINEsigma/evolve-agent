@@ -365,3 +365,11 @@ Browser最终注销对已登记的自有无头Popen只请求一次终止，再�
 `IApprovalSystem`、`IBrowserSystem`、`ICronRouter`、`IDynamicEndpointSystem` 改继承 `IDPRuntimeSystem`，四个具体实现仍只继承各自接口。构造移除重复 Runtime 声明，其余业务依赖不变；Runtime 与 Logger 依赖由公共基类链自动加入，最终依赖集合和注册槽位不变。
 
 Browser、Cron、DynamicEndpoint 接口移除重复抽象 `runtime`，具体实现的缓存属性覆写、唤醒赋值和已有 `_runtime` 引用均保留；Approval 原有缓存访问同样不改。framework 解绑后的关闭期仍使用已有引用，不改成公共属性的动态查询。审批、工具、Timer、浏览器进程与动态端点的业务和资源所有权保持，无持久化或前端变更。未运行校验、构建、实际导入或应用。
+
+## Runtime 属性与关闭准备（2026-10-30，当前约定）
+
+Approval/Browser/Cron/DynamicEndpoint移除Runtime缓存与具体属性覆写，统一继承`runtime`；前节缓存保留约定由本节覆盖。关闭主体更名为`virtual_prepare_shutdown`，Application在绑定期间等待它们，真正framework钩子只核对结果。释放Browser等服务前先有Registry真实工作屏障，不把图上独立视为工具运行时不会使用这些服务。
+
+Cron的停止观察预绑定`on_failure`，保持错误列表、Runtime→Cron锁序、持久任务语义和真实Timer join；失败不继续拆依赖。Browser的登记器release闭包仅使用既有browser/driver引用，纯连接释放pending由原登记器承接；自有进程仍实际等待，不查杀用户浏览器。Approval请求及DynamicEndpoint持久数据语义不改。
+
+无新增槽位或依赖边，不改third、前端、持久化、审批授权或5秒硬截止。日志退出和工具线程池软观察的既存限制不在本轮扩大修复。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。

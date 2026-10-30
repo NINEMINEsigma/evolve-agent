@@ -45,7 +45,6 @@ from util.atomic_io import (
 )
 from system.lifecycle import LifecycleFailure
 from interface.agentspace_service import IAgentspaceService
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from system.sandbox import SandboxError
 from system.session_visual_resources import SessionVisualResourceService
@@ -92,69 +91,97 @@ class AgentspaceService(IAgentspaceService):
         self._visual_resources: SessionVisualResourceService | None = None
         self._session_variables: SessionVariableService | None = None
         self._file_changes: SessionFileChangeStore | None = None
+        self._recovery_task: asyncio.Task[None] | None = None
         self._pending_changes: dict[str, str] = {}
         self._pending_lock = threading.Lock()
         self._started = False
         self._watcher_available = False
 
     async def virtual_awake(self) -> None:
-        runtime = self.get_system(IRuntimeSystem)
+        runtime = self.runtime
         sandbox = self.get_system(ISandbox)
         ctx = runtime.context
         self._sandbox = sandbox
         self._root = ctx.agentspace.resolve()
-        self._event_hub = AgentspaceEventHub(AGENTSPACE_EVENT_QUEUE_SIZE)
-        self._lock_registry = AgentspaceLockRegistry(
-            self._event_hub,
-            self.path_identity,
-        )
-        self._operation_gate = AgentspaceOperationGate(self._lock_registry)
-        self._trash_store = AgentspaceTrashStore(
-            self._root / AGENTSPACE_TRASH_DIR_NAME,
-            self._resolve_user_path,
-        )
-        self._watcher = AgentspaceWatcher(
-            self._root,
-            self._event_hub,
-            AGENTSPACE_WATCH_DEBOUNCE_MS,
-            {AGENTSPACE_TRASH_DIR_NAME, AGENTSPACE_INTERNAL_DIR_NAME},
-        )
-        self._visual_resources = SessionVisualResourceService(sandbox)
-        self._session_variables = SessionVariableService(sandbox)
-        self._file_changes = SessionFileChangeStore(ctx.workspace / SESSIONS_DIR_NAME)
-        # 初始化失败也必须收尾已经取得的资源；取消不能遗留恢复线程。
-        loop = asyncio.get_running_loop()
-        self._event_hub.bind_loop(loop)
-        recovery = asyncio.create_task(
-            asyncio.to_thread(self.trash_store.recover_staging),
-            name="agentspace-trash-recovery",
-        )
+        recovery: asyncio.Task[None] | None = None
         try:
+            self._event_hub = AgentspaceEventHub(AGENTSPACE_EVENT_QUEUE_SIZE)
+            self._lock_registry = AgentspaceLockRegistry(
+                self._event_hub,
+                self.path_identity,
+            )
+            self._operation_gate = AgentspaceOperationGate(self._lock_registry)
+            self._trash_store = AgentspaceTrashStore(
+                self._root / AGENTSPACE_TRASH_DIR_NAME,
+                self._resolve_user_path,
+            )
+            self._watcher = AgentspaceWatcher(
+                self._root,
+                self._event_hub,
+                AGENTSPACE_WATCH_DEBOUNCE_MS,
+                {AGENTSPACE_TRASH_DIR_NAME, AGENTSPACE_INTERNAL_DIR_NAME},
+            )
+            self._visual_resources = SessionVisualResourceService(sandbox)
+            self._session_variables = SessionVariableService(sandbox)
+            self._file_changes = SessionFileChangeStore(ctx.workspace / SESSIONS_DIR_NAME)
+            # 恢复和失败清理由实例持有，取消等待方不能遗留真实线程。
+            loop = asyncio.get_running_loop()
+            self._event_hub.bind_loop(loop)
+            recovery = asyncio.create_task(
+                asyncio.to_thread(self.trash_store.recover_staging),
+                name="agentspace-trash-recovery",
+            )
+            self._recovery_task = recovery
             await asyncio.shield(recovery)
             self._watcher.start(loop)
         except BaseException as failure:
             runtime.record_failure(failure)
-            failures: list[BaseException] = [failure]
             try:
-                await asyncio.shield(recovery)
-            except BaseException as exc:
-                if exc is not failure:
-                    failures.append(exc)
-            try:
-                await self.watcher.stop()
-            except TimeoutError:
-                logger.warning("Agentspace watcher cleanup is still pending")
-            except BaseException as exc:
-                failures.append(exc)
-            try:
-                self._event_hub.close()
-            except BaseException as exc:
-                failures.append(exc)
-            if len(failures) > 1:
-                raise BaseExceptionGroup("Agentspace initialization cleanup failed", failures) from None
+                await self.prepare_failed_startup()
+            except BaseException as cleanup_error:
+                if cleanup_error is not failure:
+                    raise BaseExceptionGroup(
+                        "Agentspace initialization cleanup failed", [failure, cleanup_error],
+                    ) from None
             raise
+        self._recovery_task = None
         self._watcher_available = True
         self._started = True
+
+    async def virtual_prepare_failed_startup(self) -> None:
+        await self._cleanup_failed_awake(self._recovery_task)
+
+    async def _cleanup_failed_awake(self, recovery: asyncio.Task[None] | None) -> None:
+        failures: list[BaseException] = []
+        if recovery is not None:
+            try:
+                await asyncio.shield(recovery)
+            except BaseException as error:
+                failures.append(error)
+        watcher = self._watcher
+        if watcher is not None:
+            try:
+                watcher.request_stop()
+                try:
+                    await watcher.stop()
+                except TimeoutError:
+                    logger.warning("Agentspace watcher cleanup is still pending")
+                await watcher.wait_stopped()
+            except BaseException as error:
+                failures.append(error)
+        # 恢复线程与 watcher 均实际退出后才允许失去 EventHub。
+        recovery_finished = recovery is None or (recovery.done() and not recovery.cancelled())
+        if recovery_finished and (watcher is None or watcher.is_stopped()):
+            if self._event_hub is not None:
+                try:
+                    self._event_hub.close()
+                except BaseException as error:
+                    failures.append(error)
+            self._recovery_task = None
+        self._started = False
+        self._watcher_available = False
+        if failures:
+            raise BaseExceptionGroup("Agentspace failed startup cleanup failed", failures)
 
     @property
     def sandbox(self) -> ISandbox:
@@ -756,7 +783,7 @@ class AgentspaceService(IAgentspaceService):
             lines.append(f"- {labels.get(operation, operation)}: {path}")
         return "\n".join(lines)
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         """关闭：停止 watcher（取消 debounce timers、join 并确认退出），最终释放 EventHub。
 
         watcher.stop 取消所有 debounce Timer、停止 Observer 并 join(timeout=5)；

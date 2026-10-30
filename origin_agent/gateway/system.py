@@ -21,7 +21,6 @@ from interface.dynamic_endpoint_system import IDynamicEndpointSystem
 from interface.frontend_sink import IFrontendSink
 from interface.gateway_system import IGatewaySystem
 from interface.llm_profile_store import ILLMProfileStore
-from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_manager import ISessionManager
 from interface.session_metadata_service import ISessionMetadataService
@@ -85,7 +84,6 @@ class GatewaySystem(IGatewaySystem):
             IDynamicEndpointSystem, IFrontendSink, IAgentspaceService, IApprovalSystem,
             ILLMProfileStore, ISessionMetadataService, ICronRouter, IShellManager, ISandbox,
         ))
-        self._runtime: IRuntimeSystem | None = None
         self._admission: GatewayAdmission | None = None
         self._ready = GatewayReadyTracker()
         self._owner: TaskOwner | None = None
@@ -135,14 +133,26 @@ class GatewaySystem(IGatewaySystem):
         return self.task_owner.create(coro, name=name)
 
     async def virtual_awake(self) -> None:
-        self._runtime = self.get_system(IRuntimeSystem)
-        self._admission = GatewayAdmission(self._runtime)
-        self._owner = TaskOwner("gateway", self._runtime.record_failure)
-        self._session_exports = SessionExportService(
-            self._runtime, self.get_system(ISessionManager), self.get_system(ISandbox),
-            self.get_system(IAgentspaceService).visual_resources,
-        )
-        await self._start()
+        runtime = self.runtime
+        try:
+            self._admission = GatewayAdmission(runtime)
+            self._owner = TaskOwner("gateway", runtime.record_failure)
+            self._session_exports = SessionExportService(
+                runtime, self.get_system(ISessionManager), self.get_system(ISandbox),
+                self.get_system(IAgentspaceService).visual_resources,
+            )
+            await self._start()
+        except BaseException as original:
+            try:
+                await self.prepare_failed_startup()
+            except BaseException as cleanup:
+                raise BaseExceptionGroup(
+                    "Gateway startup and cleanup failed", [original, cleanup],
+                ) from None
+            raise
+
+    async def virtual_prepare_failed_startup(self) -> None:
+        await self._release_startup_resources()
 
     async def _start(self) -> None:
         from gateway.server import build_router_app
@@ -153,70 +163,58 @@ class GatewaySystem(IGatewaySystem):
             raise GatewayPortBusyError(
                 f"Gateway port {ctx.gateway_port} on {ctx.gateway_host} is already in use"
             )
+        self._app = build_router_app()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            self._app = build_router_app()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind((ctx.gateway_host, ctx.gateway_port))
-                sock.listen(socket.SOMAXCONN)
-                sock.setblocking(False)
-                sock.set_inheritable(False)
-            except BaseException:
-                sock.close()
-                raise
-            self._socket = sock
-            config = uvicorn.Config(
-                app=self._app,
-                log_level="warning",
-                ws_max_size=100 * 1024 * 1024,  # 100MB — 容纳大视频 base64
-            )
-            self._server = _GatewayUvicornServer(config, self._ready)
-            self._serve_task = asyncio.create_task(
-                self._server.serve(sockets=[sock]), name="gateway-uvicorn-serve",
-            )
-            wait_ready = asyncio.create_task(self._ready.wait_ready(), name="gateway-ready-wait")
-            try:
-                done, _ = await asyncio.wait(
-                    {wait_ready, self._serve_task},
-                    timeout=GATEWAY_START_TIMEOUT_SECONDS,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-            finally:
-                if not wait_ready.done():
-                    wait_ready.cancel()
-                    await asyncio.gather(wait_ready, return_exceptions=True)
-            if self._serve_task in done:
-                # serve 在 ready 前结束：启动失败，传播真实异常。
-                self._serve_task.result()
-                raise LifecycleFailure("Gateway server exited before becoming ready")
-            if not self._ready.ready:
-                raise LifecycleFailure(
-                    f"Gateway did not finish startup within {GATEWAY_START_TIMEOUT_SECONDS}s"
-                )
-            logger.info(
-                f"Webpage http://localhost:{ctx.gateway_port}",
-            )
-            logger.info(
-                "Gateway listening on http://%s:%d (ws /ws/chat)",
-                ctx.gateway_host, ctx.gateway_port,
-            )
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((ctx.gateway_host, ctx.gateway_port))
+            sock.listen(socket.SOMAXCONN)
+            sock.setblocking(False)
+            sock.set_inheritable(False)
         except BaseException:
-            await self._release_startup_resources()
+            sock.close()
             raise
-
-    @property
-    def runtime(self) -> IRuntimeSystem:
-        if self._runtime is None:
-            raise LifecycleFailure("GatewaySystem has not been awakened")
-        return self._runtime
+        self._socket = sock
+        config = uvicorn.Config(
+            app=self._app,
+            log_level="warning",
+            ws_max_size=100 * 1024 * 1024,  # 100MB — 容纳大视频 base64
+        )
+        self._server = _GatewayUvicornServer(config, self._ready)
+        self._serve_task = asyncio.create_task(
+            self._server.serve(sockets=[sock]), name="gateway-uvicorn-serve",
+        )
+        wait_ready = asyncio.create_task(self._ready.wait_ready(), name="gateway-ready-wait")
+        try:
+            done, _ = await asyncio.wait(
+                {wait_ready, self._serve_task},
+                timeout=GATEWAY_START_TIMEOUT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not wait_ready.done():
+                wait_ready.cancel()
+                await asyncio.gather(wait_ready, return_exceptions=True)
+        if self._serve_task in done:
+            # serve 在 ready 前结束：启动失败，传播真实异常。
+            self._serve_task.result()
+            raise LifecycleFailure("Gateway server exited before becoming ready")
+        if not self._ready.ready:
+            raise LifecycleFailure(
+                f"Gateway did not finish startup within {GATEWAY_START_TIMEOUT_SECONDS}s"
+            )
+        logger.info(
+            f"Webpage http://localhost:{ctx.gateway_port}",
+        )
+        logger.info(
+            "Gateway listening on http://%s:%d (ws /ws/chat)",
+            ctx.gateway_host, ctx.gateway_port,
+        )
 
     async def _release_startup_resources(self) -> None:
         """半初始化失败的资源回收；不恢复业务状态。"""
         async def stop_serve() -> None:
             server, task = self._server, self._serve_task
-            self._server = None
-            self._serve_task = None
             if task is None:
                 return
             if server is not None:
@@ -226,20 +224,25 @@ class GatewaySystem(IGatewaySystem):
                 await task
             except asyncio.CancelledError:
                 pass
+            self._server = None
+            self._serve_task = None
 
         async def close_socket() -> None:
-            sock, self._socket = self._socket, None
+            sock = self._socket
             if sock is not None:
                 await asyncio.to_thread(sock.close)
+                self._socket = None
 
         async def close_owner() -> None:
             if self._owner is not None and not self._owner.is_idle:
                 await self._owner.cancel_and_wait(timeout=SYSTEM_QUIESCE_TIMEOUT_SECONDS)
 
-        await close_resources((stop_serve, close_socket, close_owner))
-        if self._session_exports is not None:
-            await self._session_exports.close()
-            self._session_exports = None
+        async def close_exports() -> None:
+            if self._session_exports is not None:
+                await self._session_exports.close()
+                self._session_exports = None
+
+        await close_resources((stop_serve, close_socket, close_owner, close_exports))
 
     # -- P3 关闭阶段接口 --
 
@@ -282,7 +285,7 @@ class GatewaySystem(IGatewaySystem):
 
         await close_resources((stop_serve, close_socket))
 
-    async def virtual_shotdown(self) -> None:
+    async def virtual_prepare_shutdown(self) -> None:
         self.stop_accepting()
         await self.stop_server()
         serve_task = self._serve_task
