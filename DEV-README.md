@@ -473,6 +473,8 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 
 `ActivityEvent` 仅携带主会话消息接收、Agent response stream、tool call 的安全元数据。`message_received` 是单条 observed 事实事件；Agent response/tool call 有 started/completed 生命周期。Gateway 通过 LoggerSystem 订阅活动 SSE，前端 Activity Tab 不直接读取混合日志或内部 protected 字段。
 
+活动事件写入统一复用 `ILoggableSystem.record_activity()` 转发：`BaseAgentLoop.record_activity_event()` 通过 `IRuntimeSystem` 发布，MessageRouter通过 `IGatewaySystem` 发布；原有响应与工具事件上层调用、事件构造及发布时序保持不变。GatewaySystem不再重复声明能力基类已加入的Logger依赖；活动SSE仍直接通过 `ILoggerSystem` 订阅及取消订阅。未新增System、缓存Logger或改变日志终止边界；本次仅修改源码与文档，未运行校验或应用。
+
 ## 全局工具循环配置（2026-10-26）
 
 前端“模型配置 Tab → 全局运行配置”提供所有Agent共用的工具循环轮次上限；正整数或留空用默认，`MAX_TOOL_TURNS`保留为唯一默认来源（当前90），显式配置90与未配置null不同。保存/恢复默认通过typed `GET/PUT /api/agent-loop/settings`，服务端返回自定义值、有效值与默认值，前端不写localStorage也不复制默认数字。

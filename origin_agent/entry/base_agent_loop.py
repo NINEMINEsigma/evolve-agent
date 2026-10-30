@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from interface.agentspace_service import IAgentspaceService
 from interface.llm_profile_store import ILLMProfileStore
-from interface.logger_system import ILoggerSystem
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_metadata_service import ISessionMetadataService
@@ -1461,7 +1460,7 @@ class BaseAgentLoop(ABC):
             tool_name=tool_name,
             duration_ms=duration_ms,
         )
-        return self.app.get_system(ILoggerSystem).record_activity(draft)
+        return self.app.get_system(IRuntimeSystem).record_activity(draft)
 
     # -- 主会话活动快照 --------------------------------------------------
 

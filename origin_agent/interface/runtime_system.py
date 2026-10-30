@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING
+from typing import * # type: ignore
 
 from entity.constant import ApplicationState, ShutdownReason
 from entity.puretype.agent_settings import AgentLoopSettingsState
 from system.context import RuntimeContext
+from framework import AsyncSystem
 
 from .logger_system import ILoggableSystem
 
@@ -151,3 +152,17 @@ class IRuntimeSystem(ILoggableSystem, ABC):
     def disarm_shutdown_deadline(self) -> None:
         """Cancel the hard shutdown deadline timer before final exit."""
         ...
+
+
+class IRuntimeDPSystem(ILoggableSystem):
+    def __init__(
+        self, 
+        dependencies: Iterable[type[AsyncSystem]] = []
+        ) -> None:
+        super().__init__(
+            list(dependencies) + [IRuntimeSystem]
+            )
+
+    @property
+    def runtime(self) -> IRuntimeSystem:
+        return self.get_system(IRuntimeSystem)

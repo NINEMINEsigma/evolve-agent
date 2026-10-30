@@ -394,6 +394,8 @@ InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用
 
 事件不替代既有FrontendSink WebSocket消息，也不把标准 Python logging正文转发到前端。普通子Agent不通过主会话ToolExecutor发布首版全局工具事件；ColloquyLoop沿ParentAgentLoop路径复用活动生命周期。
 
+活动事件记录经 `ILoggableSystem.record_activity()` 间接转发：`BaseAgentLoop.record_activity_event()` 保留统一事件构造与会话归属，通过 `app.get_system(IRuntimeSystem)` 发布；ParentAgentLoop、MultiAgentWorker、ToolExecutor及IMainSessionLoop的上层调用保持不变。MessageRouter通过 `IGatewaySystem` 发布输入接收事件。Loop与MessageRouter不继承System，也不缓存Logger。事件字段、发布时序、返回类型与History行为不变；本次未运行校验或应用。
+
 ## 全局工具循环配置（2026-10-26）
 
 `BaseAgentLoop.max_tool_turns` 是所有真实Loop共用的公开只读入口，通过 `IRuntimeSystem.max_tool_turns` 读取服务端内存值，不复制配置到Loop。`ParentAgentLoop`（含随意聊聊）与 `MultiAgentWorker` 每次进入下一迭代前捕获有效上限，和原计数器比较；超限日志/提示使用导致退出的同一个局部值，保存期间已发模型请求、审批和整批工具继续提交收尾。旧 `_MAX_TOOL_TURNS` 模块别名已删除。

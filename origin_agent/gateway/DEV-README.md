@@ -179,6 +179,8 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 
 Gateway 新增只读 `/api/activity/overview` 与 `/api/activity/events`。overview 从 SessionManager/ToolRegistry读取当前会话、活跃主会话Loop、工具和工具集数量，不创建Loop；events只订阅LoggerSystem在连接建立后的增量事件，不发送历史快照或 `id:`，每个等待任务由GatewaySystem.task_owner登记，断线/取消/关闭在生成器finally中清理。
 
+MessageRouter在主会话输入登记成功后，通过 `Application.current().get_system(IGatewaySystem).record_activity()` 发布 `message_received`，复用 `ILoggableSystem` 的活动事件转发，不直接取得Logger。GatewaySystem的Logger依赖由能力基类自动声明，构造不再重复列出。SSE订阅与取消订阅仍直接使用 `ILoggerSystem`，因为能力基类不提供订阅接口。事件载荷、发布时序和连接清理不变；本次未运行校验或应用。
+
 ### 会话管理
 
 | 方法 | 端点 | 说明 |

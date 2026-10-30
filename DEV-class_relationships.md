@@ -1548,6 +1548,8 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 `MessageRouter` 发布主会话消息接收事实事件；`ParentAgentLoop`、`MultiAgentWorker` 发布每个 stream 的 Agent 响应生命周期事件；`ToolExecutor` 发布主会话工具调用生命周期事件。活动事件不进入 History、不替代 FrontendSink WebSocket、不持久化；Gateway 通过 Logger System 提供只读 overview/SSE，前端 Activity Dashboard 使用唯一 EventSource。
 
+活动事件记录调用于2026-10-30迁移到 `ILoggableSystem` 间接接口：`BaseAgentLoop.record_activity_event()` 经现有 `app.get_system(IRuntimeSystem).record_activity(draft)` 发布，保留事件构造与返回值；MessageRouter经 `IGatewaySystem.record_activity()` 发布输入接收事实。两者仍为非System对象，不增加继承或Logger缓存；ParentAgentLoop、MultiAgentWorker、ToolExecutor及IMainSessionLoop的上层委托保持不变。GatewaySystem的Logger依赖只由能力基类声明，SSE订阅仍经 `ILoggerSystem` 公开契约。无新增字段、System槽位、跨类protected访问或持久化变化；未运行校验或应用。
+
 ### 全局工具循环配置关系（2026-10-26，权威）
 
 | 归属 | 新字段/公共契约 | 跨模块访问与生命周期 |

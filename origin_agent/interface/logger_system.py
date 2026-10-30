@@ -55,7 +55,11 @@ class ILoggableSystem(AsyncSystem):
             list(dependencies) + [ILoggerSystem]
             )
 
-    def log(self, level: str, message: str) -> None:
+    def log(
+        self, 
+        level: str, 
+        message: str
+        ) -> None:
         """Dispatch a compatibility text log to Logger components."""
         self.get_system(ILoggerSystem).log(level, message)
 
