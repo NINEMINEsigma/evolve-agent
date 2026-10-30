@@ -1,144 +1,134 @@
 /**
- * config-manager.js — config.json 读写（兼容 easysave 格式）
- *
- * easysave 序列化结构（已通过实际 config.json 验证）：
- * {
- *   "default": {
- *     "__root": {
- *       "__type": "config, Config",
- *       "__value": { field1: value1, field2: value2, ... }
- *     }
- *   },
- *   "other-profile": { ... }
- * }
- *
- * Config 是扁平原始类型（str/int/float/bool），不会出现 __ref token。
- * 直接 JSON 读写 __value 字段即可，__type 必须保持 "config, Config"。
+ * 配置方案读写：保留 easysave 的 config, Config 结构及已有未知字段。
+ * 对外只提供当前启动字段；结构损坏或有效字段类型错误直接拒绝。
  */
-
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
-
-const { FIELD_DEFAULTS, CLI_ARG_MAP, STORE_TRUE_FIELDS } = require('./field-defs');
-
+const definitions = require('./config-fields.json');
+const fields = require('./field-defs');
 const EASYSAVE_TYPE = 'config, Config';
 
-// ── 内部工具 ──────────────────────────────────────────────
-
-function _readConfigJson(configPath) {
-  try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    if (err.code === 'ENOENT') return null;
-    throw err;
+function requireRecord(value, label) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
   }
 }
 
-function _writeConfigJson(configPath, data) {
+function requireProfileKey(key) {
+  if (typeof key !== 'string' || !key.trim()) {
+    throw new TypeError('Configuration profile name must be a non-empty string');
+  }
+}
+
+function readConfigJson(configPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const data = JSON.parse(raw);
+  requireRecord(data, 'Configuration file');
+  return data;
+}
+
+function writeConfigJson(configPath, data) {
   fs.writeFileSync(configPath, JSON.stringify(data, null, 4), 'utf-8');
 }
 
-function _getProfileData(data, key) {
-  return data?.[key]?.['__root']?.['__value'] ?? null;
-}
-
-function _ensureProfileStructure(data, key) {
-  if (!data[key]) {
-    data[key] = {
-      __root: {
-        __type: EASYSAVE_TYPE,
-        __value: {},
-      },
-    };
+function getProfileData(data, key) {
+  requireProfileKey(key);
+  if (data === null || !Object.hasOwn(data, key)) {
+    throw new Error(`Configuration profile not found: ${key}`);
   }
-  data[key].__root = data[key].__root || { __type: EASYSAVE_TYPE, __value: {} };
-  data[key].__root.__type = EASYSAVE_TYPE;
-  data[key].__root.__value = data[key].__root.__value || {};
-  return data[key].__root.__value;
+  const profile = data[key];
+  requireRecord(profile, `Configuration profile ${key}`);
+  if (!Object.hasOwn(profile, '__root')) {
+    throw new TypeError(`Configuration profile has no root: ${key}`);
+  }
+  const root = profile.__root;
+  requireRecord(root, `Configuration root ${key}`);
+  if (root.__type !== EASYSAVE_TYPE) {
+    throw new TypeError(`Unsupported configuration profile type: ${key}`);
+  }
+  if (!Object.hasOwn(root, '__value')) {
+    throw new TypeError(`Configuration profile has no values: ${key}`);
+  }
+  requireRecord(root.__value, `Configuration values ${key}`);
+  return root.__value;
 }
 
-// ── 公共 API ──────────────────────────────────────────────
+function completeValues(stored) {
+  const values = {
+    ...fields.getDefaultValues(definitions),
+    ...fields.selectKnownValues(definitions, stored),
+  };
+  fields.assertConfigValues(definitions, values);
+  return values;
+}
 
-/**
- * 列出 config.json 顶层 key 列表。
- * @param {string} configPath — config.json 绝对路径
- * @returns {string[]} profile 名称数组
- */
 function listProfiles(configPath) {
-  const data = _readConfigJson(configPath);
-  if (!data) return [];
+  const data = readConfigJson(configPath);
+  if (data === null) return [];
+  // 列表可以展示损坏的单个方案，但选择、保存或启动时必须明确报错。
   return Object.keys(data);
 }
 
-/**
- * 读取指定 profile 的字段值。
- * 缺失字段自动补默认值。
- * @param {string} configPath
- * @param {string} key — profile 名称
- * @returns {Object} { fieldName: value, ... }
- */
 function loadProfile(configPath, key) {
-  const data = _readConfigJson(configPath);
-  if (!data || !(key in data)) {
-    return { ...FIELD_DEFAULTS };
-  }
-  const stored = _getProfileData(data, key) || {};
-  return { ...FIELD_DEFAULTS, ...stored };
+  return completeValues(getProfileData(readConfigJson(configPath), key));
 }
 
-/**
- * 保存字段值到指定 profile（持久化到 config.json）。
- * @param {string} configPath
- * @param {string} key — profile 名称
- * @param {Object} values — { fieldName: value, ... }
- */
 function saveProfile(configPath, key, values) {
-  let data = _readConfigJson(configPath);
-  if (!data) data = {};
-  const target = _ensureProfileStructure(data, key);
-  Object.assign(target, values);
-  _writeConfigJson(configPath, data);
+  const selected = fields.selectKnownValues(definitions, values);
+  fields.assertConfigValues(definitions, selected);
+  const data = readConfigJson(configPath);
+  const target = getProfileData(data, key);
+  Object.assign(target, selected);
+  writeConfigJson(configPath, data);
 }
 
-/**
- * 新建 profile，使用 FIELD_DEFAULTS 填充全部字段。
- * @param {string} configPath
- * @param {string} key — 新 profile 名称
- */
 function createProfile(configPath, key) {
-  saveProfile(configPath, key, { ...FIELD_DEFAULTS });
+  requireProfileKey(key);
+  const data = readConfigJson(configPath) ?? {};
+  if (Object.hasOwn(data, key)) {
+    throw new Error(`Configuration profile already exists: ${key}`);
+  }
+  // 显式定义自有属性，配置名称不会触发 __proto__ 等对象原型行为。
+  Object.defineProperty(data, key, {
+    value: {
+      __root: {
+        __type: EASYSAVE_TYPE,
+        __value: fields.getDefaultValues(definitions),
+      },
+    },
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  writeConfigJson(configPath, data);
 }
 
-/**
- * 生成 CLI 覆盖参数数组。
- * 仅包含用户临时修改的字段（与 profile 存储值不同的字段）。
- *
- * @param {Object} overrides — { fieldName: value } 仅包含与 profile 不同的字段
- * @returns {string[]} ['--llm_model', 'xxx', '--gateway_host', '0.0.0.0', ...]
- */
 function buildCliArgs(overrides) {
-  const args = [];
-  for (const [field, value] of Object.entries(overrides)) {
-    const cliArg = CLI_ARG_MAP[field];
-    if (!cliArg) continue;
-    if (STORE_TRUE_FIELDS.has(field)) {
-      if (value === true || value === 'true') {
-        args.push(cliArg);
-      }
-    } else {
-      args.push(cliArg, String(value));
-    }
-  }
-  return args;
+  return fields.buildCliArgs(definitions, overrides);
+}
+
+function prepareLaunch(configPath, key, overrides) {
+  const stored = getProfileData(readConfigJson(configPath), key);
+  const selected = fields.selectKnownValues(definitions, overrides);
+  fields.assertConfigValues(definitions, selected, true);
+  // 先合并再校验；本次覆盖可修正文件中已失效的有效字段值。
+  const values = completeValues({ ...stored, ...selected });
+  return { values, cliArgs: buildCliArgs(selected) };
 }
 
 module.exports = {
+  getFieldDefinitions: () => definitions,
   listProfiles,
   loadProfile,
   saveProfile,
   createProfile,
   buildCliArgs,
+  prepareLaunch,
 };

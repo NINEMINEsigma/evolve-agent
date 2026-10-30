@@ -15,19 +15,22 @@
       <span class="subtitle">配置启动器</span>
     </header>
 
+    <p id="model-notice" class="config-notice"></p>
+    <div id="config-error" class="config-error" role="alert" hidden></div>
+
     <!-- Python 路径栏 -->
     <div class="python-path-bar">
       <label for="python-path-input">Python 路径</label>
-      <input type="text" id="python-path-input" class="field-input" placeholder="python（使用环境变量）" />
+      <input type="text" id="python-path-input" class="field-input" placeholder="python（使用环境变量）" disabled />
       <span class="path-hint">留空则使用系统 PATH 中的 python</span>
     </div>
 
     <!-- Profile 选择栏 -->
     <div class="profile-bar">
       <label for="profile-select">配置方案</label>
-      <select id="profile-select"></select>
-      <button id="btn-new-profile" class="btn btn-small">新建</button>
-      <button id="btn-save-profile" class="btn btn-small">保存到 Profile</button>
+      <select id="profile-select" disabled></select>
+      <button id="btn-new-profile" class="btn btn-small" disabled>新建</button>
+      <button id="btn-save-profile" class="btn btn-small" disabled>保存到 Profile</button>
     </div>
 
     <!-- 分组字段编辑区 -->
@@ -35,7 +38,7 @@
 
     <!-- 启动栏 -->
     <div class="launch-bar">
-      <button id="btn-launch" class="btn btn-primary">启动</button>
+      <button id="btn-launch" class="btn btn-primary" disabled>启动</button>
       <button id="btn-view-log" class="btn btn-small" style="display:none">查看日志</button>
       <span id="launch-hint" class="launch-hint">未修改的字段将使用 Profile 中的值</span>
     </div>
@@ -59,6 +62,7 @@
     <p id="waiting-text">等待后端就绪...</p>
   </div>
 
+  <script src="../src/field-defs.js"></script>
   <script src="config.js"></script>
   <script src="log.js"></script>
 </body>

@@ -68,6 +68,33 @@ body {
 
 /* ═══════════════ 配置面板 ═══════════════ */
 
+.config-notice,
+.config-error {
+  flex: none;
+  margin: 10px 20px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.config-notice {
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border-radius: var(--radius);
+}
+
+.config-notice:empty { display: none; }
+
+.config-error {
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
 .profile-bar {
   display: flex;
   align-items: center;
@@ -127,6 +154,7 @@ body {
 
 .fields-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px 20px;
 }
@@ -145,18 +173,44 @@ body {
 }
 
 .field-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 4px 12px;
+  margin-bottom: 14px;
 }
 
 .field-row label {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
   font-size: 12px;
+  color: var(--text);
+}
+
+.field-row label span,
+.field-row label code {
+  display: block;
+}
+
+.field-row label code {
+  margin-top: 3px;
+  font-size: 11px;
   color: var(--text-dim);
-  min-width: 180px;
-  text-align: right;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.field-row > .field-input {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.field-description {
+  grid-column: 2;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 .field-input {
@@ -178,16 +232,21 @@ body {
 .field-input.bool {
   width: auto;
   flex: none;
+  justify-self: start;
   margin-left: 0;
   cursor: pointer;
 }
 
+.field-input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
 .field-error {
+  grid-column: 2;
   font-size: 11px;
   color: var(--error);
-  margin-left: 190px;
-  margin-bottom: 4px;
-  min-height: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .field-error:empty { display: none; }

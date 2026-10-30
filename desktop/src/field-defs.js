@@ -1,168 +1,119 @@
 /**
- * field-defs.js — 配置字段定义（从 config.py Config 类 + config_tui.py 映射）
- *
- * 包含：字段类型、默认值、分组、校验器、CLI 参数映射。
- * 所有值从 origin_agent/config.py 和 config_tui.py 提取，保持与后端一致。
+ * 共用配置值操作；Node.js 与配置页面使用同一实现。
+ * 字段和界面文案来自 config-fields.json，不依赖 Electron 或文件系统。
  */
-
-'use strict';
-
-// ── 字段类型 ──────────────────────────────────────────────
-
-const FIELD_TYPES = {
-  console_log:               'bool',
-  fast_agent_space_path:     'str',
-  slow_agent_space_path:     'str',
-  force_init:                'bool',
-  frontend_force_build:      'bool',
-  gateway_host:              'str',
-  gateway_port:              'int',
-  llm_base_url:              'str',
-  llm_model:                 'str',
-  llm_api_key:               'str',
-  llm_max_context_tokens:    'int',
-  llm_max_output_tokens:     'int',
-  llm_temperature:           'float',
-  llm_reasoning_effort:      'str',
-  llm_client_name:           'str',
-  merge_concat_threshold:    'int',
-  workspace_path:            'str',
-  agentspace_path_name:      'str',
-  logs_path_name:            'str',
-  mcp_config_path_name:      'str',
-};
-
-// ── 默认值（从 config.py Config 类）──────────────────────
-
-const FIELD_DEFAULTS = {
-  console_log:               true,
-  fast_agent_space_path:     'fast_agent_space',
-  slow_agent_space_path:     'slow_agent_space',
-  force_init:                false,
-  frontend_force_build:      false,
-  gateway_host:              '127.0.0.1',
-  gateway_port:              8765,
-  llm_base_url:              'https://api.deepseek.com',
-  llm_model:                 'deepseek-v4-flash',
-  llm_api_key:               '',
-  llm_max_context_tokens:    1000000,
-  llm_max_output_tokens:     384000,
-  llm_temperature:           0.95,
-  llm_reasoning_effort:      'medium',
-  llm_client_name:           'openai_client',
-  merge_concat_threshold:    50000,
-  workspace_path:            'workspace',
-  agentspace_path_name:      'agentspace',
-  logs_path_name:            'logs',
-  mcp_config_path_name:      'mcp_config.json',
-};
-
-// ── 分组（从 config_tui.py FIELD_GROUPS）─────────────────
-
-const FIELD_GROUPS = {
-  'LLM 核心': [
-    'llm_base_url', 'llm_model', 'llm_api_key',
-    'llm_max_context_tokens', 'llm_max_output_tokens',
-    'llm_temperature', 'llm_reasoning_effort', 'llm_client_name',
-  ],
-  'Workspace': [
-    'workspace_path', 'agentspace_path_name',
-    'logs_path_name', 'mcp_config_path_name',
-  ],
-  '网关': [
-    'gateway_host', 'gateway_port',
-  ],
-  '运行时': [
-    'console_log', 'force_init',
-    'frontend_force_build', 'merge_concat_threshold',
-  ],
-};
-
-// ── 校验器（从 config_tui.py FIELD_VALIDATORS 映射）──────
-// 每个 (raw: string) => { valid: boolean, error?: string }
-
-function _validatePort(raw) {
-  const v = Number(raw);
-  if (!Number.isInteger(v) || isNaN(v)) return { valid: false, error: `需要整数, 得到 '${raw}'` };
-  if (v < 1 || v > 65535) return { valid: false, error: `端口范围 1-65535, 得到 ${v}` };
-  return { valid: true };
-}
-
-function _validateRange(raw, min, max) {
-  const v = parseFloat(raw);
-  if (isNaN(v)) return { valid: false, error: `需要浮点数, 得到 '${raw}'` };
-  if (v < min || v > max) return { valid: false, error: `范围 ${min}-${max}, 得到 ${v}` };
-  return { valid: true };
-}
-
-function _validatePositiveInt(raw) {
-  const v = parseInt(raw, 10);
-  if (isNaN(v)) return { valid: false, error: `需要正整数, 得到 '${raw}'` };
-  if (v < 0) return { valid: false, error: `需要正整数, 得到 ${v}` };
-  return { valid: true };
-}
-
-function _validateEnum(raw, allowed) {
-  const v = raw.trim().toLowerCase();
-  if (!allowed.includes(v)) return { valid: false, error: `可选值: ${allowed.join(' / ')}, 得到 '${raw}'` };
-  return { valid: true };
-}
-
-function _validateUrl(raw) {
-  const v = raw.trim();
-  if (v && !v.startsWith('http://') && !v.startsWith('https://')) {
-    return { valid: false, error: `URL 需以 http:// 或 https:// 开头` };
+(function exposeConfigFields(root, factory) {
+  'use strict';
+  const helpers = factory();
+  if (typeof module === 'object' && module.exports) {
+    module.exports = helpers;
+  } else {
+    root.launcherConfigFields = helpers;
   }
-  return { valid: true };
-}
+})(globalThis, function createConfigFields() {
+  'use strict';
 
-const FIELD_VALIDATORS = {
-  gateway_port:              (raw) => _validatePort(raw),
-  llm_temperature:           (raw) => _validateRange(raw, 0.0, 2.0),
-  llm_max_context_tokens:    (raw) => _validatePositiveInt(raw),
-  llm_max_output_tokens:     (raw) => _validatePositiveInt(raw),
-  merge_concat_threshold:    (raw) => _validatePositiveInt(raw),
-  llm_reasoning_effort:      (raw) => _validateEnum(raw, ['low', 'medium', 'high', '']),
-  llm_base_url:              (raw) => _validateUrl(raw),
-};
+  function requireRecord(value) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('Configuration values must be an object');
+    }
+  }
 
-// ── CLI 参数映射 ──────────────────────────────────────────
-// store_true 类型的字段：CLI 中作为 flag 出现（--flag true）
-// 其余字段：CLI 中作为 --key value 对出现
+  function getDefaultValues(definitions) {
+    return Object.fromEntries(definitions.fields.map((field) => [field.name, field.default]));
+  }
 
-const STORE_TRUE_FIELDS = new Set([
-  'force_init',
-  'frontend_force_build',
-]);
+  function selectKnownValues(definitions, values) {
+    requireRecord(values);
+    const selected = {};
+    for (const field of definitions.fields) {
+      if (Object.hasOwn(values, field.name)) selected[field.name] = values[field.name];
+    }
+    return selected;
+  }
 
-const CLI_ARG_MAP = {
-  console_log:              '--console_log',
-  fast_agent_space_path:    '--fast_agent_space_path',
-  slow_agent_space_path:    '--slow_agent_space_path',
-  force_init:               '--force_init',
-  frontend_force_build:     '--frontend_force_build',
-  gateway_host:             '--gateway_host',
-  gateway_port:             '--gateway_port',
-  llm_base_url:             '--llm_base_url',
-  llm_model:                '--llm_model',
-  llm_api_key:              '--llm_api_key',
-  llm_max_context_tokens:   '--llm_max_context_tokens',
-  llm_max_output_tokens:    '--llm_max_output_tokens',
-  llm_temperature:          '--llm_temperature',
-  llm_reasoning_effort:     '--llm_reasoning_effort',
-  llm_client_name:          '--llm_client_name',
-  merge_concat_threshold:   '--merge_concat_threshold',
-  workspace_path:           '--workspace_path',
-  agentspace_path_name:     '--agentspace_path_name',
-  logs_path_name:           '--logs_path_name',
-  mcp_config_path_name:     '--mcp_config_path_name',
-};
+  function validateFieldValue(definition, value) {
+    if (definition.type === 'bool') {
+      return typeof value === 'boolean'
+        ? { valid: true, value }
+        : { valid: false, code: 'invalid_boolean' };
+    }
+    if (definition.type === 'str') {
+      return typeof value === 'string'
+        ? { valid: true, value }
+        : { valid: false, code: 'invalid_string' };
+    }
+    if (definition.type !== 'int') {
+      throw new TypeError(`Unsupported configuration type: ${definition.type}`);
+    }
+    if (!Number.isInteger(value)) return { valid: false, code: 'invalid_integer' };
+    if (!Number.isSafeInteger(value)) return { valid: false, code: 'unsafe_integer' };
+    if (definition.min !== undefined && value < definition.min) {
+      return { valid: false, code: 'below_minimum', min: definition.min };
+    }
+    if (definition.max !== undefined && value > definition.max) {
+      return { valid: false, code: 'above_maximum', max: definition.max };
+    }
+    return { valid: true, value };
+  }
 
-module.exports = {
-  FIELD_TYPES,
-  FIELD_DEFAULTS,
-  FIELD_GROUPS,
-  FIELD_VALIDATORS,
-  STORE_TRUE_FIELDS,
-  CLI_ARG_MAP,
-};
+  function parseFieldInput(definition, rawValue) {
+    if (definition.type !== 'int') return validateFieldValue(definition, rawValue);
+    if (typeof rawValue !== 'string' || !/^[+-]?\d+$/.test(rawValue.trim())) {
+      return { valid: false, code: 'invalid_integer' };
+    }
+    return validateFieldValue(definition, Number(rawValue.trim()));
+  }
+
+  function validateConfigValues(definitions, values, partial = false) {
+    requireRecord(values);
+    const errors = {};
+    for (const field of definitions.fields) {
+      if (!Object.hasOwn(values, field.name)) {
+        if (!partial) errors[field.name] = { valid: false, code: 'missing_field' };
+        continue;
+      }
+      const result = validateFieldValue(field, values[field.name]);
+      if (!result.valid) errors[field.name] = result;
+    }
+    return { valid: Object.keys(errors).length === 0, errors };
+  }
+
+  function formatFieldError(definitions, name, result) {
+    const template = definitions.ui.validation[result.code];
+    if (typeof template !== 'string') {
+      throw new TypeError(`Unknown configuration error: ${result.code}`);
+    }
+    return `${name}: ${template.replace('{min}', String(result.min)).replace('{max}', String(result.max))}`;
+  }
+
+  function assertConfigValues(definitions, values, partial = false) {
+    const result = validateConfigValues(definitions, values, partial);
+    if (!result.valid) {
+      throw new TypeError(Object.entries(result.errors)
+        .map(([name, error]) => formatFieldError(definitions, name, error)).join('\n'));
+    }
+  }
+
+  function buildCliArgs(definitions, overrides) {
+    const selected = selectKnownValues(definitions, overrides);
+    assertConfigValues(definitions, selected, true);
+    const args = [];
+    for (const field of definitions.fields) {
+      if (Object.hasOwn(selected, field.name)) {
+        args.push(field.cliArg, String(selected[field.name]));
+      }
+    }
+    return args;
+  }
+
+  return {
+    getDefaultValues,
+    selectKnownValues,
+    parseFieldInput,
+    validateConfigValues,
+    assertConfigValues,
+    formatFieldError,
+    buildCliArgs,
+  };
+});

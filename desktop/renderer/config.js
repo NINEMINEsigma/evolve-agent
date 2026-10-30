@@ -1,28 +1,24 @@
 /**
- * config.js — 配置面板交互逻辑
- *
- * 职责：
- *   - 加载 profile 列表并填充下拉选择器
- *   - 按分组渲染 27 个字段编辑控件
- *   - 实时校验字段值
- *   - 保存到 profile / 临时覆盖
- *   - 收集覆盖差异 → 调用 backend.launch
+ * 配置界面：原始输入与有效值分离，共用字段解析、校验与启动参数定义。
+ * 模型连接配置由应用内模型配置 Tab 管理；本页只编辑启动配置。
  */
-
 'use strict';
 
 const api = window.electronAPI;
-const { FIELD_GROUPS, FIELD_TYPES, FIELD_DEFAULTS, FIELD_VALIDATORS } = api.fieldDefs;
-
-// ── 状态 ──────────────────────────────────────────────────
-
-let currentProfile = null;       // 当前选中的 profile key
-let profileValues = {};          // 当前 profile 存储的字段值
-let workingValues = {};          // 用户在 UI 中编辑后的字段值
-let dirtyFields = new Set();    // 被用户修改过的字段名
-let backendLaunched = false;     // 后端是否已启动（防止重复启动）
-
-// ── DOM 引用 ───────────────────────────────────────────────
+const configFields = window.launcherConfigFields;
+let fieldDefinitions = null;
+let currentProfile = null;
+let profileValues = {};
+let rawValues = {};
+let workingValues = {};
+let dirtyFields = new Set();
+let backendLaunched = false;
+let launchPending = false;
+let formBusy = false;
+let editingProfile = false;
+let saveSucceeded = false;
+let savePending = false;
+let profileLoadSequence = 0;
 
 const profileSelect = document.getElementById('profile-select');
 const btnNewProfile = document.getElementById('btn-new-profile');
@@ -33,299 +29,357 @@ const configPanel = document.getElementById('config-panel');
 const logPanel = document.getElementById('log-panel');
 const pythonPathInput = document.getElementById('python-path-input');
 const btnViewLog = document.getElementById('btn-view-log');
+const configError = document.getElementById('config-error');
+const modelNotice = document.getElementById('model-notice');
 
-// ── 初始化 ──────────────────────────────────────────────────
+function showError(message, error) {
+  configError.textContent = error ? `${message}\n${error.message || String(error)}` : message;
+  configError.hidden = false;
+}
+
+function clearError() {
+  configError.textContent = '';
+  configError.hidden = true;
+}
+
+function updateControls() {
+  const blocked = formBusy || launchPending || editingProfile;
+  profileSelect.disabled = blocked;
+  btnNewProfile.disabled = blocked;
+  btnSaveProfile.disabled = blocked || !currentProfile;
+  btnLaunch.disabled = blocked || !currentProfile || backendLaunched;
+  pythonPathInput.disabled = blocked;
+  for (const input of fieldsContainer.querySelectorAll('[data-field]')) {
+    input.disabled = blocked;
+  }
+  const ui = fieldDefinitions.ui;
+  btnSaveProfile.textContent = savePending ? ui.saving : (saveSucceeded ? ui.saved : ui.save);
+  btnLaunch.textContent = launchPending ? ui.launchPending : (backendLaunched ? ui.running : ui.launch);
+}
 
 async function init() {
-  // 加载壳设置（Python 路径）— 失败不阻塞 profile 加载
-  try {
-    const settings = await api.settings.load();
-    pythonPathInput.value = settings.pythonPath || '';
-    // 显示自动探测到的路径作为 placeholder
-    if (settings.detectedPythonPath && settings.detectedPythonPath !== 'python') {
-      pythonPathInput.placeholder = settings.detectedPythonPath + '（自动探测）';
-    }
-  } catch (err) {
-    console.error('[config] settings.load failed:', err);
-  }
-
-  // Python 路径变更时自动保存
-  pythonPathInput.addEventListener('change', async () => {
-    try {
-      await api.settings.save({ pythonPath: pythonPathInput.value.trim() });
-    } catch (err) {
-      console.error('[config] settings.save failed:', err);
-    }
-  });
-
-  await loadProfiles();
-  profileSelect.addEventListener('change', onProfileChange);
+  fieldDefinitions = await api.config.getFieldDefinitions();
+  modelNotice.textContent = fieldDefinitions.ui.modelNotice;
+  profileSelect.addEventListener('change', loadSelectedProfile);
   btnNewProfile.addEventListener('click', onNewProfile);
   btnSaveProfile.addEventListener('click', onSaveProfile);
   btnLaunch.addEventListener('click', onLaunch);
-  btnViewLog.addEventListener('click', () => {
-    configPanel.classList.remove('active');
-    logPanel.classList.add('active');
+  btnViewLog.addEventListener('click', showLogPanel);
+  pythonPathInput.addEventListener('change', async () => {
+    try {
+      await api.settings.save({ pythonPath: pythonPathInput.value.trim() });
+    } catch (error) {
+      showError(fieldDefinitions.ui.settingsFailed, error);
+    }
   });
+
+  // 壳设置失败不伪装成配置文件缺失，也不阻止读取启动配置。
+  let settingsError = null;
+  try {
+    const settings = await api.settings.load();
+    pythonPathInput.value = settings.pythonPath || '';
+    if (settings.detectedPythonPath && settings.detectedPythonPath !== 'python') {
+      pythonPathInput.placeholder = settings.detectedPythonPath + fieldDefinitions.ui.detectedPython;
+    }
+  } catch (error) {
+    settingsError = error;
+  }
+  try {
+    await loadProfiles();
+  } catch (error) {
+    showError(fieldDefinitions.ui.loadFailed, error);
+  } finally {
+    updateControls();
+  }
+  if (settingsError && configError.hidden) {
+    showError(fieldDefinitions.ui.settingsFailed, settingsError);
+  }
 }
 
-// ── Profile 列表 ──────────────────────────────────────────
-
-async function loadProfiles() {
+async function loadProfiles(preferredKey = null) {
   const profiles = await api.config.listProfiles();
-  profileSelect.innerHTML = '';
-
+  profileSelect.replaceChildren();
   if (profiles.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = '（无配置，请新建）';
-    profileSelect.appendChild(opt);
-    fieldsContainer.innerHTML = '<p class="hint">点击"新建"创建第一个配置方案</p>';
+    currentProfile = null;
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = fieldDefinitions.ui.noProfiles;
+    profileSelect.appendChild(option);
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = fieldDefinitions.ui.createFirstProfile;
+    fieldsContainer.replaceChildren(hint);
     return;
   }
-
   for (const name of profiles) {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    profileSelect.appendChild(opt);
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    profileSelect.appendChild(option);
   }
-
-  // 默认选第一个
-  profileSelect.value = profiles[0];
-  await onProfileChange();
+  profileSelect.value = profiles.includes(preferredKey) ? preferredKey : profiles[0];
+  await loadSelectedProfile();
 }
 
-// ── Profile 切换 ──────────────────────────────────────────
-
-async function onProfileChange() {
-  currentProfile = profileSelect.value;
-  if (!currentProfile) return;
-
-  profileValues = await api.config.loadProfile(currentProfile);
-  workingValues = { ...profileValues };
-  dirtyFields = new Set();
-  renderFields();
+async function loadSelectedProfile() {
+  const key = profileSelect.value;
+  const sequence = ++profileLoadSequence;
+  currentProfile = null;
+  saveSucceeded = false;
+  fieldsContainer.replaceChildren();
+  clearError();
+  if (!key) {
+    updateControls();
+    return;
+  }
+  formBusy = true;
+  updateControls();
+  try {
+    const values = await api.config.loadProfile(key);
+    if (sequence !== profileLoadSequence) return;
+    configFields.assertConfigValues(fieldDefinitions, values);
+    currentProfile = key;
+    profileValues = values;
+    rawValues = Object.fromEntries(fieldDefinitions.fields.map((field) => [
+      field.name, field.type === 'bool' ? values[field.name] : String(values[field.name]),
+    ]));
+    dirtyFields = new Set();
+    renderFields();
+    refreshValues();
+  } catch (error) {
+    if (sequence === profileLoadSequence) showError(fieldDefinitions.ui.loadFailed, error);
+  } finally {
+    if (sequence === profileLoadSequence) {
+      formBusy = false;
+      updateControls();
+    }
+  }
 }
 
-// ── 新建 Profile ──────────────────────────────────────────
-
-async function onNewProfile() {
-  // Electron 不支持 window.prompt()，使用内联输入替代
+function onNewProfile() {
+  if (formBusy || launchPending || editingProfile) return;
   const profileBar = document.querySelector('.profile-bar');
-  if (profileBar.classList.contains('editing')) return;
-
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'new-profile-input';
-  input.placeholder = '输入配置方案名称...';
-
-  const btnConfirm = document.createElement('button');
-  btnConfirm.className = 'btn btn-small btn-confirm-new';
-  btnConfirm.textContent = '确认';
-
-  const btnCancel = document.createElement('button');
-  btnCancel.className = 'btn btn-small';
-  btnCancel.textContent = '取消';
-
+  input.placeholder = fieldDefinitions.ui.newProfilePlaceholder;
+  input.setAttribute('aria-label', fieldDefinitions.ui.newProfilePlaceholder);
+  const confirm = document.createElement('button');
+  confirm.className = 'btn btn-small btn-confirm-new';
+  confirm.textContent = fieldDefinitions.ui.confirm;
+  const cancel = document.createElement('button');
+  cancel.className = 'btn btn-small';
+  cancel.textContent = fieldDefinitions.ui.cancel;
   profileBar.classList.add('editing');
   profileBar.insertBefore(input, btnNewProfile);
-  profileBar.insertBefore(btnConfirm, btnNewProfile);
-  profileBar.insertBefore(btnCancel, btnNewProfile);
+  profileBar.insertBefore(confirm, btnNewProfile);
+  profileBar.insertBefore(cancel, btnNewProfile);
+  editingProfile = true;
+  updateControls();
   input.focus();
 
   function restore() {
     profileBar.classList.remove('editing');
     input.remove();
-    btnConfirm.remove();
-    btnCancel.remove();
+    confirm.remove();
+    cancel.remove();
+    editingProfile = false;
+    updateControls();
   }
 
-  async function doCreate() {
+  async function create() {
+    if (formBusy) return;
     const name = input.value.trim();
-    if (!name) { restore(); return; }
-
-    const profiles = await api.config.listProfiles();
-    if (profiles.includes(name)) {
-      alert(`配置方案 "${name}" 已存在`);
+    if (!name) {
       input.focus();
-      input.select();
       return;
     }
-
-    await api.config.createProfile(name);
+    formBusy = true;
+    input.disabled = true;
+    confirm.disabled = true;
+    cancel.disabled = true;
+    clearError();
+    updateControls();
+    try {
+      await api.config.createProfile(name);
+    } catch (error) {
+      formBusy = false;
+      input.disabled = false;
+      confirm.disabled = false;
+      cancel.disabled = false;
+      updateControls();
+      showError(fieldDefinitions.ui.createFailed, error);
+      input.focus();
+      return;
+    }
     restore();
-    await loadProfiles();
-    profileSelect.value = name;
-    await onProfileChange();
+    try {
+      await loadProfiles(name);
+    } catch (error) {
+      currentProfile = null;
+      fieldsContainer.replaceChildren();
+      showError(fieldDefinitions.ui.loadFailed, error);
+    } finally {
+      formBusy = false;
+      updateControls();
+    }
   }
 
-  btnConfirm.addEventListener('click', doCreate);
-  btnCancel.addEventListener('click', restore);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
-    else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+  confirm.addEventListener('click', create);
+  cancel.addEventListener('click', restore);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      create();
+    } else if (event.key === 'Escape' && !formBusy) {
+      restore();
+    }
   });
 }
 
-// ── 保存到 Profile ────────────────────────────────────────
-
-async function onSaveProfile() {
-  if (!currentProfile) return;
-
-  // 收集所有 workingValues（不仅 dirty）
-  const toSave = {};
-  for (const [field, value] of Object.entries(workingValues)) {
-    toSave[field] = value;
-  }
-  await api.config.saveProfile(currentProfile, toSave);
-
-  // 保存后重置 dirty
-  profileValues = { ...workingValues };
-  dirtyFields = new Set();
-  btnSaveProfile.textContent = '已保存';
-  setTimeout(() => { btnSaveProfile.textContent = '保存到 Profile'; }, 1500);
-}
-
-// ── 字段渲染 ──────────────────────────────────────────────
-
 function renderFields() {
-  fieldsContainer.innerHTML = '';
-
-  for (const [groupTitle, fieldNames] of Object.entries(FIELD_GROUPS)) {
-    const groupDiv = document.createElement('div');
-    groupDiv.className = 'field-group';
-
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'field-group-title';
-    titleDiv.textContent = groupTitle;
-    groupDiv.appendChild(titleDiv);
-
-    for (const fieldName of fieldNames) {
-      const type = FIELD_TYPES[fieldName] || 'str';
-      const value = workingValues[fieldName] ?? FIELD_DEFAULTS[fieldName];
-      groupDiv.appendChild(createFieldRow(fieldName, type, value));
+  fieldsContainer.replaceChildren();
+  for (const group of fieldDefinitions.groups) {
+    const section = document.createElement('section');
+    section.className = 'field-group';
+    const title = document.createElement('h2');
+    title.className = 'field-group-title';
+    title.textContent = group.label;
+    section.appendChild(title);
+    for (const field of fieldDefinitions.fields) {
+      if (field.group === group.id) section.appendChild(createFieldRow(field));
     }
-
-    fieldsContainer.appendChild(groupDiv);
+    fieldsContainer.appendChild(section);
   }
 }
 
-function createFieldRow(fieldName, type, value) {
+function createFieldRow(field) {
   const row = document.createElement('div');
-
-  // label
+  row.className = 'field-row';
   const label = document.createElement('label');
-  label.textContent = fieldName;
+  label.htmlFor = `config-${field.name}`;
+  const title = document.createElement('span');
+  title.textContent = field.label;
+  const name = document.createElement('code');
+  name.textContent = field.name;
+  label.append(title, name);
   row.appendChild(label);
 
-  // input
-  let input;
-  if (type === 'bool') {
-    input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = !!value;
-    input.className = 'field-input bool';
-  } else {
-    input = document.createElement('input');
-    input.type = 'text';
-    input.value = String(value ?? '');
-    input.className = 'field-input';
-  }
-  input.dataset.field = fieldName;
-  input.dataset.type = type;
-  input.addEventListener('input', () => onFieldInput(input));
-  input.addEventListener('change', () => onFieldInput(input));
+  const input = document.createElement('input');
+  input.id = label.htmlFor;
+  input.className = field.type === 'bool' ? 'field-input bool' : 'field-input';
+  input.type = field.type === 'bool' ? 'checkbox' : 'text';
+  if (field.type === 'bool') input.checked = rawValues[field.name];
+  else input.value = rawValues[field.name];
+  if (field.type === 'int') input.inputMode = 'numeric';
+  input.dataset.field = field.name;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-describedby', `description-${field.name} error-${field.name}`);
+  input.addEventListener('input', () => onFieldInput(field, input));
+  input.addEventListener('change', () => onFieldInput(field, input));
   row.appendChild(input);
 
-  // error 提示
-  const errorDiv = document.createElement('div');
-  errorDiv.className = 'field-error';
-  errorDiv.id = `error-${fieldName}`;
-  row.appendChild(errorDiv);
-
+  const description = document.createElement('p');
+  description.id = `description-${field.name}`;
+  description.className = 'field-description';
+  description.textContent = field.description;
+  const error = document.createElement('div');
+  error.id = `error-${field.name}`;
+  error.className = 'field-error';
+  error.setAttribute('aria-live', 'polite');
+  row.append(description, error);
   return row;
 }
 
-function onFieldInput(input) {
-  const fieldName = input.dataset.field;
-  const type = input.dataset.type;
-  let rawValue;
+function onFieldInput(field, input) {
+  rawValues[field.name] = field.type === 'bool' ? input.checked : input.value;
+  saveSucceeded = false;
+  clearError();
+  refreshValues();
+  updateControls();
+}
 
-  if (type === 'bool') {
-    rawValue = input.checked;
-  } else {
-    rawValue = input.value;
+function refreshValues(focusFirst = false) {
+  const values = {};
+  const errors = {};
+  dirtyFields = new Set();
+  for (const field of fieldDefinitions.fields) {
+    const result = configFields.parseFieldInput(field, rawValues[field.name]);
+    if (result.valid) values[field.name] = result.value;
+    else errors[field.name] = result;
+    if (!result.valid || result.value !== profileValues[field.name]) dirtyFields.add(field.name);
+    const input = document.getElementById(`config-${field.name}`);
+    input.setAttribute('aria-invalid', String(!result.valid));
+    document.getElementById(`error-${field.name}`).textContent = result.valid
+      ? '' : configFields.formatFieldError(fieldDefinitions, field.name, result);
   }
-
-  // 校验
-  const validator = FIELD_VALIDATORS[fieldName];
-  if (validator && type !== 'bool') {
-    const result = validator(rawValue);
-    const errorEl = document.getElementById(`error-${fieldName}`);
-    if (!result.valid) {
-      errorEl.textContent = result.error;
-      input.style.borderColor = 'var(--error)';
-    } else {
-      errorEl.textContent = '';
-      input.style.borderColor = '';
-    }
+  workingValues = values;
+  const firstError = Object.keys(errors)[0];
+  if (firstError && focusFirst) {
+    showError(fieldDefinitions.ui.invalidFields);
+    const input = document.getElementById(`config-${firstError}`);
+    input.scrollIntoView({ block: 'center' });
+    input.focus();
   }
+  return !firstError;
+}
 
-  // 类型转换并存储
-  let storeValue = rawValue;
-  if (type === 'int') storeValue = parseInt(rawValue, 10);
-  else if (type === 'float') storeValue = parseFloat(rawValue);
-  else if (type === 'bool') storeValue = rawValue;
-  else storeValue = rawValue;
-
-  workingValues[fieldName] = storeValue;
-
-  // 标记 dirty（与 profile 原始值比较）
-  if (JSON.stringify(storeValue) !== JSON.stringify(profileValues[fieldName])) {
-    dirtyFields.add(fieldName);
-  } else {
-    dirtyFields.delete(fieldName);
+async function onSaveProfile() {
+  if (!currentProfile || formBusy || launchPending || editingProfile) return;
+  clearError();
+  if (!refreshValues(true)) return;
+  const values = { ...workingValues };
+  formBusy = true;
+  savePending = true;
+  saveSucceeded = false;
+  updateControls();
+  try {
+    await api.config.saveProfile(currentProfile, values);
+    profileValues = values;
+    dirtyFields = new Set();
+    saveSucceeded = true;
+  } catch (error) {
+    showError(fieldDefinitions.ui.saveFailed, error);
+  } finally {
+    savePending = false;
+    formBusy = false;
+    updateControls();
   }
 }
 
-// ── 启动 ──────────────────────────────────────────────────
-
-function onLaunch() {
-  if (!currentProfile) {
-    alert('请先选择或创建一个配置方案');
-    return;
-  }
-  if (backendLaunched) {
-    // 已启动 → 直接切到日志面板
-    configPanel.classList.remove('active');
-    logPanel.classList.add('active');
-    return;
-  }
-
-  // 收集临时覆盖（仅 dirty 字段）
-  const overrides = {};
-  for (const field of dirtyFields) {
-    overrides[field] = workingValues[field];
-  }
-
-  // Python 路径（从壳设置中读取，空则由 main.js 的 detectPythonPath 接管）
-  const pythonPath = pythonPathInput.value.trim();
-
-  // 标记已启动 + 禁用启动按钮
-  backendLaunched = true;
-  btnLaunch.disabled = true;
-  btnLaunch.textContent = '运行中';
-  btnViewLog.style.display = '';
-
-  // 切换到日志面板
+function showLogPanel() {
   configPanel.classList.remove('active');
   logPanel.classList.add('active');
-
-  // 发送启动命令
-  api.backend.launch(currentProfile, overrides, pythonPath);
 }
 
-// ── 启动 ──────────────────────────────────────────────────
+async function onLaunch() {
+  if (formBusy || launchPending || editingProfile) return;
+  if (backendLaunched) {
+    showLogPanel();
+    return;
+  }
+  if (!currentProfile) {
+    showError(fieldDefinitions.ui.selectProfile);
+    return;
+  }
+  clearError();
+  if (!refreshValues(true)) return;
+  const overrides = Object.fromEntries([...dirtyFields].map((name) => [name, workingValues[name]]));
+  launchPending = true;
+  updateControls();
+  try {
+    await api.backend.launch(currentProfile, overrides, pythonPathInput.value.trim());
+    backendLaunched = true;
+    btnViewLog.style.display = '';
+    showLogPanel();
+  } catch (error) {
+    showError(fieldDefinitions.ui.launchRejected, error);
+  } finally {
+    launchPending = false;
+    updateControls();
+  }
+}
 
-init();
+init().catch((error) => {
+  showError('Configuration initialization failed.', error);
+});

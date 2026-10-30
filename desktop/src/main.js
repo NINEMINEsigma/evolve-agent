@@ -252,13 +252,12 @@ function updateTrayMenu() {
 // ── IPC 注册 ──────────────────────────────────────────────
 
 function registerIpc() {
+  ipcMain.handle('config:field-definitions', () => {
+    return configManager.getFieldDefinitions();
+  });
+
   ipcMain.handle('config:list-profiles', () => {
-    try {
-      return configManager.listProfiles(CONFIG_JSON);
-    } catch (err) {
-      console.error('[config] listProfiles error:', err);
-      return [];
-    }
+    return configManager.listProfiles(CONFIG_JSON);
   });
 
   ipcMain.handle('config:load-profile', (event, key) => {
@@ -288,8 +287,9 @@ function registerIpc() {
     return true;
   });
 
-  ipcMain.on('backend:launch', (event, configKey, overrides, pythonPath) => {
+  ipcMain.handle('backend:launch', (event, configKey, overrides, pythonPath) => {
     launchBackend(event, configKey, overrides, pythonPath);
+    return true;
   });
 
   ipcMain.on('backend:kill', () => {
@@ -302,15 +302,18 @@ function registerIpc() {
 // ── 后端启动流程编排 ──────────────────────────────────────
 
 function launchBackend(event, configKey, overrides, pythonPath) {
+  // 所有配置检查必须在创建后端进程之前完成。
+  const prepared = configManager.prepareLaunch(CONFIG_JSON, configKey, overrides ?? {});
+  const host = prepared.values.gateway_host;
+  const port = prepared.values.gateway_port;
+  const healthHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+  const py = (pythonPath && pythonPath.trim()) || getEffectivePythonPath();
+  const cliArgs = ['run.py', '--load', configKey, ...prepared.cliArgs];
+
   backend = new BackendManager();
 
-  const py = (pythonPath && pythonPath.trim()) || getEffectivePythonPath();
   console.log('[launcher] launchBackend | py:', py, '| REPO_ROOT:', REPO_ROOT);
   console.log('[launcher] launchBackend | configKey:', configKey);
-
-  const cliArgs = ['run.py', '--load', configKey, '--console_log', 'true'];
-  const overrideArgs = configManager.buildCliArgs(overrides || {});
-  cliArgs.push(...overrideArgs);
 
   backend.onLog((log) => {
     if (controlWindow && !controlWindow.isDestroyed()) {
@@ -361,11 +364,6 @@ function launchBackend(event, configKey, overrides, pythonPath) {
   backend.start(REPO_ROOT, cliArgs, py);
   backendRunning = true;
   sendStatus(event, 'starting');
-
-  const profileValues = configManager.loadProfile(CONFIG_JSON, configKey);
-  const host = (overrides && overrides.gateway_host) || profileValues.gateway_host || '127.0.0.1';
-  const port = (overrides && overrides.gateway_port) || profileValues.gateway_port || 8765;
-  const healthHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
   backend.waitForHealth(
     healthHost,

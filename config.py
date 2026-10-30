@@ -4,17 +4,28 @@ import argparse
 from third.easysave import save, load, contains
 from pydantic import BaseModel
 
+
+def _parse_bool(value: str) -> bool:
+    """Parse explicit boolean overrides without treating 'false' as truthy."""
+    normalized = value.strip().lower()
+    if normalized in ("true", "1", "yes", "on", "y"):
+        return True
+    if normalized in ("false", "0", "no", "off", "n"):
+        return False
+    raise argparse.ArgumentTypeError("Expected a boolean value: true or false")
+
+
 argparse_parser = argparse.ArgumentParser()
 
 group = argparse_parser.add_mutually_exclusive_group()
 group.add_argument("--load", type=str, default="")
 group.add_argument("--save", type=str, default="")
 group.add_argument("--interactive", action="store_true", default=False)
-argparse_parser.add_argument("--console_log", type=bool, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--console_log", type=_parse_bool, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--force_init", action="store_true", default=argparse.SUPPRESS)
-argparse_parser.add_argument("--frontend_force_build", action="store_true", default=argparse.SUPPRESS)
+argparse_parser.add_argument("--force_init", type=_parse_bool, nargs="?", const=True, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--frontend_force_build", type=_parse_bool, nargs="?", const=True, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--gateway_host", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRESS)
 
@@ -49,7 +60,7 @@ class Config(BaseModel):
 base_config: Config|None = None
 # 运行时类型转换器：将用户输入字符串转为对应类型
 _type_converters: dict[type, Callable[[str], Any]] = {
-    bool: lambda v: v.strip().lower() in ("true", "1", "yes", "on", "y"),
+    bool: _parse_bool,
     int: int,
     float: float,
     str: str,

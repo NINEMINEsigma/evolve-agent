@@ -1,0 +1,53 @@
+{
+  "groups": [
+    { "id": "paths", "label": "路径" },
+    { "id": "gateway", "label": "网关" },
+    { "id": "runtime", "label": "运行时" }
+  ],
+  "fields": [
+    { "name": "workspace_path", "type": "str", "default": "workspace", "group": "paths", "label": "运行时根目录", "description": "fast仓库、slow仓库、会话和日志所在的根目录。", "cliArg": "--workspace_path" },
+    { "name": "fast_agent_space_path", "type": "str", "default": "fast_agent_space", "group": "paths", "label": "fast仓库目录", "description": "相对于运行时根目录的 fast仓库目录。", "cliArg": "--fast_agent_space_path" },
+    { "name": "slow_agent_space_path", "type": "str", "default": "slow_agent_space", "group": "paths", "label": "slow仓库目录", "description": "相对于运行时根目录的 slow仓库目录。", "cliArg": "--slow_agent_space_path" },
+    { "name": "agentspace_path_name", "type": "str", "default": "agentspace", "group": "paths", "label": "工作空间目录", "description": "相对于运行时根目录的工作空间目录。", "cliArg": "--agentspace_path_name" },
+    { "name": "logs_path_name", "type": "str", "default": "logs", "group": "paths", "label": "日志目录", "description": "相对于运行时根目录的日志目录。", "cliArg": "--logs_path_name" },
+    { "name": "mcp_config_path_name", "type": "str", "default": "mcp_config.json", "group": "paths", "label": "MCP 配置文件", "description": "相对于工作空间目录的 MCP 配置文件。", "cliArg": "--mcp_config_path_name" },
+    { "name": "gateway_host", "type": "str", "default": "127.0.0.1", "group": "gateway", "label": "监听地址", "description": "默认只允许本机访问；0.0.0.0 允许其他设备连接。", "cliArg": "--gateway_host" },
+    { "name": "gateway_port", "type": "int", "default": 8765, "group": "gateway", "label": "监听端口", "description": "取值范围为 1–65535。", "cliArg": "--gateway_port", "min": 1, "max": 65535 },
+    { "name": "console_log", "type": "bool", "default": true, "group": "runtime", "label": "输出控制台日志", "description": "控制后端是否向启动器输出控制台日志；不影响文件日志。", "cliArg": "--console_log" },
+    { "name": "force_init", "type": "bool", "default": false, "group": "runtime", "label": "强制初始化", "description": "重置 slow仓库和 fallback仓库，并用 origin仓库覆盖 fast仓库的同名文件。请谨慎启用。", "cliArg": "--force_init" },
+    { "name": "frontend_force_build", "type": "bool", "default": false, "group": "runtime", "label": "强制重建前端", "description": "忽略前端构建缓存，在启动时重新构建。", "cliArg": "--frontend_force_build" },
+    { "name": "merge_concat_threshold", "type": "int", "default": 50000, "group": "runtime", "label": "会话合并字符阈值", "description": "直接拼接会话摘要的字符阈值，允许非负整数。", "cliArg": "--merge_concat_threshold", "min": 0 }
+  ],
+  "ui": {
+    "modelNotice": "模型连接配置已移至应用内的「模型配置」Tab；此处只管理启动参数。",
+    "noProfiles": "（无配置，请新建）",
+    "createFirstProfile": "点击「新建」创建第一个配置方案。",
+    "newProfilePlaceholder": "输入配置方案名称…",
+    "confirm": "确认",
+    "cancel": "取消",
+    "profileExists": "同名配置方案已存在。",
+    "save": "保存到 Profile",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "launch": "启动",
+    "launchPending": "提交启动配置…",
+    "running": "运行中",
+    "selectProfile": "请先选择或创建一个配置方案。",
+    "invalidFields": "请先修正标出的配置项。",
+    "loadFailed": "配置读取失败，请检查文件后重新选择配置方案。",
+    "saveFailed": "保存失败，编辑内容已保留。",
+    "createFailed": "创建配置失败。",
+    "launchRejected": "启动配置未被接受，编辑内容已保留。",
+    "settingsFailed": "启动器设置读写失败。",
+    "detectedPython": "（自动探测）",
+    "validation": {
+      "missing_field": "缺少配置值。",
+      "invalid_boolean": "需要布尔值。",
+      "invalid_string": "需要文本。",
+      "invalid_integer": "需要完整的整数，不能包含小数或其他字符。",
+      "unsafe_integer": "整数超出可精确表示的范围。",
+      "below_minimum": "最小值为 {min}。",
+      "above_maximum": "最大值为 {max}。"
+    }
+  }
+}

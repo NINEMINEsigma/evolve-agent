@@ -39,6 +39,16 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 
 ---
 
+## 桌面启动器（desktop/）
+
+`desktop/` 是 origin仓库之外的独立 Electron 启动器，负责启动配置编辑、Python 路径设置、调用根目录 `run.py`，并加载后端提供的 Web 前端。详细说明见 [desktop/DEV-README.md](desktop/DEV-README.md)。
+
+2026-10-29 配置项更新以 `config.py::Config` 的 12 个字段为依据：桌面端字段与中文文案集中于 `desktop/src/config-fields.json`，主进程和配置页面共用 `field-defs.js` 的解析与校验，预加载脚本只提供 IPC 桥接；旧 `llm_*` 字段不进入表单或启动参数，保存时保留文件中的未知字段。模型连接配置继续由应用内模型配置 Tab 管理，Python 路径仍是独立桌面设置。启动前在创建进程之前校验最终配置，不再强制覆盖 `console_log`。
+
+根目录 `config.py` 的 `console_log` 参数正确解析显式布尔值；`force_init`、`frontend_force_build` 同时支持裸开关（等于 true）及显式 true/false，未传时仍不覆盖已保存配置。本轮未修改 Config 结构、持久化格式或 origin仓库源码；关闭接口、进程生命周期与打包适配延后。仅完成源码与静态审阅，未运行校验、构建或应用，人工验收见桌面开发文档。
+
+---
+
 ## 开发辅助脚本
 
 `dev_helpers/` 服务于开发者与开发助手AI，独立于 origin仓库和应用生命周期。`read_history.py` 提供 History辅助读取：复用只读 `third/easysave.raw_load()`、项目 `entity.typeref.make_config()`、`History_Version` 和正式History/媒体类型，还原真实History后输出以占位符替换图片/音频/视频载荷的 JSON，并保留消息类型、顺序、媒体身份/发送开关及文字描述。模型公开迭代接口自动保留当前字段；不重复实现对象图协议。`last_user_message` 以索引展示；不调用会清理未配对工具调用的 `SessionStore.read_history()`，不修改原模型或写回任何持久化文件。
