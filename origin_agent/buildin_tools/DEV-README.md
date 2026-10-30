@@ -20,6 +20,14 @@
 
 ---
 
+## 异常定义包（2026-10-30）
+
+内置工具与 BrowserSystem 消费的所有公共自定义异常统一 `from entity.error import X`，不从 Sandbox、Shell、角色档案、元数据或其他业务模块间接导入。全部 origin仓库自定义异常（含内部控制信号）只在 [异常定义包](../entity/error/DEV-README.md) 按职责子模块定义，并在 `__init__.py` 显式导出；本包不定义工具专用异常或兼容转发。标准库与第三方异常继续从原来源导入，`NotImplementedError` 等标准异常不迁移。私有 `_SourceUnavailable` 只从 `entity.error.session_export` 显式导入且不公开。
+
+异常保留原 Exception 家族，不强行改 BaseModel；工具 before/handle/after、普通工具错误转换、审批拒绝、中断配对、必要保存失败与快速失败语义保持。`MetaFormatError` 定义已移至 `entity/error/util.py`，`util/file_metadata.py` 仍负责解析与抛出。`SessionExportError` 的所有公共子类保持同一唯一基类，不建立平行异常族。
+
+异常不进入 easysave/typeref，存储 key、工具声明、System装配和资源所有权不变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用。用户须停机完整部署新包与全部调用方并重启，注意合并复制旧文件残留；开发助手AI不操作 workspace。
+
 ## 工具系统
 
 ### 注册与发现

@@ -28,7 +28,8 @@ import httpcore
 import httpx
 import json
 
-from abstract.llm.client import BaseLLMClient, LLMAPIStatusError
+from abstract.llm.client import BaseLLMClient
+from entity.error import LLMAPIStatusError
 from abstract.llm.formats import messages_to_anthropic_list
 from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage

@@ -89,9 +89,11 @@ from entry.agent_support.multimodal import (
     content_to_serializable,
     extract_tool_call_meta,
 )
-from entry.history_media import (
+from entity.error import (
     HistoryMediaConflictError,
     HistoryMediaNotFoundError,
+)
+from entry.history_media import (
     build_media_history_candidate,
     count_history_media,
     ensure_history_media_identity,
@@ -100,8 +102,8 @@ from entry.history_media import (
     project_media_item,
     reuse_unchanged_media_blocks,
 )
-from system.session_store import SessionStore, HistoryPersistenceError
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.session_store import SessionStore
+from entity.error import ApplicationStoppingError, HistoryPersistenceError, LifecycleFailure
 
 if TYPE_CHECKING:
     from entity.puretype_after import SessionExportHistorySource
@@ -776,10 +778,12 @@ class BaseAgentLoop(ABC):
         """协作复制完整 History；不写盘、不补媒体身份、不等待回复锁。"""
         from entity.constant import SESSION_EXPORT_MAX_MESSAGES
         from entity.puretype_after import SessionExportHistorySource
-        from entry.session_export import (
-            SessionExportBusyError, SessionExportChangedError,
-            SessionExportLimitError, capture_export_messages,
+        from entity.error import (
+            SessionExportBusyError,
+            SessionExportChangedError,
+            SessionExportLimitError,
         )
+        from entry.session_export import capture_export_messages
 
         guard = self.get_session_export_guard()
         session_id = self.session_id
@@ -1006,8 +1010,8 @@ class BaseAgentLoop(ABC):
             exc_info=(type(error), error, error.__traceback__),
         )
         status_text = CONTEXT_LIMIT_METADATA_FAILURE_STATUS
-        from system.session_metadata import MetadataGenerationError
-        from system.session_variables import SessionVariableError
+        from entity.error import MetadataGenerationError
+        from entity.error import SessionVariableError
         if isinstance(error, MetadataGenerationError) and isinstance(error.__cause__, SessionVariableError):
             # 变量继承拒绝必须把脱敏逻辑路径与修复指引交给用户，不能仅写日志。
             status_text = f"{status_text}\n{error}"
@@ -1590,7 +1594,7 @@ class BaseAgentLoop(ABC):
             messages_to_text,
             extract_last_rounds,
         )
-        from system.session_metadata import SessionMetadataError
+        from entity.error import SessionMetadataError
         from util.templates import read_template
 
         summaries: list[tuple[str, str]] = []
@@ -1659,7 +1663,7 @@ class BaseAgentLoop(ABC):
                 + "\n\n---\n\n".join(tail_blocks)
             )
 
-        from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
+        from entity.error import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
         variable_service = self.app.get_system(IAgentspaceService).session_variables
         try:

@@ -65,8 +65,7 @@ from entity.puretype import (
     ActivityEventStatus,
 )
 from entry.agent_support.multimodal import summarize_message_for_log
-from system.lifecycle import ApplicationStoppingError
-from system.llm_profile_store import ProfileNotFoundError
+from entity.error import ApplicationStoppingError, ProfileNotFoundError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop

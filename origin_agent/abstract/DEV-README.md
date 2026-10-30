@@ -33,6 +33,14 @@ abstract/
 
 ---
 
+## 异常定义包（2026-10-30）
+
+本层自定义异常统一定义于 `entity/error/abstract.py`：`UnsupportedModalityError`、`LLMEmptyResponseError`、`LLMAPIStatusError`、`InvalidMcpUrlError`、`OAuthNonInteractiveError`。调用方统一 `from entity.error import X`，不从 `llm/client.py`、`llm/formats.py`、`mcp/client.py` 或 `mcp/oauth.py` 等业务模块导入异常；本层使用的生命周期、停止及其他自定义异常也走同一公共入口。标准库/第三方异常仍从原来源导入。
+
+异常继续继承原 Exception 家族，保留构造、字段与异常链；本次不改变客户端错误归一化、空响应重试、MCP 容错、取消和生命周期失败传播，不强行改 BaseModel。所有 origin仓库自定义异常（含内部控制信号）的唯一定义位置、私有 `_SourceUnavailable` 例外及部署边界见 [异常定义包文档](../entity/error/DEV-README.md)。异常不进 easysave/typeref，存储 key 未变。
+
+本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用。用户须停机完整部署新包与全部调用方并重启，注意合并复制残留；开发助手AI不操作 workspace。
+
 ## LLM 客户端抽象层
 
 ### `abstract/llm/`
@@ -70,7 +78,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 #### `abstract/llm/retry.py` — `EmptyResponseRetryClient`
 
-该装饰器在正式加载入口统一覆盖普通模式、多Agent模式、随意聊聊、子Agent、临时Agent，以及元数据、审批与多模态调用。`LLM_EMPTY_RESPONSE_MAX_ATTEMPTS=3` 表示初次请求加最多两次重试，复用 `BACKOFF_BASE` 等待1秒、2秒；每次仍向同一底层客户端传递原请求参数，不追加空assistant/续传提示，不执行或重放工具，不额外消耗工具循环轮数。`chat()` 仅在 `content` 长度为零且 `tool_calls` 为空时重试，思考内容不能代替有效完成；纯工具调用合法，非零长度空白正文保持原语义。耗尽抛出 `client.py::LLMEmptyResponseError(RuntimeError)`，由现有调用错误出口处理。
+该装饰器在正式加载入口统一覆盖普通模式、多Agent模式、随意聊聊、子Agent、临时Agent，以及元数据、审批与多模态调用。`LLM_EMPTY_RESPONSE_MAX_ATTEMPTS=3` 表示初次请求加最多两次重试，复用 `BACKOFF_BASE` 等待1秒、2秒；每次仍向同一底层客户端传递原请求参数，不追加空assistant/续传提示，不执行或重放工具，不额外消耗工具循环轮数。`chat()` 仅在 `content` 长度为零且 `tool_calls` 为空时重试，思考内容不能代替有效完成；纯工具调用合法，非零长度空白正文保持原语义。耗尽抛出 `entity/error/abstract.py` 中的 `LLMEmptyResponseError(RuntimeError)`（从 `entity.error` 导入），由现有调用错误出口处理。
 
 流式事件语义在本装饰层确定，`StreamConsumer` 继续负责聚合、计时、取消及前端发送：
 

@@ -36,23 +36,20 @@ from entity.puretype import ShellInfo, ShellOutputSlice
 from entity.puretype.resource_cleanup import CleanupReport
 from entity.puretype.shell import ShellStopResult
 from framework import AsyncSystem
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import (
+    ApplicationStoppingError,
+    LifecycleFailure,
+    SandboxError,
+    ShellAccessError,
+    ShellError,
+)
 from system.process_termination import OwnedProcessIdentity
 from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle
 from interface.sandbox import ISandbox
 from interface.shell_manager import IShellManager
-from system.sandbox import SandboxError
 from system.shell_text import ShellTextNormalizer
 
 logger = logging.getLogger(__name__)
-
-
-class ShellError(RuntimeError):
-    """Shell会话操作失败。"""
-
-
-class ShellAccessError(ShellError):
-    """Shell会话不存在或调用者无权访问。"""
 
 
 class _ShellSession:

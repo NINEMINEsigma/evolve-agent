@@ -31,7 +31,7 @@ from util.atomic_io import (
     move_tree_no_replace,
     write_text_atomic,
 )
-from .errors import (
+from entity.error import (
     AgentspaceNotFoundError,
     AgentspaceTrashCorruptError,
     AgentspaceTrashError,

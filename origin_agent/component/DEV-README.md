@@ -30,6 +30,14 @@ component/
 
 ---
 
+## 异常定义包（2026-10-30）
+
+本包审批、MCP、Cron 与动态端点业务使用的公共自定义异常统一 `from entity.error import X`；全部 origin仓库自定义异常（含内部控制信号）只在 [异常定义包](../entity/error/DEV-README.md) 按职责子模块定义，并由 `__init__.py` 显式导出，不散放在本包业务模块。标准库/第三方异常仍从原来源导入。私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入，不公开。
+
+异常继续继承原 Exception 家族，不强行改 BaseModel，不改变审批拒绝、任务执行、取消/停止、必要持久化失败、资源清理与快速失败策略。`SessionExportError` 及全部公共子类仍为唯一定义的同一族；本包不建立重复类型或旧路径兼容入口。纯转发 `system/lifecycle_errors.py` 已删除，生命周期分类函数仍留原业务职责。
+
+异常不加入 easysave/typeref，存储 key 未变，System装配和资源所有权不变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用；用户须停机完整部署新包与全部调用方并重启，注意合并复制残留，开发助手AI不操作 workspace。
+
 ## 审批系统
 
 ### `component/approval/`（目录化重构）

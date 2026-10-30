@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 def _handle_read_session_variables(args: dict[str, Any], context: "ToolContext | None" = None) -> dict[str, Any]:
-    from system.session_variables import SessionVariableError
+    from entity.error import SessionVariableError
 
     if context is None or not context.resource_session_id:
         return tool_error("A current main session context is required", code="invalid_context")

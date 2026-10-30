@@ -172,7 +172,8 @@ async def _handsfree_confirm(
             content=json.dumps(user_prompt_data, ensure_ascii=False),
         ),
     ]
-    from system.lifecycle import ApplicationStoppingError, contains_lifecycle_failure
+    from entity.error import ApplicationStoppingError
+    from system.lifecycle import contains_lifecycle_failure
 
     try:
         response = await approval_system.chat(messages)

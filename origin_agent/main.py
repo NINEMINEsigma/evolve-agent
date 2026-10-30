@@ -53,7 +53,7 @@ class App:
             await application.start(shutdown_callbacks=self._shutdown_callbacks)
         except Exception as exc:
             # 端口占用是启动前的明确业务拒绝：按普通停止退出，不进入 fallback。
-            from gateway.system import GatewayPortBusyError
+            from entity.error import GatewayPortBusyError
             if _contains_port_busy(exc):
                 logger.error("Gateway port unavailable — normal stop: %s", exc)
                 return EXIT_NORMAL
@@ -104,7 +104,7 @@ class App:
 
 
 def _contains_port_busy(error: BaseException) -> bool:
-    from gateway.system import GatewayPortBusyError
+    from entity.error import GatewayPortBusyError
     if isinstance(error, GatewayPortBusyError):
         return True
     return isinstance(error, BaseExceptionGroup) and any(

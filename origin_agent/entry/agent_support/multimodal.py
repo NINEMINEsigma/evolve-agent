@@ -15,6 +15,7 @@ from typing import * # type: ignore
 
 from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, History, ImageBlock, MessageBlock, TextBlock, VideoBlock
 from entity.puretype import MessageContent, Role, ModalityCapability, ModalityDescriptionResult
+from entity.error import ModalityForwardUnavailableError
 from entity.constant import (
     FORWARDED_AUDIO_TAG,
     FORWARDED_VISION_TAG,
@@ -35,15 +36,6 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
-
-
-class ModalityForwardUnavailableError(ValueError):
-    """活动模型不支持该模态且未配置任何引用 Profile，无法转发。
-
-    携带面向用户的配置指引（配置对应媒体引用 Profile 或切换到支持
-    该模态的模型）。调用方捕获后应终止本轮回复并将指引作为持久化
-    系统状态展示给前端。
-    """
 
 
 def is_content_block_error(exc: Exception) -> bool:

@@ -42,7 +42,7 @@ from entity.puretype import (
     SubAgentUpdate,
     QueuedMessage,
 )
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from util.templates import read_template
 from interface.frontend_sink import IFrontendSink
 from interface.approval_system import IApprovalSystem

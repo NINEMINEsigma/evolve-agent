@@ -23,28 +23,12 @@ from easysave import save, load, contains
 from entity.typeref import make_config
 
 from util.atomic_io import write_text_atomic
-from system.lifecycle import LifecycleFailure
+from entity.error import (
+    HistoryPersistenceError,
+    LifecycleFailure,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class HistoryPersistenceError(LifecycleFailure):
-    """History 写盘失败；保留原始 cause，禁止被普通工具错误吞没。
-
-    继承 ``LifecycleFailure``，使所有涉及本次提交的宽泛捕获（如
-    ``except Exception``）仍能通过 ``contains_lifecycle_failure`` 识别
-    并让该错误继续传播，不被转换为成功的应用关闭。
-    """
-
-    def __init__(
-        self,
-        session_id: str,
-        cause: BaseException
-        ) -> None:
-        super().__init__(
-            f"Failed to persist history for session {session_id}: {cause}"
-        )
-        self.__cause__ = cause
 
 
 class SessionStore:

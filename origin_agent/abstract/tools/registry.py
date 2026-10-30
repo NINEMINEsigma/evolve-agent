@@ -29,9 +29,9 @@ from .tool import (
     ToolHandlerResult, ToolPostprocessEffect,
 )
 from system.cleanup_errors import split_cleanup_timeouts
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, TaskOwner,
-    close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
+    TaskOwner, close_resources, contains_lifecycle_failure, requires_lifecycle_propagation,
 )
 from interface.tool_registry import IToolRegistry
 

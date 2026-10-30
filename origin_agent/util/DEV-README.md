@@ -2,13 +2,21 @@
 
 本包承载无需 Application 装配即可导入和复用的辅助函数模块。前置辅助模块的规范定义见根目录 `DEV-glossary.md`；“前置”表示依赖方向，不等于所有函数无 I/O，也不表示把本包整体提前初始化。
 
+## 异常定义包（2026-10-30）
+
+`MetaFormatError` 与 `LocalFontAccessError` 唯一定义于 `entity/error/util.py`，`file_metadata.py`、`local_fonts.py` 只导入并抛出同一类型；所有调用方统一 `from entity.error import X`，不从 util 业务模块间接导入异常。标准库/第三方异常来源不变。所有 origin仓库自定义异常（含内部控制信号）的定义与显式导出规则见 [异常定义包文档](../entity/error/DEV-README.md)；私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入且不公开。
+
+异常保留原 `ValueError` 家族、字段、构造与异常链，不强行改 BaseModel，不改变元数据解析错误、字体拒绝或快速失败语义。本包新增 `entity.error` 依赖，异常定义包在运行时仅依赖标准库，不反向导入 util 或具体业务实现；其 `system.py` 仅在 `TYPE_CHECKING` 下从 `entity.puretype.resource_cleanup` 导入 `CleanupWarning` 供类型检查，不构成运行时依赖，不通过业务 System 取得数据，也不引入 Application 装配依赖。
+
+异常不进 easysave/typeref，存储 key 未变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用；用户须停机完整部署新包与全部调用方并重启，注意合并复制残留，开发助手AI不操作 workspace。
+
 ## 依赖与初始化边界
 
 - 允许标准库、第三方库、已经核实不会反向引入业务实现的 `entity/` 或 `interface/` 子模块，以及本包其他前置辅助模块。
 - 检查范围包括模块级、函数内部、平台条件分支和 `TYPE_CHECKING` 中的导入；延迟导入不豁免依赖约束。
 - 不导入 `system/`、`entry/`、`subagent/`、`gateway/`、`component/` 或 `abstract/` 的具体实现，不通过 `Application.current()` 查询 System，不持有业务生命周期、共享业务缓存或后台资源。
 - `__init__.py` 保持为空，调用方显式导入职责子模块，不建立全包聚合导出、运行时初始化、旧路径代理或 `sys.modules` 别名。
-- 本批实际项目内依赖只有 `entity.constant`、`util.pathutils` 和 `util.text_codec`。常量包内部与标准库依赖不会反向引入消息体系；不能把整个 entity/interface 包无条件视为安全依赖。
+- 当前项目内依赖为 `entity.constant`、`entity.error`、`util.pathutils` 和 `util.text_codec`。异常定义包及常量包不反向引入业务实现；不能把整个 entity/interface 包无条件视为安全依赖。
 
 ## 模块地图
 
@@ -20,8 +28,8 @@
 | `text_preview.py` | 不改变原文的逐行展示截断 | `util.text_codec` |
 | `convert.py` | 枚举、布尔值转换 | 无 |
 | `error_utils.py` | 可恢复辅助副作用的日志与同步/异步调用包装 | 无 |
-| `file_metadata.py` | 同级元数据文本解析与 `MetaFormatError` | 无 |
-| `local_fonts.py` | 字体路径/MIME校验与 `LocalFontAccessError` | `entity.constant` |
+| `file_metadata.py` | 同级元数据文本解析；抛出统一 `MetaFormatError` | `entity.error` |
+| `local_fonts.py` | 字体路径/MIME校验；抛出统一 `LocalFontAccessError` | `entity.constant`、`entity.error` |
 | `pkgmgr.py` | 包管理器探测，Windows 返回显式 `.cmd` 名称 | 无 |
 | `atomic_io.py` | 跨平台原子替换、独占创建及无覆盖文件/目录操作 | 无 |
 

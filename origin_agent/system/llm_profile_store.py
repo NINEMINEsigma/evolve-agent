@@ -27,18 +27,10 @@ from entity.puretype.llm import (
 )
 from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure, ProfileConflictError, ProfileNotFoundError
 from interface.llm_profile_store import ILLMProfileStore
 
 logger = logging.getLogger(__name__)
-
-
-class ProfileNotFoundError(LookupError):
-    """指定名称的 LLM Profile 不存在（可预期的用户请求错误）。"""
-
-
-class ProfileConflictError(ValueError):
-    """LLM Profile 名称冲突或引用占用导致拒绝操作（可预期的用户请求错误）。"""
 
 
 class LLMProfileStore(ILLMProfileStore):

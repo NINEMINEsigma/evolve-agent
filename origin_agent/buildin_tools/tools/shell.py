@@ -16,7 +16,7 @@ from entity.constant import (
     SHELL_WAIT_TIMEOUT_SECONDS,
 )
 from entity.puretype import ToolAvailability, ToolDangerLevel
-from system.shell_manager import ShellAccessError, ShellError
+from entity.error import ShellAccessError, ShellError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext

@@ -1,5 +1,15 @@
 # system/ — 基础设施与异步生命周期
 
+## 异常定义包（2026-10-30）
+
+origin仓库所有自定义异常（含内部控制信号）只在 `entity/error/` 定义。本包的 Shell、Sandbox、Profile、元数据、生命周期、资源清理、搜索、会话变量/视觉/文件统计及 Agentspace 异常统一位于 `entity/error/system.py`，公共类型从 `entity.error` 显式导入；标准库/第三方异常继续使用原来源。`LifecycleFailure`、`ApplicationStoppingError`、`HistoryPersistenceError` 等不再定义于业务模块。
+
+`system/agentspace/errors.py` 已删除，`system/agentspace/__init__.py` 不再导出异常；纯转发 `system/lifecycle_errors.py` 已删除，不保留兼容入口。`lifecycle.py`、`cleanup_errors.py` 中的分类/异常组聚合辅助函数和 `resource_cleanup.py` 的清理行为仍留原职责，不随类型集中而移动或改策略。
+
+导出公共异常统一定义于 `entity/error/session_export.py`，`SessionExportError` 是唯一基类，entry/system/gateway 使用同一族；线程侧私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入，不公开。异常保持原 Exception 家族、字段、构造与异常链，不强行改 BaseModel，不改变抛出/捕获、资源清理观察超时、必要失败传播及快速失败语义。完整约定见 [异常定义包文档](../entity/error/DEV-README.md)。
+
+异常不进入 easysave/typeref，持久化模型、存储 key、21个System槽位和装配不变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用。用户须停机完整部署新包与全部调用方并重启，注意合并复制（含 fast仓库 force_init）不清除旧文件，保护本地进化内容后定向处理；开发助手AI不操作 workspace。
+
 ## 前置辅助模块边界（2026-10-22）
 
 `pathutils`、`templates`、`text_codec`、`text_preview`、`convert`、`error_utils`、`file_metadata`、`local_fonts`、`pkgmgr`、`atomic_io` 十个整文件已迁入同级 `util/`，原路径不保留转发；模块地图和依赖约束见 [util/DEV-README.md](../util/DEV-README.md)。System、叶服务、RuntimeContext、TaskOwner、ShellTextNormalizer 及业务组装模块仍留在本包，20 个 System 的装配和资源所有权不变。

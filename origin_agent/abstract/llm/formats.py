@@ -15,7 +15,7 @@ import re
 import json
 from typing import Any
 
-from abstract.llm.client import UnsupportedModalityError
+from entity.error import UnsupportedModalityError
 from entity.messages import (
     BaseMessage,
     CharacterConversationMessage,

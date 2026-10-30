@@ -21,15 +21,11 @@ from entity.puretype import (
     SessionFileChangesData, SessionFileChangesSummary, SessionFileChangesPage,
 )
 from entity.typeref import make_config
-from system.lifecycle import LifecycleFailure
-
-
-class SessionFileChangesPersistenceFailure(LifecycleFailure):
-    """文件副作用已完成后，必要统计提交失败。"""
-
-
-class SessionFileChangesBusyError(RuntimeError):
-    """删除尚未开始，会话统计提交锁在允许期限内仍被占用。"""
+from entity.error import (
+    LifecycleFailure,
+    SessionFileChangesBusyError,
+    SessionFileChangesPersistenceFailure,
+)
 
 
 class SessionFileChangeStore:

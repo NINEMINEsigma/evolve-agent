@@ -34,8 +34,9 @@ from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 from entry.tool_post_dispatch import PreparedToolResult, ToolPostprocessor, prepare_tool_result
 from abstract.tools.tool import ToolExecution
+from entity.error import ApplicationStoppingError, LifecycleFailure, ToolInterrupted
 from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, contains_lifecycle_failure,
+    contains_lifecycle_failure,
     requires_lifecycle_propagation,
 )
 from entry.tool_pairing import interrupted_tool_result as _interrupted_result
@@ -84,19 +85,6 @@ async def cancel_tool_wait(
         error = task.exception()
         if error is not None and requires_lifecycle_propagation(error):
             raise error
-
-
-class ToolInterrupted(Exception):
-    """内部中断信号：可中断等待被 cancel_event 打断时抛出。
-
-    携带 phase 字段（"approval" / "dispatch"），由调用方
-    ``except ToolInterrupted as ti`` 捕获后用 ``ti.phase``
-    构造统一的中断失败结果。
-    """
-
-    def __init__(self, phase: str) -> None:
-        super().__init__(f"Tool call interrupted during {phase}")
-        self.phase: str = phase
 
 
 class ToolExecutor:

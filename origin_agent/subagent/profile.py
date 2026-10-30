@@ -16,14 +16,10 @@ from entity.constant import (
     SUBAGENT_NAME_PATTERN,
 )
 from entity.puretype import AgentConfig, CharacterProfile
-from util.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import SandboxError
+from entity.error import CharacterProfileError, MetaFormatError, SandboxError
+from util.file_metadata import parse_meta_content
 from interface.llm_profile_store import ILLMProfileStore
 from interface.sandbox import ISandbox
-
-
-class CharacterProfileError(ValueError):
-    """角色档案不存在、无效或引用不可用 Profile。"""
 
 
 class CharacterProfileResolver:

@@ -12,7 +12,8 @@ from component.approval.manager import ApprovalBackendManager
 from component.approval.mode_store import ApprovalModeStore
 from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.messages import BaseMessage
-from system.lifecycle import ApplicationStoppingError, TaskOwner
+from entity.error import ApplicationStoppingError
+from system.lifecycle import TaskOwner
 from interface.approval_system import IApprovalSystem
 from interface.llm_profile_store import ILLMProfileStore
 

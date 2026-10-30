@@ -46,8 +46,9 @@ from entity.constant import (
     WRITE_FILE_MAX_CHARS,
     WRITE_FILE_TRUNCATION_TAIL,
 )
-from util.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import Access, SandboxError
+from entity.error import MetaFormatError, SandboxError
+from util.file_metadata import parse_meta_content
+from system.sandbox import Access
 from util.text_codec import split_lf_lines
 from util.text_preview import truncate_lf_lines
 from pathlib import Path
@@ -250,7 +251,7 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
 
     # 发送 didChange 通知
     uri = resolved.real.as_uri()
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import ApplicationStoppingError
     try:
         manager.notify_did_change(logical_path, content)
     except ApplicationStoppingError:

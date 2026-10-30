@@ -27,6 +27,14 @@ buildin_tools/multiagenttools/   ← 多代理 / 子Agent工具
 
 ---
 
+## 异常定义包（2026-10-30）
+
+`CharacterProfileError(ValueError)` 统一定义于 `entity/error/subagent.py`，`subagent/profile.py` 继续负责角色档案解析、抛出与业务处理，不再定义异常；`subagent/__init__.py` 不作为异常兼容导出入口。所有公共自定义异常统一 `from entity.error import X`；标准库/第三方异常继续从原来源导入。
+
+所有 origin仓库自定义异常（含内部控制信号）只能定义于 [异常定义包](../entity/error/DEV-README.md)，按职责子模块组织并由包入口显式导出；私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入且不公开。异常保留原 Exception 家族，不强行改 BaseModel，不改变档案拒绝、启动回收、工具审批/中断、History 保存或生命周期失败传播策略。
+
+异常不进入 easysave/typeref，存储 key 未变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用；用户须停机完整部署新包与全部调用方并重启，注意合并复制残留，开发助手AI不操作 workspace。
+
 ## 工具对象与四阶段执行（2026-10-15）
 
 普通子Agent和临时Agent已接入对象工具 execution 与共享 `ToolPostprocessor`，不调用主会话 `ToolExecutor.execute()`，父Agent审批、脱手模式与临时Agent的 TASKAGENT∩safe 授权保持不变。每批模型调用先按工具声明截断，再写 assistant History；被声明丢弃的调用不审批、不执行、不补结果。

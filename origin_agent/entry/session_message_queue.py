@@ -15,7 +15,7 @@ from entity.puretype import (
     MessageContent, QueuedMessage, ShutdownInputReport,
 )
 from entry.input_delivery import InputDeliveryBuffer, ToolInputReservation
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop

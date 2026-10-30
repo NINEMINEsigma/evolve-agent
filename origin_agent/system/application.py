@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, ClassVar, Never
 from framework import AsyncArchitecture, AsyncSystem
 
 from entity.constant import ApplicationState, ShutdownReason
-from system.lifecycle import LifecycleFailure, close_resources
+from entity.error import LifecycleFailure
+from system.lifecycle import close_resources
 
 if TYPE_CHECKING:
     from interface.runtime_system import IDPRuntimeSystem, IRuntimeSystem
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_port_busy_rejection(error: BaseException) -> bool:
-    from gateway.system import GatewayPortBusyError
+    from entity.error import GatewayPortBusyError
     if isinstance(error, GatewayPortBusyError):
         return True
     return isinstance(error, BaseExceptionGroup) and all(

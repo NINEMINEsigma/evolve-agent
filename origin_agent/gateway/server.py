@@ -47,13 +47,13 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
-from system.session_file_changes import SessionFileChangeStore, SessionFileChangesBusyError
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from system.session_file_changes import SessionFileChangeStore
+from entity.error import ApplicationStoppingError, LifecycleFailure, SessionFileChangesBusyError
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
+from entity.error import AgentspaceConnectionClosed
 from .agentspace_event_bridge import (
-    AgentspaceConnectionClosed,
     attach_agentspace_events,
     build_initial_agentspace_events,
     detach_agentspace_events,
@@ -155,16 +155,16 @@ from entity.puretype import (
     SubAgentUpdate,
 )
 from entity.messages import ImageBlock, VideoBlock
-from entry.history_media import (
+from entity.error import (
     HistoryMediaConflictError,
     HistoryMediaNotFoundError,
     HistoryMediaPreviewError,
-    decode_media_preview,
 )
-from system.llm_profile_store import ProfileConflictError, ProfileNotFoundError
-from system.session_metadata import MetadataGenerationError, MetadataProfileUnavailableError
-from system.agentspace import AgentspaceError
-from system.sandbox import (
+from entry.history_media import decode_media_preview
+from entity.error import ProfileConflictError, ProfileNotFoundError
+from entity.error import MetadataGenerationError, MetadataProfileUnavailableError
+from entity.error import AgentspaceError
+from entity.error import (
     DynamicSandboxConflictError,
     DynamicSandboxInputError,
     DynamicSandboxNotFoundError,
@@ -218,7 +218,7 @@ def _gateway():
 
 def _admit_business_http() -> None:
     """新业务 HTTP 输入的同步准入；STOPPING/未开放时返回 503。"""
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import ApplicationStoppingError
     try:
         with _gateway().admission.admit_business():
             pass
@@ -596,7 +596,7 @@ async def get_session_tab_capabilities(
     """Return lightweight content capabilities for session-dependent tabs."""
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.session_variables import (
+    from entity.error import (
         SessionVariableInputError, SessionVariableAccessError,
         SessionVariableLimitError, SessionVariableConflictError,
     )
@@ -636,7 +636,7 @@ async def get_session_variables(session_id: str, response: Response) -> SessionV
     """只读会话变量池，不创建 Loop；与 Agent 全量读取复用同一解析服务。"""
     from starlette.concurrency import run_in_threadpool
     from system.application import Application
-    from system.session_variables import (
+    from entity.error import (
         SessionVariableInputError, SessionVariableAccessError,
         SessionVariableLimitError, SessionVariableConflictError,
     )
@@ -1025,8 +1025,8 @@ async def _run_export_http(
 @router.post("/api/sessions/{session_id}/export/snapshot")
 async def capture_session_export(session_id: str, req: Request):
     """一次性只读捕获完整主会话，避免复用前端已加载页。"""
-    from entry.session_export import SessionExportError
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import SessionExportError
+    from entity.error import ApplicationStoppingError
     from entity.constant import SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
     gateway = _gateway()
 
@@ -1067,8 +1067,8 @@ async def read_session_export_resource(session_id: str, req: Request):
         SESSION_EXPORT_RESOURCE_BODY_MAX_BYTES, SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS,
         SESSION_EXPORT_DIGEST_HEADER, SESSION_EXPORT_IDENTITY_HEADER,
     )
-    from entry.session_export import SessionExportError
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import SessionExportError
+    from entity.error import ApplicationStoppingError
     body = await _read_export_body(req, SESSION_EXPORT_RESOURCE_BODY_MAX_BYTES)
     try:
         payload = SessionExportResourceRequest.model_validate_json(body)
@@ -1106,8 +1106,8 @@ async def read_session_export_resource(session_id: str, req: Request):
 async def verify_session_export(session_id: str, req: Request):
     from entity.puretype import SessionExportVerifyRequest
     from entity.constant import SESSION_EXPORT_VERIFY_BODY_MAX_BYTES, SESSION_EXPORT_REQUEST_TIMEOUT_SECONDS
-    from entry.session_export import SessionExportError
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import SessionExportError
+    from entity.error import ApplicationStoppingError
     body = await _read_export_body(req, SESSION_EXPORT_VERIFY_BODY_MAX_BYTES)
     try:
         payload = SessionExportVerifyRequest.model_validate_json(body)
@@ -1827,7 +1827,7 @@ async def stop_shell_endpoint(session_id: str, shell_id: str):
     """由前端用户停止指定主会话中的 Shell会话。"""
     _admit_business_http()
     from system.application import Application
-    from system.shell_manager import ShellAccessError
+    from entity.error import ShellAccessError
 
     logger.info("Stop Shell from frontend | session=%s shell=%s", session_id, shell_id)
     try:
@@ -1983,7 +1983,7 @@ async def dynamic_endpoint_handler(
         )
 
     # 先完成接收登记再回报成功；关闭中的拒绝明确返回 503。
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import ApplicationStoppingError
     try:
         loop.loop.message_queue.push(
             payload,
@@ -2107,8 +2107,8 @@ def serve_workspace_file(
     ):
     """在线程池解析视觉入口；最终 HEAD 响应独立校验来源并返回版本。"""
     from system.application import Application
-    from system.sandbox import SandboxError
-    from system.session_visual_resources import SessionVisualResourceError, SessionVisualVersionUnavailable
+    from entity.error import SandboxError
+    from entity.error import SessionVisualResourceError, SessionVisualVersionUnavailable
     from entity.puretype import SessionVisualKind, SessionVisualSource, SessionVisualStatus
 
     sandbox = Application.current().get_system(ISandbox)
@@ -2192,7 +2192,8 @@ async def serve_local_font(font_path: str):
     - 拒绝 .. 路径遍历
     - 响应头：Cache-Control: no-cache + Access-Control-Allow-Origin: *
     """
-    from util.local_fonts import resolve_local_font, LocalFontAccessError
+    from util.local_fonts import resolve_local_font
+    from entity.error import LocalFontAccessError
 
     try:
         font_file = resolve_local_font(font_path)
@@ -2211,7 +2212,7 @@ async def serve_local_font(font_path: str):
 async def download_workspace_file(namespace: str, file_path: str):
     """提供沙盒命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
     from system.application import Application
-    from system.sandbox import SandboxError
+    from entity.error import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
@@ -2254,7 +2255,7 @@ def download_dir_zip(
     import zipfile
 
     from system.application import Application
-    from system.sandbox import SandboxError
+    from entity.error import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
@@ -2663,7 +2664,7 @@ async def put_metadata_profile(
 ):
     """设置或清空项目级全局元数据 Profile 引用。"""
     from system.application import Application
-    from system.session_metadata import (
+    from entity.error import (
         MetadataProfileUnavailableError,
     )
 
@@ -2717,7 +2718,7 @@ async def put_toolchain_summary_profile(
 ):
     """设置或清空项目级工具链摘要 Profile 引用。"""
     from system.application import Application
-    from system.session_metadata import (
+    from entity.error import (
         MetadataProfileUnavailableError,
     )
 
@@ -2760,7 +2761,7 @@ def _agentspace_service():
 
 
 def _raise_agentspace_http(exc: AgentspaceError) -> NoReturn:
-    from system.agentspace import (
+    from entity.error import (
         AgentspaceAlreadyExistsError,
         AgentspaceInvalidPathError,
         AgentspaceLockedError,
@@ -3266,7 +3267,7 @@ async def _send_agentspace_ws_event(
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
     from system.application import Application
-    from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+    from entity.error import ApplicationStoppingError, LifecycleFailure
 
     gateway = _gateway()
     try:

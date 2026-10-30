@@ -19,7 +19,8 @@ from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandle
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from entity.puretype import ToolAvailability
 from util.pkgmgr import detect_package_manager
-from system.sandbox import Access, SandboxError
+from entity.error import SandboxError
+from system.sandbox import Access
 
 logger = logging.getLogger(__name__)
 

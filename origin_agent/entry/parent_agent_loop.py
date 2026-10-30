@@ -69,17 +69,18 @@ from system.prompt import (
     build_session_stage_block,
     build_session_variables_block,
 )
+from entity.error import IncompatibleHistoryError, ModalityForwardUnavailableError
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
     summarize_message_for_log,
     prepare_main_multimodal_request,
     PreparedMultimodalRequest,
-    ModalityForwardUnavailableError,
 )
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import requires_lifecycle_propagation
 from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
@@ -92,13 +93,6 @@ if TYPE_CHECKING:
     from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
-
-
-class IncompatibleHistoryError(Exception):
-    """会话历史格式不兼容，无法加载。"""
-    def __init__(self, session_id: str) -> None:
-        self.session_id = session_id
-        super().__init__(f"Session {session_id} history format is incompatible")
 
 
 class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
@@ -208,7 +202,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self.session_id,
             )
         except Exception as exc:
-            from system.session_metadata import SessionMetadataError
+            from entity.error import SessionMetadataError
 
             if isinstance(exc, SessionMetadataError):
                 await self.report_context_limit_rotation_blocked(old_sid, exc)
@@ -261,7 +255,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 move_last_user_message=move_last_user_message,
             )
         except Exception as exc:
-            from system.session_metadata import SessionMetadataError
+            from entity.error import SessionMetadataError
 
             if not isinstance(exc, SessionMetadataError):
                 raise
@@ -275,7 +269,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         try:
             new_sid = await self._lifecycle.rotate_session_for_continuation(sid)
         except Exception as exc:
-            from system.session_metadata import SessionMetadataError
+            from entity.error import SessionMetadataError
 
             if not isinstance(exc, SessionMetadataError):
                 raise
@@ -953,7 +947,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             )
                             self.session_id = sid
                         except Exception as exc:
-                            from system.session_metadata import SessionMetadataError
+                            from entity.error import SessionMetadataError
 
                             if not isinstance(exc, SessionMetadataError):
                                 raise

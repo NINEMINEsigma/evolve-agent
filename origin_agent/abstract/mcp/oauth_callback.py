@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from entity.constant import OAUTH_CALLBACK_THREAD_JOIN_TIMEOUT
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure
 
 
 class CallbackHTTPServer(HTTPServer):

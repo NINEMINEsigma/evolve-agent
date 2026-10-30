@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from entity.constant import InputDeliveryState
 from entity.puretype import InputDelivery, QueuedMessage, ShutdownInputReport
 from entity.messages import ToolResultMessage
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from interface.runtime_system import IRuntimeSystem
 
 PayloadT = TypeVar("PayloadT", bound=BaseModel)

@@ -42,7 +42,8 @@ from entity.constant import (
 from util.pathutils import get_templates_dir
 from util.templates import render_multi_agent_prompt
 from system.session_store import SessionStore
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import requires_lifecycle_propagation
 from system.prompt import (
     build_dynamic_sandbox_spaces_block,
     build_session_chat_style_block,
@@ -286,7 +287,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             await self._rotate_session_for_context_limit()
             return True
         except Exception as exc:
-            from system.session_metadata import SessionMetadataError
+            from entity.error import SessionMetadataError
 
             if not isinstance(exc, SessionMetadataError):
                 raise

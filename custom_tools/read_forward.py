@@ -53,7 +53,7 @@ from abstract.tools.tool import (
 )
 
 # ── 沙箱与运行时上下文 ──
-from system.sandbox import SandboxError
+from entity.error import SandboxError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext

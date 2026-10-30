@@ -21,7 +21,7 @@ from entity.constant import (
     TOOL_DISCOVERY_EXCLUDED_FILENAMES,
     TOOLSET_DECLARATION_NAME,
 )
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from util.pathutils import find_repo_root, get_agent_dir
 from interface.approval_system import IApprovalSystem
 from interface.agentspace_service import IAgentspaceService

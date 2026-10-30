@@ -9,7 +9,7 @@ import threading
 from typing import Any
 
 from entity.constant import SubprocessCreationState
-from system.lifecycle_errors import LifecycleFailure
+from entity.error import LifecycleFailure
 from system.process_termination import OwnedProcessIdentity
 from system.resource_cleanup import CleanupReservation, ResourceCleanupHandle
 

@@ -23,12 +23,14 @@ from entity.constant import (
 from entity.messages import BaseMessage, CharacterConversationMessage, History
 from entity.puretype import LLMProfile, MetadataProfileState, Role, ToolchainSummaryProfileState
 from entry.agent_support.history_summary import summarize_history
-from system.lifecycle import (
+from entity.error import (
     ApplicationStoppingError,
     LifecycleFailure,
-    TaskOwner,
-    contains_lifecycle_failure,
+    MetadataGenerationError,
+    MetadataProfileUnavailableError,
+    SessionMetadataError,
 )
+from system.lifecycle import TaskOwner, contains_lifecycle_failure
 from interface.frontend_sink import IFrontendSink
 from interface.llm_profile_store import ILLMProfileStore
 from interface.session_manager import ISessionManager
@@ -40,18 +42,6 @@ if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
-
-
-class SessionMetadataError(RuntimeError):
-    """可预期的会话元数据业务失败。"""
-
-
-class MetadataProfileUnavailableError(SessionMetadataError):
-    """没有可用的全局或目标会话 Profile。"""
-
-
-class MetadataGenerationError(SessionMetadataError):
-    """元数据模型调用或输出解析失败。"""
 
 
 class SessionMetadataService(ISessionMetadataService):

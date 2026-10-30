@@ -43,14 +43,13 @@ from util.atomic_io import (
     move_tree_no_replace,
     replace_atomic,
 )
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure, SandboxError
 from interface.agentspace_service import IAgentspaceService
 from interface.sandbox import ISandbox
-from system.sandbox import SandboxError
 from system.session_visual_resources import SessionVisualResourceService
 from system.session_variables import SessionVariableService
 from system.session_file_changes import SessionFileChangeStore
-from .errors import (
+from entity.error import (
     AgentspaceAlreadyExistsError,
     AgentspaceInvalidPathError,
     AgentspaceNotFoundError,

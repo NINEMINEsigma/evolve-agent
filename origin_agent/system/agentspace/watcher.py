@@ -21,7 +21,7 @@ from entity.puretype import (
     AgentspaceEventKind,
     AgentspaceEventSource,
 )
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from .event_hub import AgentspaceEventHub
 

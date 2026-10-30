@@ -21,7 +21,8 @@ from abstract.tools.tool import (
     tool_error, tool_result,
 )
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT, ShutdownReason
-from system.sandbox import Access, SandboxError
+from entity.error import SandboxError
+from system.sandbox import Access
 
 logger = logging.getLogger(__name__)
 

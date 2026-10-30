@@ -32,7 +32,7 @@ from entity.constant import (
     MCP_STDIO_STDIN_CLOSE_TIMEOUT,
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure
 
 
 class MCPStdioTransport:

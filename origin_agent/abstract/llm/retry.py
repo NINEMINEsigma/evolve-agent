@@ -12,7 +12,8 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from typing import Any, cast
 
-from abstract.llm.client import BaseLLMClient, LLMEmptyResponseError
+from abstract.llm.client import BaseLLMClient
+from entity.error import LLMEmptyResponseError
 from entity.constant import BACKOFF_BASE, LLM_EMPTY_RESPONSE_MAX_ATTEMPTS
 from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMResponse, StreamChunk, Usage

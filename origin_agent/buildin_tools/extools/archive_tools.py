@@ -26,7 +26,7 @@ from abstract.tools.tool import (
     tool_result,
 )
 from entity.puretype import ToolDangerLevel
-from system.sandbox import SandboxError
+from entity.error import SandboxError
 
 logger = logging.getLogger(__name__)
 

@@ -20,17 +20,10 @@ from entity.puretype import (
     SessionVisualKind, SessionVisualResourceState, SessionVisualResources,
     SessionVisualSource, SessionVisualStatus,
 )
-from util.file_metadata import MetaFormatError, parse_meta_content
-from system.sandbox import ResolvedPath, SandboxError
+from util.file_metadata import parse_meta_content
+from entity.error import MetaFormatError, SessionVisualResourceError, SessionVisualVersionUnavailable, SandboxError
+from system.sandbox import ResolvedPath
 from interface.sandbox import ISandbox
-
-
-class SessionVisualResourceError(ValueError):
-    """安全的入口错误，不包含物理路径。"""
-
-
-class SessionVisualVersionUnavailable(SessionVisualResourceError):
-    """签名预算耗尽或资源在扫描中失效；不能返回部分签名。"""
 
 
 class SessionVisualResourceService:

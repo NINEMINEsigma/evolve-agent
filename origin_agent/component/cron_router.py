@@ -26,7 +26,7 @@ from entity.constant import (
 )
 from entity.puretype import CronTaskInfo
 from util.atomic_io import write_text_atomic
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from interface.cron_router import ICronRouter
 from interface.sandbox import ISandbox
 from interface.subprocess_runner import ISubprocessRunner

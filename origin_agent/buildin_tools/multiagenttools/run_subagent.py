@@ -19,7 +19,8 @@ from abstract.tools.tool import (
 )
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from system.application import Application
-from subagent.profile import CharacterProfileError, CharacterProfileResolver
+from entity.error import CharacterProfileError
+from subagent.profile import CharacterProfileResolver
 
 
 async def _handle_run_subagent(args: dict[str, Any]) -> dict:

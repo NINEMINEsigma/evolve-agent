@@ -49,6 +49,12 @@ from entity.puretype import (
 )
 from util.atomic_io import replace_atomic
 from system.context import RuntimeContext
+from entity.error import (
+    DynamicSandboxConflictError,
+    DynamicSandboxInputError,
+    DynamicSandboxNotFoundError,
+    SandboxError,
+)
 from util.pathutils import find_repo_root
 from interface.sandbox import ISandbox
 from interface.subprocess_runner import ISubprocessRunner
@@ -95,32 +101,6 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         Namespace.CUSTOM_TOOLS.value:      [Access.READ],
     },
 }
-
-
-class SandboxError(PermissionError):
-    """当工具操作违反沙盒约束时抛出。"""
-
-
-class DynamicSandboxInputError(ValueError):
-    """动态沙盒空间名称、路径或描述等业务输入无效时抛出。
-
-    Gateway 捕获后映射 HTTP 400。内部类型不变量（如字段非字符串/布尔）
-    仍抛 ``TypeError``，不在此类中。
-    """
-
-
-class DynamicSandboxConflictError(DynamicSandboxInputError):
-    """动态沙盒空间名称重复、同名配置不同或路径与已有空间/内置命名空间重叠时抛出。
-
-    Gateway 捕获后映射 HTTP 409（比 ``DynamicSandboxInputError`` 更具体，优先匹配）。
-    """
-
-
-class DynamicSandboxNotFoundError(KeyError):
-    """按名称更新动态沙盒空间但目标不存在时抛出。
-
-    Gateway 捕获后映射 HTTP 404。
-    """
 
 
 # ---------------------------------------------------------------------------

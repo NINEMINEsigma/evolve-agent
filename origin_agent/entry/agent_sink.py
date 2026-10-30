@@ -42,7 +42,8 @@ from entity.puretype import (
     ToolchainSummaryProfileState,
 )
 from framework import AsyncSystem
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import TaskOwner
 from interface.agent_sink import IAgentSink
 from interface.frontend_sink import IFrontendSink
 from interface.tool_registry import IToolRegistry

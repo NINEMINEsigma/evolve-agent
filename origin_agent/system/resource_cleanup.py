@@ -14,8 +14,8 @@ from typing import Any
 from entity.constant.resource_cleanup import CleanupReservationState, CleanupState
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from entity.puretype.resource_cleanup import CleanupReport, CleanupWarning
-from system.cleanup_errors import CleanupErrorSink, ResourceCleanupTimeout, split_cleanup_timeouts
-from system.lifecycle_errors import LifecycleFailure
+from entity.error import LifecycleFailure, ResourceCleanupTimeout
+from system.cleanup_errors import CleanupErrorSink, split_cleanup_timeouts
 
 logger = logging.getLogger(__name__)
 

@@ -38,19 +38,29 @@ from entity.puretype import (
     SessionStatus, SessionVisualKind, SessionVisualResourceState,
 )
 from entity.puretype_after import SessionExportHistorySource
-from entry.session_export import (
-    SessionExportBusyError, SessionExportChangedError, SessionExportError,
-    SessionExportLimitError, SessionExportTimeoutError, export_history_digest, project_export_history,
+from entity.error import (
+    SessionExportBusyError,
+    SessionExportCapacityError,
+    SessionExportChangedError,
+    SessionExportError,
+    SessionExportInputError,
+    SessionExportLimitError,
+    SessionExportMetricsError,
+    SessionExportNotFoundError,
+    SessionExportNotReadyError,
+    SessionExportTimeoutError,
+    SandboxError,
+    SessionVisualResourceError,
+    LocalFontAccessError,
+    MetaFormatError,
 )
-from util.file_metadata import MetaFormatError, parse_meta_content
-from util.local_fonts import (
-    LocalFontAccessError, local_font_mime_type, resolve_local_font,
-)
-from system.sandbox import ResolvedPath, SandboxError
+from entity.error.session_export import _SourceUnavailable
+from entry.session_export import export_history_digest, project_export_history
+from util.file_metadata import parse_meta_content
+from util.local_fonts import local_font_mime_type, resolve_local_font
+from system.sandbox import ResolvedPath
 from system.session_store import SessionStore
-from system.session_visual_resources import (
-    SessionVisualResourceError, SessionVisualResourceService,
-)
+from system.session_visual_resources import SessionVisualResourceService
 from interface.runtime_system import IRuntimeSystem
 from interface.sandbox import ISandbox
 from interface.session_manager import ISessionManager
@@ -62,53 +72,6 @@ ExportWorkT = TypeVar("ExportWorkT")
 
 
 logger = logging.getLogger(__name__)
-
-
-class SessionExportInputError(SessionExportError):
-    """请求结构、路径或来源无效。"""
-
-    def __init__(
-        self,
-        code: str,
-        message: str
-        ) -> None:
-        super().__init__(code, message, 400)
-
-
-class SessionExportNotFoundError(SessionExportError):
-    """会话不存在、删除中或目标资源缺失。"""
-
-    def __init__(
-        self,
-        code: str,
-        message: str
-        ) -> None:
-        super().__init__(code, message, 404)
-
-
-class SessionExportNotReadyError(SessionExportError):
-    """会话存在但 Loop 未恢复、身份不匹配或已归档不可导出。"""
-
-    def __init__(
-        self,
-        code: str,
-        message: str
-        ) -> None:
-        super().__init__(code, message, 409)
-
-
-class SessionExportCapacityError(SessionExportError):
-    """进程级并发容量已满，不排队直接拒绝。"""
-
-    def __init__(self) -> None:
-        super().__init__("export_capacity", "Too many concurrent export operations", 429)
-
-
-class SessionExportMetricsError(SessionExportError):
-    """消息计时文件已存在但结构损坏；不能转成空 metrics。"""
-
-    def __init__(self, message: str) -> None:
-        super().__init__("invalid_metrics", message, 409)
 
 
 class SessionExportResourceRead(BaseModel):
@@ -159,19 +122,6 @@ class _CapacityTicket:
                 return
             self._released = True
         self._release()
-
-
-class _SourceUnavailable(Exception):
-    """线程侧资源不可用信号；由 status 与 code 承载结果。"""
-
-    def __init__(
-        self,
-        status: Literal["missing", "denied", "too_large"],
-        code: str
-        ) -> None:
-        super().__init__(code)
-        self.status = status
-        self.code = code
 
 
 def _guess_media_type(path: Path) -> str:

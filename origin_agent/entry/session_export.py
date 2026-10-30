@@ -23,44 +23,17 @@ from entity.messages import (
     ToolResultMessage, VideoBlock,
 )
 from entity.puretype import MessageMetrics, SessionExportHistorySnapshot
+from entity.error import (
+    SessionExportBusyError,
+    SessionExportChangedError,
+    SessionExportError,
+    SessionExportLimitError,
+    SessionExportTimeoutError,
+)
 from entity.puretype_after import SessionExportHistorySource
 from entry.history_projection import project_history_content_rows
 
 logger = logging.getLogger(__name__)
-
-
-class SessionExportError(ValueError):
-    """导出边界的已识别业务拒绝；服务层复用而不建立循环依赖。"""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        status: int = 400
-        ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status = status
-
-
-class SessionExportLimitError(SessionExportError):
-    def __init__(self, message: str) -> None:
-        super().__init__("export_limit", message, 413)
-
-
-class SessionExportChangedError(SessionExportError):
-    def __init__(self) -> None:
-        super().__init__("export_changed", "Session content changed; retry when idle", 409)
-
-
-class SessionExportTimeoutError(SessionExportError):
-    def __init__(self) -> None:
-        super().__init__("export_timeout", "Export operation timed out; retry when idle", 408)
-
-
-class SessionExportBusyError(SessionExportError):
-    def __init__(self) -> None:
-        super().__init__("session_busy", "Session must be idle before exporting", 409)
 
 
 class _CopyBudget:

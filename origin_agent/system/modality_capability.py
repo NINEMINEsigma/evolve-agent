@@ -28,9 +28,8 @@ from contextlib import contextmanager
 
 from interface.llm_profile_store import ILLMProfileStore
 from interface.modality_capability_system import IModalityCapabilitySystem
-from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, TaskOwner, requires_lifecycle_propagation,
-)
+from entity.error import ApplicationStoppingError, LifecycleFailure, ModalityDescriptionError
+from system.lifecycle import TaskOwner, requires_lifecycle_propagation
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 
 from easysave import load as es_load, save as es_save
@@ -58,7 +57,8 @@ from entity.messages import (
     ToolCall,
     FunctionCall,
 )
-from abstract.llm.client import BaseLLMClient, UnsupportedModalityError, LLMAPIStatusError
+from abstract.llm.client import BaseLLMClient
+from entity.error import UnsupportedModalityError, LLMAPIStatusError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -342,10 +342,6 @@ async def _forward_modality_to_ref_profile(
             context.session_id if context else "", ref_profile.name, media_type, exc,
         )
         return _error_text(ref_profile.name, f"{type(exc).__name__}: {exc}")
-
-
-class ModalityDescriptionError(RuntimeError):
-    """转发返回空描述等协议失败，不能当作明确模态不可用。"""
 
 
 def is_explicit_modality_rejection(exc: Exception, media_type: ModalityType) -> bool:

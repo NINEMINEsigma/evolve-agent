@@ -16,11 +16,11 @@ from entity.constant import (
     CONNECT_TIMEOUT_MS,
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
-from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources,
+from entity.error import (
+    ApplicationStoppingError, LifecycleFailure, ResourceCleanupPendingError,
 )
+from system.lifecycle import TaskOwner, close_resources
 from interface.browser_system import IBrowserSystem
-from system.cleanup_errors import ResourceCleanupPendingError
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
 from entity.puretype.browser import HeadlessCleanupResult

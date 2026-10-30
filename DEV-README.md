@@ -97,6 +97,16 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 
 ---
 
+## 异常定义包与集中迁移（2026-10-30，当前权威约定）
+
+origin仓库所有自定义异常（含内部控制信号）只在 `origin_agent/entity/error/` 定义，按 `abstract.py`、`entry.py`、`gateway.py`、`session_export.py`、`subagent.py`、`system.py`、`util.py` 划分职责。公共类型在 `__init__.py` 显式导出，调用方统一 `from entity.error import X`；私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入，不公开。标准库和第三方异常继续从原来源导入。本包不依赖具体业务实现或 Application，不引入统一捕获器；定义约定与完整模块地图见 [entity/error/DEV-README.md](origin_agent/entity/error/DEV-README.md)。
+
+异常保留原 Exception 家族、构造、字段和异常链，不强行改 BaseModel，不改抛出/捕获策略、重试、HTTP 映射或快速失败与只崩溃软件语义。`ToolInterrupted`、连接终止哨兵等控制信号同样纳入；`SessionExportError` 是唯一公共导出基类，entry/system/gateway 使用的全部导出子类保持同一族。业务模块继续负责分类、抛出、捕获与必要资源释放。
+
+`system/agentspace/errors.py` 已删除，纯转发 `system/lifecycle_errors.py` 已删除；原业务模块不再是异常定义位置或兼容导入入口。本节覆盖历史章节中“异常定义在所属业务模块”及旧 util/LLM/导出定义位置说明，历史记录不全量改写。异常不进入 easysave 或 typeref，持久化模型、存储 key、System 槽位与装配不变。
+
+用户应停机后完整部署新包与全部调用方并重启进程，避免混用旧模块缓存中的异常类。`run.py` 合并复制不会自动删除目标侧旧文件，`force_init` 对 fast仓库亦如此；应保护本地进化修改后按部署范围定向处理残留，不删除整个业务包或运行时根目录。开发助手AI不读取、搜索或操作 workspace代码。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用，运行验收由用户执行。
+
 ## 模块地图
 
 | 模块 | 职责 | 详细文档 |
@@ -111,7 +121,7 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 | `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、会话存储、生命周期、业务提示词组装与 LSP（`lsp.py`） | [system/DEV-README.md](origin_agent/system/DEV-README.md) |
 | `util/` | 前置辅助模块：路径、模板读取、文本/元数据解析、转换、日志、包管理器检测与原子文件操作 | [util/DEV-README.md](origin_agent/util/DEV-README.md) |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
-| `entity/` | 常量与消息体系：`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | 见相关模块文档 |
+| `entity/` | 常量、异常与消息体系：`error/`（异常定义包）、`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | [异常定义包](origin_agent/entity/error/DEV-README.md)及相关模块文档 |
 | `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
 
 前端布局约定：`Layout` 以 `.app-layout` 纵向排列 28px 结构性常驻 `Header` 和 `.app-body`；`.app-body` 横向承载左侧导航栏与主内容区，右侧 Tab 栏由可滚动图标区和固定底部控制区组成。顶部栏主徽章的右侧边缘与右侧 Tab 栏的左边界对齐，连接健康灯在主徽章右侧与屏幕右缘、顶部栏底边围成的矩形中心。命令菜单位于右侧 Tab 栏底部，审批模式入口位于聊天 Tab 输入栏右侧操作区，顶部栏不再使用浮层热区或 56px 顶部安全区。详细组件、样式与人工验收边界见 `origin_agent/frontend/DEV-README.md`。
@@ -315,7 +325,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 ### util/
 
-前置辅助模块仅依赖标准库、第三方库、已核实无反向业务依赖的 entity/interface 子模块及同包辅助模块；不依赖具体 System、Agent Loop 或业务实现。当前十个模块的项目内依赖只有 `entity.constant`、`util.pathutils` 和 `util.text_codec`，`util/__init__.py` 保持为空，不做聚合导入或运行时初始化。消息层模板依赖为 `entity.messages → util.templates → util.pathutils`，渲染时再引用 `entity.constant`，不反向导入消息类或类型映射。
+前置辅助模块仅依赖标准库、第三方库、已核实无反向业务依赖的 entity/interface 子模块及同包辅助模块；不依赖具体 System、Agent Loop 或业务实现。当前十个模块的项目内依赖为 `entity.constant`、`entity.error`、`util.pathutils` 和 `util.text_codec`，`util/__init__.py` 保持为空，不做聚合导入或运行时初始化。消息层模板依赖为 `entity.messages → util.templates → util.pathutils`，渲染时再引用 `entity.constant`，不反向导入消息类或类型映射。
 
 - `util/pathutils.py`：项目根、当前代码副本根和模板路径；同级目录迁移保持 `__file__` 相对深度与路径算法。
 - `util/templates.py`：模板读取与多Agent占位符渲染，模板缺失和读取失败的处理不变；需要模板目录的调用方直接从 `util.pathutils` 导入。

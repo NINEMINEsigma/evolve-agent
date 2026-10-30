@@ -24,8 +24,9 @@ from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
 from entity.puretype import ProcessLineStreamResult
 from entity.puretype.resource_cleanup import CleanupReport, CleanupWarning
 from interface.subprocess_runner import ISubprocessRunner
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from system.cleanup_errors import split_cleanup_timeouts
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from system.lifecycle import close_resources
 from system.process_termination import OwnedProcessIdentity, terminate_owned_tree
 from system.resource_cleanup import CleanupProducer, ResourceCleanupHandle, ResourceCleanupRegistry
 from system.subprocess_operation import SubprocessOperation

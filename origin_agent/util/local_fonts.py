@@ -9,20 +9,7 @@ from pathlib import Path
 from entity.constant import (
     LOCAL_FONT_ALLOWED_EXTENSIONS, LOCAL_FONT_MAX_BYTES, LOCAL_FONT_MIME_TYPES,
 )
-
-
-class LocalFontAccessError(ValueError):
-    """已识别的字体读取拒绝；携带稳定 code 与 HTTP status，不含物理路径。"""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        status: int
-        ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status = status
+from entity.error import LocalFontAccessError
 
 
 def reject_reparse_components(path: Path) -> None:

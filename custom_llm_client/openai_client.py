@@ -22,7 +22,8 @@ import httpcore
 import httpx
 import openai
 
-from abstract.llm.client import BaseLLMClient, LLMAPIStatusError
+from abstract.llm.client import BaseLLMClient
+from entity.error import LLMAPIStatusError
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage

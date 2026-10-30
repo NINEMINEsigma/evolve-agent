@@ -2,20 +2,7 @@
 
 from __future__ import annotations
 
-from entity.puretype.resource_cleanup import CleanupWarning
-from system.lifecycle_errors import LifecycleFailure
-
-
-class ResourceCleanupTimeout(TimeoutError):
-    """A located cleanup phase exhausted its observation deadline."""
-
-    def __init__(self, warning: CleanupWarning) -> None:
-        self.warning = warning
-        super().__init__(warning.message)
-
-
-class ResourceCleanupPendingError(RuntimeError):
-    """A new operation conflicts with a resource that is still being released."""
+from entity.error import LifecycleFailure, ResourceCleanupTimeout
 
 
 class CleanupErrorSink:

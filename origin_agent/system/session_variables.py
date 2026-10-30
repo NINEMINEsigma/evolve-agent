@@ -24,55 +24,19 @@ from entity.puretype import (
     SessionVariableIssue, SessionVariableMetadata, SessionVariablePoolResponse,
     SessionVariableSnapshotNode, SessionVariableSourceSnapshot,
 )
-from util.file_metadata import MetaFormatError, parse_meta_content
-from system.lifecycle import LifecycleFailure
+from util.file_metadata import parse_meta_content
+from entity.error import (
+    MetaFormatError,
+    LifecycleFailure,
+    SessionVariableAccessError,
+    SessionVariableCleanupFailure,
+    SessionVariableConflictError,
+    SessionVariableError,
+    SessionVariableInputError,
+    SessionVariableLimitError,
+    SandboxError,
+)
 from interface.sandbox import ISandbox
-from system.sandbox import SandboxError
-
-
-class SessionVariableError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str,
-        logical_path: str = ""
-        ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.logical_path = logical_path
-
-
-class SessionVariableInputError(SessionVariableError):
-    pass
-
-
-class SessionVariableAccessError(SessionVariableError):
-    pass
-
-
-class SessionVariableLimitError(SessionVariableError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        logical_path: str = ""
-        ) -> None:
-        super().__init__(message, code="pool_limit_exceeded", logical_path=logical_path)
-
-
-class SessionVariableConflictError(SessionVariableError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        logical_path: str = ""
-        ) -> None:
-        super().__init__(message, code="pool_conflict", logical_path=logical_path)
-
-
-class SessionVariableCleanupFailure(LifecycleFailure):
-    pass
 
 
 class SessionVariableScanBudget(BaseModel):

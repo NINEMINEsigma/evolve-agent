@@ -26,10 +26,10 @@ from typing import Any, Callable
 
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from entity.error import ApplicationStoppingError, LifecycleFailure, SandboxError
+from system.lifecycle import close_resources
 from interface.lsp_manager import ILSPManager
 from interface.sandbox import ISandbox
-from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 

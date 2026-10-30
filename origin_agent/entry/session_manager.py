@@ -77,7 +77,7 @@ class LoopSessionManager:
                     "Session %s history incompatible or corrupt: %s",
                     self._loop.session_id, exc,
                 )
-                from entry.parent_agent_loop import IncompatibleHistoryError
+                from entity.error import IncompatibleHistoryError
                 raise IncompatibleHistoryError(self._loop.session_id) from exc
 
     # ------------------------------------------------------------------
@@ -428,7 +428,7 @@ async def terminate_and_rotate_session(
     from entity.constant import INHERIT_LAST_ROUNDS, USER_CHARACTER_NAME
     from entry.agent_support.history_summary import extract_last_rounds, messages_to_text
     from entity.messages import History, CharacterConversationMessage
-    from system.session_metadata import MetadataGenerationError
+    from entity.error import MetadataGenerationError
 
     if session_store is None:
         raise MetadataGenerationError("session store not available")
@@ -462,7 +462,7 @@ async def terminate_and_rotate_session(
 
     from system.application import Application
     from interface.approval_system import IApprovalSystem
-    from system.session_variables import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
+    from entity.error import SessionVariableError, SessionVariableConflictError, SessionVariableCleanupFailure
 
     variable_service = Application.current().get_system(IAgentspaceService).session_variables
     approval_mode_store = Application.current().get_system(IApprovalSystem).mode_store

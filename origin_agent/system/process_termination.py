@@ -12,7 +12,7 @@ import sys
 from typing import Any
 
 from entity.constant.timeouts import RESOURCE_CLEANUP_POLL_SECONDS
-from system.lifecycle import LifecycleFailure
+from entity.error import LifecycleFailure
 
 
 class OwnedProcessIdentity:

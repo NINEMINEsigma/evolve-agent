@@ -19,11 +19,19 @@ gateway/
 
 ---
 
+## 异常定义包（2026-10-30）
+
+`GatewayPortBusyError`、`AgentspaceSendTimeout`、`AgentspaceConnectionClosed` 统一定义于 `entity/error/gateway.py`；端口检查和连接终止分类函数仍留在 Gateway 业务模块。所有公共自定义异常（包括 Profile、Sandbox、Agentspace、History媒体和导出异常）统一 `from entity.error import X`，不通过所属服务模块或旧包入口间接导入；标准库/第三方异常仍从原来源导入。
+
+`SessionExportError` 在 `entity/error/session_export.py` 唯一定义，全部公共子类与 entry/system 使用同一类型族，HTTP 映射仍捕获该唯一基类。私有 `_SourceUnavailable` 不公开，使用方仅从 `entity.error.session_export` 显式导入。异常保留原 Exception 家族，不强行改 BaseModel；端口占用正常停止、慢消费者1011驱逐、对端断线不再发关闭帧、预期失败登记顺序和快速失败策略均保持。
+
+[异常定义包文档](../entity/error/DEV-README.md) 是定义/导入规则依据；`system/agentspace/errors.py` 已删除，纯转发 `system/lifecycle_errors.py` 已删除，不提供兼容入口。异常不进 easysave/typeref，存储 key 未变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用；用户须停机完整部署并重启，注意合并复制旧文件残留，开发助手AI不操作 workspace。
+
 ## 分层职责
 
 | 文件 | 职责 |
 |---|---|
-| `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 与 `GatewayPortBusyError`（占用按退出 0 的普通业务拒绝）也在此。 |
+| `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 也在此，抛出的 `GatewayPortBusyError` 定义于 `entity/error/gateway.py`（占用按退出 0 的普通业务拒绝）。 |
 | `lifecycle.py` | `GatewayAdmission`：新业务经 `admit_business()`（要求 RUNNING）；WS 连接经 `admit_connection()`（STARTING/RUNNING）；已建立连接的每条输入经 `require_open_connection()`。`GatewayReadyTracker` 由 uvicorn 子类在 startup 成功后置位。 |
 | `server.py` | 只含静态路由定义的模块级 `APIRouter` 与 `build_router_app() -> FastAPI` 工厂（include_router、挂载 assets、计算 build_hash 存于 `app.state.build_hash`）。不再有模块级 FastAPI 实例、`_agentspace_path`/`_BUILD_HASH` 运行快照、`set_agentspace_path` 或旧 `create_server` 入口；文件上传路径经 `RuntimeSystem.context.agentspace`。 |
 | `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。USER_MESSAGE 在 `route()` 内同步完成目标/字段/Profile 校验并登记输入记录（主会话 `message_queue.accept(ready=False)`），之后才经 `GatewaySystem.spawn_work` 启动准备任务（Profile 就绪、自动标题——无标题会话首条消息经 `SessionMetadataService.maybe_generate_first_title` 触发 LLM 生成+截取回退、客户端信息、子会话转发），准备完成后 `mark_ready`；准备任务非取消异常按 RV9 记录应用失败，记录保留由关闭刷新只落 History。 |

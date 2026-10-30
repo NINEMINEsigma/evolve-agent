@@ -15,7 +15,7 @@ from typing import * # type: ignore
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
-from system.sandbox import SandboxError
+from entity.error import SandboxError
 
 if TYPE_CHECKING:
     from cv2.typing import MatLike

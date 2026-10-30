@@ -97,9 +97,9 @@ from urllib.parse import urlparse
 
 from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandlerResult
 from util.convert import as_bool
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, TaskOwner,
-    close_resources, requires_lifecycle_propagation,
+    TaskOwner, close_resources, requires_lifecycle_propagation,
 )
 from entity.constant import (
     ApplicationState, SYSTEM_QUIESCE_TIMEOUT_SECONDS,
@@ -116,6 +116,7 @@ from entity.constant import (
 from entity.puretype import MCPBridgeCall, Role
 from .work import MCPThreadWork
 from .schema import normalize_mcp_input_schema as _normalize_schema
+from entity.error import InvalidMcpUrlError, OAuthNonInteractiveError
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -926,15 +927,6 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
 # ---------------------------------------------------------------------------
 # Remote MCP URL validation
 # ---------------------------------------------------------------------------
-
-
-class InvalidMcpUrlError(ValueError):
-    """Raised when a remote MCP server's ``url`` cannot be parsed as http(s)://.
-
-    Validated once at startup so we fail fast with a clear message instead of
-    burning through the reconnect-backoff loop on every attempt.  (Ported from
-    anomalyco/opencode#25019.)
-    """
 
 
 def _validate_remote_mcp_url(server_name: str, url: object) -> str:
@@ -2045,11 +2037,7 @@ def _get_auth_error_types() -> tuple:
         types.append(UnauthorizedError)
     except ImportError:
         pass
-    try:
-        from .oauth import OAuthNonInteractiveError
-        types.append(OAuthNonInteractiveError)
-    except ImportError:
-        pass
+    types.append(OAuthNonInteractiveError)
     try:
         import httpx
         types.append(httpx.HTTPStatusError)

@@ -34,7 +34,7 @@ from entity.constant import (
 )
 from util.pathutils import get_agent_dir
 from interface.sandbox import ISandbox
-from system.sandbox import SandboxError
+from entity.error import RipgrepFatalError, RipgrepRecoverableError, RipgrepUnavailable, SandboxError
 from system.subprocess_utils import safe_decode
 from util.text_codec import strip_lf_line_ending
 
@@ -44,18 +44,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _RIPGREP_SHA256_CACHE: tuple[Path, str] | None = None
-
-
-class RipgrepUnavailable(RuntimeError):
-    """固定 ripgrep 二进制不可用，可回退到 Python 搜索。"""
-
-
-class RipgrepRecoverableError(RuntimeError):
-    """本次 ripgrep 调用失败，但整次回退可保持结果完整性。"""
-
-
-class RipgrepFatalError(RuntimeError):
-    """不应静默回退的 ripgrep 错误。"""
 
 
 def _s():

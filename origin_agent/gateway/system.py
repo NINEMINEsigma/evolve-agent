@@ -12,7 +12,7 @@ from typing import Any, TypeVar
 import uvicorn
 from fastapi import FastAPI
 from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
-from system.lifecycle import LifecycleFailure, TaskOwner, close_resources
+from system.lifecycle import TaskOwner, close_resources
 
 from interface.approval_system import IApprovalSystem
 from interface.agentspace_service import IAgentspaceService
@@ -33,14 +33,11 @@ from entity.constant import (
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
 )
 from system.session_export import SessionExportService
+from entity.error import GatewayPortBusyError, LifecycleFailure
 
 logger = logging.getLogger(__name__)
 
 WorkT = TypeVar("WorkT")
-
-
-class GatewayPortBusyError(RuntimeError):
-    """启动前端口已被占用的明确业务拒绝；调用方按普通停止处理。"""
 
 
 def check_port_available(host: str, port: int) -> bool:

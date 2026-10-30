@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 from .oauth import _OAUTH_CALLBACK_TIMEOUT
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import MCPOAuthProviderEntry
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 from .oauth_callback import OAuthCallbackServer
 
 logger = logging.getLogger(__name__)

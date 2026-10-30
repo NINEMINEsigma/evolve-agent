@@ -21,7 +21,8 @@ from abstract.mcp.work import MCPThreadWork
 from interface.mcp_system import IMCPSystem
 from interface.tool_registry import IToolRegistry
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, TaskOwner, close_resources
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import TaskOwner, close_resources
 
 logger = logging.getLogger(__name__)
 

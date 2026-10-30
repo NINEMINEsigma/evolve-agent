@@ -21,27 +21,12 @@ from entity.messages import (
     AudioBlock, BaseMessage, CharacterMessage, History, ImageBlock,
     MediaBlock, MessageBlock, ToolResultMessage, VideoBlock,
 )
+from entity.error import (
+    HistoryMediaConflictError,
+    HistoryMediaNotFoundError,
+    HistoryMediaPreviewError,
+)
 from entity.puretype import ModalityType, SessionMediaItem, SessionMediaListResponse
-
-
-class HistoryMediaNotFoundError(LookupError):
-    """媒体实例已不存在，不能按原历史位置猜测另一个实例。"""
-
-
-class HistoryMediaConflictError(ValueError):
-    """客户端所见开关与服务端当前值发生并发冲突。"""
-
-
-class HistoryMediaPreviewError(ValueError):
-    def __init__(
-        self,
-        message: str,
-        status_code: int
-        ) -> None:
-        if status_code not in (400, 415):
-            raise ValueError("Invalid media preview error status")
-        super().__init__(message)
-        self.status_code = status_code
 
 
 class HistoryMediaOccurrence(BaseModel):

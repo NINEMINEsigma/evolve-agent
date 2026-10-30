@@ -33,6 +33,14 @@ entry/
 
 ---
 
+## 异常定义包（2026-10-30）
+
+本层 `IncompatibleHistoryError`、`ToolInterrupted`、`HistoryMediaNotFoundError`、`HistoryMediaConflictError`、`HistoryMediaPreviewError`、`ModalityForwardUnavailableError` 统一定义于 `entity/error/entry.py`；业务模块不再是异常定义或导入入口，调用方统一 `from entity.error import X`。`HistoryPersistenceError` 等生命周期异常也从该公共入口取得。标准库/第三方异常保留原来源。
+
+History 捕获使用 `entity/error/session_export.py` 中唯一 `SessionExportError` 及其子类，与 system 导出服务和 Gateway 的捕获类型保持同一族；私有 `_SourceUnavailable` 只允许从 `entity.error.session_export` 显式导入，不公开。内部 `ToolInterrupted` 仍是原 Exception 控制信号，不改 BaseModel；History 提交失败、媒体冲突、工具中断配对、普通工具错误转换与快速失败语义均不改变。
+
+完整定义、显式导出及部署规则见 [异常定义包文档](../entity/error/DEV-README.md)。异常不加入 easysave/typeref，存储 key 未变。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用；用户须完整部署全部调用方并重启，注意合并复制残留，开发助手AI不操作 workspace。
+
 ## 工具对象与四阶段执行（2026-10-15）
 
 工具来源为 `BaseTool` 子类与顶层 `TOOLSET`，`ToolRegistry` 只持有对象；来源迁移与静态复核仍在收尾，完整任务复核与用户验收待完成，不能启动中间源码。`prepare_tool_result()` 为明确函数定义；`PreparedToolResult.execution` 关联本次工具调用，只有 `store_tool_result()` 成功提交后才写回 `history_index`/`result_message`。拒绝、中断结果不持有 execution，不进入专属 after，但仍按已有通知路径回显。

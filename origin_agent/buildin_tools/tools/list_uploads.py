@@ -18,7 +18,7 @@ from abstract.tools.tool import BaseTool, BaseToolSet, ToolExecution, ToolHandle
 from entity.puretype import ToolDangerLevel
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN, UPLOADS_WS_PREFIX
 from interface.sandbox import ISandbox
-from system.sandbox import SandboxError
+from entity.error import SandboxError
 
 logger = logging.getLogger(__name__)
 

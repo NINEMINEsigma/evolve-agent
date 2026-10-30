@@ -26,7 +26,7 @@ from entity.puretype import (
     ActivityStreamItem,
 )
 from interface.logger_system import ILoggerSystem
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 
 
 def validate_activity_event_draft(draft: ActivityEventDraft) -> None:

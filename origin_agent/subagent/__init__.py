@@ -10,12 +10,11 @@ from .context import SubRuntimeContext
 from .loop import SubAgentLoop
 from .orchestrator import SubAgentOrchestrator
 
-from .profile import CharacterProfileError, CharacterProfileResolver
+from .profile import CharacterProfileResolver
 
 __all__ = [
     "SubRuntimeContext",
     "SubAgentLoop",
     "SubAgentOrchestrator",
-    "CharacterProfileError",
     "CharacterProfileResolver",
 ]

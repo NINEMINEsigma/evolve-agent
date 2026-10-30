@@ -12,9 +12,8 @@ from typing import Any, TypeVar
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype.lifecycle import SyncToolCallRecord
 from system.cleanup_errors import split_cleanup_timeouts
-from system.lifecycle import (
-    ApplicationStoppingError, LifecycleFailure, contains_lifecycle_failure,
-)
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import contains_lifecycle_failure
 
 T = TypeVar("T")
 

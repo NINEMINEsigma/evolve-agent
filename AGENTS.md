@@ -147,10 +147,17 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 | 消息前纯类型（无方法，不依赖正式消息类） | `entity/puretype/` 包内对应子模块 |
 | 消息后纯类型（无方法，依赖正式消息类） | `entity/puretype_after/` 包内对应子模块 |
 | 带验证/转换/业务方法的模型 | 对应业务模块 |
-| 工具类 / 异常类 / 枚举 | 按职责分散到各模块 |
+| 工具类 / 枚举 | 按职责分散到各模块 |
+| origin仓库自定义异常（含内部控制信号） | 异常定义包 `entity/error/`，按职责子模块定义，公共类型由包入口显式导出 |
 | 项目级常量 | `entity/constant/` 包内对应职责子模块 |
 
 新增纯数据类时先判断是否有方法；没有则按是否依赖正式消息类，放入 `entity/puretype/` 或 `entity/puretype_after/` 中合适的职责子模块，并在所属包的 `__init__.py` 中再导出。两个时期表示类型依赖顺序，不要求应用启动时手工安排导入。
+
+### 异常集中定义
+
+origin仓库所有自定义异常（含内部控制信号）只在异常定义包 `origin_agent/entity/error/` 定义；当前按 `abstract.py`、`entry.py`、`gateway.py`、`session_export.py`、`subagent.py`、`system.py`、`util.py` 划分职责。公共异常在 `__init__.py` 显式导出，调用方统一 `from entity.error import X`；私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入，不公开。标准库与第三方异常继续从原来源导入。异常保留原 Exception 家族、构造与继承关系，不强行改 BaseModel，不改变抛出/捕获策略及快速失败语义。
+
+`SessionExportError` 保持唯一类型，所有公共导出子类属于同一族。`system/agentspace/errors.py` 已删除，纯转发 `system/lifecycle_errors.py` 已删除，不保留旧路径兼容入口。异常不进入 easysave/typeref，本次存储 key 未变。用户须完整部署本包和全部调用方并重启，注意合并复制（含 fast仓库 force_init）不会自动清除旧文件；开发助手AI不操作 workspace。本次仅源码迁移与文档同步，未运行测试、实际导入、构建、校验或应用。详细规则见 `origin_agent/entity/error/DEV-README.md`。
 
 ### Application全局单例
 

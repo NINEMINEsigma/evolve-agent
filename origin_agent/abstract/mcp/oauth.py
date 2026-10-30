@@ -87,14 +87,7 @@ except ImportError:
     AnyUrl = None  # type: ignore[assignment, misc]
 
 
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
-
-
-class OAuthNonInteractiveError(RuntimeError):
-    """Raised when OAuth requires browser interaction in a non-interactive env."""
-
+from entity.error import OAuthNonInteractiveError
 
 # ---------------------------------------------------------------------------
 # Module-level state
@@ -416,7 +409,7 @@ async def _wait_for_callback(
     ) -> tuple[str, str | None]:
     """Await one owned listener and confirm native cleanup before release."""
     from .oauth_callback import OAuthCallbackServer
-    from system.lifecycle import ApplicationStoppingError
+    from entity.error import ApplicationStoppingError
     import anyio
 
     manager.require_open()

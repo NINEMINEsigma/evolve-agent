@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 
 from entity.puretype import AgentspaceLockOwner
-from .errors import AgentspaceLockedError
+from entity.error import AgentspaceLockedError
 from .lock_registry import AgentspaceLockRegistry
 
 

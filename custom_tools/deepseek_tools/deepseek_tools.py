@@ -22,7 +22,7 @@ from ._deepseek_constants import (
 from entity.constant import TOOL_INTERNAL_ARG_KEYS
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from interface.llm_profile_store import ILLMProfileStore
-from system.llm_profile_store import ProfileNotFoundError
+from entity.error import ProfileNotFoundError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext

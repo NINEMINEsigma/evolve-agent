@@ -9,7 +9,7 @@ from typing import * # type: ignore
 from entity.constant import ApplicationState, ShutdownReason
 from entity.puretype.agent_settings import AgentLoopSettingsState
 from system.context import RuntimeContext
-from system.lifecycle_errors import LifecycleFailure
+from entity.error import LifecycleFailure
 from framework import AsyncSystem
 
 from .logger_system import ILoggableSystem

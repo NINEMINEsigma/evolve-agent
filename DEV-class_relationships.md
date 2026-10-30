@@ -2,6 +2,8 @@
 
 > **迁移前基线说明**：本文件的继承关系图、`## 字段归属（已确认）` 表中的 `_toolsets` 行，以及 `### 工具注册表生命周期迁移（S10）`、`### 工具显式注册与发现生命周期迁移（S20）` 两节，记录的是对象工具化迁移之前的实现。自 2026-10-15 起，唯一权威的工具对象与四阶段执行契约见文末 `### 对象工具与四阶段执行迁移（2026-10-15，权威）`；`ToolEntry`/`ToolsetEntry` 元数据镜像、`register_tools(registry, ui_events)` 函数注册协议、`registry.register()` 顶层注册与 `UIEventRouter` 均已退役。本文件其余历史章节保持原文，不因本次迁移改写。
 
+> **异常定义位置的权威覆盖（2026-10-30）**：origin仓库所有自定义异常（含内部控制信号）统一定义于异常定义包 `entity/error/`，公共类型由包入口显式导出，调用方使用 `from entity.error import X`；私有 `_SourceUnavailable` 只从 `entity.error.session_export` 显式导入且不公开。标准库/第三方异常来源不变。下列历史章节中业务模块、util 或旧路径为异常定义位置的记载仅反映当时实现，现行约定以本说明及 [entity/error/DEV-README.md](origin_agent/entity/error/DEV-README.md) 为准。
+
 ## 继承关系（mermaid）
 
 ```mermaid
@@ -1418,6 +1420,16 @@ ParentAgentLoop每轮消费独立request.messages，不覆盖原messages。Multi
 
 本次未新增 Application/AsyncSystem、Agent Loop protected 字段、跨类私有访问、后端接口、依赖或存储版本；通用自动重连策略不变，漏通知且数量未下降的恢复问题明确延期。源码已按 PLAN v2.1 实施并定向静态审阅，未运行类型检查、构建或应用，用户验收仍待完成。
 
+
+### 异常定义包集中迁移（2026-10-30，当前约定）
+
+异常类型按职责集中到 `entity/error/` 的 `abstract.py`、`entry.py`、`gateway.py`、`session_export.py`、`subagent.py`、`system.py`、`util.py`，公共类型由 `__init__.py` 显式导出，业务调用方统一使用 `from entity.error import X`。私有 `_SourceUnavailable` 由使用方从 `entity.error.session_export` 显式导入，不进入公共导出。标准库和第三方异常仍使用原来源，不在本包重复包装或定义。
+
+所有异常保持原 Exception 家族，不适用 BaseModel/纯类型模型迁移；不改变构造参数、字段、异常链、抛出/捕获、异常组分类、取消、HTTP 映射与快速失败语义。`ToolInterrupted` 和 Agentspace 连接级控制信号虽属于内部流程，也遵循唯一定义位置。`SessionExportError` 只定义一次，全部公共导出子类都继承这个基类，保证 entry 捕获、system 服务和 Gateway 转换边界使用同一类型族。
+
+`system/agentspace/errors.py` 已删除，纯转发 `system/lifecycle_errors.py` 已删除，不作为兼容入口。`system/lifecycle.py`、`system/cleanup_errors.py` 等继续承载原分类与聚合函数，异常类型本身来自统一包；util 的两种异常定义也移至 `entity/error/util.py`，不再按历史路径导入。本节覆盖前文业务模块分散定义和 util 同定义说明。
+
+本次不新增 System、实例、Agent Loop protected 字段、跨类私有访问或装配依赖；异常不登记于 easysave/typeref，持久化模型与存储 key 未变。用户须停机完整部署本包及所有调用方并重启，注意合并复制及 fast仓库 force_init 的旧文件残留，保护本地进化内容后定向处理；开发助手AI不操作 workspace。仅完成源码迁移、文档同步与只读文本审阅，未运行测试、实际导入、构建、校验或应用。
 
 ### 对象工具与四阶段执行迁移（2026-10-15，权威）
 

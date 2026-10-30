@@ -46,7 +46,8 @@ from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
 from entry.tool_executor import ToolExecutor, _interrupted_result
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, requires_lifecycle_propagation
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import requires_lifecycle_propagation
 from entry.agent_support.multimodal import prepare_main_multimodal_request
 import asyncio
 

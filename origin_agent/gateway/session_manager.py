@@ -28,7 +28,8 @@ from entity.puretype import (
     Loop, LoopMeta, Role, SessionInfo, ClientInfo, ShutdownInputReport,
     QueuedMessage, SubAgentFeedbackDelivery, LLMProfile,
 )
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure, close_resources
+from entity.error import ApplicationStoppingError, LifecycleFailure
+from system.lifecycle import close_resources
 from gateway.chat import SessionManager as ChatSessionManager
 from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS, SYSTEM_CHARACTER_NAME
 

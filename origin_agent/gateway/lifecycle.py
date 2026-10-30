@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 from entity.constant import ApplicationState
 from interface.runtime_system import IRuntimeSystem
-from system.lifecycle import ApplicationStoppingError, LifecycleFailure
+from entity.error import ApplicationStoppingError, LifecycleFailure
 
 
 class GatewayAdmission:
