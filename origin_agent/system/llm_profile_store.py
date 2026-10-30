@@ -56,7 +56,7 @@ class LLMProfileStore(ILLMProfileStore):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem,))
+        super().__init__()
         self._agentspace_dir: Path | None = None
         self._path: Path | None = None
         self._lock = threading.RLock()

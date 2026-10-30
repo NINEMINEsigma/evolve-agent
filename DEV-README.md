@@ -529,5 +529,13 @@ Application 移除 `_registered_types` 及逐节点注销循环，普通关闭�
 
 根级联抛错时直接交给现有外层异常边界，不重新逐节点注销，也不继续其后的最终 drain；成功后仍使用 Runtime 局部对象完成现有清理。最终 drain 抛错保留原异常组，不再调用 Runtime 诊断入口补日志。未完成 awake 的节点不会执行 framework 的关闭钩子，本次不扩大为 failed-awake 资源协议改造。System 数量、History/配置/持久化格式、业务停止顺序及5秒硬截止不变。仅完成源码和只读差异审阅，未运行校验、导入、构建或应用，部署验收由用户执行。
 
+## Runtime 依赖公共基类（2026-10-30，后续修订）
+
+19个依赖运行时系统的 System 接口统一继承 `IDPRuntimeSystem`，由其构造自动加入 `IRuntimeSystem` 依赖，并经 `ILoggableSystem` 自动加入 `ILoggerSystem` 依赖；具体实现仍只继承各自接口，构造仅声明其他业务依赖。`IDPRuntimeSystem` 定义于 `interface/runtime_system.py` 并由 `interface/__init__.py` 显式导出，它是公共基类，不是 `IRuntimeSystem` 服务实现或新增注册槽位。
+
+`IRuntimeSystem` 自身继续直接继承 `ILoggableSystem`，避免自身依赖；`ILoggerSystem` 仍直接继承 `AsyncSystem` 且无 Runtime 依赖，保持依赖根无环。最终依赖集合、21个接口槽位、Application 装配和 Logger 根级联关闭均不变。本节更新前文20个非 Logger 接口直接继承 `ILoggableSystem` 的表述：其中19个现经 `IDPRuntimeSystem` 间接继承。
+
+12个接口重复声明的抽象 `runtime` 属性已移除，公共只读属性统一来自 `IDPRuntimeSystem`。具体实现中的 `_runtime` 引用、唤醒初始化、`runtime` 覆写和关闭后清空行为保留：framework 在调用 `virtual_shotdown()` 前已解除架构绑定，关闭期不能用基类的 `get_system()` 查询代替已有引用。非 System 对象仍使用原显式查询或注入，不加入此继承链。无持久化、前端或业务调用变更；仅完成源码和只读差异审阅，未运行校验、构建、实际导入或应用。
+
 
 

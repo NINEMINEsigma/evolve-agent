@@ -154,7 +154,7 @@ class IRuntimeSystem(ILoggableSystem, ABC):
         ...
 
 
-class IRuntimeDPSystem(ILoggableSystem):
+class IDPRuntimeSystem(ILoggableSystem):
     def __init__(
         self, 
         dependencies: Iterable[type[AsyncSystem]] = []

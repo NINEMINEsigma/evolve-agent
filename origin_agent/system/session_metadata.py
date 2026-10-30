@@ -64,7 +64,7 @@ class SessionMetadataService(ISessionMetadataService):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        super().__init__(dependencies=(ILLMProfileStore,))
         self._runtime: IRuntimeSystem | None = None
         self._llm_profile_store: ILLMProfileStore | None = None
         self._session_store: SessionStore | None = None

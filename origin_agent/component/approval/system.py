@@ -22,7 +22,7 @@ class ApprovalSystem(IApprovalSystem):
     """不在唤醒时请求模型；已配置模型的调用由明确请求方等待。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        super().__init__(dependencies=(ILLMProfileStore,))
         self._runtime: IRuntimeSystem
         self._mode_store: ApprovalModeStore
         self._backend_manager: ApprovalBackendManager

@@ -4,8 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from entity.puretype.extools import CronTaskInfo
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 from .sandbox import ISandbox
 from .subprocess_runner import ISubprocessRunner
 
@@ -13,14 +12,8 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import BaseAgentLoop
 
 
-class ICronRouter(ILoggableSystem, ABC):
+class ICronRouter(IDPRuntimeSystem, ABC):
     """Declare scheduled-task routing, persistence and shutdown operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime admission service."""
-        ...
 
     @property
     @abstractmethod

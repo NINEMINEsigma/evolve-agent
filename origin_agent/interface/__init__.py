@@ -11,7 +11,7 @@ from .logger_system import ILoggerSystem, ILoggableSystem
 from .lsp_manager import ILSPManager
 from .mcp_system import IMCPSystem
 from .modality_capability_system import IModalityCapabilitySystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem, IRuntimeSystem
 from .sandbox import ISandbox
 from .session_manager import ISessionManager
 from .session_metadata_service import ISessionMetadataService
@@ -27,6 +27,7 @@ __all__ = [
     "IApprovalSystem",
     "IBrowserSystem",
     "ICronRouter",
+    "IDPRuntimeSystem",
     "IDynamicEndpointSystem",
     "IFrontendSink",
     "IGatewaySystem",

@@ -1622,6 +1622,16 @@ Application 删除 `_registered_types` 字段与 start 中的维护操作，`_un
 
 Runtime 只以现有函数局部引用参与根注销后的清理，drain 失败只保留异常组，不再经 `record_failure` 补打诊断。`ILoggerSystem` 开始自身注销后日志能力终止，禁止使用缓存、备用出口或直接终端输出延长日志生命周期；未迁移的标准日志调用仍由后续任务处理。未新增服务镜像、外部 protected 访问、模型、存储版本或业务资源所有者；ExitStack 与5秒硬截止不变。仅完成源码及只读审阅，未运行校验、导入、构建或应用。
 
+### Runtime 依赖继承收敛（2026-10-30，后续修订）
+
+继承关系为 `AsyncSystem → ILoggableSystem → IDPRuntimeSystem → 19个 Runtime 依赖接口 → 对应具体实现`；`IRuntimeSystem` 仍直接继承 `ILoggableSystem`，`ILoggerSystem` 仍直接继承 `AsyncSystem`。`IDPRuntimeSystem` 只自动合并 `IRuntimeSystem` 依赖并提供只读 `runtime` 属性，不继承运行时服务契约、不注册新槽位；Logger 依赖继续来自 `ILoggableSystem`。接口直接从 `.runtime_system` 导入公共基类，包入口显式导出，不反向依赖具体实现。
+
+19个接口为 `IAgentspaceService`、`IApprovalSystem`、`IBrowserSystem`、`ICronRouter`、`IDynamicEndpointSystem`、`IFrontendSink`、`IGatewaySystem`、`ILLMProfileStore`、`ILSPManager`、`IMCPSystem`、`IModalityCapabilitySystem`、`ISandbox`、`ISessionManager`、`ISessionMetadataService`、`IShellManager`、`ISubAgentOrchestrator`、`ISubprocessRunner`、`IToolDiscoverySystem`、`IToolRegistry`。`IFrontendSink` 保留 `IAgentSink` 和 `ABC`，其他接口保留 `ABC`；具体实现不重复继承公共基类。构造移除重复 Runtime 声明，最终依赖集合与21个注册槽位不变。
+
+其中 Browser、Cron、DynamicEndpoint、Gateway、LSP、MCP、Modality、SessionMetadata、Shell、SubAgentOrchestrator、SubprocessRunner、ToolRegistry 对应的12个接口移除重复抽象 `runtime` 声明；具体实现的同名缓存属性覆写全部保留。已有 `_runtime` 字段归属、唤醒赋值、任务回调绑定和关闭清空均不变：framework 在 `virtual_shotdown()` 前解绑架构，关闭期继续使用已有引用，不依赖公共属性的动态查询。其他7个接口继承默认属性，但不据此改写其现有业务访问。
+
+本节覆盖前文20个业务接口直接继承 `ILoggableSystem` 的当前描述；历史段落保留。Application、Logger 根级联、非 System 对象、资源所有权、持久化和5秒硬截止不改。仅完成源码及只读审阅，未运行校验、构建、实际导入或应用。
+
 
 
 

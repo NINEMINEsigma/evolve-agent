@@ -4,19 +4,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from entity.puretype.extools import DynamicEndpointInfo
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 from .session_manager import ISessionManager
 
 
-class IDynamicEndpointSystem(ILoggableSystem, ABC):
+class IDynamicEndpointSystem(IDPRuntimeSystem, ABC):
     """Declare dynamic endpoint registration and session migration operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime admission service."""
-        ...
 
     @property
     @abstractmethod

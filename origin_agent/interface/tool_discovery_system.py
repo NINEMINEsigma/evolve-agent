@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from abc import ABC
 
-from .logger_system import ILoggableSystem
+from .runtime_system import IDPRuntimeSystem
 
 
-class IToolDiscoverySystem(ILoggableSystem, ABC):
+class IToolDiscoverySystem(IDPRuntimeSystem, ABC):
     """Declare the tool discovery System slot contract."""
 
     pass

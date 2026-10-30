@@ -23,7 +23,7 @@ class DynamicEndpointSystem(IDynamicEndpointSystem):
     """持有动态端点注册表、锁和原JSON持久化。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISessionManager))
+        super().__init__(dependencies=(ISessionManager,))
         self._runtime: IRuntimeSystem | None = None
         self._session_manager: ISessionManager | None = None
         self._store_path: Path | None = None

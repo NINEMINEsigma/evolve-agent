@@ -407,4 +407,10 @@ is_active只覆盖已经登记活动快照的排队/准备窗口；accept登记�
 
 stop_server仍提供既有软观察窗口；virtual_shotdown在serve仍pending时最终shield等待同一serve task真实终结，不以返回pending代替退出，不重建/取消serve。路由TaskOwner必须idle才允许资源注销，已创建的会话导出线程池实际close后才清引用；异常由Application即时记录并保留依赖到硬截止。Gateway仍先于其他System注销，输入冻结和History刷新后才结束已有输出的顺序不变。纯端口占用维持普通业务拒绝，混合启动/清理失败不得误报退出0。本次仅源码与只读审阅，未运行校验或应用。
 
+## Runtime 依赖继承（2026-10-30）
+
+`ISessionManager` 和 `IGatewaySystem` 改继承 `IDPRuntimeSystem`，具体实现仍只继承对应接口；构造只声明其余业务依赖，Runtime 与 Logger 依赖由公共基类链自动加入。最终依赖集合、21个槽位、服务唤醒关系与业务关闭顺序不变。`IGatewaySystem` 移除重复抽象 `runtime`，GatewaySystem 的缓存属性覆写和两个实现的 `_runtime` 引用保留，支持 framework 解绑后的现有关闭路径。
+
+`GatewayAdmission` 和 `SessionExportService` 保持显式 Runtime 注入，MessageRouter 保留原有查询方式，均不是本次公共基类的继承对象。路由、History 提交、导出、WebSocket、SSE 和端口占用分流不改；未运行校验、构建、实际导入或应用。
+
 

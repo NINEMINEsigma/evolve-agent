@@ -11,8 +11,7 @@ from entity.puretype import (
 )
 from system.lifecycle import TaskOwner
 
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from abstract.tools.tool import (
@@ -28,14 +27,8 @@ JSONValue: TypeAlias = (
 ToolPayload: TypeAlias = dict[str, JSONValue]
 
 
-class IToolRegistry(ILoggableSystem, ABC):
+class IToolRegistry(IDPRuntimeSystem, ABC):
     """Declare object-tool registration, filtering, execution and cleanup."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime admission and failure service."""
-        ...
 
     @property
     @abstractmethod

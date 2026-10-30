@@ -408,3 +408,9 @@ InputDeliveryBuffer在同一锁内先完成所有候选选择/同步无副作用
 
 FrontendSink的close_all_connections继续由唯一_close_task持有；每条连接实例的实际ws.close另由_connection_close_tasks强引用。软观察超时只记录pending，不用asyncio.timeout取消真实close，最终等待同一task终结再删除匹配连接。不同连接实例以身份区分，旧连接清理不能删除已替换项。明确网络断开仍按既有规则处理；非网络清理错误立即交Runtime记录，应用不会提前结束loop并取消剩余释放。单会话close_session、消息协议和History提交顺序不变。本次未运行校验或应用，等待用户人工验收。
 
+## FrontendSink 的 Runtime 依赖继承（2026-10-30）
+
+`IFrontendSink` 的直接基类改为 `IDPRuntimeSystem`、`IAgentSink`、`ABC`；`FrontendSink` 仍只继承 `IFrontendSink`，显式调用该接口的无参构造。Runtime 依赖及日志能力由公共基类链自动提供，事件契约仍唯一来自 `IAgentSink`，最终依赖集合和注册槽位不变。
+
+FrontendSink 现有 `_runtime` 赋值、发送/交互任务、关闭连接及错误处理不改，关闭期继续使用已有引用，不依赖解绑后不可用的默认 `runtime` 动态查询。`ParentAgentSink`、各 Loop、工具执行器和消息队列均不加入 System 继承，保留原有引用与查询方式。无消息协议、History 或持久化变化；未运行校验、构建、实际导入或应用。
+

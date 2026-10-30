@@ -13,7 +13,7 @@ from entity.puretype import (
     AgentspaceLockOwner,
     AgentspaceTrashEntry,
 )
-from .logger_system import ILoggableSystem
+from .runtime_system import IDPRuntimeSystem
 from .sandbox import ISandbox
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from system.session_visual_resources import SessionVisualResourceService
 
 
-class IAgentspaceService(ILoggableSystem, ABC):
+class IAgentspaceService(IDPRuntimeSystem, ABC):
     """Declare file, lock, event and leaf-service operations for Agentspace."""
 
     @property

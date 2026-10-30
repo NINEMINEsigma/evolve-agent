@@ -2,18 +2,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 
-class IMCPSystem(ILoggableSystem, ABC):
+class IMCPSystem(IDPRuntimeSystem, ABC):
     """Declare MCP refresh, status and shutdown admission operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used for admission and failures."""
-        ...
 
     @abstractmethod
     async def refresh(self) -> dict[str, dict[str, str | int | float | bool | None]]:

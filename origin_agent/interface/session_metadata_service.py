@@ -11,22 +11,15 @@ from entity.puretype import (
 )
 from system.lifecycle import TaskOwner
 
-from .logger_system import ILoggableSystem
 from .llm_profile_store import ILLMProfileStore
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from system.session_store import SessionStore
 
 
-class ISessionMetadataService(ILoggableSystem, ABC):
+class ISessionMetadataService(IDPRuntimeSystem, ABC):
     """Declare metadata Profile selection and session text-generation operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used for metadata admission."""
-        ...
 
     @property
     @abstractmethod

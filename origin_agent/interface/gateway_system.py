@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
 from fastapi import FastAPI
 from system.lifecycle import TaskOwner
 
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
@@ -17,7 +16,7 @@ if TYPE_CHECKING:
 WorkT = TypeVar("WorkT")
 
 
-class IGatewaySystem(ILoggableSystem, ABC):
+class IGatewaySystem(IDPRuntimeSystem, ABC):
     """Declare Gateway application, admission and server lifecycle operations."""
 
     @property
@@ -42,12 +41,6 @@ class IGatewaySystem(ILoggableSystem, ABC):
     @abstractmethod
     def task_owner(self) -> TaskOwner:
         """Return the owner for Gateway background tasks."""
-        ...
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used by Gateway."""
         ...
 
     @property

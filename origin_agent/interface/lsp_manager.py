@@ -4,19 +4,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 from .sandbox import ISandbox
 
 
-class ILSPManager(ILoggableSystem, ABC):
+class ILSPManager(IDPRuntimeSystem, ABC):
     """Declare language-server startup, query and diagnostic operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime event-loop and failure service."""
-        ...
 
     @property
     @abstractmethod

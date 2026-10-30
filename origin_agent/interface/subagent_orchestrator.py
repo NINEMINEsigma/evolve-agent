@@ -12,8 +12,7 @@ from entity.puretype import (
     SubAgentSnapshotResponse,
     SubAgentStopResult,
 )
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 from .session_manager import ISessionManager
 
 
@@ -21,14 +20,8 @@ DecisionValue = str | int | float | bool | None | list[str]
 Decision = dict[str, DecisionValue]
 
 
-class ISubAgentOrchestrator(ILoggableSystem, ABC):
+class ISubAgentOrchestrator(IDPRuntimeSystem, ABC):
     """Declare sub-agent creation, messaging, approval and shutdown operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used by sub-agent contexts."""
-        ...
 
     @property
     @abstractmethod

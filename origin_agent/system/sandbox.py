@@ -148,7 +148,7 @@ class Sandbox(ISandbox):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISubprocessRunner))
+        super().__init__(dependencies=(ISubprocessRunner,))
         self._ctx: RuntimeContext
         self._runner: ISubprocessRunner
         self._dynamic_spaces_path: Path

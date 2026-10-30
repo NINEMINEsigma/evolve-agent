@@ -6,18 +6,11 @@ from typing import Callable
 
 from entity.constant import SEARCH_PROCESS_STDERR_MAX_BYTES
 from entity.puretype.runtime import ProcessLineStreamResult
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 
-class ISubprocessRunner(ILoggableSystem, ABC):
+class ISubprocessRunner(IDPRuntimeSystem, ABC):
     """Declare sandboxed subprocess execution and shutdown ownership."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime admission and failure-reporting service."""
-        ...
 
     @abstractmethod
     def close_admission(self) -> None:

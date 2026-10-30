@@ -359,3 +359,9 @@ ApprovalSystem、BrowserSystem、CronRouter 和 DynamicEndpointSystem 分别使�
 Timer回调意外失败先交Runtime即时记录完整栈并请求失败关闭，再追加session_id/task_id/is_wait安全定位，不新增命令正文日志。附加诊断失败不覆盖原异常；真实持久化或内部错误不降级。资源清理观察超时仍维持pending，不据此单独关闭应用。
 
 Browser最终注销对已登记的自有无头Popen只请求一次终止，再观察同一实例退出；不因短窗口返回就宣称收回、不重复taskkill，不杀用户浏览器。CDP/driver真实释放仍归清理登记器。当前仅源码实施与只读审阅，未运行校验、构建或应用；用户需部署后验收。
+
+## Runtime 依赖继承（2026-10-30）
+
+`IApprovalSystem`、`IBrowserSystem`、`ICronRouter`、`IDynamicEndpointSystem` 改继承 `IDPRuntimeSystem`，四个具体实现仍只继承各自接口。构造移除重复 Runtime 声明，其余业务依赖不变；Runtime 与 Logger 依赖由公共基类链自动加入，最终依赖集合和注册槽位不变。
+
+Browser、Cron、DynamicEndpoint 接口移除重复抽象 `runtime`，具体实现的缓存属性覆写、唤醒赋值和已有 `_runtime` 引用均保留；Approval 原有缓存访问同样不改。framework 解绑后的关闭期仍使用已有引用，不改成公共属性的动态查询。审批、工具、Timer、浏览器进程与动态端点的业务和资源所有权保持，无持久化或前端变更。未运行校验、构建、实际导入或应用。

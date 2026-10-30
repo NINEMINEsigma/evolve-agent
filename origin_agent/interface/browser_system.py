@@ -9,21 +9,14 @@ from entity.puretype.browser import HeadlessCleanupResult
 from entity.puretype.resource_cleanup import CleanupReport
 from system.lifecycle import TaskOwner
 
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser
 
 
-class IBrowserSystem(ILoggableSystem, ABC):
+class IBrowserSystem(IDPRuntimeSystem, ABC):
     """Declare browser connection and application-owned process cleanup."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used for browser admission."""
-        ...
 
     @property
     @abstractmethod

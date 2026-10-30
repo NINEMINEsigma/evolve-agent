@@ -9,21 +9,14 @@ from entity.messages import MediaBlock, MessageBlock
 from entity.puretype import LLMProfile, ModalityCapability, ModalityDescriptionResult
 from system.lifecycle import TaskOwner
 
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 
-class IModalityCapabilitySystem(ILoggableSystem, ABC):
+class IModalityCapabilitySystem(IDPRuntimeSystem, ABC):
     """Declare multimodal probing, forwarding and description operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime admission and failure service."""
-        ...
 
     @property
     @abstractmethod

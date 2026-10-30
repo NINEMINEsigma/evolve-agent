@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import ContextManager, Literal
 
 from entity.puretype.llm import LLMProfile, LLMProfileData, LLMProfilePayload
-from .logger_system import ILoggableSystem
+from .runtime_system import IDPRuntimeSystem
 
 
-class ILLMProfileStore(ILoggableSystem, ABC):
+class ILLMProfileStore(IDPRuntimeSystem, ABC):
     """Declare the process-wide LLM Profile root storage contract."""
 
     @property

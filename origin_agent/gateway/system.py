@@ -81,7 +81,7 @@ class GatewaySystem(IGatewaySystem):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            IRuntimeSystem, IToolDiscoverySystem, ISessionManager, ISubAgentOrchestrator,
+            IToolDiscoverySystem, ISessionManager, ISubAgentOrchestrator,
             IDynamicEndpointSystem, IFrontendSink, IAgentspaceService, IApprovalSystem,
             ILLMProfileStore, ISessionMetadataService, ICronRouter, IShellManager, ISandbox,
         ))

@@ -459,7 +459,7 @@ class ModalityCapabilitySystem(IModalityCapabilitySystem):
     """多模态探测锁、探针媒体、缓存路径与请求的唯一所有者。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ILLMProfileStore))
+        super().__init__(dependencies=(ILLMProfileStore,))
         self._runtime: IRuntimeSystem | None = None
         self._profiles: ILLMProfileStore | None = None
         self._owner: TaskOwner | None = None

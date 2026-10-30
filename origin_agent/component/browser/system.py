@@ -35,7 +35,7 @@ class BrowserSystem(IBrowserSystem):
     """仅关闭 CDP 客户端连接；只终止明确登记为应用自有的无头进程。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem,))
+        super().__init__()
         self._runtime: IRuntimeSystem | None = None
         self._owner: TaskOwner | None = None
         self._pw: Playwright | None = None

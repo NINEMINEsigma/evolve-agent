@@ -171,7 +171,7 @@ class ToolDiscoverySystem(IToolDiscoverySystem):
         from interface.shell_manager import IShellManager
 
         super().__init__(dependencies=(
-            IRuntimeSystem, IToolRegistry, ISandbox, IShellManager,
+            IToolRegistry, ISandbox, IShellManager,
             IAgentspaceService, ISessionMetadataService, IApprovalSystem,
             ILSPManager, IBrowserSystem, IModalityCapabilitySystem, ICronRouter,
             ISessionManager, ISubAgentOrchestrator, IDynamicEndpointSystem, IMCPSystem,

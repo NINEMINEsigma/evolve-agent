@@ -114,7 +114,7 @@ class SubprocessRunner(ISubprocessRunner):
     """Own creation, consumer handoff and one real cleanup per subprocess."""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem,))
+        super().__init__()
         self._active_procs: dict[str, list[SubprocessOperation]] = {}
         self._operations: set[SubprocessOperation] = set()
         self._retained_operations: set[SubprocessOperation] = set()

@@ -65,7 +65,7 @@ class ToolRegistry(IToolRegistry):
     _CHECK_FN_TTL_SECONDS: float = 30.0
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem,))
+        super().__init__()
         self._tools: dict[str, BaseTool] = {}
         self._toolset_checks: dict[str, Callable] = {}
         self._toolset_aliases: dict[str, str] = {}

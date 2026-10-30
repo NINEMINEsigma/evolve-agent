@@ -81,7 +81,7 @@ class AgentspaceService(IAgentspaceService):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
+        super().__init__(dependencies=(ISandbox,))
         self._sandbox: ISandbox | None = None
         self._root: Path | None = None
         self._event_hub: AgentspaceEventHub | None = None

@@ -76,7 +76,7 @@ class FrontendSink(IFrontendSink):
     """
 
     def __init__(self) -> None:
-        IFrontendSink.__init__(self, dependencies=(IRuntimeSystem,))
+        IFrontendSink.__init__(self)
         # session_id → WsConnectionEntry
         self._ws_sinks: dict[str, WsConnectionEntry] = {}
         # {request_id: Future[ApprovalResult]}

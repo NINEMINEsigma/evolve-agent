@@ -276,5 +276,11 @@ TaskAgent继续无系统提示词，只有已加载工具集∩TASKAGENT∩safe�
 
 原计数周期保持：普通子Agent的turn在整个run内累积，纯文本回复后等待/唤醒不重置，改配置不主动唤醒等待者；临时Agent纯文本完成即结束、原反馈/停止/安全授权不变。提高上限不重建已结束实例，不增加构造期或每角色覆盖。仅源码实施与只读审阅，未运行校验、构建或应用，用户人工验收待完成。
 
+## 编排器 Runtime 依赖继承（2026-10-30）
+
+`ISubAgentOrchestrator` 改继承 `IDPRuntimeSystem` 并移除重复抽象 `runtime` 声明；`SubAgentOrchestrator` 仍只继承该接口，构造仅声明其他业务依赖。Runtime 与 Logger 依赖由公共基类链自动加入，最终依赖集合、注册槽位与编排器资源所有权不变。
+
+具体编排器的 `_runtime` 字段、`virtual_awake` 赋值、缓存 `runtime` 覆写及 `virtual_shotdown` 完成后清空引用均保留。framework 在关闭钩子前解除架构绑定，关闭任务继续使用已有缓存，不改为动态 `get_system()` 查询。`_OrchestratorContext`、SubAgentLoop 和 TaskAgentLoop 仍非 System，不加入此继承链；子会话输入、反馈交接、停止与 History 保存不改。未运行校验、构建、实际导入或应用。
+
 
 

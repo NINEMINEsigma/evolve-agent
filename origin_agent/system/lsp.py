@@ -77,7 +77,7 @@ class LSPManager(ILSPManager):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
+        super().__init__(dependencies=(ISandbox,))
         self._lock = threading.RLock()
         self._operation_lock = threading.Lock()
         self._admission_closed = threading.Event()

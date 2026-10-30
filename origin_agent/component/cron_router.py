@@ -41,7 +41,7 @@ class CronRouter(ICronRouter):
     """加载不调度；关闭只冻结运行资源，不删除持久任务。"""
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISandbox, ISubprocessRunner))
+        super().__init__(dependencies=(ISandbox, ISubprocessRunner))
         self._runtime: IRuntimeSystem | None = None
         self._sandbox: ISandbox | None = None
         self._runner: ISubprocessRunner | None = None

@@ -266,3 +266,9 @@ BaseLLMClient.chat/chat_stream新增keyword-only `require_tool_call: bool = Fals
 
 EmptyResponseRetryClient两种方法在每次底层调用中保留参数，仍只按原条件重试空响应；StreamConsumer负责从Loop显式转交，不新增响应违约检测、能力探测、补救prompt或重试预算。服务不支持参数或配置冲突时走既有错误出口；工具执行、审批和权限不由此契约保证。子会话及辅助模型默认false，History/Profile/easysave结构不变。源码已实施，尚未运行验证。
 
+## Runtime 依赖继承（2026-10-30）
+
+`IToolRegistry`、`IToolDiscoverySystem`、`IMCPSystem` 统一继承 `IDPRuntimeSystem`，`ToolRegistry`、`ToolDiscoverySystem`、`MCPSystem` 继续只继承各自接口。Runtime 依赖由公共基类自动加入，Logger 依赖继续由 `ILoggableSystem` 加入；具体构造仅声明其他业务依赖，最终依赖集合、注册槽位及发现顺序不变。
+
+`IToolRegistry`、`IMCPSystem` 移除重复抽象 `runtime` 声明，具体实现保留 `_runtime`、唤醒赋值和缓存属性覆写，保证 framework 解绑后的关闭钩子仍使用已有引用；ToolDiscoverySystem 原有局部查询不改。对象工具注册、发现、MCP 连接和原生资源清理行为均不变，不新增依赖或持久化格式。仅完成源码及只读审阅，未运行校验、构建、实际导入或应用。
+

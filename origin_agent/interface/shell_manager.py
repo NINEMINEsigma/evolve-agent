@@ -3,19 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from entity.puretype.shell import ShellInfo, ShellOutputSlice, ShellStopResult
-from .logger_system import ILoggableSystem
-from .runtime_system import IRuntimeSystem
+from .runtime_system import IDPRuntimeSystem
 from .sandbox import ISandbox
 
 
-class IShellManager(ILoggableSystem, ABC):
+class IShellManager(IDPRuntimeSystem, ABC):
     """Declare interactive Shell ownership, I/O and cleanup operations."""
-
-    @property
-    @abstractmethod
-    def runtime(self) -> IRuntimeSystem:
-        """Return the runtime service used for Shell admission."""
-        ...
 
     @property
     @abstractmethod

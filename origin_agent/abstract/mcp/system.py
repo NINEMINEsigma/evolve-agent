@@ -136,7 +136,7 @@ def _validate_servers(raw: Any) -> tuple[dict[str, dict[str, Any]], dict[str, st
 
 class MCPSystem(IMCPSystem):
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, IToolRegistry))
+        super().__init__(dependencies=(IToolRegistry,))
         self._runtime: IRuntimeSystem | None = None
         self._core: MCPCore | None = None
         self._work: MCPThreadWork | None = None

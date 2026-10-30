@@ -1021,7 +1021,7 @@ class SubAgentOrchestrator(ISubAgentOrchestrator):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            IRuntimeSystem, ISessionManager, IApprovalSystem, IFrontendSink,
+            ISessionManager, IApprovalSystem, IFrontendSink,
             IToolRegistry, ICronRouter, IAgentspaceService,
             ISandbox, ILLMProfileStore, IModalityCapabilitySystem,
         ))

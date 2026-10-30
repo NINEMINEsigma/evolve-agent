@@ -283,6 +283,12 @@ Application 不再保存 `_registered_types`，`_unregister_systems()` 统一等
 
 本节替代前文逆清单逐节点注销和相关局部异常保留的旧描述，不恢复 `_runtime_ref` 或 `_failed_owner_refs`，不改变业务停止顺序、ExitStack 与5秒硬截止。仅完成源码和只读差异审阅，未运行测试、校验、实际导入、构建或应用，待用户完整部署验收。
 
+## Runtime 依赖声明来源（2026-10-30）
+
+19个依赖 `IRuntimeSystem` 的接口改继承 `IDPRuntimeSystem`，构造只声明其他业务依赖；Runtime 和 Logger 依赖分别由该公共基类及其父类 `ILoggableSystem` 自动加入。`IRuntimeSystem` 自身保留 `ILoggableSystem` 基类，Logger 无 Runtime 依赖。`IDPRuntimeSystem` 不是新槽位，21个槽位及各节点最终依赖集合不变，Application 和关闭编排不改。本节更新前文所有业务接口直接继承 `ILoggableSystem` 的描述。
+
+12个接口的重复抽象 `runtime` 属性收敛至公共基类，具体实现中的缓存属性覆写不删除。framework 在调用 `virtual_shotdown()` 前解除架构绑定，基类默认 `runtime` 通过 `get_system()` 查询只适用于架构仍绑定的阶段；关闭钩子和迟到回调保留现有 `_runtime`、绑定方法或局部引用。Agentspace、Sandbox、Profile 等原有上下文访问不因新基类而改写，叶服务及非 System 对象保持显式注入或查询。无资源所有权、持久化或硬截止变更；未运行校验、构建、实际导入或应用。
+
 
 
 

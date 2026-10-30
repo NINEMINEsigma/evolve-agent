@@ -279,7 +279,7 @@ class ShellManager(IShellManager):
     """
 
     def __init__(self) -> None:
-        super().__init__(dependencies=(IRuntimeSystem, ISandbox))
+        super().__init__(dependencies=(ISandbox,))
         self._sandbox: ISandbox | None = None
         self._runtime: IRuntimeSystem | None = None
         self._conpty_spawn_lock = threading.Lock()

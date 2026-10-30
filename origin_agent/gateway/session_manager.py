@@ -55,7 +55,7 @@ class SessionManager(ISessionManager):
 
     def __init__(self) -> None:
         super().__init__(dependencies=(
-            IRuntimeSystem, ILLMProfileStore, ISessionMetadataService, IApprovalSystem,
+            ILLMProfileStore, ISessionMetadataService, IApprovalSystem,
             IFrontendSink, IToolRegistry, ICronRouter, IAgentspaceService,
             IShellManager, IModalityCapabilitySystem,
         ))

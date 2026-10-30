@@ -14,14 +14,14 @@ from entity.puretype import (
     SubAgentFeedbackDelivery,
 )
 from .frontend_sink import IFrontendSink
-from .logger_system import ILoggableSystem
+from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
     from gateway.chat import SessionManager as ChatSessionManager
 
 
-class ISessionManager(ILoggableSystem, ABC):
+class ISessionManager(IDPRuntimeSystem, ABC):
     """Declare session index, Loop ownership and shutdown coordination."""
 
     @property
