@@ -6,12 +6,11 @@ from typing import Callable
 
 from entity.constant import SEARCH_PROCESS_STDERR_MAX_BYTES
 from entity.puretype.runtime import ProcessLineStreamResult
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 
 
-class ISubprocessRunner(AsyncSystem, ABC):
+class ISubprocessRunner(ILoggableSystem, ABC):
     """Declare sandboxed subprocess execution and shutdown ownership."""
 
     @property

@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING, Literal
 
 from entity.messages import MediaBlock, MessageBlock
 from entity.puretype import LLMProfile, ModalityCapability, ModalityDescriptionResult
-from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 
-class IModalityCapabilitySystem(AsyncSystem, ABC):
+class IModalityCapabilitySystem(ILoggableSystem, ABC):
     """Declare multimodal probing, forwarding and description operations."""
 
     @property

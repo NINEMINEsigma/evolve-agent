@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
 
 from fastapi import FastAPI
-from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 WorkT = TypeVar("WorkT")
 
 
-class IGatewaySystem(AsyncSystem, ABC):
+class IGatewaySystem(ILoggableSystem, ABC):
     """Declare Gateway application, admission and server lifecycle operations."""
 
     @property

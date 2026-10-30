@@ -1596,6 +1596,31 @@ System 对应关系为：RuntimeSystem/IRuntimeSystem、SubprocessRunner/ISubpro
 
 `_unregister_systems()` 移除注销返回值校验及 Runtime 专属的最后注销分支；Runtime 与其他 System 一样进入注册清单倒序遍历。循环后仍使用 `_runtime_ref` 封闭并等待资源清理，实际注销/清理异常维持既有失败处理。本节替代前文 Runtime 必须在最终 drain 后注销的约定；未新增字段、继承关系或跨类 protected 访问，不修改 framework 的依赖拒绝语义，也未新增拓扑排序或级联注销。现有清单仍将 Runtime 放在首位，返回 False 不再转为 Application 异常，其他注册顺序适配尚未实施。未运行校验或应用。
 
+### Application Runtime 引用移除（2026-10-29，后续修订）
+
+移除 `Application._runtime_ref` 与 `Application.disarm_shutdown_deadline()`。正常启动在注册循环结束后通过 `get_system(IRuntimeSystem)` 获取已唤醒实例；正常关闭与注销流程在函数内提前取得局部引用，注销后的 drain、失败记录及失败关闭保留路径只使用该引用，`_hold_failed_shutdown(error, runtime)` 显式接收它，不重新查询注册表。
+
+启动失败使用 `has_system(IRuntimeSystem)` 区分未注册与已注册但可能未唤醒的实例：未注册时不使用 Runtime，部分初始化时仍执行其内存级关闭与清理契约，不把未唤醒实例交给 `get_system()`。注销函数仅在实例已唤醒时再通过 `get_system()` 取得它。
+
+`App` 新增 `_shutdown_callbacks: ExitStack`，经 `Application.start(shutdown_callbacks=...)` 交入；Application 在正常启动完成或启动失败清理前，登记 Runtime 的 `disarm_shutdown_deadline` 绑定方法。回调按必要生命周期保留所属实例，但不提供 Runtime 服务查询入口，也不在 App 增加 Runtime 服务镜像字段。`__main__` 仍在 `asyncio.run()` 与默认线程池结束后调用 `App.disarm_watchdog()`，由它关闭回调栈，保持硬截止覆盖范围；注册前失败时栈为空。既有 `App.run()` 函数内的 Runtime 局部引用继续用于信号处理及注销后的退出码读取。
+
+本节覆盖前节对 `_runtime_ref` 的描述；不改变 System 清单、framework 注销返回值语义、资源所有权或持久化格式，保留用户已有的 `_wake_task: asyncio.Task[bool] | None` 修改。仅完成源码与只读差异审阅，未运行校验、构建、导入或应用。
+
+### 注销失败实例保留字段移除（2026-10-30）
+
+移除 `Application._failed_owner_refs: list[AsyncSystem]` 与注销异常时唯一的追加操作；该列表没有读取、重试或业务调用方。原字段归属记录以本节为准。`_shutdown_failures` 及 `_hold_failed_shutdown(error, runtime)` 保持原样，不改变 System 依赖、持久化或资源清理顺序。未运行校验或应用。
+
+### 日志能力继承与根节点级联注销（2026-10-30，当前约定）
+
+现有20个业务 System 的接口均从直接继承 `AsyncSystem` 改为继承 `ILoggableSystem`、`ABC`；`IFrontendSink` 的基类为 `ILoggableSystem`、`IAgentSink`、`ABC`。具体实现继续继承原接口，无新增构造、业务方法或日志调用。`ILoggableSystem` 定义于 `interface/logger_system.py` 并经 `interface/__init__.py` 显式导出，构造自动并入 `ILoggerSystem` 依赖，保留原业务依赖；重复 Logger 声明由 framework 的依赖集合去重。
+
+`ILoggerSystem` 和 `ILoggableSystem` 仍直接继承 framework `AsyncSystem`；前者是服务槽位，后者是能力基类、不是注册节点。LoggerSystem 保持无 Runtime 依赖，其余20个节点都依赖 Logger，现有21个槽位与具体实现配对不变。接口模块直接从 `.logger_system` 导入基类，不反向依赖具体 Logger 实现。本文前面的2026-10-20槽位关系和2026-10-21事件契约记录中涉及直接 AsyncSystem 基类的历史描述由本节更新。
+
+Application 删除 `_registered_types` 字段与 start 中的维护操作，`_unregister_systems()` 只调用一次 `shoudown_system(ILoggerSystem)`，由 framework 递归关闭依赖方后再关闭根。两条调用路径（启动失败回收、普通关闭）共用此入口；不再维护逆拓扑清单、逐个 unregister 或二次重试。原业务停止失败仍使用 `_hold_failed_shutdown`，根级联失败则直接进入外层异常边界；级联失败不继续最终 drain，且不表示资源已完整回收。本节覆盖前面逆清单注销及相关异常保留路径的旧约定。
+
+Runtime 只以现有函数局部引用参与根注销后的清理，drain 失败只保留异常组，不再经 `record_failure` 补打诊断。`ILoggerSystem` 开始自身注销后日志能力终止，禁止使用缓存、备用出口或直接终端输出延长日志生命周期；未迁移的标准日志调用仍由后续任务处理。未新增服务镜像、外部 protected 访问、模型、存储版本或业务资源所有者；ExitStack 与5秒硬截止不变。仅完成源码及只读审阅，未运行校验、导入、构建或应用。
+
+
 
 
 

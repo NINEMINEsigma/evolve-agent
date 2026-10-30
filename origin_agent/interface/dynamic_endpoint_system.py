@@ -4,13 +4,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from entity.puretype.extools import DynamicEndpointInfo
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 from .session_manager import ISessionManager
 
 
-class IDynamicEndpointSystem(AsyncSystem, ABC):
+class IDynamicEndpointSystem(ILoggableSystem, ABC):
     """Declare dynamic endpoint registration and session migration operations."""
 
     @property

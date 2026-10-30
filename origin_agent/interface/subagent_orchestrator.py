@@ -12,8 +12,7 @@ from entity.puretype import (
     SubAgentSnapshotResponse,
     SubAgentStopResult,
 )
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 from .session_manager import ISessionManager
 
@@ -22,7 +21,7 @@ DecisionValue = str | int | float | bool | None | list[str]
 Decision = dict[str, DecisionValue]
 
 
-class ISubAgentOrchestrator(AsyncSystem, ABC):
+class ISubAgentOrchestrator(ILoggableSystem, ABC):
     """Declare sub-agent creation, messaging, approval and shutdown operations."""
 
     @property

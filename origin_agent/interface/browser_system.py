@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING
 from entity.constant import CDP_ENDPOINT_DEFAULT
 from entity.puretype.browser import HeadlessCleanupResult
 from entity.puretype.resource_cleanup import CleanupReport
-from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser
 
 
-class IBrowserSystem(AsyncSystem, ABC):
+class IBrowserSystem(ILoggableSystem, ABC):
     """Declare browser connection and application-owned process cleanup."""
 
     @property

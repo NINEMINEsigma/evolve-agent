@@ -4,13 +4,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from entity.puretype import LSPDefinition, LSPDiagnostic, LSPReference, LSPState, LSPSymbol
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 from .sandbox import ISandbox
 
 
-class ILSPManager(AsyncSystem, ABC):
+class ILSPManager(ILoggableSystem, ABC):
     """Declare language-server startup, query and diagnostic operations."""
 
     @property

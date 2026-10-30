@@ -9,9 +9,9 @@ from entity.puretype import (
     MetadataProfileState,
     ToolchainSummaryProfileState,
 )
-from framework import AsyncSystem
 from system.lifecycle import TaskOwner
 
+from .logger_system import ILoggableSystem
 from .llm_profile_store import ILLMProfileStore
 from .runtime_system import IRuntimeSystem
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from system.session_store import SessionStore
 
 
-class ISessionMetadataService(AsyncSystem, ABC):
+class ISessionMetadataService(ILoggableSystem, ABC):
     """Declare metadata Profile selection and session text-generation operations."""
 
     @property

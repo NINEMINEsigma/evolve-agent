@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from entity.messages import BaseMessage
-from framework import AsyncSystem
+from .logger_system import ILoggableSystem
 
 if TYPE_CHECKING:
     from component.approval.allowlist import ToolAllowlistStore
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from component.approval.mode_store import ApprovalModeStore
 
 
-class IApprovalSystem(AsyncSystem, ABC):
+class IApprovalSystem(ILoggableSystem, ABC):
     """Declare approval mode, backend and model-request operations."""
 
     @property

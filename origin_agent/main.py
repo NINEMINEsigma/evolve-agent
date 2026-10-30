@@ -8,6 +8,7 @@ App 只负责：创建唯一 Application、平台信号处理、等待关闭请�
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 import logging
 import signal
 from typing import TYPE_CHECKING
@@ -31,7 +32,9 @@ class App:
     def __init__(self, ctx: RuntimeContext) -> None:
         self._ctx: RuntimeContext = ctx
         self._application: Application | None = None
-        self._wake_task: asyncio.Task[None] | None = None
+        # 只保存 asyncio.run 结束后执行的硬截止解除回调，不保存 Runtime 服务字段。
+        self._shutdown_callbacks = ExitStack()
+        self._wake_task: asyncio.Task[bool] | None = None
 
     async def run(self) -> int:
         """阻塞直到关闭完成；失败关闭返回 1，绝不返回进化成功。"""
@@ -47,7 +50,7 @@ class App:
         application = self._application
 
         try:
-            await application.start()
+            await application.start(shutdown_callbacks=self._shutdown_callbacks)
         except Exception as exc:
             # 端口占用是启动前的明确业务拒绝：按普通停止退出，不进入 fallback。
             from gateway.system import GatewayPortBusyError
@@ -97,9 +100,7 @@ class App:
 
     def disarm_watchdog(self) -> None:
         """仅由 __main__ 在 asyncio.run 及线程池清理完成后调用。"""
-        if self._application is None:
-            return
-        self._application.disarm_shutdown_deadline()
+        self._shutdown_callbacks.close()
 
 
 def _contains_port_busy(error: BaseException) -> bool:

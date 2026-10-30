@@ -3,13 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from entity.puretype.shell import ShellInfo, ShellOutputSlice, ShellStopResult
-from framework import AsyncSystem
-
+from .logger_system import ILoggableSystem
 from .runtime_system import IRuntimeSystem
 from .sandbox import ISandbox
 
 
-class IShellManager(AsyncSystem, ABC):
+class IShellManager(ILoggableSystem, ABC):
     """Declare interactive Shell ownership, I/O and cleanup operations."""
 
     @property
