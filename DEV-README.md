@@ -104,7 +104,8 @@ Shell会话由 `Application.current().get_system(IShellManager)` 统一持有。
 | `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`LoopSessionManager`、`AgentSink`、`ToolExecutor`、`StreamConsumer`、`SessionMessageQueue`（会话级消息队列）、`tool_execution.accept_tool_batch`（工具批次接收声明）、`tool_post_dispatch.ToolPostprocessor`（工具结果提交后统一后处理） | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
 | `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop`、`TaskAgentLoop`（临时Agent：无系统提示词、无持久化、纯文本回复即终止） | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
 | `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理 | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
-| `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由、桌面自动化（`automation/`）、浏览器控制（`browser/`） | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
+| `buildin_tools/` | 内置工具的五个子包（`tools/`、`extools/`、`multiagenttools/`、`automation/`、`browser/`）及随包 BrowserSystem、共享构造逻辑 | [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md) |
+| `component/` | 当前保留审批系统、MCP 管理入口、Cron 路由与任务模型、动态端点服务；本轮尚未完成 Component 专用整理 | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
 | `abstract/` | 抽象层：LLM 客户端、对象工具注册表（`BaseTool`/`BaseToolSet` 工具集元数据与渐进式加载）、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
 | `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、会话存储、生命周期、业务提示词组装与 LSP（`lsp.py`） | [system/DEV-README.md](origin_agent/system/DEV-README.md) |
@@ -179,7 +180,7 @@ Evolve Agent 内置两套多代理运行时：
 - `subagent/orchestrator.py` 的 `SubAgentOrchestrator` 是 framework `AsyncSystem`，按父会话维护子代理上下文；它通过 `SessionManager` 查询真实父会话，不再依赖启动用 Loop。子Agent输入由 `InputDeliveryBuffer` 记录，停止先等待任务收尾再刷新Inbox和保存普通子AgentHistory，反馈经 `SubAgentFeedbackDelivery` 一次性交接。
 - 每个子代理是独立的 `SubAgentLoop`（继承 `BasePrivateChatAgentLoop`），拥有独立的 LLM 配置与历史；启动过程登记启动状态，不设置活跃数量上限，显式历史加载失败会拒绝启动并回滚，不会静默从空历史继续。
 - `subagent/profile.py::CharacterProfileResolver` 每次动态扫描 `ws:characters/roleplay/` 与 `ws:characters/task/`，从 `profile.md.meta` 的 `[llm_profile]` 解析当前 LLM Profile、读取 `[description]` 简介，并按 `[profile]` 的多行逻辑路径加载多个独立系统提示词；角色名称跨类型全局唯一。主Agent系统提示词每次构建时注入当前可运行角色的名称、类型和简介。
-- `component/multiagenttools/` 提供动态发现、启动、对话、审批、停止和列表工具，不再提供显式注册工具。
+- `buildin_tools/multiagenttools/` 提供动态发现、启动、对话、审批、停止和列表工具，不再提供显式注册工具。
 - 子代理的工具可见性由 `availability` 位掩码控制：通常只能看到标记为 `SUBAGENT` 或 `EVERY` 的工具。
 - 审批结果和子代理输出会周期性注入父 Agent 的消息循环。
 
@@ -295,7 +296,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - 前端模型配置抽屉通过“模型配置 / 全局配置引用”分页分别管理 Profile 定义和全局用途引用。模型定义按客户端、端点纵向分组，详情单项展开、先只读后编辑；切分页保留内存草稿，离开未保存配置时明确确认。会话待用 Profile 选择只在顶部栏修改，浏览器按会话独立保存名称；无本地覆盖时通过 `GET /api/sessions/{id}/llm-profile` 读取持久化指针及既有全局最近使用回退。选择本身不写服务端，发送到主会话或重新生成才提交；`resume` 保持后端当前配置。全局配置引用页还管理工具链摘要 Profile 与图片、音频、视频三条独立回退引用，状态分别经 `/api/toolchain-summary/profile`、`/api/modality/profiles` 和 `toolchain_summary_profile_changed`、`modality_profile_changed` 同步。旧浏览器全局选择不猜测迁移到任何会话。
 - `system/session_metadata.py`：`SessionMetadataService` 已改为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`LLMProfileStore`），无参构造，由 `virtual_awake` 取得依赖并创建本服务的 `SessionStore`。不创建独立 Profile 事务锁，原 `Application.profile_lock` 语义统一经 `LLMProfileStore.locked()` 访问同一把共享 RLock。全局元数据 Profile优先；未配置时按目标会话持久化的活动 Profile回退。统一生成标题、标签和摘要，并为分支、合并与自动旋转提供摘要保障。明确配置不可用时不静默回退。工具链摘要 Profile（`LLMProfileData.toolchain_summary_profile`）为 `CompressHistory` 和独立 `CompressToolChains` 折叠工具链生成紧凑链摘要（`generate_tool_chain_summary`），未配置时回退到目标会话活动 Profile；解析/校验/客户端创建与元数据共用 `_resolve_session_profile_fallback`、`_assert_profile_usable`、`_create_client_for_profile`，模板为 `toolchain_summary.txt` / `toolchain_summary_input.txt`。五个完整异步操作通过 `TaskOwner.run_request()` 登记，包含读取、模型调用、解析与必要写盘；普通请求异常交回原业务边界，用户取消不被误报为整个应用失败。首条用户消息自动标题经同步入口 `maybe_generate_first_title`（路由层判定无标题+非空文本后调用）：同一同步代码段内检查+登记 per-session 防重集合，`task_owner.create` 派发一次性后台任务（不套 run_request）；LLM 失败回退 30 字符截取，停机竞态静默放弃，`CancelledError` 传播，finally 对称清理防重。`close_admission()` 在 STOPPING 期间仍可封闭接收，`cancel_pending()` 等待实际任务及结果交接，生命周期/清理失败继续传播。关闭消息刷新不调用生成接口。
 - `abstract/tools/registry.py`：`ToolRegistry` 已迁移为依赖 RuntimeSystem 的 AsyncSystem，模块级单例与兼容代理已移除。工具表直接保存 `BaseTool` 对象，工具集元数据直接使用 `BaseToolSet`；`register_toolset(toolset, merge=True)` 装载/合并声明，`register_tool(tool, replace=True)` 供 MCP 动态刷新原子替换，查询入口为 `get_tool`/`get_toolset`。`async_dispatch(execution)` 执行 before/handle，`async_postprocess(execution)` 在结果提交后托管 after，二者复用同一 TaskOwner 与真实同步 Future。异步工具通过 TaskOwner.run_request 托管；包含同步历史扫描、磁盘读取或 CPU 密集计算的工具应声明为同步工具，交给 ToolRegistry 的专用线程池执行，不能因为 handler 声明为 async 就在事件循环线程执行阻塞逻辑；同步工具由唯一执行器持有真实 Future，取消等待不删除仍在运行的线程登记。停止分发、请求取消、真实工作等待及线程池异步关闭分别核对结局，生命周期失败继续传播。
-- `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 component 子包与可选 custom_tools，AST 只识别顶层固定名称 `TOOLSET` 并登记唯一模块集合；最后注册 MCP 管理工具和固定 `BaseToolSet` 工具集元数据，不重新建立 MCP 连接。退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入与导入期注册直接拒绝；读取/语法/导入/注册错误直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
+- `abstract/tools/discover.py`：`ToolDiscoverySystem` 依赖工具所需的已就绪 System，按固定顺序扫描五个 buildin_tools 子包与可选 custom_tools，AST 只识别顶层固定名称 `TOOLSET` 并登记唯一模块集合；最后注册 MCP 管理工具和固定 `BaseToolSet` 工具集元数据，不重新建立 MCP 连接。退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入与导入期注册直接拒绝；读取/语法/导入/注册错误直接失败，未授权名称覆盖拒绝会抛错；保留 Python 模块缓存，不通过重载或注入修补发现。
 - `system/lifecycle.py`：`TaskOwner.create/track` 负责后台任务，`run_request` 负责有明确结果等待方的请求。`cancel` 登记预期取消并复用固定截止；`is_idle` 同时要求任务结束和交接完成，取消后仍运行的任务不能从所有权记录中移除。原生线程/子进程仍由各 System 持有真实资源，不由异步包装任务的结束替代。
 - `system/context.py`：`RuntimeContext`（`BaseModel`，不可变运行时配置）。全局 `set_runtime_context`/`get_runtime_context` 单例入口已删除；配置唯一真相来源由 `RuntimeSystem` 持有，经 `app.get_system(IRuntimeSystem).context` 取得。
 - `system/sandbox.py`：`Sandbox` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem` 与 `SubprocessRunner`），无参构造，`virtual_awake` 取得依赖并加载动态空间；由 Application 在 P22 装配后经 `app.get_system(ISandbox)` 取得。路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；`Sandbox.read()` 按 UTF-8、系统编码和 Windows 常见编码自动探测，返回准确原文，分页只按 LF 定位原文行片段，保留 CRLF、孤立 CR 与末尾换行；工具 `Read` 在其上独立应用正文单行展示截断，未截断内容保持原文。编辑和 LSP 使用的 `limit=0` 路径仍返回完整解码原文。`write()` / `append()` 禁用平台换行转换，按传入文本原样写入 UTF-8，避免 Windows 上 `PatchEdit` 写回时给已有 CRLF 增加一个 CR；`PatchEdit` 按原文匹配与替换，已有异常换行不自动修复。动态配置位于 workspace 根且由唯一 Sandbox 实例持有。动态沙盒空间 Tab 通过 Gateway REST 复用该单例。所有调用方（包括内置文件工具与自定义扩展）统一经 `app.get_system(ISandbox)` 取得，不再从 `filesystem._s` 跨工具引用或 `Application.current().sandbox` 旧属性获取。
@@ -308,7 +309,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - 主会话强制中断：`IMainSessionLoop` 只登记已经取得处理锁的单次回复 task；长期 `SessionMessageQueue` consumer 不属于中断目标。`request_interrupt()` 先设置轮次取消事件并等待协作式收尾，超时后只强制取消该轮 task；轮次 finally 在下一条消息开始前清除取消状态。`StreamConsumer` 自行竞速取消信号与流读取，并作为异步迭代器的唯一关闭者。前端以 `history_sync.processing` 的 true/false 为主会话处理状态权威。
 - `gateway/session_manager.py`：SessionManager已改为AsyncSystem，virtual_awake加载索引与随意聊聊索引，外部统一get_system取得。S16已接入输入记录、主/多Agent逐项保存确认、工具结果先提交再发送与退役Loop交接；S17的SubAgentOrchestrator通过其公开关闭反馈入口完成子会话交接；S21完成Gateway提前接收登记，P22完成Application最终装配。
 - `component/cron_router.py`：CronRouter已迁移为依赖RuntimeSystem/Sandbox/SubprocessRunner的AsyncSystem，持久任务严格加载但不启动Timer，RUNNING后由Application统一activate。工具和API只经公开实例方法操作；冻结保留持久任务，命令使用独立进程会话键，先终止命令再确认Timer退出。快照与原子写串行，失败传播，关闭后不再投递新模型工作。
-- `component/browser/system.py`：`BrowserSystem` 已迁移为依赖RuntimeSystem的AsyncSystem，持有唯一Playwright/CDP连接、端点和全部自有无头进程；可选浏览器仍按需启动。请求与清理分别持有，原生进程确认退出后才回收句柄，用户自有浏览器不被终止。`_connection.py`只保留无状态函数，main.py重复清理已移除。
+- `buildin_tools/browser/system.py`：`BrowserSystem` 已迁移为依赖RuntimeSystem的AsyncSystem，持有唯一Playwright/CDP连接、端点和全部自有无头进程；可选浏览器仍按需启动。请求与清理分别持有，原生进程确认退出后才回收句柄，用户自有浏览器不被终止。`_connection.py`只保留无状态函数，main.py重复清理已移除。
 - `system/lsp.py`：`LSPManager` 已迁移为依赖 RuntimeSystem/Sandbox 的 AsyncSystem，工具和文件诊断附加通过 `get_system(ILSPManager)` 取得实例。唤醒不启动 pyright，按需 start 保持；启动握手与正常响应共用唯一 reader，复用 Runtime 主 loop。最终关闭在线程中等待进程和 reader/stderr 退出，失败保留资源并传播；旧模块 getter/cleanup 与 main.py 重复清理已移除。
 - `system/modality_capability.py`：`ModalityCapabilitySystem` 已迁移为依赖 RuntimeSystem/LLMProfileStore 的 AsyncSystem，独占探测锁、媒体及缓存路径。探测与转发请求由 TaskOwner 管理，六路子探针使用 TaskGroup 完整收尾；HTTP 400 模态拒绝经模块级 `_is_modality_rejection` 统一判定，只识别客户端归一化的 abstract 层 `LLMAPIStatusError(400)`（openai/anthropic 协议非流式由客户端转换、流式回退经 `StreamChunk.error_code` 重建），system 层不依赖具体 SDK 异常族；认证/网络/超时不写入不支持缓存。有状态调用经 get_system，纯媒体构造和显式引用解析保持函数。多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`resolve_modality_reference_profile()` 按活动 Profile 对应引用优先、全局图片/音频/视频回退引用次之解析目标；`forward_modality_to_ref_profile()` 只将明确的模态/Provider 请求失败转换为转发错误，其他异常继续抛出）。`build_media_content_block()` 提供不附加 prompt 的共享单媒体块构造入口。多模态预检调用（`ParentAgentLoop._run_tool_loop` 与 `MultiAgentWorker`）纳入模型错误转换边界：无法转发（`ModalityForwardUnavailableError`）时终止本轮并把配置指引持久化展示给前端，provider 错误降级为用户可见错误。
 
@@ -320,7 +321,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `util/templates.py`：模板读取与多Agent占位符渲染，模板缺失和读取失败的处理不变；需要模板目录的调用方直接从 `util.pathutils` 导入。
 - `util/text_codec.py`：编码探测、解码和 LF 分行/行尾处理，原文及编辑契约不变。
 - `util/text_preview.py`：无 I/O 的 `truncate_lf_lines` 纯函数，由 Read 在原文分页统计后调用。Read 新参数 `max_line_chars` 默认 1000，仅允许正整数且可显式提高、不能关闭；按 Unicode 码点保留每行前 N 个正文字符，超限附加 ` ... [truncated]`（含前导空格），标识及 LF/CRLF 行尾不占额度，孤立 CR 仍按正文计数。成功文本结果附带 `max_line_chars`、`truncated`、`truncated_lines`（原文件绝对 0-indexed 行索引）；原行数和分页不变，`remaining=0` 仍可有截断。标识不是原文，PatchEdit 使用前需检查截断状态，必要时提高有限上限重读。自动附带 meta、目录和媒体不应用此展示策略，内部完整读取不变；这不是总输出预算或全文件解码内存限制。
-- `util/file_metadata.py`：Read 的元数据文件纯文本解析器，`parse_meta_content(content)` 按独立的 `[key]` 行解析一层字符串字典，保留值的原始空白和换行；非法/重复键及前导非空文字抛带行号的 `MetaFormatError`。`component/tools/filesystem.py` 负责通过 Sandbox 读取目标完整名称追加 `.meta` 的同级文件，目录也使用同级 `目录名.meta`；命名空间根目录不附带，显式 `.meta` 不继续嵌套。成功时结果附加 `meta` 字典，缺失省略，元数据访问/解析失败附加错误字符串而保留原结果。会话视觉源目录的 `redirect` 由 `system/session_visual_resources.py` 单层消费，Read 只在 `meta.redirect` 中报告错误，不跟随目标。目录列表隐藏 `.meta` 文件（后缀不区分大小写，保留同后缀目录），其他文件工具与前端文件树不变。自动附带的元数据完整读取不受正文分页或单行字符限制影响；显式 Read `.meta` 目标则按文本正文分页及截断，但不继续查找 `.meta.meta`。ws: 元数据文件沿用回复轮次文件接触登记；当前不自动维护文件。
+- `util/file_metadata.py`：Read 的元数据文件纯文本解析器，`parse_meta_content(content)` 按独立的 `[key]` 行解析一层字符串字典，保留值的原始空白和换行；非法/重复键及前导非空文字抛带行号的 `MetaFormatError`。`buildin_tools/tools/filesystem.py` 负责通过 Sandbox 读取目标完整名称追加 `.meta` 的同级文件，目录也使用同级 `目录名.meta`；命名空间根目录不附带，显式 `.meta` 不继续嵌套。成功时结果附加 `meta` 字典，缺失省略，元数据访问/解析失败附加错误字符串而保留原结果。会话视觉源目录的 `redirect` 由 `system/session_visual_resources.py` 单层消费，Read 只在 `meta.redirect` 中报告错误，不跟随目标。目录列表隐藏 `.meta` 文件（后缀不区分大小写，保留同后缀目录），其他文件工具与前端文件树不变。自动附带的元数据完整读取不受正文分页或单行字符限制影响；显式 Read `.meta` 目标则按文本正文分页及截断，但不继续查找 `.meta.meta`。ws: 元数据文件沿用回复轮次文件接触登记；当前不自动维护文件。
 - `util/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
 - `util/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程；原策略不随迁移改变。
 - `util/local_fonts.py`：在线路由与离线导出的共享字体路径/MIME校验，导出额外拒绝 reparse，在线权限口径不变。
@@ -353,9 +354,9 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 
 ## 独立工具链压缩
 
-`core` 工具集新增 `CompressToolChains`（`component/tools/compress_tool_chains.py`），没有业务参数，仅压缩当前会话全部历史中的完整工具链。用户消息、system 消息和不带工具调用的普通回复保持原样；工具链内带调用的 assistant 正文及工具结果由链摘要替代，不截断会话轮次、不要求 Agent 编写会话摘要。每条链须含真实工具调用、全部调用已有配对结果，并达到既有 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符）；未完成链及纯 `CompressedToolChain` 占位链跳过，含新增真实调用的混合链仍可压缩。
+`core` 工具集新增 `CompressToolChains`（`buildin_tools/tools/compress_tool_chains.py`），没有业务参数，仅压缩当前会话全部历史中的完整工具链。用户消息、system 消息和不带工具调用的普通回复保持原样；工具链内带调用的 assistant 正文及工具结果由链摘要替代，不截断会话轮次、不要求 Agent 编写会话摘要。每条链须含真实工具调用、全部调用已有配对结果，并达到既有 `TOOL_CHAIN_COMPRESS_MIN_CHARS`（4000 字符）；未完成链及纯 `CompressedToolChain` 占位链跳过，含新增真实调用的混合链仍可压缩。
 
-`CompressHistory` 仍替换旧轮次并压缩保留轮次内的链，二者共用 `component/tools/_history_compression.py::prepare_tool_chain_replacements()`，由唯一 `SessionMetadataService` 使用工具链摘要 Profile（未配置则回退目标会话活动 Profile）逐链生成摘要。共享入口只返回非持久化 `ToolChainReplacement`，所有摘要成功后才修改 History；生成失败/期间取消不提交压缩，写盘失败沿原生命周期传播，不伪装成功或承诺内存自动回滚。无可压缩链时返回零计数，不调用模型或写历史。两工具通过公开 `BaseAgentLoop.reset_context_tokens()` 重置旧 prompt token 计数，不修改累计用量。
+`CompressHistory` 仍替换旧轮次并压缩保留轮次内的链，二者共用 `buildin_tools/tools/_history_compression.py::prepare_tool_chain_replacements()`，由唯一 `SessionMetadataService` 使用工具链摘要 Profile（未配置则回退目标会话活动 Profile）逐链生成摘要。共享入口只返回非持久化 `ToolChainReplacement`，所有摘要成功后才修改 History；生成失败/期间取消不提交压缩，写盘失败沿原生命周期传播，不伪装成功或承诺内存自动回滚。无可压缩链时返回零计数，不调用模型或写历史。两工具通过公开 `BaseAgentLoop.reset_context_tokens()` 重置旧 prompt token 计数，不修改累计用量。
 
 新工具与现有压缩工具同为 `MAIN` / `critical` / `no_timeout`：普通模式主Agent和随意聊聊会话可用，手动/脱手模式由用户审批，YOLO免审批；不扩展到多Agent、子Agent或临时Agent，不新增工具集、模型配置、UI事件或持久化版本。源码已实施并静态复核，未运行校验、构建或应用验收。
 
@@ -461,7 +462,8 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
 2. 根据你关心的领域阅读对应子模块 DEV-README：
    - 改主循环、消息处理 -> `entry/DEV-README.md`
    - 改网关、会话、前端协议 -> `gateway/DEV-README.md`
-   - 改工具、审批、MCP -> `component/DEV-README.md`
+   - 改工具、浏览器或桌面自动化 -> `buildin_tools/DEV-README.md`
+   - 改审批、MCP 管理、Cron 或动态端点服务 -> `component/DEV-README.md`
    - 改抽象层、注册表、LLM 客户端 -> `abstract/DEV-README.md`
    - 改前端 UI -> `frontend/DEV-README.md`
    - 改子代理 -> `subagent/DEV-README.md`
@@ -548,6 +550,15 @@ Application 的正常退出和部分启动回收共用：先等待实际失败 a
 Gateway/MCP/Agentspace 的失败 awake 不能只因 framework 跳过钩子就丢掉工作；Agentspace 另持有真实恢复任务，watcher 结束后才关闭事件总线。LSP准备核对进程/读线程终局，Shell区分已登记释放与尚未可靠交接，子进程准备确认消费者交接后才允许纯物理释放留给最终 drain。完成观察回调提前绑定失败能力；工具 Future 结算同时绑定 loop，且在发布请求释放事实之前取得能力。
 
 ToolRegistry线程池关闭的既有软观察 pending 仍由原任务/执行器持有，由既有线程退出阶段承接，不属于 Runtime.cleanup.drain 的覆盖范围；本轮不宣称修复全部线程池退出和日志终止边界。21槽位、依赖集合、持久化格式、前端和硬截止不变。仅实施源码及开发文档并做只读审阅，未运行测试、校验、导入、构建或应用，运行验收由用户执行。
+
+## 内置工具五包迁移（2026-10-30）
+
+`component/` 下的 `tools/`、`extools/`、`multiagenttools/`、`automation/`、`browser/` 共61个Python文件整体迁至同级 `buildin_tools/`，五包名称、文件层级与50个 `TOOLSET` 声明保持。工具发现按原五包顺序只扫描新前缀；可选 `custom_tools/` 随后发现，`component.mcp_tools` 仍单独注册，不扫描旧五包、不保留兼容转发。BrowserSystem 与 `_connection.py` 随 browser 包移动，前者仍通过 `IBrowserSystem` 装配；共享 Profile 构造器仍供进入多Agent模式、会话恢复和运行期 Profile 切换使用，延迟导入位置保持。
+
+本轮只迁五包及必要引用，不移动审批、Cron、动态端点或 MCP 管理入口，也不移动 `ActivityLoggerComponent`；`component/` 尚未完成最终 Component 专用整理。工具名称、schema、权限、四阶段执行、第三方依赖版本、21个System槽位、依赖关系、关闭准备、持久化模型与 easysave key 均保持。工具完整约定见 [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md)，保留服务见 [component/DEV-README.md](origin_agent/component/DEV-README.md)。
+
+部署须由用户停机后同步新包与全部调用方。`run.py` 的合并复制不会自动删除目标侧旧五包，`force_init` 对 fast仓库同样不保证清除；用户应先保护本地进化修改，再定向处理 fast/slow/fallback仓库的旧五包，保留 component 的其他服务与用户内容，不删除整个 component 或 workspace。开发助手AI未检查或清理运行时副本；未知外部扩展使用旧导入路径时需同步修改。本轮仅源码与文档实施、只读文本审阅，未运行校验、实际导入、构建、测试或应用；字节级换行校验和运行验收未执行。
+
 
 
 

@@ -40,7 +40,7 @@ mod 是面向 Evolve Agent 的系统功能指导。它解释某项功能如何�
 |---|---|---|
 | `origin_agent/abstract/skills/frontmatter.py` | 解析 Markdown 的 YAML frontmatter 子集 | 可复用或抽取通用解析能力，但必须补足 mod 的严格格式检查 |
 | `origin_agent/abstract/skills/loader.py` | 技能发现、读取、模板处理 | 参考目录与读取接口，不照搬宽松路径解析、内联命令执行或未知占位符置空行为 |
-| `origin_agent/component/tools/skills.py` | `RecallSkill` 无名称列举、有名称返回全文 | 参考工具结果交付方式，而不是假设技能维护了永久正文加载状态 |
+| `origin_agent/buildin_tools/tools/skills.py` | `RecallSkill` 无名称列举、有名称返回全文 | 参考工具结果交付方式，而不是假设技能维护了永久正文加载状态 |
 | `origin_agent/entry/agent_support/messages.py` | 技能简目录、系统提示词和 History 组装 | 放置 mod 入口说明的接入点之一 |
 | `origin_agent/abstract/tools/tool.py` | 工具对象与调用级执行材料 | 新工具继续使用现有对象协议 |
 | `origin_agent/system/prompt.py` | 业务提示词与会话功能模板组装 | 复用运行时值的权威来源，后续逐项移除重复全文注入 |
@@ -411,7 +411,7 @@ mod 是功能指导模板，运行时值由可信代码提供，不由模型参�
 | `entity/puretype/` | 不依赖正式消息类的元数据、结果和诊断模型，通过所属包显式再导出 |
 | `entity/constant/` | mod 文件名、预算、名称规则和通用协议常量 |
 | `system/prompt.py` 或按职责拆分的业务组装模块 | 当前调用的可信模板值与最小系统入口说明；不拥有另一份 mod 存储 |
-| `component/tools/` | `RecallModTool` 与 `TOOLSET`，通过公开 ToolContext 取得上下文，适配原有工具结果 |
+| `buildin_tools/tools/` | `RecallModTool` 与 `TOOLSET`，通过公开 ToolContext 取得上下文，适配原有工具结果 |
 | `system/sandbox.py` 与命名空间常量 | 后续选择暴露 `custom_mods:` 时的唯一只读路径映射 |
 
 复用通用 Markdown/frontmatter 能力时保持依赖方向明确，不让抽象加载器反向依赖具体 Loop、System 或功能 mod。

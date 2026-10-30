@@ -56,7 +56,7 @@
 | 动态沙盒空间 Tab | 右侧 Tab 栏的动态沙盒空间 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批（英文锚点：`dynamic sandbox spaces tab`） |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径。逻辑路径格式为 `命名空间:相对路径`，路径段之间统一使用 `/`；不能以 `/` 或 `\` 开始或结束，也不能包含 `\`。文档中目录示例的末尾 `/` 只是目录说明，不是文件工具参数的一部分 |
 | 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。Read 默认仅返回数据；会话视觉源目录的 `redirect` 字段约定由会话视觉资源服务解释，Read 本身不跟随重定向。与会话元数据及工具内部 `_meta` 字段不同。会话视觉重定向实现进度以对应任务文件为准。 |
-| 主Agent角色名 | 运行时由 `RuntimeSystem.main_agent_character_name` 持有的进程级名称，用于 History 角色标记、前端展示与多Agent路由匹配。启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取一次，缺失或异常时回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`（"main-agent"）；运行期由 `RefreshIdentity` 工具（`component/tools/refresh_identity.py`，MAIN scope）重新读取。该机制供未来 `SOUL.md.meta` 扩展更多运行时设定复用。 |
+| 主Agent角色名 | 运行时由 `RuntimeSystem.main_agent_character_name` 持有的进程级名称，用于 History 角色标记、前端展示与多Agent路由匹配。启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取一次，缺失或异常时回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`（"main-agent"）；运行期由 `RefreshIdentity` 工具（`buildin_tools/tools/refresh_identity.py`，MAIN scope）重新读取。该机制供未来 `SOUL.md.meta` 扩展更多运行时设定复用。 |
 | 角色头像（character avatar） | 元数据键 `[avatar]` 声明的角色自定义头像（英文锚点：character avatar）。主Agent键在 `ws:SOUL.md.meta`，子Agent键在角色目录 `profile.md.meta`；值为一行任意可读命名空间逻辑路径。服务端仅校验可读、是文件与 ≤`AVATAR_MAX_BYTES`（5 MiB），不限扩展名，浏览器自动尝试加载；经 `GET /api/characters/avatars` 实时组装、`/files` 前缀服务，前端按角色名映射并回退首字母头像。编辑 meta 后前端经 Agentspace 事件去抖自动刷新，无需调用工具；非 agentspace 命名空间的头像文件本体替换不触发自动重拉（重连 `resync` 或重新挂载时生效）。 |
 | `.docs/` | 项目示例与引用资料目录 |
 
@@ -192,6 +192,7 @@
 | 非固着器 | 仅实现 `hook_message` 的钩子：产出**非持久化**扩展块（`dynamic_message_suffix`，当轮注入） |
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
+| 内置工具 | 英文锚点：built-in tool。正式五个工具来源子包位于 `origin_agent/buildin_tools/` 下的 `tools/`、`extools/`、`multiagenttools/`、`automation/`、`browser/`，声明模块级 `TOOLSET` 并由 ToolDiscoverySystem 发现；区别于可选 `custom_tools/` 扩展，MCP 管理入口 `component/mcp_tools.py` 仍单独注册。BrowserSystem 和共享模块随所属包归档，不代表它们本身是工具或架构 Component |
 | 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，声明模块级 `TOOLSET: BaseToolSet` 对象，由 ToolDiscoverySystem 发现并注册 | custom tool |
 | 工具集对象声明 | 模块级固定名称 `TOOLSET` 的 `BaseToolSet` 实例；导入期只创建无连接工具对象，注册期由 ToolRegistry 执行预热 | TOOLSET object declaration |
 | 工具调用前 | 工具实例 `before_handle(execution)` 阶段；发生在审批通过后、工具主体之前，只处理当前调用准备 | before handle |

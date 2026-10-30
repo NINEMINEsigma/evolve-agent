@@ -1,6 +1,6 @@
 # abstract/ — 抽象层
 
-`abstract/` 是 Evolve Agent 的抽象层，定义 LLM 客户端、工具注册表、AST 发现、技能、插件、MCP 客户端等核心抽象。这些模块不依赖具体实现，可被 `component/`、`custom_tools/`、`custom_llm_client/` 等复用。
+`abstract/` 是 Evolve Agent 的抽象层，定义 LLM 客户端、工具注册表、AST 发现、技能、插件、MCP 客户端等核心抽象。这些模块不依赖具体实现，可被 `buildin_tools/`、保留服务所在的 `component/`、`custom_tools/`、`custom_llm_client/` 等复用。
 
 ---
 
@@ -161,13 +161,13 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ### 会话变量只读注册
 
-`component/tools/session_variables.py` 以顶层 `TOOLSET` 声明在 filesystem 工具集注册 safe/EVERY 的同步 `ReadSessionVariables`，不新增工具集、UI 事件或模块实例。其原生工作由 ToolRegistry 既有执行器持有，执行结果由服务主动检查 UTF-8 响应预算，不能把未使用的 get_max_result_size 查询当截断保障。filesystem 仍非默认加载；主/参与/普通子/临时Agent均先通过已有 LoadToolset 加载，临时Agent不获得写权限。usage_guide 说明完整读取、原值/meta/问题结构和主Agent单写者约定。
+`buildin_tools/tools/session_variables.py` 以顶层 `TOOLSET` 声明在 filesystem 工具集注册 safe/EVERY 的同步 `ReadSessionVariables`，不新增工具集、UI 事件或模块实例。其原生工作由 ToolRegistry 既有执行器持有，执行结果由服务主动检查 UTF-8 响应预算，不能把未使用的 get_max_result_size 查询当截断保障。filesystem 仍非默认加载；主/参与/普通子/临时Agent均先通过已有 LoadToolset 加载，临时Agent不获得写权限。usage_guide 说明完整读取、原值/meta/问题结构和主Agent单写者约定。
 
 ### `abstract/tools/discover.py`
 
 `discover_builtin_tools(tools_dir, package_prefix, *, registry)` 严格读取并解析候选 `.py`，只识别顶层固定名称 `TOOLSET` 声明，按路径顺序导入后以 `registry.register_toolset(toolset, merge=True)` 注册。辅助模块正常跳过；退役的 `register_tools` 函数、旧全局注册表导入、`abstract.tools.ui_event_router` 导入、导入期注册以及语法/读取/导入/注册错误直接失败。命名冲突未授权覆盖时 ToolRegistry 抛错，不把拒绝注册计为成功。
 
-`ToolDiscoverySystem` 是 framework AsyncSystem，依赖已就绪的工具所需业务系统（包括 MCPSystem），构造不发现工具。`virtual_awake` 扫描原五个 component 子目录与可选 custom_tools，显式注册 MCPRefresh，最后登记工具集元数据；缺失内置目录失败，只有不存在的 custom_tools 可跳过。实例保存唯一已注册模块名集合，同一次装配重复注册直接失败。Python 模块缓存照常保留，每次显式调用入口，不重载或修改 sys.modules；宿主根导入路径沿原启动方式加入，只有本次添加的路径才在失败/注销时释放。
+`ToolDiscoverySystem` 是 framework AsyncSystem，依赖已就绪的工具所需业务系统（包括 MCPSystem），构造不发现工具。`virtual_awake` 按 `tools` → `extools` → `multiagenttools` → `automation` → `browser` 顺序扫描 `buildin_tools/` 下五个子包，再处理可选 custom_tools，随后单独显式注册仍位于 `component.mcp_tools` 的 MCPRefresh，最后登记工具集元数据；缺失内置目录失败，只有不存在的 custom_tools 可跳过。实例保存唯一已注册模块名集合，同一次装配重复注册直接失败。Python 模块缓存照常保留，每次显式调用入口，不重载或修改 sys.modules；宿主根导入路径沿原启动方式加入，只有本次添加的路径才在失败/注销时释放。
 
 发现失败终止启动，不提供半套工具继续服务、不重试注册或创建第二个注册表；已提交条目仍由原 ToolRegistry 持有。最终注销只清除本次发现记录和导入路径，不卸载模块，不重连 MCP。
 
@@ -235,14 +235,14 @@ ToolRegistry 的 `_tools` 直接保存 `BaseTool` 对象，工具集元数据直
 
 ## 与其他模块的关系
 
-`abstract/` 定义接口与通用逻辑，`component/` 和 `custom_*/` 提供具体实现：
+`abstract/` 定义接口与通用逻辑，`buildin_tools/`、保留服务所在的 `component/` 和 `custom_*/` 提供具体实现；工具目录与部署边界见 [buildin_tools/DEV-README.md](../buildin_tools/DEV-README.md)：
 
 | abstract | 具体实现 |
 |---|---|
 | `BaseLLMClient` | `custom_llm_client/<name>.py` 暴露的工厂返回符合公共接口的客户端实例 |
 | `to_openai_message()` / `messages_to_anthropic_list()` | 被 `custom_llm_client/` 中的客户端调用 |
-| `ToolRegistry` | `component/extools/`、`component/multiagenttools/`、`custom_tools/` |
-| `SkillManager` | `component/extools/` 中的 `load_skill` / `list_skills` 工具 |
+| `ToolRegistry` | `buildin_tools/` 五个工具子包、`custom_tools/` 及单独注册的 `component/mcp_tools.py` |
+| `SkillManager` | `buildin_tools/tools/skills.py` 中的 `RecallSkill` / `CreateSkill` 工具 |
 | `MCPClient` | `component/mcp_tools.py` |
 | `PluginDiscover` | 启动时扫描 `plugins/` 目录 |
 

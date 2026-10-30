@@ -349,7 +349,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         main_agent.llm_profile = profile
         self._active_llm_profile = profile
 
-        from component.multiagenttools.profile_builder import _resolve_main_agent_prompts
+        from buildin_tools.multiagenttools.profile_builder import _resolve_main_agent_prompts
         common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
         main_agent.system_prompts = _resolve_main_agent_prompts(
             self._main_agent_name,

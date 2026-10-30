@@ -954,8 +954,8 @@ classDiagram
 | 访问方 | 被访问字段 | 被访问类 | 位置 | 说明 |
 |---|---|---|---|---|
 | `ToolContext.resource_session_id` | `parent_session_id`（若公开且非空） | `SubAgentLoop` / `TaskAgentLoop` | `entry/base_agent_loop.py` | 为长期资源选择父主会话 ID；其他 Loop 回退当前 session_id |
-| `RunTaskAgent` handler | `llm_profile` / `snapshot_profile()` | `ToolContext` / `LLMProfileStore` | `component/multiagenttools/run_taskagent.py` | 通过公开工具上下文取得活动 Profile，并在 Store共享锁内创建非持久化深快照；不访问主会话 protected字段 |
-| Shell 工具 handlers | `shell_manager` | `Application` | `component/tools/shell.py` | 按资源主会话 ID 与角色名创建或操作 Shell会话 |
+| `RunTaskAgent` handler | `llm_profile` / `snapshot_profile()` | `ToolContext` / `LLMProfileStore` | `buildin_tools/multiagenttools/run_taskagent.py` | 通过公开工具上下文取得活动 Profile，并在 Store共享锁内创建非持久化深快照；不访问主会话 protected字段 |
+| Shell 工具 handlers | `shell_manager` | `Application` | `buildin_tools/tools/shell.py` | 按资源主会话 ID 与角色名创建或操作 Shell会话 |
 | 会话终结/旋转 | `stop_session()` / `migrate_session()` | `ShellManager` | `entry/session_manager.py`、`entry/multi_agent_loop.py` | 手动终结停止；自动旋转迁移 Shell 所有权 |
 | Gateway Shell REST | `list_shells()` / `stop_shell_for_user()` | `ShellManager` | `gateway/server.py` | 用户查看同会话元数据并直接停止 Shell |
 | `ToolContext.sink` | `_get_sink()` | `BaseAgentLoop` | `entry/base_agent_loop.py` | 工具通过 `ctx.sink` 访问 loop 的 sink |
@@ -964,7 +964,7 @@ classDiagram
 | `ToolExecutor.execute` | `is_toolset_loaded()` | `BaseAgentLoop` | `entry/tool_executor.py` | 审批前检查工具集加载状态 |
 | `ToolRegistry.dispatch/async_dispatch` | `is_toolset_loaded()` | `BaseAgentLoop` (via `ToolContext.loop`) | `abstract/tools/registry.py` | 分发前统一拦截未加载工具 |
 | `build_system_prompt` | `get_loaded_toolsets()` | `BaseAgentLoop` | `system/prompt.py` | 构造工具集目录提示词块 |
-| `LoadToolset handler` | `load_toolsets()` | `BaseAgentLoop` (via `ToolContext.loop`) | `component/tools/load_toolset.py` | 加载工具集并持久化 |
+| `LoadToolset handler` | `load_toolsets()` | `BaseAgentLoop` (via `ToolContext.loop`) | `buildin_tools/tools/load_toolset.py` | 加载工具集并持久化 |
 | 各 Agent Loop 回复收尾 | `release_agent_access()` | `AgentspaceService` | `entry/parent_agent_loop.py`、`entry/multi_agent_loop.py`、`subagent/loop.py`、`subagent/taskloop.py` | 主Agent、参与Agent、子Agent与临时Agent在匹配 round `finally` 释放 |
 | `BaseAgentLoop._remove_last_user_message` | `_update_last_user_message()` | `History` | `entry/base_agent_loop.py` | 跨类调用 History 的 protected 方法 |
 | `MultiAgentLoop._aggregate_worker_usage` | `_total_token_usage` | `MultiAgentWorker` | `entry/multi_agent_loop.py` | 读取 worker 内部 token 统计 |
@@ -977,7 +977,7 @@ classDiagram
 | `ParentAgentSink.request_approval` | `_parent_session_id`, `_pending_approvals`, `_paused_event`, `_emit()` | `SubAgentLoop` | `entry/agent_sink.py` | 直接访问子 agent 内部字段/方法 |
 | `ParentAgentSink.emit_*` | `_emit()` / `_parent_session_id` | `SubAgentLoop` | `entry/agent_sink.py` | 转发事件时读取子 agent 内部 |
 | `ParentAgentSink.emit_stream_done` | `get_system(IFrontendSink)` | `Application` | `entry/agent_sink.py` | 通过 `Application.current().get_system(IFrontendSink)` 转发到父会话前端 |
-| `ShowTool._visible_tool_names` | `get_effective_visible_tool_names()` | `SubAgentLoop`（TaskAgentLoop 经虚分派覆写） | `component/tools/show_tool.py` | 子Agent可见性查询走公开方法，动态口径（loaded ∩ scope ∩ check_fn） |
+| `ShowTool._visible_tool_names` | `get_effective_visible_tool_names()` | `SubAgentLoop`（TaskAgentLoop 经虚分派覆写） | `buildin_tools/tools/show_tool.py` | 子Agent可见性查询走公开方法，动态口径（loaded ∩ scope ∩ check_fn） |
 | `LoopSessionManager.initialize` | `_session_store`, `_history`, `session_id` | `ParentAgentLoop` | `entry/session_manager.py` | 初始化时读写 loop 内部 |
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
 | `LoopSessionManager.rotate_session_for_continuation` | `_history`, `_session_store`, `_session_manager`, `handoff_token_usage`, `load_history`, `save_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时封存来源用量并切换 History，不再就地清零来源 token 记录 |
@@ -1005,7 +1005,7 @@ classDiagram
 | 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `component/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 Application持有的 Store恢复、更新和显式重置模式 |
 | Gateway主会话生命周期 | `initialize_session()` / `inherit_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py`、`entry/session_manager.py` | 新建普通/派生/随意聊聊主会话及分支/合并会话初始化手动模式；上下文超限自动延续继承来源主会话当前模式；永久删除成功后清理缓存 |
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`gateway/message_router.py`（首条用户消息经 `maybe_generate_first_title` 触发一次性 LLM 标题生成+截取回退，SessionManager/FrontendSink 由服务动态取得）、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
-| 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
+| 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `buildin_tools/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
 | Gateway Agentspace SSE | `RuntimeSystem.shutdown_event` | `RuntimeSystem` | `gateway/server.py::agentspace_events` | 独立 Agentspace 编辑器通过共享进程关闭信号主动结束 SSE，等待任务经 `GatewaySystem.task_owner` 登记，避免阻塞 uvicorn 优雅关闭 |
 | Gateway聊天 WebSocket Agentspace桥接 | `subscribe_events()` / `unsubscribe_events()` | `AgentspaceService` | `gateway/server.py::ws_chat`、`gateway/agentspace_event_bridge.py` | 每条聊天连接订阅一次 EventHub，发送初始 `resync/locks/watcher_error`，积压折叠为 `resync`（日志按时间窗限流携带累计 dropped），断线时取消 task并注销；自动旋转复用物理连接与订阅；单事件发送超时抛 `AgentspaceSendTimeout`，回调经 `TaskOwner.mark_expected_failure` 标记例常驱逐后 1011 断连 |
@@ -1018,7 +1018,7 @@ classDiagram
 
 ### 会话视觉资源服务
 
-`Application` 持有 `SessionVisualResourceService`；Gateway 的视觉入口、会话 status REST、`component/tools/filesystem.py` 的视觉源 `Read` 错误转换及扩展调用方通过其公开接口读取状态。该服务只解析源目录 `.meta` 一次，不持久化视觉状态，不访问目标目录 `.meta`；新增纯数据模型位于 `entity/puretype/session_visual.py`。
+`Application` 持有 `SessionVisualResourceService`；Gateway 的视觉入口、会话 status REST、`buildin_tools/tools/filesystem.py` 的视觉源 `Read` 错误转换及扩展调用方通过其公开接口读取状态。该服务只解析源目录 `.meta` 一次，不持久化视觉状态，不访问目标目录 `.meta`；新增纯数据模型位于 `entity/puretype/session_visual.py`。
 
 
 
@@ -1650,6 +1650,17 @@ Runtime 只以现有函数局部引用参与根注销后的清理，drain 失败
 LSP准备增加物理终局检查；Shell只允许已释放或可靠交给登记器的状态完成必要交接；Runner使用原wait_idle预算确认I/O消费者和交接退出。准备期间保留绑定只保证依赖查询，不表示已关闭的业务资源仍可使用。纯资源仍由原所有者/登记器承接，ToolRegistry线程池软观察pending不被宣称为Runtime drain已覆盖；既存退出错误和日志边界限制保留。
 
 未新增System、持久化字段或type token，不修改third、前端、业务History/反馈顺序和5秒硬截止。本轮仅源码、文档及只读差异审阅，未运行校验、测试、导入、构建或应用。
+
+### 内置工具包迁移（2026-10-30）
+
+原 `component/` 的 tools、extools、multiagenttools、automation、browser 五个子包整体迁入同级 `buildin_tools/`，共61个Python文件。本文当前有效的工具调用位置已更新；此前设计变更记录及明确保留的历史章节中的旧路径仍表示当时位置，当前对应关系以本节为准，不全局改写历史。
+
+`BrowserSystem` 的实现路径成为 `buildin_tools/browser/system.py`，Application 的具体实现导入同步更新，仍通过原 `IBrowserSystem` 槽位装配。其 Runtime 依赖、资源所有权、关闭准备与 Logger 根级联不变。`buildin_tools/multiagenttools/profile_builder.py` 继续提供共享 Profile 构造；`EnterMultiAgent`、`gateway/session_manager.py::_create_multi_loop()`、`entry/multi_agent_loop.py::set_profile()` 保留原调用和延迟导入位置，仅改模块前缀。`FileChangeRecorder`、两种压缩工具和自动化/浏览器共享辅助模块也随包迁移，不创建新的服务或对象所有权层。
+
+本次不新增、删除或改名类、业务方法或字段，不增加跨类 protected 访问；既有共享函数依赖仅更新位置。五个发现前缀保序切换，MCP 管理入口继续为 `component.mcp_tools`，审批、Cron 和动态端点服务保留在 component。运行时工具、BrowserSystem 与调用级材料不进入 easysave，正式持久化类仍在 entity，type token、存储key和数据语义保持不变。
+
+完整工具契约、无旧包兼容转发及用户停机部署/旧五包残留处理边界见 [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md)。此次仅实施源码和开发文档并只读审阅，未运行校验、测试、实际导入、构建或应用；不宣称字节级换行一致或运行验收通过。
+
 
 
 

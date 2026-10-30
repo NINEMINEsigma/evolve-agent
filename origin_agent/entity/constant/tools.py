@@ -1,12 +1,12 @@
 """Tool registration protocol and built-in discovery scope."""
 
-# 按原发现顺序扫描的 component 子包；顺序用于保持工具覆盖语义。
+# 按原发现顺序扫描的 buildin_tools 子包；顺序用于保持工具覆盖语义。
 BUILTIN_TOOL_PACKAGES: tuple[str, ...] = (
-    "component.tools",
-    "component.extools",
-    "component.multiagenttools",
-    "component.automation",
-    "component.browser",
+    "buildin_tools.tools",
+    "buildin_tools.extools",
+    "buildin_tools.multiagenttools",
+    "buildin_tools.automation",
+    "buildin_tools.browser",
 )
 
 # MCP 管理工具单独显式注册，远程工具由 MCPSystem 初始化。

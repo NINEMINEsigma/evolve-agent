@@ -429,7 +429,7 @@ class SessionManager(ISessionManager):
         from interface.tool_registry import IToolRegistry
         tool_registry = self._app.get_system(IToolRegistry)
         from system.session_store import SessionStore
-        from component.multiagenttools.profile_builder import (
+        from buildin_tools.multiagenttools.profile_builder import (
             build_multi_agent_tools,
             build_agent_profiles,
         )

@@ -1,6 +1,6 @@
 # subagent/ — 子代理与多代理系统
 
-`subagent/` 与 `component/multiagenttools/` 共同实现 Evolve Agent 的多代理运行时。它包含两套系统：主 Agent → 子 Agent 的编排模式，以及多 Agent 广播协作模式。
+`subagent/` 与 `buildin_tools/multiagenttools/` 共同实现 Evolve Agent 的多代理运行时。它包含两套系统：主 Agent → 子 Agent 的编排模式，以及多 Agent 广播协作模式。
 
 ---
 
@@ -13,7 +13,7 @@ subagent/
 ├── taskloop.py              ← TaskAgentLoop（一次性临时Agent循环）
 └── context.py               ← SubRuntimeContext（子代理/临时Agent运行时上下文构建）
 
-component/multiagenttools/   ← 多代理 / 子Agent工具
+buildin_tools/multiagenttools/   ← 多代理 / 子Agent工具
 ├── profile_builder.py       ← 动态角色档案到多Agent Profile的构造
 ├── list_subagents.py        ← ListSubAgents
 ├── run_subagent.py          ← RunSubAgent
@@ -147,7 +147,7 @@ graph TD
 
 ### `profile_builder`
 
-`component/multiagenttools/profile_builder.py` 提供多 Agent 模式的 Profile 构造逻辑：
+`buildin_tools/multiagenttools/profile_builder.py` 提供多 Agent 模式的 Profile 构造逻辑：
 
 - `build_multi_agent_tools(tool_registry)`：返回多 Agent 模式下可用的工具定义（MAIN 工具集排除 multiagent 工具集）。
 - `build_agent_profile()`：为多 Agent 模式中的单个 Agent 构造 `AgentProfile`（系统提示词、工具列表、LLM 客户端）。

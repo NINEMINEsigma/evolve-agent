@@ -143,7 +143,7 @@ LSPManager继承AsyncSystem并依赖RuntimeSystem、Sandbox；virtual_awake只�
 
 ## BrowserSystem接入
 
-component/browser/system.py 的 BrowserSystem 为依赖RuntimeSystem的AsyncSystem。CDP/Playwright/端点与所有应用自有无头进程仅由该System持有，唤醒不启动可选浏览器；_connection保留纯函数。请求使用TaskOwner，独立断连/原生进程回收任务保留至真实结束，取消异步等待不代表原生结束。只停止已登记无头进程，普通CDP连接仅断开，不停止用户浏览器。多进程句柄不互相覆盖，释放错误汇总传播。Application 关闭先停止在途工具调用，再逆拓扑注销并释放浏览器资源。
+buildin_tools/browser/system.py 的 BrowserSystem 为依赖RuntimeSystem的AsyncSystem。CDP/Playwright/端点与所有应用自有无头进程仅由该System持有，唤醒不启动可选浏览器；_connection保留纯函数。请求使用TaskOwner，独立断连/原生进程回收任务保留至真实结束，取消异步等待不代表原生结束。只停止已登记无头进程，普通CDP连接仅断开，不停止用户浏览器。多进程句柄不互相覆盖，释放错误汇总传播。Application 关闭先停止在途工具调用，再逆拓扑注销并释放浏览器资源。
 
 ## ModalityCapabilitySystem接入
 
@@ -173,9 +173,9 @@ Gateway SessionManager无参构造并继承AsyncSystem，dependencies按计划�
 
 ## ToolDiscoverySystem接入
 
-`abstract/tools/discover.py::ToolDiscoverySystem` 依赖已就绪的工具注册表、工具业务 System 及 MCPSystem，按 P1 顺序在 MCPSystem 之后、Gateway 之前唤醒。模块只导出对象声明，导入不创建运行实例。发现器按路径读取/解析/导入，AST 只识别顶层固定名称 `TOOLSET`，唯一已注册模块集合由该 System 持有；遇到退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入、导入期注册或任何读取/语法/导入/注册错误直接失败，缺失内置目录同样失败，可选 custom_tools 不存在才跳过。
+`abstract/tools/discover.py::ToolDiscoverySystem` 依赖已就绪的工具注册表、工具业务 System 及 MCPSystem，按 P1 顺序在 MCPSystem 之后、Gateway 之前唤醒。模块只导出对象声明，导入不创建运行实例。发现器按 `buildin_tools.tools` → `buildin_tools.extools` → `buildin_tools.multiagenttools` → `buildin_tools.automation` → `buildin_tools.browser` 原顺序扫描新五包，再处理可选 custom_tools；按路径读取/解析/导入，AST 只识别顶层固定名称 `TOOLSET`，唯一已注册模块集合由该 System 持有；遇到退役的 `register_tools`、旧全局注册表导入、`ui_event_router` 导入、导入期注册或任何读取/语法/导入/注册错误直接失败，缺失内置目录同样失败，可选 custom_tools 不存在才跳过。
 
-复用已缓存模块仍以 `register_toolset(toolset, merge=True)` 显式注册对象声明，不重新加载或改写 sys.modules。发现后注册 MCP 管理工具（`MCP_TOOL_MODULE`）和固定 `BaseToolSet` 元数据，远程连接归 MCPSystem；最终注销仅释放发现记录和本次加入的宿主导入路径，注册表条目归原 ToolRegistry。Application 完整注册已由 P22 接通；构造发现器不执行扫描或调用 Application.current()。
+复用已缓存模块仍以 `register_toolset(toolset, merge=True)` 显式注册对象声明，不重新加载或改写 sys.modules。发现后注册仍位于 `component.mcp_tools` 的 MCP 管理工具（`MCP_TOOL_MODULE`）和固定 `BaseToolSet` 元数据，远程连接归 MCPSystem；最终注销仅释放发现记录和本次加入的宿主导入路径，注册表条目归原 ToolRegistry。Application 完整注册已由 P22 接通；构造发现器不执行扫描或调用 Application.current()。
 
 ## 会话变量池
 

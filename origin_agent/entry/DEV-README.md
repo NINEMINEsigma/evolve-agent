@@ -271,7 +271,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 5. 延续 History 载入当前 Loop 后，`SessionManager.rotate_session()`把 Loop 改挂到延续会话。随后把现有 WebSocket 改挂过去，发送 `session_rotated` 并立刻带上 `history_sync`。页面这时才路由到延续会话并读取历史。轮次结束时的再次同步只沿用已经切换的会话 ID，不再发送第二次旋转通知。
 6. 迁移其余运行态资源（工具副作用、cron 任务）。手动延续和合并不走这条自动旋转路径。
 
-上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩；独立 `CompressToolChains` 则仅扫描全部历史中的完整工具链，不截断轮次、不插入会话摘要。两者共用 `component/tools/_history_compression.py` 的替换准备入口，纯检测与构造仍位于 `agent_support/tool_chain_compress.py`，链摘要使用 `toolchain_summary.txt` / `toolchain_summary_input.txt` 及工具链摘要 Profile。未完成链和纯压缩占位链不参与；含新增真实调用的混合链仍可压缩。
+上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。`CompressHistory` 工具在轮次级截断之外，还会对保留轮次内的完整工具链执行链压缩；独立 `CompressToolChains` 则仅扫描全部历史中的完整工具链，不截断轮次、不插入会话摘要。两者共用 `buildin_tools/tools/_history_compression.py` 的替换准备入口，纯检测与构造仍位于 `agent_support/tool_chain_compress.py`，链摘要使用 `toolchain_summary.txt` / `toolchain_summary_input.txt` 及工具链摘要 Profile。未完成链和纯压缩占位链不参与；含新增真实调用的混合链仍可压缩。
 
 `ParentAgentLoop._run_tool_loop()` 在本批工具结果提交后通过 `_get_full_history()` 重建下一请求上下文，压缩不需要修改循环内的旧请求列表。所有链摘要生成成功后才逆序替换、严格保存 History，再调用公开 `reset_context_tokens()`；保存失败传播，不保证共享内存自动回滚。此次保留原 `MAIN` 可用范围，不改多Agent或子会话请求路径。
 
@@ -316,7 +316,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 - `detect_compressible_chains(messages, min_chars) -> list[ToolChainSpan]`：检测可压缩工具链（链内 tool_call 全部已配对结果、含真实调用、原始体积达 `TOOL_CHAIN_COMPRESS_MIN_CHARS`）；进行中的本轮链因缺少结果天然排除，纯压缩占位链跳过。
 - `chain_to_summary_input(chain_messages) -> str`：链文本化（复用 `messages_to_text`，不设全局截断）。
 - `build_compressed_chain_messages(chain_messages, summary) -> list[BaseMessage]`：把整链重打包为「伪造的 `CompressedToolChain` 调用（不可调用，参数携带调用数与工具名清单）+ 携带链摘要的配对 ToolResultMessage」。
-- 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` / `CompressToolChains` 通过 `component/tools/_history_compression.py::prepare_tool_chain_replacements()` 共用 `SessionMetadataService.generate_tool_chain_summary()` 预生成，返回 `entity.puretype_after` 显式导出的 `ToolChainReplacement`，全部成功后调用方才通过 `History.replace_range()` 应用替换。`ToolChainSpan` 仅含索引，继续定义于消息前纯类型 `entity/puretype/session.py`；`ToolChainReplacement` 持有正式消息实例，定义于消息后纯类型 `entity/puretype_after/session.py` 并直接导入 `BaseMessage`，不再由业务模块补装配。两者因类型依赖不同分属两个时期，检测与重打包职责保持不变。
+- 纯函数层，不访问运行时服务；链摘要由 `CompressHistory` / `CompressToolChains` 通过 `buildin_tools/tools/_history_compression.py::prepare_tool_chain_replacements()` 共用 `SessionMetadataService.generate_tool_chain_summary()` 预生成，返回 `entity.puretype_after` 显式导出的 `ToolChainReplacement`，全部成功后调用方才通过 `History.replace_range()` 应用替换。`ToolChainSpan` 仅含索引，继续定义于消息前纯类型 `entity/puretype/session.py`；`ToolChainReplacement` 持有正式消息实例，定义于消息后纯类型 `entity/puretype_after/session.py` 并直接导入 `BaseMessage`，不再由业务模块补装配。两者因类型依赖不同分属两个时期，检测与重打包职责保持不变。
 
 ### `history_media.py` 媒体能力投影
 

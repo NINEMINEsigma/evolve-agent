@@ -20,7 +20,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 # ── 复用 filesystem 的 MIME 常量与探测函数 ──
-from component.tools.filesystem import (
+from buildin_tools.tools.filesystem import (
     _guess_mime,
     _SUPPORTED_MIMES,
     _SUPPORTED_AUDIO_MIMES,
