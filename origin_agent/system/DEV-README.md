@@ -309,6 +309,12 @@ Agentspace恢复task由实例持有，部分初始化失败也等待恢复线程
 
 子进程/PTY/浏览器连接的已登记纯释放继续由Runtime清理登记器最终drain。工具线程池原软观察pending仍按既有task/线程退出阶段持有，不在本轮扩大改造或宣称由drain覆盖；日志退出边界既存限制保留。21槽位、依赖、持久化、History顺序、ExitStack与5秒硬截止不变。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。
 
+## Gateway API端点组件装配（2026-10-31）
+
+GatewaySystem._start改为build_router_app(self)。已有admission、TaskOwner与SessionExportService先就绪，再由工厂把91个APIComponent通过add_component绑定到这个同一实例，显式登记92条路由；不经Application查询尚未awake的Gateway槽位，不创建备用服务/Runtime/Owner。server仅工厂，具体端点和共享辅助位于gateway/apis、api_support、http_boundary、notifications及frontend_assets。
+
+组件只持有framework父关系，单请求/连接状态保持局部；FastAPI、uvicorn、socket、真实serve/ready及导出线程池仍唯一归Gateway。原启动失败清理、端口占用普通拒绝、History先落盘后关闭输出、绑定期间关闭准备与Logger根级联保持。HTTP准入限制新工作，不逐次限制旧输出；未知异常继续原边界传播。无System槽位/依赖/持久化/key变更，未运行校验、导入、构建或应用。
+
 
 
 

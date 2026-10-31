@@ -11,12 +11,15 @@ import type {
   InterruptResponse,
   MessageContent,
   NonStreamWSMessage,
+  OperationNotice,
   ShellInfo,
   SubagentSession,
   TaskProgress,
   WSMessage,
 } from "../types";
-import type { SessionToolResourcesDto } from "../types/sessionResources";
+import type { SessionToolResourcesDto, SessionResourceScope } from "../types/sessionResources";
+import { HttpResponseError } from "../services/httpErrors";
+import errorLabels from "../services/httpErrorLabels.json";
 import { collectClientInfo } from "../constants/clientInfo";
 import { COLLOQUY_SID } from "../constants/session";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -58,6 +61,20 @@ function objectValue(payload: unknown): Record<string, unknown> {
     throw new Error("Expected a JSON object");
   }
   return payload as Record<string, unknown>;
+}
+
+function requestOperation(path: string, init: RequestInit): Promise<Record<string, unknown>> {
+  return fetchJsonWithTimeout(path, init, { timeoutMs: CRITICAL_TIMEOUT_MS, phase: "chat-operation" }, objectValue);
+}
+function decodeInterrupt(value: unknown, sid: string): InterruptResponse {
+  const data = objectValue(value);
+  if (data.session_id !== sid || typeof data.interrupted !== "boolean"
+    || !["idle", "cancelled", "timeout", "failed"].includes(String(data.status))
+    || (data.reason !== undefined && data.reason !== null && typeof data.reason !== "string")
+    || (data.error !== undefined && data.error !== null && typeof data.error !== "string")) {
+    throw new Error(errorLabels.invalidResponse);
+  }
+  return data as unknown as InterruptResponse;
 }
 
 /** Shell 列表：列表必须存在且为数组；逐项核对归属、running 与身份字段类型。 */
@@ -164,6 +181,13 @@ export function useWebSocket() {
   // 只用于阻止切会话期间提交旧身份；不承载新的会话真相源。
   const sessionTransitionRef = useRef(true);
 
+  const isResourceScopeCurrent = useCallback((scope: SessionResourceScope): boolean =>
+    sessionRef.current?.isResourceScopeCurrent(scope) ?? false, []);
+  const showOperationNoticeForScope = useCallback((scope: SessionResourceScope, notice: OperationNotice): void => {
+    const owner = sessionRef.current;
+    if (owner?.isResourceScopeCurrent(scope)) owner.showOperationNotice(notice);
+  }, []);
+
   const fetchToolResourcesRef = useRef(async (sid: string) => {
     if (!sid) return;
     const owner = sessionRef.current;
@@ -191,7 +215,7 @@ export function useWebSocket() {
         owner.setTaskProgress(toolRes.value.task_progress);
         owner.dynamicEndpointResource.completeRequest(endpointToken, toolRes.value.dynamic_endpoints);
       } else {
-        owner.dynamicEndpointResource.failRequest(endpointToken, "tool-resources 请求失败");
+        owner.dynamicEndpointResource.failRequest(endpointToken, toolRes.reason instanceof Error ? toolRes.reason.message : errorLabels.requestFailed);
       }
     }
     if (subagentRes.status === "fulfilled") {
@@ -754,15 +778,8 @@ export function useWebSocket() {
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
     const activeSessionAtStart = sessionRef.current?.sessionId;
     try {
-      const response = await fetch(`/api/sessions/${sid}`, { method: "DELETE" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.deleted) {
-        const reason = typeof data.error === "string"
-          ? data.error
-          : `HTTP ${response.status}`;
-        appendLocalMessage("error", `删除会话失败：${reason}`);
-        return;
-      }
+      const data = await requestOperation(`/api/sessions/${sid}`, { method: "DELETE" });
+      if (data.deleted !== true) throw new Error(errorLabels.invalidResponse);
       llmProfilesRef.current.forgetSessionSelection(sid);
       sessionRef.current?.setSessions((previous) => previous.filter((item) => item.id !== sid));
       if (activeSessionAtStart === sid && sessionRef.current?.sessionId === sid) {
@@ -789,45 +806,57 @@ export function useWebSocket() {
   const interrupt = useCallback(async () => {
     const currentSession = sessionRef.current;
     if (!currentSession?.sessionId || currentSession.interruptStatus === "interrupting") return;
+    const scope = { ...currentSession.resourceScope };
     currentSession.setInterruptStatus("interrupting");
     currentSession.clearPendingInteractions();
+    const apply = (data: InterruptResponse) => {
+      if (!currentSession.isResourceScopeCurrent(scope)) return;
+      currentSession.setInterruptStatus(data.status === "cancelled" ? "cancelled" : data.status === "idle" ? "idle" : "failed");
+      if (data.status === "cancelled" || data.status === "idle") useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
+    };
     try {
-      const response = await fetch(`/api/interrupt/${currentSession.sessionId}`, { method: "POST" });
-      const data: InterruptResponse = await response.json().catch(() => ({}));
-      if (data.status === "cancelled") currentSession.setInterruptStatus("cancelled");
-      else if (data.status === "idle") currentSession.setInterruptStatus("idle");
-      else currentSession.setInterruptStatus("failed");
-      if (data.status === "cancelled" || data.status === "idle") {
-        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-      }
-    } catch {
-      currentSession.setInterruptStatus("failed");
+      apply(decodeInterrupt(await requestOperation(`/api/interrupt/${scope.sessionId}`, { method: "POST" }), scope.sessionId));
+    } catch (error) {
+      if (!currentSession.isResourceScopeCurrent(scope)) return;
+      if (error instanceof HttpResponseError && ((error.status === 409 && error.code === "interrupt_timeout")
+        || (error.status === 500 && error.code === "interrupt_failed"))) {
+        try {
+          const result = decodeInterrupt(error.businessDetail?.result, scope.sessionId);
+          if (result.status !== (error.code === "interrupt_timeout" ? "timeout" : "failed")) throw new Error(errorLabels.invalidResponse);
+          apply(result);
+        } catch {
+          currentSession.setInterruptStatus("failed");
+        }
+      } else currentSession.setInterruptStatus("failed");
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-  }, []);
+  }, [showOperationNoticeForScope]);
 
   const disgust = useCallback(() => {
-    const sid = sessionRef.current?.sessionId || "unknown";
-    appendLocalMessage("system", "用户表达了强烈不满");
-    fetch(`/api/disgust/${sid}`, { method: "POST" }).catch(() => {});
-  }, [appendLocalMessage]);
+    const owner = sessionRef.current;
+    if (!owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
+    void requestOperation(`/api/disgust/${scope.sessionId}`, { method: "POST" }).then((data) => {
+      if (data.disgusted !== true) throw new Error(errorLabels.invalidResponse);
+      if (owner.isResourceScopeCurrent(scope)) appendLocalMessage("system", "\u7528\u6237\u8868\u8fbe\u4e86\u5f3a\u70c8\u4e0d\u6ee1");
+    }).catch((error: unknown) => showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
+  }, [appendLocalMessage, showOperationNoticeForScope]);
 
   const resume = useCallback(async () => {
-    const sid = sessionRef.current?.sessionId;
-    if (!sid) return;
+    const owner = sessionRef.current;
+    if (!owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
     useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(`resume-${Date.now()}`, "resume");
     useChatRuntimeStore.getState().setProcessing(true);
     try {
-      const response = await fetch(`/api/sessions/${sid}/resume`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.resumed) {
-        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-        appendLocalMessage("error", `恢复失败：${data.error || "unknown error"}`);
-      }
+      const data = await requestOperation(`/api/sessions/${scope.sessionId}/resume`, { method: "POST" });
+      if (data.resumed !== true) throw new Error(errorLabels.invalidResponse);
     } catch (error) {
+      if (!owner.isResourceScopeCurrent(scope)) return;
       useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-      appendLocalMessage("error", `恢复失败：${error instanceof Error ? error.message : "网络错误"}`);
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-  }, [appendLocalMessage]);
+  }, [showOperationNoticeForScope]);
   const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string) => {
     sessionRef.current?.respondConfirm(request, action, reason, deniedBy);
   }, []);
@@ -837,50 +866,56 @@ export function useWebSocket() {
 
   const editMessage = useCallback(async (id: string, content: MessageContent) => {
     const message = useChatRuntimeStore.getState().contentByRowId[id];
-    if (typeof message?.messageIndex !== "number") return;
-    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/${message.messageIndex}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
-    if (response.status === 409) {
-      appendLocalMessage("error", "Agent 正在处理，暂时不能修改历史消息。");
-      return;
+    const owner = sessionRef.current;
+    if (typeof message?.messageIndex !== "number" || !owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
+    try {
+      const data = await requestOperation(`/api/sessions/${scope.sessionId}/messages/${message.messageIndex}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+      });
+      if (data.updated !== true || data.session_id !== scope.sessionId || data.index !== message.messageIndex
+        || (typeof data.content !== "string" && !Array.isArray(data.content))) throw new Error(errorLabels.invalidResponse);
+      if (!owner.isResourceScopeCurrent(scope)) return;
+      const savedContent = data.content as MessageContent;
+      useChatRuntimeStore.setState((state) => ({ contentByRowId: {
+        ...state.contentByRowId, [id]: { ...message, content: savedContent, edited: true },
+      } }));
+    } catch (error) {
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.updated) {
-      appendLocalMessage("error", `消息编辑失败：${data.error || "unknown error"}`);
-      return;
-    }
-    useChatRuntimeStore.setState((state) => ({
-      contentByRowId: {
-        ...state.contentByRowId,
-        [id]: { ...message, content: data.content ?? content, edited: true },
-      },
-    }));
-  }, [appendLocalMessage]);
+  }, [showOperationNoticeForScope]);
 
   const deleteMessages = useCallback(async (count = 1) => {
-    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages?count=${count}`, { method: "DELETE" });
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 409) {
-      appendLocalMessage("error", "Agent 正在处理，暂时不能删除历史消息。");
-    } else if (response.ok && data.deleted) {
-      await chatRuntimeController.invalidateAfterMutation(data.history_count);
+    const owner = sessionRef.current;
+    if (!owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
+    try {
+      const data = await requestOperation(`/api/sessions/${scope.sessionId}/messages?count=${count}`, { method: "DELETE" });
+      if (data.deleted !== true || data.session_id !== scope.sessionId || !Number.isSafeInteger(data.history_count)
+        || (data.history_count as number) < 0) throw new Error(errorLabels.invalidResponse);
+      if (owner.isResourceScopeCurrent(scope)) await chatRuntimeController.invalidateAfterMutation(data.history_count as number);
+    } catch (error) {
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-  }, [appendLocalMessage]);
+  }, [showOperationNoticeForScope]);
 
   const deleteSingleMessage = useCallback(async (index: number) => {
-    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/single?index=${index}`, { method: "DELETE" });
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 409) {
-      appendLocalMessage("error", "Agent 正在处理，暂时不能删除历史消息。");
-    } else if (response.ok && data.deleted) {
-      await chatRuntimeController.invalidateAfterMutation(data.history_count);
-      if (typeof data.token_usage === "number") sessionRef.current?.setTokenUsage(data.token_usage);
-      if (typeof data.context_tokens === "number") sessionRef.current?.setContextTokens(data.context_tokens);
+    const owner = sessionRef.current;
+    if (!owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
+    try {
+      const data = await requestOperation(`/api/sessions/${scope.sessionId}/messages/single?index=${index}`, { method: "DELETE" });
+      if (data.deleted !== true || data.session_id !== scope.sessionId || !Number.isSafeInteger(data.history_count)
+        || (data.history_count as number) < 0) throw new Error(errorLabels.invalidResponse);
+      if (!owner.isResourceScopeCurrent(scope)) return;
+      await chatRuntimeController.invalidateAfterMutation(data.history_count as number);
+      if (!owner.isResourceScopeCurrent(scope)) return;
+      if (typeof data.token_usage === "number") owner.setTokenUsage(data.token_usage);
+      if (typeof data.context_tokens === "number") owner.setContextTokens(data.context_tokens);
+    } catch (error) {
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-  }, [appendLocalMessage]);
+  }, [showOperationNoticeForScope]);
 
   const regenerateResponse = useCallback(async (messageIndex: number) => {
     const sid = sessionRef.current?.sessionId;
@@ -934,7 +969,7 @@ export function useWebSocket() {
       }
     };
     try {
-      const responsePromise = fetch(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
+      const responsePromise = requestOperation(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -944,13 +979,9 @@ export function useWebSocket() {
         }),
       });
       if (requireToolCall) runtime.clearRequireToolCall(sid);
-      const response = await responsePromise;
-      const data = await response.json().catch(() => ({}));
+      const data = await responsePromise;
       if (!ownsRequest()) return;
-      if (!response.ok || !data.regenerate) {
-        cancelUnconfirmedPlaceholder();
-        appendLocalMessage("error", `\u91cd\u65b0\u751f\u6210\u5931\u8d25\uff1a${data.error || "unknown error"}`);
-      }
+      if (data.regenerate !== true) throw new Error(errorLabels.invalidResponse);
     } catch (cause) {
       if (!ownsRequest()) return;
       cancelUnconfirmedPlaceholder();
@@ -966,26 +997,26 @@ export function useWebSocket() {
 
   const updateMessageVisibility = useCallback(async (messageId: string, visibleCharacters: string[]) => {
     const message = useChatRuntimeStore.getState().contentByRowId[messageId];
-    if (typeof message?.messageIndex !== "number") return;
-    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/${message.messageIndex}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ visible_characters: visibleCharacters }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 409) {
-      appendLocalMessage("error", "Agent 正在处理，暂时不能修改消息可见性。");
-      return;
+    const owner = sessionRef.current;
+    if (typeof message?.messageIndex !== "number" || !owner?.sessionId) return;
+    const scope = { ...owner.resourceScope };
+    try {
+      const data = await requestOperation(`/api/sessions/${scope.sessionId}/messages/${message.messageIndex}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ visible_characters: visibleCharacters }),
+      });
+      if (data.updated !== true || data.session_id !== scope.sessionId || data.index !== message.messageIndex
+        || !Array.isArray(data.visible_characters) || !data.visible_characters.every((item) => typeof item === "string")) {
+        throw new Error(errorLabels.invalidResponse);
+      }
+      if (!owner.isResourceScopeCurrent(scope)) return;
+      const savedVisibility = data.visible_characters as string[];
+      useChatRuntimeStore.setState((state) => ({ contentByRowId: {
+        ...state.contentByRowId, [messageId]: { ...message, visibleCharacters: savedVisibility },
+      } }));
+    } catch (error) {
+      showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed });
     }
-    if (response.ok && data.updated) {
-      useChatRuntimeStore.setState((state) => ({
-        contentByRowId: {
-          ...state.contentByRowId,
-          [messageId]: { ...message, visibleCharacters: data.visible_characters ?? visibleCharacters },
-        },
-      }));
-    }
-  }, [appendLocalMessage]);
+  }, [showOperationNoticeForScope]);
 
   useEffect(() => {
     if (!session.sessionId) return;
@@ -1003,8 +1034,8 @@ export function useWebSocket() {
           (payload) => decodeSessionShells(payload, sid),
         ).then((shells) => {
           if (owner.isResourceScopeCurrent(scope)) owner.shellResource.completeRequest(shellToken, shells);
-        }).catch(() => {
-          if (owner.isResourceScopeCurrent(scope)) owner.shellResource.failRequest(shellToken, "shells 请求失败");
+        }).catch((error: unknown) => {
+          if (owner.isResourceScopeCurrent(scope)) owner.shellResource.failRequest(shellToken, error instanceof Error ? error.message : errorLabels.requestFailed);
         });
       }
       if (cronToken) {
@@ -1014,8 +1045,8 @@ export function useWebSocket() {
           (payload) => decodeSessionCronTasks(payload),
         ).then((tasks) => {
           if (owner.isResourceScopeCurrent(scope)) owner.cronResource.completeRequest(cronToken, tasks);
-        }).catch(() => {
-          if (owner.isResourceScopeCurrent(scope)) owner.cronResource.failRequest(cronToken, "cron-tasks 请求失败");
+        }).catch((error: unknown) => {
+          if (owner.isResourceScopeCurrent(scope)) owner.cronResource.failRequest(cronToken, error instanceof Error ? error.message : errorLabels.requestFailed);
         });
       }
       fetchToolResourcesRef.current(sid);
@@ -1034,6 +1065,8 @@ export function useWebSocket() {
   }, [session.sessionId]);
 
   return {
+    isResourceScopeCurrent,
+    showOperationNoticeForScope,
     status: conn.status,
     waiting: processing,
     pendingConfirms: session.pendingConfirms,

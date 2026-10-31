@@ -160,7 +160,7 @@ class GatewaySystem(IGatewaySystem):
             raise GatewayPortBusyError(
                 f"Gateway port {ctx.gateway_port} on {ctx.gateway_host} is already in use"
             )
-        self._app = build_router_app()
+        self._app = build_router_app(self)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

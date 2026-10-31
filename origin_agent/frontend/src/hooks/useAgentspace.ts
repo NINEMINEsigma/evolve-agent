@@ -23,6 +23,20 @@ import {
   sortEntries,
 } from "../utils/agentspacePath";
 
+function isFileLocks(value: unknown): value is FileLock[] {
+  return Array.isArray(value) && value.every((lock: unknown) => {
+    if (!lock || typeof lock !== "object") return false;
+    const item = lock as Record<string, unknown>;
+    return typeof item.path === "string" && typeof item.recursive === "boolean"
+      && Array.isArray(item.owners) && item.owners.every((owner: unknown) => {
+        if (!owner || typeof owner !== "object") return false;
+        const entry = owner as Record<string, unknown>;
+        return typeof entry.owner_id === "string" && typeof entry.session_id === "string"
+          && typeof entry.character_name === "string" && typeof entry.round_id === "string";
+      });
+  });
+}
+
 function getLanguageFromPath(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const map: Record<string, string> = {
@@ -528,7 +542,9 @@ export function useAgentspace(): UseAgentspaceResult {
       dispatch({ type: "APPLY_SNAPSHOT", id, snapshot });
       return true;
     } catch (error) {
-      if (error instanceof AgentspaceApiError && error.status === 409) {
+      if (error instanceof AgentspaceApiError && error.status === 409 && error.httpError.kind === "business"
+        && error.detail.path === tab.path
+        && (error.detail.current_version === null || typeof error.detail.current_version === "string")) {
         try {
           const disk = await api.readFile(tab.path);
           const localVersion = await api.getTextVersion(tab.content);
@@ -564,7 +580,8 @@ export function useAgentspace(): UseAgentspaceResult {
         }
         return false;
       }
-      if (error instanceof AgentspaceApiError && error.status === 423 && error.detail.locks) {
+      if (error instanceof AgentspaceApiError && error.status === 423 && error.httpError.kind === "business"
+        && isFileLocks(error.detail.locks)) {
         dispatch({ type: "SET_LOCKS", locks: error.detail.locks });
       }
       setError(

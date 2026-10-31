@@ -428,3 +428,9 @@ FrontendSink删除`_runtime`，发送/交互及初始化通过继承`runtime`访
 
 ParentAgentSink、各Loop、工具执行器和消息队列不是本次System迁移对象，原显式Runtime引用/注入保持。History、事件协议、审批及21个System槽位不变；未运行校验、导入、测试、构建或应用，需用户部署后验收。
 
+## Gateway组件化的合并前置条件（2026-10-31）
+
+BaseAgentLoop.merge_sessions保持原成功/已识别摘要或变量继承拒绝的SessionMergeResult，以及初始化清理、History提交和归档顺序。仅将缺失session_manager、缺失_session_store两项内部依赖破坏直接抛RuntimeError，不能让HTTP把它们伪装成普通业务拒绝。entry不依赖HTTPErrorDetail、APIComponent或Gateway HTTP异常，不改持久化模型/key。
+
+HTTP端点已迁至gateway/apis，聊天连接由ChatWebSocketAPI交给原MessageRouter；Loop不新增当前请求/端点状态，输入投递、工具/History提交、活动登记与关闭反馈所有权保持。源码修改尚未运行导入、校验、构建或应用，用户需完整部署后按网关任务人工验收。
+

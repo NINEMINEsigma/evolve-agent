@@ -7,26 +7,23 @@ import type {
   TrashEntry,
 } from "../types";
 import { sha256Hex } from "../utils/sha256";
+import { decodeHttpErrorBody, HttpResponseError } from "./httpErrors";
 
-interface ErrorDetail {
-  code?: string;
-  message?: string;
-  path?: string;
-  current_version?: string | null;
-  locks?: FileLock[];
-}
+type ErrorDetail = Readonly<Record<string, unknown>>;
 
 export class AgentspaceApiError extends Error {
-  status: number;
-  code: string;
-  detail: ErrorDetail;
+  readonly status: number;
+  readonly code: string;
+  readonly detail: ErrorDetail;
+  readonly httpError: HttpResponseError;
 
-  constructor(status: number, detail: ErrorDetail) {
-    super(detail.message || `Agentspace 请求失败（HTTP ${status}）`);
+  constructor(httpError: HttpResponseError) {
+    super(httpError.message);
     this.name = "AgentspaceApiError";
-    this.status = status;
-    this.code = detail.code || "http_error";
-    this.detail = detail;
+    this.status = httpError.status;
+    this.code = httpError.code ?? "http_error";
+    this.detail = httpError.businessDetail ?? {};
+    this.httpError = httpError;
   }
 }
 
@@ -42,22 +39,10 @@ export function createOperationId(): string {
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  let payload: unknown = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    const rawDetail = (payload as { detail?: unknown } | null)?.detail;
-    const detail: ErrorDetail =
-      typeof rawDetail === "string"
-        ? { message: rawDetail }
-        : rawDetail && typeof rawDetail === "object"
-          ? (rawDetail as ErrorDetail)
-          : { message: `Agentspace 请求失败（HTTP ${response.status}）` };
-    throw new AgentspaceApiError(response.status, detail);
-  }
+  const body = await response.text();
+  if (!response.ok) throw new AgentspaceApiError(decodeHttpErrorBody(response.status, body));
+  const payload: unknown = JSON.parse(body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid Agentspace response");
   return payload as T;
 }
 

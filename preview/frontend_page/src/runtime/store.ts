@@ -11,7 +11,7 @@ import { createSeedSessions } from "../data/sessions";
 import { createCatalog } from "../data/catalog";
 import { createSeedFiles } from "../data/files";
 import { DEMO_ASSETS, PREVIEW, PREVIEW_MEDIA_URLS } from "../constants";
-import { PreviewHttpError } from "../transport/contracts";
+import { PreviewHttpError, PreviewValidationError } from "../transport/contracts";
 import labels from "../content/zh-CN.json";
 
 interface StoredTrash { entry: TrashEntry; files: PreviewFile[] }
@@ -51,24 +51,25 @@ export class PreviewStore {
   nextId(prefix: string): string { return `${prefix}-${++this.sequence}`; }
   session(id: string): PreviewSession {
     const session = this.sessions.get(id);
-    if (!session) throw new PreviewHttpError(404, "Preview session does not exist");
+    if (!session) throw new PreviewHttpError(404, "session_not_found", "Preview session does not exist", { session_id: id });
     return session;
   }
   writable(id: string): PreviewSession {
     const session = this.session(id);
-    if (session.info.status === "archived") throw new PreviewHttpError(403, "Archived preview session is read-only");
+    if (session.info.status === "archived") throw new PreviewHttpError(403, "session_archived", "Archived preview session is read-only", { session_id: id });
     return session;
   }
   idle(id: string): PreviewSession {
     const session = this.writable(id);
-    if (session.activity) throw new PreviewHttpError(409, "Preview response is still processing");
+    if (session.activity) throw new PreviewHttpError(409, "session_busy", "Preview response is still processing", { session_id: id });
     return session;
   }
   listSessions(): SessionInfo[] {
     return [...this.sessions.values()].filter((session) => session.info.id !== COLLOQUY_SID).map((session) => structuredClone(session.info));
   }
   createSession(sources: string[] = []): PreviewSession {
-    for (const id of sources) if (this.session(id).info.status !== "archived") throw new PreviewHttpError(409, "Only archived sources can be continued");
+    if (!Array.isArray(sources) || sources.some((id) => typeof id !== "string")) throw new PreviewValidationError([{ loc: ["body", "sources"], msg: "Expected source session identifiers", type: "list_type" }]);
+    for (const id of sources) if (this.session(id).info.status !== "archived") throw new PreviewHttpError(409, "merge_source_not_archived", "Only archived sources can be continued", { source_id: id });
     const empty = structuredClone(this.emptyTemplate);
     const id = this.nextId("preview-session");
     empty.info = { id, title: sources.length ? labels.script.title : "", status: "active", created_at: PREVIEW.epochMs / 1000, parents: sources };
@@ -174,7 +175,8 @@ export class PreviewStore {
   deleteAt(id: string, index: number): void {
     const session = this.idle(id);
     const row = session.rows.find((item) => item.history_index === index || item.tool_card?.result_history_index === index);
-    if (!row) throw new PreviewHttpError(404, "Message does not exist");
+    if (!Number.isSafeInteger(index) || index < 0) throw new PreviewValidationError([{ loc: ["query", "index"], msg: "Invalid message index", type: "greater_than_equal" }]);
+    if (!row) throw new PreviewHttpError(400, "message_delete_rejected", "Message does not exist", { session_id: id, message_index: index });
     const removed = [row.history_index];
     if (row.tool_card?.result_history_index != null) removed.push(row.tool_card.result_history_index);
     session.rows = session.rows.filter((item) => item !== row);
@@ -193,13 +195,16 @@ export class PreviewStore {
     return { profile_name: name, model: profile?.model ?? null, available: !!profile };
   }
   filePath(input: string): string {
+    if (typeof input !== "string") throw new PreviewValidationError([{ loc: ["body", "path"], msg: "Expected a path string", type: "string_type" }]);
     const normalized = input.replace(/^ws:/, "");
-    if (normalized.includes("\\") || normalized.includes(":") || normalized.startsWith("/") || normalized.split("/").includes("..")) throw new PreviewHttpError(422, "Invalid virtual path");
+    if (normalized.includes("\\") || normalized.includes(":") || normalized.startsWith("/") || normalized.split("/").includes("..")) throw new PreviewHttpError(400, "invalid_path", "Invalid virtual path", { path: input });
     return normalized.replace(/\/$/, "");
   }
   async snapshot(path: string): Promise<FileSnapshot> {
-    const item = this.files.get(this.filePath(path));
-    if (!item || item.kind !== "file") throw new PreviewHttpError(404, "Virtual file does not exist");
+    const normalized = this.filePath(path);
+    const item = this.files.get(normalized);
+    if (!item) throw new PreviewHttpError(404, "not_found", "Virtual file does not exist", { path: normalized });
+    if (item.kind !== "file") throw new PreviewHttpError(415, "not_text", "Target is not a text file", { path: normalized });
     return { path: item.path, content: item.content, version: await getTextVersion(item.content),
       size: new TextEncoder().encode(item.content).length, modified_ns: PREVIEW.epochMs * 1000000 };
   }

@@ -49,6 +49,7 @@ Retained public pre-message types are explicitly re-exported here, preserving
 not re-exported here; import them from entity.puretype_after.
 """
 
+from .http import HTTPErrorDetail
 from .agent_settings import (
     AgentLoopSettingsData,
     AgentLoopSettingsUpdateRequest,
@@ -293,6 +294,7 @@ from .agentspace import (
 )
 
 __all__ = [
+    "HTTPErrorDetail",
     "AgentLoopSettingsData",
     "AgentLoopSettingsUpdateRequest",
     "AgentLoopSettingsState",

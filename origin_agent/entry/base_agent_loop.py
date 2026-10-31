@@ -1584,11 +1584,11 @@ class BaseAgentLoop(ABC):
         """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""
         sm = self.session_manager
         if sm is None:
-            return SessionMergeResult(merged=False, error="session manager not available")
+            raise RuntimeError("Session manager is not available for merging")
         if not sources:
             return SessionMergeResult(merged=False, error="sources list is empty")
         if self._session_store is None:
-            return SessionMergeResult(merged=False, error="session store not available")
+            raise RuntimeError("Session store is not available for merging")
 
         from entry.agent_support.history_summary import (
             messages_to_text,

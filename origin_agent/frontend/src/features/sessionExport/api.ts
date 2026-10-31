@@ -6,9 +6,10 @@ import type {
 import { EXPORT_LIMITS } from "./limits";
 import { exportLabels } from "./labels";
 import { sha256Hex } from "../../utils/sha256";
+import { decodeHttpError, decodeHttpErrorBody, type HttpResponseError } from "../../services/httpErrors";
 
 export class SessionExportRequestError extends Error {
-  constructor(readonly code: string, message: string, readonly status: number) { super(message); }
+  constructor(readonly code: string, message: string, readonly status: number, readonly httpError?: HttpResponseError) { super(message); }
 }
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid export object");
@@ -153,60 +154,95 @@ export async function fetchExportResponse(
   } finally { window.clearTimeout(timer); signal.removeEventListener("abort", abort); controller.abort(); }
 }
 function parse(bytes: Uint8Array): unknown { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
-function fail(response: Response, payload: unknown): never {
-  if (response.status === 405) throw new SessionExportRequestError("export_backend_unavailable", exportLabels.backendUnavailable, 405);
-  const body = record(payload);
-  const detail = typeof body.detail === "object" && body.detail ? record(body.detail) : body;
-  throw new SessionExportRequestError(
-    typeof detail.code === "string" ? detail.code : "export_failed",
-    typeof detail.message === "string" ? detail.message : `HTTP ${response.status}`,
-    response.status,
-  );
+function fail(error: HttpResponseError): never {
+  if (error.status === 405) throw new SessionExportRequestError("export_backend_unavailable", exportLabels.backendUnavailable, 405, error);
+  throw new SessionExportRequestError(error.code ?? "export_failed", error.message, error.status, error);
+}
+function errorFromBytes(response: Response, bytes: Uint8Array): HttpResponseError {
+  let body: string;
+  try { body = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    return decodeHttpError(response.status, null);
+  }
+  return decodeHttpErrorBody(response.status, body);
+}
+function checkRequestDeadline(started: number, signal: AbortSignal): void {
+  if (signal.aborted) throw signal.reason;
+  if (performance.now() - started > EXPORT_LIMITS.requestMs) throw new Error("Export request decoding timed out");
 }
 function endpoint(sessionId: string, suffix: string): string { return `/api/sessions/${encodeURIComponent(sessionId)}/export/${suffix}`; }
 export async function captureSessionExport(sessionId: string, signal: AbortSignal): Promise<SessionExportSnapshotDto> {
   const started = performance.now();
   const { response, bytes } = await fetchExportResponse(endpoint(sessionId, "snapshot"), { method: "POST" }, signal, EXPORT_LIMITS.snapshotBytes);
+  checkRequestDeadline(started, signal);
+  if (!response.ok) {
+    const error = errorFromBytes(response, bytes);
+    checkRequestDeadline(started, signal);
+    fail(error);
+  }
   const data = parse(bytes);
-  if (!response.ok) fail(response, data);
+  checkRequestDeadline(started, signal);
   const snapshot = decodeExportSnapshot(data, sessionId);
-  if (signal.aborted) throw signal.reason;
-  if (performance.now() - started > EXPORT_LIMITS.requestMs) throw new Error("Export snapshot decoding timed out");
+  checkRequestDeadline(started, signal);
   return snapshot;
 }
 export async function readSessionExportResource(
   sessionId: string, stamp: SessionExportStamp, source: ExportResourceSource, signal: AbortSignal,
 ): Promise<ExportResourceReadResult> {
+  const started = performance.now();
   const { response, bytes } = await fetchExportResponse(endpoint(sessionId, "resource"), {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stamp, source }),
   }, signal, EXPORT_LIMITS.resourceBytes);
+  checkRequestDeadline(started, signal);
   if (!response.ok) {
-    const data = parse(bytes);
-    const detail = record(record(data).detail);
-    if (detail.proof && ["resource_missing", "resource_denied", "resource_too_large"].includes(String(detail.code))) {
+    const error = errorFromBytes(response, bytes);
+    checkRequestDeadline(started, signal);
+    const detail = error.businessDetail;
+    const unavailable = error.status === 404 && error.code === "resource_missing" ? "missing"
+      : error.status === 403 && error.code === "resource_denied" ? "denied"
+      : error.status === 413 && error.code === "resource_too_large" ? "too_large" : null;
+    if (detail && unavailable !== null) {
+      const origin = record(detail.source);
       const proof = record(detail.proof);
-      const origin = record(proof.source);
-      if (origin.kind !== source.kind || origin.path !== source.path || !["missing", "denied", "too_large"].includes(String(proof.status))) throw new Error("Invalid unavailable proof");
-      return { status: "unavailable", code: String(detail.code), proof: proof as unknown as ExportResourceProof };
+      const proofSource = record(proof.source);
+      if (origin.kind !== source.kind || origin.path !== source.path
+        || proofSource.kind !== source.kind || proofSource.path !== source.path
+        || proof.status !== unavailable
+        || (proof.digest !== null && (typeof proof.digest !== "string" || !/^[0-9a-f]{64}$/.test(proof.digest)))
+        || (proof.identity !== null && (typeof proof.identity !== "string" || !/^[0-9a-f]{64}$/.test(proof.identity)))
+        || (proof.size !== null && (!Number.isSafeInteger(proof.size) || (proof.size as number) < 0))) {
+        throw new Error("Invalid unavailable proof");
+      }
+      checkRequestDeadline(started, signal);
+      return { status: "unavailable", code: detail.code, proof: proof as unknown as ExportResourceProof };
     }
-    fail(response, data);
+    fail(error);
   }
   const hash = response.headers.get("X-Export-Digest");
   const identity = response.headers.get("X-Export-Identity");
   digest(hash); digest(identity);
   const declaredLength = response.headers.get("Content-Length");
   if (declaredLength === null || !/^\d+$/.test(declaredLength) || Number(declaredLength) !== bytes.byteLength || await sha256Hex(bytes) !== hash) throw new Error("Export resource integrity mismatch");
-  if (signal.aborted) throw signal.reason;
+  checkRequestDeadline(started, signal);
   return { status: "saved", bytes, mime: response.headers.get("Content-Type") || "application/octet-stream", proof: {
     source, status: "saved", digest: hash, identity, size: bytes.byteLength,
   } };
 }
 export async function verifySessionExport(sessionId: string, request: ExportVerifyRequest, signal: AbortSignal): Promise<void> {
+  const started = performance.now();
   const body = JSON.stringify(request);
   if (new TextEncoder().encode(body).byteLength > EXPORT_LIMITS.verifyBytes) throw new Error("Export proof budget exceeded");
   const { response, bytes } = await fetchExportResponse(endpoint(sessionId, "verify"), { method: "POST", headers: { "Content-Type": "application/json" }, body }, signal, EXPORT_LIMITS.verifyBytes);
+  checkRequestDeadline(started, signal);
+  if (!response.ok) {
+    const error = errorFromBytes(response, bytes);
+    checkRequestDeadline(started, signal);
+    fail(error);
+  }
   const data = parse(bytes);
-  if (!response.ok) fail(response, data);
+  checkRequestDeadline(started, signal);
   const result = record(data);
   if (result.verified !== true || result.session_id !== sessionId || typeof result.verified_at !== "string") throw new Error("Invalid verification response");
+  checkRequestDeadline(started, signal);
 }

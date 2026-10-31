@@ -25,6 +25,33 @@ import type {
 import { STORAGE_KEYS } from "../constants/storage";
 import { SID_SHORT_LEN } from "../constants/session";
 import { WS_IN } from "../constants/ws";
+import { TIMING } from "../constants/timing";
+import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
+import { HttpResponseError, isPreExecutionRejection } from "../services/httpErrors";
+import errorLabels from "../services/httpErrorLabels.json";
+
+type InteractionKind = "confirm" | "ask";
+type InteractionSubmissionPhase = "submitting" | "uncertain";
+interface InteractionSubmission {
+  kind: InteractionKind;
+  requestId: string;
+  scope: SessionResourceScope;
+  payload: string;
+  phase: InteractionSubmissionPhase;
+  detached: boolean;
+}
+
+function responseRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(errorLabels.invalidResponse);
+  return value as Record<string, unknown>;
+}
+function stringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+function requestSessionJson(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  return fetchJsonWithTimeout(path, init,
+    { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "session-operation" }, responseRecord);
+}
 
 export interface SessionStoreCallbacks {
   onSessionRotated?: (newSid: string, oldSid: string) => void;
@@ -102,18 +129,6 @@ export interface SessionStore {
   toggleCluster: (id: string) => void;
 }
 
-function operationError(data: unknown, fallback: string): string {
-  if (!data || typeof data !== "object") return fallback;
-  const payload = data as Record<string, unknown>;
-  if (typeof payload.error === "string") return payload.error;
-  if (typeof payload.detail === "string") return payload.detail;
-  if (payload.detail && typeof payload.detail === "object") {
-    const message = (payload.detail as Record<string, unknown>).message;
-    if (typeof message === "string") return message;
-  }
-  return fallback;
-}
-
 export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionStore {
   const [pendingConfirms, setPendingConfirms] = useState<ConfirmRequest[]>([]);
   const [pendingAsks, setPendingAsks] = useState<AskRequest[]>([]);
@@ -146,6 +161,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     },
   );
 
+  const interactionSubmissionsRef = useRef(new Map<string, InteractionSubmission>());
   const pendingAsksRef = useRef<AskRequest[]>([]);
   const pendingConfirmsRef = useRef<ConfirmRequest[]>([]);
   const callbacksRef = useRef(callbacks);
@@ -183,37 +199,103 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     },
     [shellResource.reset, cronResource.reset, dynamicEndpointResource.reset],
   );
-  useEffect(() => { pendingAsksRef.current = pendingAsks; }, [pendingAsks]);
-  useEffect(() => { pendingConfirmsRef.current = pendingConfirms; }, [pendingConfirms]);
   useEffect(() => { callbacksRef.current = callbacks; }, [callbacks]);
   useEffect(() => { sidRef.current = sessionId; }, [sessionId]);
 
+  const submitInteraction = useCallback(async (
+    kind: InteractionKind, requestId: string, payload: string,
+    scope: SessionResourceScope, detached: boolean,
+  ): Promise<void> => {
+    const key = `${kind}:${requestId}`;
+    const previous = interactionSubmissionsRef.current.get(key);
+    if (previous?.phase === "submitting") {
+      if (detached) previous.detached = true;
+      return;
+    }
+    if (previous && previous.payload !== payload) {
+      if (!detached && isResourceScopeCurrent(scope)) {
+        setOperationNotice({ kind: "warning", message: errorLabels.interactionPayloadLocked });
+      }
+      return;
+    }
+    // 登记在首次 await 之前完成；同 ID 的在途请求只能有一个。
+    const submission: InteractionSubmission = previous ?? {
+      kind, requestId, payload, scope: { ...scope }, phase: "submitting", detached,
+    };
+    submission.phase = "submitting";
+    submission.detached ||= detached;
+    interactionSubmissionsRef.current.set(key, submission);
+    const owns = () => interactionSubmissionsRef.current.get(key) === submission;
+    const visible = () => owns() && !submission.detached && isResourceScopeCurrent(submission.scope);
+    const consume = () => {
+      if (kind === "confirm") {
+        pendingConfirmsRef.current = pendingConfirmsRef.current.filter((item) => item.request_id !== requestId);
+        setPendingConfirms(pendingConfirmsRef.current);
+      } else {
+        pendingAsksRef.current = pendingAsksRef.current.filter((item) => item.request_id !== requestId);
+        setPendingAsks(pendingAsksRef.current);
+      }
+    };
+    try {
+      const data = await requestSessionJson(`/api/${kind}/${encodeURIComponent(requestId)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: submission.payload,
+      });
+      if (data.resolved !== true || data.request_id !== requestId) throw new Error(errorLabels.invalidResponse);
+      if (visible()) consume();
+      if (owns()) interactionSubmissionsRef.current.delete(key);
+    } catch (error) {
+      if (!owns()) return;
+      if (!visible()) {
+        interactionSubmissionsRef.current.delete(key);
+        return;
+      }
+      if (error instanceof HttpResponseError && error.status === 404 && error.code === "interaction_not_found") {
+        consume();
+        interactionSubmissionsRef.current.delete(key);
+        setOperationNotice({ kind: "warning", message: errorLabels.interactionExpired });
+      } else if (error instanceof HttpResponseError && isPreExecutionRejection(error)) {
+        interactionSubmissionsRef.current.delete(key);
+        setOperationNotice({ kind: "error", message: error.message });
+      } else {
+        submission.phase = "uncertain";
+        setOperationNotice({ kind: "warning", message: errorLabels.interactionUncertain });
+      }
+    }
+  }, [isResourceScopeCurrent]);
+
   const clearPendingInteractions = useCallback(() => {
-    for (const ask of pendingAsksRef.current) {
-      fetch(`/api/ask/${ask.request_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: null }),
-      }).catch(() => {});
+    const scope = { ...resourceScopeRef.current };
+    const clear = (kind: InteractionKind, requestId: string, payload: string) => {
+      const submission = interactionSubmissionsRef.current.get(`${kind}:${requestId}`);
+      if (submission) submission.detached = true;
+      else void submitInteraction(kind, requestId, payload, scope, true);
+    };
+    for (const ask of pendingAsksRef.current) clear("ask", ask.request_id, JSON.stringify({ answers: null }));
+    for (const request of pendingConfirmsRef.current) clear("confirm", request.request_id,
+      JSON.stringify({ action: "deny", deny_reason: errorLabels.interactionCleared, denied_by: "user" }));
+    for (const [key, submission] of interactionSubmissionsRef.current) {
+      submission.detached = true;
+      if (submission.phase === "uncertain") interactionSubmissionsRef.current.delete(key);
     }
-    for (const request of pendingConfirmsRef.current) {
-      fetch(`/api/confirm/${request.request_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "deny", deny_reason: "会话中断或切换", denied_by: "user" }),
-      }).catch(() => {});
-    }
+    pendingAsksRef.current = [];
+    pendingConfirmsRef.current = [];
     setPendingAsks([]);
     setPendingConfirms([]);
-  }, []);
+  }, [submitInteraction]);
 
   const fetchSessions = useCallback(() => {
-    fetch("/api/sessions").then((response) => response.json())
-      .then((data) => setSessions(data.sessions || [])).catch(() => {});
+    void requestSessionJson("/api/sessions").then((data) => {
+      if (!Array.isArray(data.sessions) || !data.sessions.every((item) => item && typeof item === "object" && typeof item.id === "string")) {
+        throw new Error(errorLabels.invalidResponse);
+      }
+      setSessions(data.sessions as SessionInfo[]);
+    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
   }, []);
   const fetchAllTags = useCallback(() => {
-    fetch("/api/tags").then((response) => response.json())
-      .then((data) => setAllTags(data.tags || [])).catch(() => {});
+    void requestSessionJson("/api/tags").then((data) => {
+      if (!stringList(data.tags)) throw new Error(errorLabels.invalidResponse);
+      setAllTags(data.tags);
+    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
   }, []);
 
   const handleMessage = useCallback((message: WSMessage) => {
@@ -306,8 +388,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         danger_level: message.danger_level,
         args: message.args || {},
       };
-      setPendingConfirms((previous) => previous.some((item) => item.request_id === request.request_id)
-        ? previous : [...previous, request]);
+      if (!pendingConfirmsRef.current.some((item) => item.request_id === request.request_id)) {
+        pendingConfirmsRef.current = [...pendingConfirmsRef.current, request];
+        setPendingConfirms(pendingConfirmsRef.current);
+      }
       return;
     }
     if (message.type === WS_IN.ASK_REQUEST && message.request_id && Array.isArray(message.questions) && message.questions.length > 0) {
@@ -315,32 +399,26 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         request_id: message.request_id,
         questions: message.questions,
       };
-      setPendingAsks((previous) => previous.some((item) => item.request_id === request.request_id)
-        ? previous : [...previous, request]);
+      if (!pendingAsksRef.current.some((item) => item.request_id === request.request_id)) {
+        pendingAsksRef.current = [...pendingAsksRef.current, request];
+        setPendingAsks(pendingAsksRef.current);
+      }
     }
   }, [clearPendingInteractions, fetchSessions, sessionId]);
 
-  const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string) => {
-    if (!request) return;
+  const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string): void => {
+    if (!request || !pendingConfirmsRef.current.includes(request)) return;
     const body: Record<string, string> = { action };
     if (action === "deny" && reason) {
       body.deny_reason = reason;
       body.denied_by = deniedBy || "user";
     }
-    fetch(`/api/confirm/${request.request_id}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    }).catch(() => {});
-    setPendingConfirms((previous) => previous.filter((item) => item.request_id !== request.request_id));
-  }, []);
-  const respondAsk = useCallback((request: AskRequest | null, answers?: AskAnswerItem[] | null) => {
-    if (!request) return;
-    fetch(`/api/ask/${request.request_id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: answers ?? null }),
-    }).catch(() => {});
-    setPendingAsks((previous) => previous.filter((item) => item.request_id !== request.request_id));
-  }, []);
+    void submitInteraction("confirm", request.request_id, JSON.stringify(body), { ...resourceScopeRef.current }, false);
+  }, [submitInteraction]);
+  const respondAsk = useCallback((request: AskRequest | null, answers?: AskAnswerItem[] | null): void => {
+    if (!request || !pendingAsksRef.current.includes(request)) return;
+    void submitInteraction("ask", request.request_id, JSON.stringify({ answers: answers ?? null }), { ...resourceScopeRef.current }, false);
+  }, [submitInteraction]);
 
   const showOperationNotice = useCallback((notice: OperationNotice) => {
     setOperationNotice(notice);
@@ -373,12 +451,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setGeneratingTitleSessions((previous) => new Set(previous).add(sid));
     setOperationNotice(null);
     try {
-      const response = await fetch(`/api/sessions/${sid}/auto-title`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.title) {
-        throw new Error(operationError(data, "自动命名失败"));
-      }
-      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: data.title } : item));
+      const data = await requestSessionJson(`/api/sessions/${sid}/auto-title`, { method: "POST" });
+      if (typeof data.title !== "string" || !data.title) throw new Error(errorLabels.invalidResponse);
+      const title = data.title;
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title } : item));
       fetchSessions();
     } catch (cause) {
       setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "自动命名失败" });
@@ -391,12 +467,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setGeneratingTagSessions((previous) => new Set(previous).add(sid));
     setOperationNotice(null);
     try {
-      const response = await fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !Array.isArray(data.tags)) {
-        throw new Error(operationError(data, "自动标签生成失败"));
-      }
-      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags: data.tags } : item));
+      const data = await requestSessionJson(`/api/sessions/${sid}/auto-tags`, { method: "POST" });
+      if (!stringList(data.tags)) throw new Error(errorLabels.invalidResponse);
+      const tags = data.tags;
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags } : item));
       fetchSessions();
       fetchAllTags();
     } catch (cause) {
@@ -410,11 +484,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setGeneratingSummarySessions((previous) => new Set(previous).add(sid));
     setOperationNotice(null);
     try {
-      const response = await fetch(`/api/sessions/${sid}/regenerate-summary`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.success) {
-        throw new Error(operationError(data, "摘要重新生成失败"));
-      }
+      const data = await requestSessionJson(`/api/sessions/${sid}/regenerate-summary`, { method: "POST" });
+      if (data.success !== true) throw new Error(errorLabels.invalidResponse);
       fetchSessions();
     } catch (cause) {
       setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "摘要重新生成失败" });
@@ -427,11 +498,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTerminatingSessions((previous) => new Set(previous).add(sid));
     setOperationNotice(null);
     try {
-      const response = await fetch(`/api/sessions/${sid}/terminate`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.terminated) {
-        throw new Error(operationError(data, "会话终结失败"));
-      }
+      const data = await requestSessionJson(`/api/sessions/${sid}/terminate`, { method: "POST" });
+      if (data.terminated !== true) throw new Error(errorLabels.invalidResponse);
       const warnings = Array.isArray(data.metadata_warnings)
         ? data.metadata_warnings.filter((item: unknown): item is string => typeof item === "string" && Boolean(item))
         : [];
@@ -446,33 +514,35 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }
   }, [fetchSessions]);
   const togglePinSession = useCallback((sid: string) => {
-    fetch(`/api/sessions/${sid}/pin`, { method: "POST" }).then((response) => response.json())
-      .then((data) => setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, pinned: data.pinned } : item)))
-      .catch(() => {});
+    void requestSessionJson(`/api/sessions/${sid}/pin`, { method: "POST" }).then((data) => {
+      if (typeof data.pinned !== "boolean") throw new Error(errorLabels.invalidResponse);
+      const pinned = data.pinned;
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, pinned } : item));
+    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
   }, []);
   const renameSession = useCallback((sid: string, title: string) => {
     const trimmed = title.trim().slice(0, 50);
     if (!trimmed) { setRenamingSessionId(null); return; }
-    fetch(`/api/sessions/${sid}/title`, {
+    void requestSessionJson(`/api/sessions/${sid}/title`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: trimmed }),
-    }).then((response) => response.json())
-      .then((data) => { if (data.updated) setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: data.title } : item)); })
-      .catch(() => {}).finally(() => setRenamingSessionId(null));
+    }).then((data) => {
+      if (data.updated !== true || typeof data.title !== "string") throw new Error(errorLabels.invalidResponse);
+      const savedTitle = data.title;
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: savedTitle } : item));
+      setRenamingSessionId((current) => current === sid ? null : current);
+    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
   }, []);
   const mergeSessions = useCallback(async (sources: string[]): Promise<string | undefined> => {
     const validSources = sources.filter((sid) => sessions.find((item) => item.id === sid)?.status === "archived");
     if (!validSources.length) return undefined;
     setOperationNotice(null);
     try {
-      const response = await fetch("/api/sessions/merge", {
+      const data = await requestSessionJson("/api/sessions/merge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sources: validSources }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.merged || !data.session_id) {
-        throw new Error(operationError(data, "延续会话创建失败"));
-      }
+      if (data.merged !== true || typeof data.session_id !== "string" || !data.session_id) throw new Error(errorLabels.invalidResponse);
       fetchSessions();
       return data.session_id as string;
     } catch (cause) {
@@ -481,13 +551,17 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }
   }, [fetchSessions, sessions]);
   const updateSessionTags = useCallback(async (sid: string, tags: string[]) => {
-    const valid = tags.map((tag) => tag.trim()).filter((tag) => /^[\u4e00-\u9fa5]{1,5}$/.test(tag) || /^[a-zA-Z]{1,10}$/.test(tag));
-    const response = await fetch(`/api/sessions/${sid}/tags`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags: valid }),
+    const submitted = tags.map((tag) => tag.trim());
+    const data = await requestSessionJson(`/api/sessions/${sid}/tags`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags: submitted }),
     });
-    const data = await response.json().catch(() => ({}));
-    if (data.updated) setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags: data.tags || valid } : item));
-    return data.tags || valid;
+    if (data.updated !== true || data.session_id !== sid || (data.tags !== null && !stringList(data.tags))) {
+      throw new Error(errorLabels.invalidResponse);
+    }
+    // 正式服务逐项验证后返回 tags=null；仅明确成功时采用本次已验证提交值。
+    const saved = data.tags === null ? submitted : data.tags as string[];
+    setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags: saved } : item));
+    return saved;
   }, []);
   const toggleMergeSelect = useCallback((sid: string) => {
     if (sessions.find((item) => item.id === sid)?.status !== "archived") return;

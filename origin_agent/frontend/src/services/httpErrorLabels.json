@@ -1,0 +1,18 @@
+{
+  "resourceLoading": "正在读取资源…",
+  "resourceUnknown": "尚未取得资源快照",
+  "staleSnapshot": "读取失败，保留上次快照",
+  "directoryLabel": "目录",
+  "validationFailed": "请求字段校验失败",
+  "requestFailed": "请求失败",
+  "invalidResponse": "服务器返回了不完整或无效的成功回执",
+  "interactionUncertain": "回答提交结果不确定。请手动重试相同答案；结果确认前不能改选其他答案。",
+  "interactionPayloadLocked": "此前答案的提交结果尚未确认，只能重试相同答案。",
+  "interactionExpired": "此审批或提问已经结束，当前回答未获确认。",
+  "interactionCleared": "会话中断或切换",
+  "tagsSaveFailed": "标签保存失败，草稿已保留",
+  "mentionLoadFailed": "候选项加载失败，请重新输入以重试",
+  "resourceOperationFailed": "资源操作失败，原有快照已保留",
+  "uploadFailed": "文件选择失败",
+  "shellNotFound": "Shell会话已不存在，等待列表刷新"
+}

@@ -6,6 +6,8 @@ import { useChatRuntimeStore } from "../chat/chatRuntimeStore";
 import type { TabRenderContext } from "./registry";
 import labels from "./resourceCleanupLabels.json";
 import { stopSessionShell } from "../../services/shellResourcesApi";
+import { decodeHttpErrorBody } from "../../services/httpErrors";
+import errorLabels from "../../services/httpErrorLabels.json";
 
 /**
  * Resources tab: session resources, Shell sessions, Cron tasks and dynamic
@@ -25,6 +27,21 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
   const images = resources?.images ?? [];
   const downloads = resources?.downloads ?? [];
   const sessionId = ctx.sessionId;
+  const cronOperation = async (taskId: string, action: "trigger" | "cancel") => {
+    const scope = { ...ws.resourceScope };
+    const setTasks = ws.setCronTasks;
+    try {
+      const response = await fetch(`/api/sessions/${scope.sessionId}/cron-tasks/${taskId}/${action}`, { method: "POST" });
+      if (!response.ok) throw decodeHttpErrorBody(response.status, await response.text());
+      const data: unknown = await response.json();
+      if (!data || typeof data !== "object" || !("success" in data) || data.success !== true) throw new Error(errorLabels.invalidResponse);
+      if (!ws.isResourceScopeCurrent(scope)) return;
+      if (action === "cancel") setTasks((previous) => previous.filter((item) => item.task_id !== taskId));
+      // trigger 回执只确认接受；真实执行次数由既有三秒轮询更新。
+    } catch (error) {
+      ws.showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.resourceOperationFailed });
+    }
+  };
 
   useEffect(() => {
     if (activeTab === "resources" && resourcesExpanded) void chatRuntimeController.loadResources();
@@ -48,7 +65,8 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
                   <button type="button" onClick={() => void chatRuntimeController.loadResources(true)}>重试</button>
                 </div>
               )}
-              {!resourcesLoading && !resourcesError && images.length === 0 && downloads.length === 0 && (
+              {!resourcesLoading && !resourcesError && resources === null && <div className="drawer-empty">{errorLabels.resourceUnknown}</div>}
+              {!resourcesLoading && !resourcesError && resources !== null && images.length === 0 && downloads.length === 0 && (
                 <div className="drawer-empty">暂无资源</div>
               )}
               {images.length > 0 && (
@@ -88,7 +106,9 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
           </div>
           {backgroundExpanded && (
             <div className="drawer-section-body">
-              {ws.shells.length === 0 ? (
+              {ws.resourceSnapshots.shells.loading && <div className="drawer-empty">{errorLabels.resourceLoading}</div>}
+              {ws.resourceSnapshots.shells.error && <div className="drawer-empty">{errorLabels.staleSnapshot}: {ws.resourceSnapshots.shells.error}</div>}
+              {ws.resourceSnapshots.shells.data === null ? <div className="drawer-empty">{errorLabels.resourceUnknown}</div> : ws.shells.length === 0 ? (
                 <div className="drawer-empty">暂无 Shell 会话</div>
               ) : (
                 ws.shells.map((shell) => (
@@ -110,16 +130,17 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
                       <button
                         className="task-list-action stop"
                         onClick={() => {
-                          void stopSessionShell(sessionId, shell.shell_id).then((result) => {
-                            if (result?.cleanup.complete) {
-                              ws.setShells((previous) => previous.filter((item) => item.shell_id !== shell.shell_id));
-                              return;
+                          const scope = { ...ws.resourceScope };
+                          const setShells = ws.setShells;
+                          void stopSessionShell(scope.sessionId, shell.shell_id).then((result) => {
+                            if (!ws.isResourceScopeCurrent(scope)) return;
+                            if (result.cleanup.complete) {
+                              setShells((previous) => previous.filter((item) => item.shell_id !== shell.shell_id));
+                            } else {
+                              setShells((previous) => previous.map((item) => item.shell_id === shell.shell_id ? result.shell : item));
                             }
-                            if (result) {
-                              ws.setShells((previous) => previous.map((item) => (
-                                item.shell_id === shell.shell_id ? result.shell : item
-                              )));
-                            }
+                          }).catch((error: unknown) => {
+                            ws.showOperationNoticeForScope(scope, { kind: "error", message: error instanceof Error ? error.message : errorLabels.resourceOperationFailed });
                           });
                         }}
                       >{shell.cleanup && !shell.cleanup.complete ? labels.refreshStatus : "停止"}</button>
@@ -139,7 +160,9 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
           </div>
           {cronExpanded && (
             <div className="drawer-section-body">
-              {ws.cronTasks.length === 0 ? (
+              {ws.resourceSnapshots.cronTasks.loading && <div className="drawer-empty">{errorLabels.resourceLoading}</div>}
+              {ws.resourceSnapshots.cronTasks.error && <div className="drawer-empty">{errorLabels.staleSnapshot}: {ws.resourceSnapshots.cronTasks.error}</div>}
+              {ws.resourceSnapshots.cronTasks.data === null ? <div className="drawer-empty">{errorLabels.resourceUnknown}</div> : ws.cronTasks.length === 0 ? (
                 <div className="drawer-empty">暂无定时任务</div>
               ) : (
                 ws.cronTasks.map((t) => (
@@ -151,8 +174,8 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
                     <div className="cron-list-schedule">{t.schedule_type === "interval" ? `${t.schedule_value} 秒` : t.schedule_value}</div>
                     <div className="cron-list-meta">下次执行: {t.next_run ? new Date(t.next_run).toLocaleString() : "-"} | 已执行: {t.run_count} 次</div>
                     <div className="cron-list-actions">
-                      <button className="cron-list-action trigger" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/trigger`, { method: "POST" }).then(() => ws.setCronTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, run_count: x.run_count + 1 } : x)))}>立即触发</button>
-                      <button className="cron-list-action cancel" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/cancel`, { method: "POST" }).then(() => ws.setCronTasks((prev) => prev.filter((x) => x.task_id !== t.task_id)))}>取消</button>
+                      <button className="cron-list-action trigger" onClick={() => void cronOperation(t.task_id, "trigger")}>立即触发</button>
+                      <button className="cron-list-action cancel" onClick={() => void cronOperation(t.task_id, "cancel")}>取消</button>
                     </div>
                   </div>
                 ))
@@ -169,7 +192,9 @@ export default function ResourcesTab({ ctx }: { ctx: TabRenderContext }) {
           </div>
           {dynamicEndpointsExpanded && (
             <div className="drawer-section-body">
-              {ws.dynamicEndpoints.length === 0 ? (
+              {ws.resourceSnapshots.dynamicEndpoints.loading && <div className="drawer-empty">{errorLabels.resourceLoading}</div>}
+              {ws.resourceSnapshots.dynamicEndpoints.error && <div className="drawer-empty">{errorLabels.staleSnapshot}: {ws.resourceSnapshots.dynamicEndpoints.error}</div>}
+              {ws.resourceSnapshots.dynamicEndpoints.data === null ? <div className="drawer-empty">{errorLabels.resourceUnknown}</div> : ws.dynamicEndpoints.length === 0 ? (
                 <div className="drawer-empty">暂无动态端点</div>
               ) : (
                 ws.dynamicEndpoints.map((ep) => (

@@ -672,7 +672,7 @@ class _OrchestratorContext:
         interactive 为 None 时自动推断：TaskAgentLoop → False，其他 → True。
         """
         try:
-            from gateway.server import push_subagent_update
+            from gateway.notifications import push_subagent_update
             sub = self._active.get(session_id)
             if interactive is None:
                 interactive = not isinstance(sub, TaskAgentLoop)

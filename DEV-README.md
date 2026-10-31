@@ -66,7 +66,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端，随后 `asyncio.run(App(ctx).run())`；返回后由 App 解除关闭硬截止 watchdog。
 4. `main.py::App` 只负责创建唯一 `Application`、平台信号处理（统一经 `RuntimeSystem.request_shutdown`）、等待关闭事件与退出码映射；不再持有 Gateway 实例、第二份关闭事件或各子系统清理逻辑。
 5. `Application` 继承 `AsyncArchitecture`，`start()` 串行登记21个 System 接口槽位（含 `ILoggerSystem`），登记顺序不要求按依赖排列；graphlib 仅校验依赖图完整性，实际唤醒由 framework 在依赖就绪后完成。其余20个业务 System 接口通过 `ILoggableSystem` 间接继承 `AsyncSystem`，自动声明 `ILoggerSystem` 依赖。注册失败进入同一 Logger 根节点级联回收入口并传播；全部注册完成后获取 Runtime，调用 `mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
-6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只含静态 `APIRouter` 与 `build_router_app()` 工厂，运行实例、socket、serve 任务与 ready 事件均由 `GatewaySystem`（最后唤醒、首先注销）持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
+6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只保留 `build_router_app(gateway)` 工厂；`gateway/apis/` 按职责显式装配91个API端点组件（92条路由注册，文件GET/HEAD共用一个组件），运行实例、组件、socket、serve 任务与 ready 事件均由 `GatewaySystem` 持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
 关闭由 `Application.shutdown()` 单一协调任务执行（重复请求等待同一任务）：
@@ -135,7 +135,7 @@ origin仓库所有自定义异常（含内部控制信号）只在 `origin_agent
 ```mermaid
 sequenceDiagram
     participant FE as 前端 (React)
-    participant GW as gateway/server.py
+    participant GW as gateway/apis/websocket/chat.py
     participant MR as gateway/message_router.py
     participant SM as gateway/session_manager.py
     participant PAL as entry/parent_agent_loop.py
@@ -164,7 +164,7 @@ sequenceDiagram
 
 主要阶段说明：
 
-- **消息接收**：`gateway/server.py` 通过 WebSocket 接收 `user_message`，`gateway/message_router.py` 在路由内同步完成目标校验并登记输入记录，再由 `GatewaySystem.spawn_work` 启动准备任务，交给 `SessionManager` 分配到对应 `ParentAgentLoop`。
+- **消息接收**：`gateway/apis/websocket/chat.py` 的 `ChatWebSocketAPI` 通过 WebSocket 接收 `user_message`，`gateway/message_router.py` 在路由内同步完成目标校验并登记输入记录，再由 `GatewaySystem.spawn_work` 启动准备任务，交给 `SessionManager` 分配到对应 `ParentAgentLoop`。
 - **上下文组装**：`entry/agent_support/messages.py` 加载钩子与 system prompt，将钩子返回的上下文扩展块和历史消息组装成 `BaseMessage` 列表。
 - **流式生成**：通过 `abstract/llm/` 抽象层的 `BaseLLMClient.chat_stream()` 调用大模型（具体后端由 `custom_llm_client/` 插件提供），`ParentAgentLoop` 实时解析 `StreamChunk` 中的文本增量与工具调用。正式 `create_llm_client()` 统一返回 `EmptyResponseRetryClient` 装饰器：正文零长度且无工具调用的正常返回最多尝试3次（初次+2次，等待1秒/2秒），耗尽通过现有错误出口结束，不写空assistant；纯工具调用合法，网络/认证/解析错误、取消和关闭失败不由这层重试。流式正文/思考/工具增量实时透传，失败空尝试的usage与结束原因不作为完成；各尝试的思考在同一流中连续展示但不加入重试输入。已有工具参数片段而无完整调用且无正文时明确失败、不重播。子Agent、临时Agent的非流式调用与辅助模型同样适用；模态探针持续空会整体失败且不写能力缓存，审批持续空不放行。该预算独立于Provider/SDK已有网络重试，实际HTTP次数和耗时可能更多，详细边界见 `abstract/DEV-README.md`。仅完成源码与只读审阅，未运行校验或启动应用，等待用户人工验收。
 - **工具执行**：工具来源为 `BaseTool` 子类，各模块以顶层固定名称 `TOOLSET` 声明 `BaseToolSet`；`ToolRegistry` 直接持有 `BaseTool` 对象，模型返回的整批 tool calls 在写入 assistant 消息前经 `accept_tool_batch()` 按每个工具的 `accepts_following_calls` 声明截断，后续调用不审批、不执行、不配对并向前端发送 `tool_calls_discarded`。`ToolExecutor` 在审批前做前置快速拒绝，`async_dispatch(execution)` 执行工具调用前的 `before_handle` 与工具主体 `handle` 并写回 `body_executed`/`body_completed_normally`/`result`/`state`；工具结果写入 History 后，`ToolPostprocessor.after_committed()` 对已提交调用调用工具调用后的 `after_handle`。工具集加载检查在分发中统一拦截未加载工具（工具对象与四阶段执行已按任务文件 v8 实施并静态复核，完整任务复核与用户验收仍待完成）。主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`component/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
@@ -568,6 +568,18 @@ ToolRegistry线程池关闭的既有软观察 pending 仍由原任务/执行器�
 本轮只迁五包及必要引用，不移动审批、Cron、动态端点或 MCP 管理入口，也不移动 `ActivityLoggerComponent`；`component/` 尚未完成最终 Component 专用整理。工具名称、schema、权限、四阶段执行、第三方依赖版本、21个System槽位、依赖关系、关闭准备、持久化模型与 easysave key 均保持。工具完整约定见 [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md)，保留服务见 [component/DEV-README.md](origin_agent/component/DEV-README.md)。
 
 部署须由用户停机后同步新包与全部调用方。`run.py` 的合并复制不会自动删除目标侧旧五包，`force_init` 对 fast仓库同样不保证清除；用户应先保护本地进化修改，再定向处理 fast/slow/fallback仓库的旧五包，保留 component 的其他服务与用户内容，不删除整个 component 或 workspace。开发助手AI未检查或清理运行时副本；未知外部扩展使用旧导入路径时需同步修改。本轮仅源码与文档实施、只读文本审阅，未运行校验、实际导入、构建、测试或应用；字节级换行校验和运行验收未执行。
+
+## API端点组件与HTTP协议统一（2026-10-31，当前约定）
+
+GatewaySystem在自身唤醒期间将self传给`gateway/server.py::build_router_app(gateway)`；工厂通过`gateway/apis/__init__.py::register_apis`按固定顺序创建并绑定91个`APIComponent`，显式登记92条原路径/方法。每个具体端点独立文件并按职责分组，GET/HEAD文件服务共用组件，原同步文件/ZIP handler继续由FastAPI线程池执行。组件不保存当前会话、Request、WebSocket、订阅或单次结果。静态产物位置/hash/MIME由`gateway/frontend_assets.py`提供，跨模块子Agent状态通知改从`gateway/notifications.py`导入，不再依赖server或具体端点。完整目录与扩展规则见gateway及apis开发文档。
+
+`gateway/http_boundary.py`在读取正文之前拒绝非RUNNING的新`/api`、`/dynamic`请求，包含只读查询和新建SSE；仅此执行前拒绝标记`detail.request_accepted=false`。health、public文件/字体/下载/ZIP、首页/SPA、WS既有准入及已建流的关闭协议保持。未知业务路径不再伪装SPA成功。既有输出仍按History提交后关闭的原顺序收尾，不增加System或资源所有者。
+
+请求格式/字段/参数错误为标准422列表；明确业务拒绝为非2xx和`detail:{code,message,...}`，原锁、版本（含显式null）、路径、中断结果、导出source/proof等专属字段保留。仅转换已有业务异常和HTTP协议异常；未知错误继续交FastAPI，不新增通用Exception/OSError捕获。普通成功结构保持，正常取消、空列表、资源清理pending及部分失败不当作整体业务拒绝。合并缺内部依赖直接RuntimeError，避免把软件不变式破坏包装成业务失败。
+
+配套前端共用`services/httpErrors.ts`，失败不回空数据、不提交成功状态，关键JSON截止覆盖正文与解码前后检查。交互提交按request_id和会话代际持有，清理提交中请求不再另发相反答案；资源操作绑定原scope、继续已有三秒轮询，不凭Cron触发回执增加实际执行次数。未知503/网络失败仍可能晚于提交，只有明确执行前拒绝可排除副作用。独立预览的模拟HTTP协议同步，不改WS帧或增加真实后端依赖。
+
+用户须同批部署完整后端与配套前端并重新构建/重启/刷新；外部错误调用方同步升级，无旧错误协议兼容层。持久化结构/type token/easysave key、21个System槽位、依赖及5秒关闭截止均不变。开发助手AI未运行测试、校验、实际导入、构建或应用，也不操作workspace副本。人工验收矩阵见`.tasks/2026-10-31_1_gateway-endpoint-components.md`的P9/P19。独立预览已有媒体ID与正式32位十六进制要求不匹配的限制已登记，未在本轮扩大为种子/身份生成修复，不能据预览断言正式媒体链路已验收。
 
 
 

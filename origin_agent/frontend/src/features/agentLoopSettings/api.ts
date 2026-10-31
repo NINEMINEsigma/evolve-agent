@@ -1,18 +1,21 @@
 import { TIMING } from "../../constants/timing";
 import { fetchJsonWithTimeout } from "../../services/fetchJsonWithTimeout";
-import { agentLoopSettingsLabels as labels, formatAgentLoopSettingsLabel } from "./labels";
+import { decodeHttpError, HttpResponseError, isPreExecutionRejection } from "../../services/httpErrors";
+import { agentLoopSettingsLabels as labels } from "./labels";
 import type { AgentLoopSettingsState } from "./types";
 
 const endpoint = "/api/agent-loop/settings";
 
 export class AgentLoopSettingsHttpError extends Error {
-  constructor(public readonly status: number) {
-    super(formatAgentLoopSettingsLabel(labels.httpError, { status }));
+  readonly status: number;
+  constructor(readonly httpError: HttpResponseError) {
+    super(httpError.message);
     this.name = "AgentLoopSettingsHttpError";
+    this.status = httpError.status;
   }
 
   get uncertain(): boolean {
-    return ![400, 404, 409, 422, 503].includes(this.status);
+    return !isPreExecutionRejection(this.httpError);
   }
 }
 
@@ -51,7 +54,7 @@ export function readAgentLoopSettings(signal?: AbortSignal): Promise<AgentLoopSe
   return fetchJsonWithTimeout(endpoint, { method: "GET", signal, cache: "no-store" }, {
     timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
     phase: "agent-loop-settings-read",
-    createHttpError: (status) => new AgentLoopSettingsHttpError(status),
+    createHttpError: (status, payload) => new AgentLoopSettingsHttpError(decodeHttpError(status, payload)),
   }, decodeAgentLoopSettingsState);
 }
 
@@ -65,6 +68,6 @@ export function updateAgentLoopSettings(
   }, {
     timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
     phase: "agent-loop-settings-save",
-    createHttpError: (status) => new AgentLoopSettingsHttpError(status),
+    createHttpError: (status, payload) => new AgentLoopSettingsHttpError(decodeHttpError(status, payload)),
   }, decodeAgentLoopSettingsState);
 }

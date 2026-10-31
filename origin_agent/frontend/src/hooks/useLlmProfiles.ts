@@ -1,16 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionLlmSelection } from "./useSessionLlmSelection";
 import type {
-  LlmProfile, ApprovalProfileState, MetadataProfileState, ToolchainSummaryProfileState, ModalityProfileState,
+  LlmProfile, ApprovalProfileState, MetadataProfileState, ToolchainSummaryProfileState,
   ModalityProfileStates, ModalityType, LlmLoadStatus,
   LlmProfileChangeEvent, LlmProfileDeleteResult,
 } from "../types";
 
+import { decodeHttpErrorBody, HttpResponseError, isPreExecutionRejection } from "../services/httpErrors";
+
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
-async function responseError(response: Response): Promise<Error> {
-  const data = await response.json().catch(() => ({}));
-  return new Error(typeof data.detail === "string" ? data.detail : `请求失败 (${response.status})`);
+async function responseError(response: Response): Promise<HttpResponseError> {
+  return decodeHttpErrorBody(response.status, await response.text());
+}
+function profileReference(value: unknown): ApprovalProfileState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid profile reference response");
+  const data = value as Record<string, unknown>;
+  if ((data.profile_name !== null && typeof data.profile_name !== "string")
+    || (data.model !== null && typeof data.model !== "string") || typeof data.available !== "boolean") {
+    throw new Error("Invalid profile reference response");
+  }
+  return data as unknown as ApprovalProfileState;
+}
+function modalityReferences(value: unknown): ModalityProfileStates {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid modality references response");
+  const data = value as Record<string, unknown>;
+  return { image: profileReference(data.image), audio: profileReference(data.audio), video: profileReference(data.video) };
+}
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+function isLlmProfile(value: unknown): value is LlmProfile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  return ["name", "llm_client_name", "base_url", "model", "api_key", "reasoning_effort", "soul_file"].every((key) => typeof data[key] === "string")
+    && typeof data.temperature === "number" && Number.isFinite(data.temperature)
+    && ["max_output_tokens", "max_context_tokens"].every((key) => Number.isSafeInteger(data[key]))
+    && ["vision_image_profile", "audio_profile", "vision_video_profile"].every((key) => data[key] === null || typeof data[key] === "string");
+}
+function mutationUncertain(error: HttpResponseError): boolean {
+  return !(isPreExecutionRejection(error) || error.code === "profile_not_found" || error.code === "profile_conflict");
 }
 
 /** 写请求可能已到达服务端；编辑器必须先查询确认，不能盲目重试 POST。 */
@@ -27,13 +56,18 @@ async function mutateProfile<T>(method: string, body: unknown): Promise<T> {
   } catch {
     throw new LlmProfileMutationError("连接中断，保存结果尚未确认，请刷新确认后继续。", true);
   }
-  if (!response.ok) {
-    const error = await responseError(response);
-    // 服务端 5xx 可能发生在持久化之后，保持不确定结果而不是重复提交。
-    throw new LlmProfileMutationError(error.message, response.status >= 500);
+  try {
+    if (!response.ok) {
+      const error = await responseError(response);
+      throw new LlmProfileMutationError(error.message, mutationUncertain(error));
+    }
+    const value: unknown = await response.json();
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid mutation response");
+    return value as T;
+  } catch (error) {
+    if (error instanceof LlmProfileMutationError) throw error;
+    throw new LlmProfileMutationError("Incomplete response; refresh to confirm the saved result", true);
   }
-  try { return await response.json() as T; }
-  catch { throw new LlmProfileMutationError("服务端响应不完整，请刷新确认保存结果。", true); }
 }
 
 /** 审批和元数据引用共享请求状态，不共享具体值。GET、PUT及广播统一用代际收敛。 */
@@ -62,7 +96,7 @@ function useGlobalProfileReference(endpoint: string) {
     try {
       const response = await fetch(endpoint, { cache: "no-store" });
       if (!response.ok) throw await responseError(response);
-      const value = await response.json() as ApprovalProfileState;
+      const value = profileReference(await response.json());
       if (token === generation.current) publish(value);
       return value;
     } catch (cause) {
@@ -81,12 +115,17 @@ function useGlobalProfileReference(endpoint: string) {
         body: JSON.stringify({ profile_name: profileName }),
       });
       if (!response.ok) throw await responseError(response);
-      const data = await response.json() as { state: ApprovalProfileState };
-      if (token === generation.current) publish(data.state);
+      const data: unknown = await response.json();
+      const value = profileReference(data && typeof data === "object" && "state" in data ? data.state : null);
+      if (value.profile_name !== profileName) throw new Error("Profile reference mutation target mismatch");
+      if (token === generation.current) publish(value);
       return stateRef.current;
     } catch (cause) {
-      if (token === generation.current) setError(errorText(cause));
-      throw cause;
+      const failure = cause instanceof HttpResponseError
+        ? new LlmProfileMutationError(cause.message, mutationUncertain(cause))
+        : cause instanceof LlmProfileMutationError ? cause : new LlmProfileMutationError(errorText(cause), true);
+      if (token === generation.current) setError(failure.message);
+      throw failure;
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -126,7 +165,7 @@ function useGlobalModalityReferences(endpoint: string) {
     try {
       const response = await fetch(endpoint, { cache: "no-store" });
       if (!response.ok) throw await responseError(response);
-      const value = await response.json() as ModalityProfileStates;
+      const value = modalityReferences(await response.json());
       if (token === revision.current) publish(value);
       return value;
     } catch (cause) {
@@ -141,23 +180,29 @@ function useGlobalModalityReferences(endpoint: string) {
     if (busyRef.current[mediaType]) throw new Error("配置正在保存，请稍候。");
     busyRef.current = { ...busyRef.current, [mediaType]: true };
     setBusy(busyRef.current);
-    revision.current++;
+    const token = ++revision.current;
     try {
       const response = await fetch(endpoint, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ media_type: mediaType, profile_name: profileName }),
       });
       if (!response.ok) throw await responseError(response);
-      const data = await response.json() as { state: ModalityProfileState };
-      const next = { ...statesRef.current, [mediaType]: data.state } as ModalityProfileStates;
+      const raw: unknown = await response.json();
+      const state = profileReference(raw && typeof raw === "object" && "state" in raw ? raw.state : null);
+      if (state.profile_name !== profileName) throw new Error("Modality reference mutation target mismatch");
+      if (token !== revision.current) return statesRef.current[mediaType];
+      const next = { ...statesRef.current, [mediaType]: state } as ModalityProfileStates;
       statesRef.current = next;
       setStates(next);
       setStatuses((previous) => ({ ...previous, [mediaType]: "ready" }));
       setErrors((previous) => ({ ...previous, [mediaType]: null }));
-      return data.state;
+      return state;
     } catch (cause) {
-      setErrors((previous) => ({ ...previous, [mediaType]: errorText(cause) }));
-      throw cause;
+      const failure = cause instanceof HttpResponseError
+        ? new LlmProfileMutationError(cause.message, mutationUncertain(cause))
+        : cause instanceof LlmProfileMutationError ? cause : new LlmProfileMutationError(errorText(cause), true);
+      if (token === revision.current) setErrors((previous) => ({ ...previous, [mediaType]: failure.message }));
+      throw failure;
     } finally {
       busyRef.current = { ...busyRef.current, [mediaType]: false };
       setBusy(busyRef.current);
@@ -217,7 +262,7 @@ export function useLlmProfiles(sessionId: string) {
       const response = await fetch("/api/llm/profiles", { cache: "no-store" });
       if (!response.ok) throw await responseError(response);
       const data = await response.json();
-      if (!Array.isArray(data.profiles)) throw new Error("服务端返回的 Profile 列表格式无效");
+      if (!Array.isArray(data.profiles) || !data.profiles.every(isLlmProfile)) throw new Error("Invalid profile list response");
       if (token !== requestGeneration.current || revision !== mutationRevision.current) {
         throw new DOMException("目录请求已被更新的请求取代", "AbortError");
       }
@@ -282,7 +327,7 @@ export function useLlmProfiles(sessionId: string) {
         originalName === null ? "POST" : "PUT",
         originalName === null ? profile : { profile_name: originalName, profile },
       );
-      if (!result.profile || typeof result.profile.name !== "string") {
+      if (!isLlmProfile(result.profile) || (result.notification_failures !== undefined && !isStringList(result.notification_failures))) {
         throw new LlmProfileMutationError("保存响应缺少配置，请刷新确认。", true);
       }
       invalidateDirectory();
@@ -305,7 +350,11 @@ export function useLlmProfiles(sessionId: string) {
       const result = await mutateProfile<LlmProfileDeleteResult>("DELETE", {
         profile_name: profileName, replacement_profile_name: replacementProfileName,
       });
-      if (!result.deleted) throw new Error("服务端未确认配置已删除");
+      if (result.deleted !== true || result.profile_name !== profileName
+        || (result.replacement_profile_name !== null && typeof result.replacement_profile_name !== "string")
+        || !isStringList(result.switched_sessions) || !isStringList(result.pending_sessions) || !isStringList(result.notification_failures)) {
+        throw new LlmProfileMutationError("Incomplete delete confirmation; refresh to confirm", true);
+      }
       invalidateDirectory();
       selectionRef.current.handleProfileNameChange({ operation: "deleted", old_name: profileName, new_name: result.replacement_profile_name });
       publishProfiles(profilesRef.current.filter((profile) => profile.name !== profileName));

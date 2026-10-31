@@ -2,26 +2,30 @@ import type { LlmProfile, ModalityType, DynamicSandboxSpaceWithAvailability } fr
 import type { PreviewRuntime } from "../types";
 import { createCharacterProfiles, createCharacterAvatars, ACTIVITY_OVERVIEW } from "../data/catalog";
 import { PREVIEW } from "../constants";
-import { PreviewHttpError, flag, integer, jsonResponse, objectBody, readBody, text } from "./contracts";
+import { PreviewHttpError, PreviewValidationError, flag, integer, jsonResponse, objectBody, readBody, text } from "./contracts";
 import labels from "../content/zh-CN.json";
 
-function profileInput(value: unknown): LlmProfile {
-  const body = objectBody(value);
-  const nullable = (value: unknown) => value === null ? null : text(value);
-  if (typeof body.temperature !== "number" || !Number.isFinite(body.temperature)) throw new PreviewHttpError(422, "Invalid temperature");
+function profileInput(value: unknown, location: readonly (string | number)[] = ["body"]): LlmProfile {
+  const body = objectBody(value, location);
+  const field = (name: string) => text(body[name], [...location, name]);
+  const nullable = (name: string) => body[name] === null ? null : field(name);
+  if (typeof body.temperature !== "number" || !Number.isFinite(body.temperature)) throw new PreviewValidationError([{ loc: [...location, "temperature"], msg: "Invalid temperature", type: "float_type" }]);
   return {
-    name: text(body.name), llm_client_name: text(body.llm_client_name), base_url: text(body.base_url),
-    model: text(body.model), api_key: text(body.api_key), temperature: body.temperature,
-    max_output_tokens: integer(body.max_output_tokens, 1), max_context_tokens: integer(body.max_context_tokens, 1),
-    reasoning_effort: text(body.reasoning_effort), soul_file: text(body.soul_file),
-    vision_image_profile: nullable(body.vision_image_profile), audio_profile: nullable(body.audio_profile), vision_video_profile: nullable(body.vision_video_profile),
+    name: field("name"), llm_client_name: field("llm_client_name"), base_url: field("base_url"),
+    model: field("model"), api_key: field("api_key"), temperature: body.temperature,
+    max_output_tokens: integer(body.max_output_tokens, 1, [...location, "max_output_tokens"]), max_context_tokens: integer(body.max_context_tokens, 1, [...location, "max_context_tokens"]),
+    reasoning_effort: field("reasoning_effort"), soul_file: field("soul_file"),
+    vision_image_profile: nullable("vision_image_profile"), audio_profile: nullable("audio_profile"), vision_video_profile: nullable("vision_video_profile"),
   };
 }
 function sandboxInput(value: unknown): DynamicSandboxSpaceWithAvailability {
   const body = objectBody(value);
-  const name = text(body.name);
-  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) throw new PreviewHttpError(422, "Invalid namespace name");
-  return { name, path: text(body.path), description: text(body.description), is_readonly: flag(body.is_readonly), available: true };
+  const name = text(body.name, ["body", "name"]);
+  const path = text(body.path, ["body", "path"]);
+  const description = text(body.description, ["body", "description"]);
+  const isReadonly = flag(body.is_readonly, ["body", "is_readonly"]);
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) throw new PreviewHttpError(400, "sandbox_input_invalid", "Invalid namespace name");
+  return { name, path, description, is_readonly: isReadonly, available: true };
 }
 export async function handleConfigRequest(request: Request, runtime: PreviewRuntime): Promise<Response | null> {
   const url = new URL(request.url), path = url.pathname, method = request.method;
@@ -30,13 +34,13 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
     if (method === "GET") return jsonResponse({ profiles: store.profiles });
     const body = await readBody(request);
     if (method === "POST" || method === "PUT") {
-      const profile = profileInput(method === "POST" ? body : body.profile);
-      const original = method === "PUT" ? text(body.profile_name) : null;
-      if (!profile.name.trim()) throw new PreviewHttpError(422, "Profile name cannot be blank");
-      if (original && !store.profiles.some((item) => item.name === original)) throw new PreviewHttpError(404, "Profile does not exist");
-      if (store.profiles.some((item) => item.name === profile.name && item.name !== original)) throw new PreviewHttpError(409, "Profile name is already used");
+      const profile = profileInput(method === "POST" ? body : body.profile, method === "POST" ? ["body"] : ["body", "profile"]);
+      const original = method === "PUT" ? text(body.profile_name, ["body", "profile_name"]) : null;
+      if (!profile.name.trim()) throw new PreviewValidationError([{ loc: method === "POST" ? ["body", "name"] : ["body", "profile", "name"], msg: "Profile name cannot be blank", type: "value_error" }]);
+      if (original && !store.profiles.some((item) => item.name === original)) throw new PreviewHttpError(404, "profile_not_found", "Profile does not exist");
+      if (store.profiles.some((item) => item.name === profile.name && item.name !== original)) throw new PreviewHttpError(409, "profile_conflict", "Profile name is already used");
       const exists = (name: string | null) => name === null || name === profile.name || store.profiles.some((item) => item.name === name);
-      if (![profile.vision_image_profile, profile.audio_profile, profile.vision_video_profile].every(exists)) throw new PreviewHttpError(422, "Unknown referenced profile");
+      if (![profile.vision_image_profile, profile.audio_profile, profile.vision_video_profile].every(exists)) throw new PreviewHttpError(409, "profile_conflict", "Unknown referenced profile");
       store.profiles = store.profiles.filter((item) => item.name !== original);
       store.profiles.push(profile);
       if (original && original !== profile.name) {
@@ -52,11 +56,11 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
       return jsonResponse({ profile, notification_failures: [] });
     }
     if (method === "DELETE") {
-      const name = text(body.profile_name), replacement = body.replacement_profile_name === null ? null : text(body.replacement_profile_name);
-      if (!store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(404, "Profile does not exist");
-      if (replacement === name || (replacement !== null && !store.profiles.some((item) => item.name === replacement))) throw new PreviewHttpError(422, "Invalid replacement profile");
+      const name = text(body.profile_name, ["body", "profile_name"]), replacement = body.replacement_profile_name === null ? null : text(body.replacement_profile_name, ["body", "replacement_profile_name"]);
+      if (!store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(404, "profile_not_found", "Profile does not exist");
+      if (replacement === name || (replacement !== null && !store.profiles.some((item) => item.name === replacement))) throw new PreviewHttpError(409, "profile_conflict", "Invalid replacement profile");
       const incoming = store.profiles.some((item) => item.name !== name && [item.vision_image_profile, item.audio_profile, item.vision_video_profile].includes(name));
-      if (incoming && replacement === null) throw new PreviewHttpError(409, "Choose a replacement for referenced profile");
+      if (incoming && replacement === null) throw new PreviewHttpError(409, "profile_conflict", "Choose a replacement for referenced profile");
       const switched: string[] = [];
       for (const session of store.sessions.values()) if (session.profileName === name) { session.profileName = replacement ?? ""; switched.push(session.info.id); }
       store.profiles = store.profiles.filter((item) => item.name !== name);
@@ -76,8 +80,20 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
   if (reference) {
     if (method === "GET") return jsonResponse(store.profileState(store.references[reference]));
     if (method === "PUT") {
-      const body = await readBody(request), name = body.profile_name === null ? null : text(body.profile_name);
-      if (name !== null && !store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(422, "Unknown profile");
+      const body = await readBody(request), name = body.profile_name === null ? null : text(body.profile_name, ["body", "profile_name"]);
+      if (name !== null && !store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(404, "profile_not_found", "Unknown profile");
+      const profile = store.profiles.find((item) => item.name === name);
+      if (reference === "approval" && profile) {
+        const missing = ["llm_client_name", "base_url", "model"].filter((key) => {
+          switch (key) {
+            case "llm_client_name": return !profile.llm_client_name.trim();
+            case "base_url": return !profile.base_url.trim();
+            case "model": return !profile.model.trim();
+            default: throw new Error("Unexpected profile field");
+          }
+        });
+        if (missing.length) throw new PreviewHttpError(409, "profile_conflict", "Approval profile lacks connection fields", { profile_name: name, missing_fields: missing });
+      }
       store.references[reference] = name;
       const state = store.profileState(name);
       if (reference === "approval") runtime.events.broadcast({ type: "approval_profile_changed", approval_profile_name: name, approval_profile_model: state.model, approval_profile_available: state.available });
@@ -90,10 +106,10 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
     if (method === "GET") return jsonResponse({ image: store.profileState(store.references.image), audio: store.profileState(store.references.audio), video: store.profileState(store.references.video) });
     if (method === "PUT") {
       const body = await readBody(request);
-      if (body.media_type !== "image" && body.media_type !== "audio" && body.media_type !== "video") throw new PreviewHttpError(422, "Unknown modality");
+      if (body.media_type !== "image" && body.media_type !== "audio" && body.media_type !== "video") throw new PreviewValidationError([{ loc: ["body", "media_type"], msg: "Unknown modality", type: "literal_error" }]);
       const key: ModalityType = body.media_type;
-      const name = body.profile_name === null ? null : text(body.profile_name);
-      if (name !== null && !store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(422, "Unknown profile");
+      const name = body.profile_name === null ? null : text(body.profile_name, ["body", "profile_name"]);
+      if (name !== null && !store.profiles.some((item) => item.name === name)) throw new PreviewHttpError(404, "profile_not_found", "Unknown profile");
       store.references[key] = name;
       const image = store.profileState(store.references.image), audio = store.profileState(store.references.audio), video = store.profileState(store.references.video);
       runtime.events.broadcast({ type: "modality_profile_changed", modality_vision_image_profile_name: image.profile_name, modality_vision_image_profile_model: image.model, modality_vision_image_profile_available: image.available,
@@ -103,7 +119,15 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
     }
   }
   if (path === "/api/agent-loop/settings" && (method === "GET" || method === "PUT")) {
-    if (method === "PUT") { const value = (await readBody(request)).max_tool_turns; store.maxToolTurns = value === null ? null : integer(value, 1); }
+    if (method === "PUT") {
+      const body = await readBody(request);
+      const extra = Object.keys(body).find((key) => key !== "max_tool_turns");
+      if (extra) throw new PreviewValidationError([{ loc: ["body", extra], msg: "Extra inputs are not permitted", type: "extra_forbidden" }]);
+      const value = body.max_tool_turns;
+      const turns = value === null ? null : integer(value, 1, ["body", "max_tool_turns"]);
+      if (turns !== null && turns > Number.MAX_SAFE_INTEGER) throw new PreviewValidationError([{ loc: ["body", "max_tool_turns"], msg: "Tool turns exceed the upper limit", type: "less_than_equal" }]);
+      store.maxToolTurns = turns;
+    }
     return jsonResponse({ max_tool_turns: store.maxToolTurns, effective_max_tool_turns: store.maxToolTurns ?? PREVIEW.defaultMaxTurns, default_max_tool_turns: PREVIEW.defaultMaxTurns });
   }
   if (path === "/api/characters/profiles" && method === "GET") return jsonResponse(createCharacterProfiles());
@@ -116,18 +140,18 @@ export async function handleConfigRequest(request: Request, runtime: PreviewRunt
     if (method === "GET") return jsonResponse({ spaces: store.spaces });
     if (method === "POST") {
       const space = sandboxInput(await readBody(request));
-      if (store.spaces.some((item) => item.name === space.name)) throw new PreviewHttpError(409, "Namespace already exists");
+      if (store.spaces.some((item) => item.name === space.name)) throw new PreviewHttpError(409, "sandbox_space_conflict", "Namespace already exists");
       store.spaces.push(space); return jsonResponse({ space });
     }
   }
   const spacePath = path.match(/^\/api\/sandbox-spaces\/([^/]+)$/);
   if (spacePath) {
     const name = decodeURIComponent(spacePath[1]), existing = store.spaces.find((item) => item.name === name);
-    if (!existing) throw new PreviewHttpError(404, "Namespace does not exist");
+    if (!existing) throw new PreviewHttpError(404, "sandbox_space_not_found", "Namespace does not exist");
     if (method === "DELETE") { store.spaces = store.spaces.filter((item) => item !== existing); return jsonResponse({ removed: true }); }
     if (method === "PUT") {
       const space = sandboxInput(await readBody(request));
-      if (name !== space.name) throw new PreviewHttpError(422, "Namespace cannot be renamed");
+      if (name !== space.name) throw new PreviewHttpError(400, "sandbox_space_name_mismatch", "Namespace cannot be renamed");
       store.spaces = store.spaces.map((item) => item === existing ? space : item); return jsonResponse({ space });
     }
   }

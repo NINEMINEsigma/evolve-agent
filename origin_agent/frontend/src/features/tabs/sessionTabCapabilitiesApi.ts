@@ -1,5 +1,6 @@
 import { TIMING } from "../../constants/timing";
 import { fetchJsonWithTimeout } from "../../services/fetchJsonWithTimeout";
+import { decodeHttpError, type HttpResponseError } from "../../services/httpErrors";
 import type { FetchJsonWithTimeoutOptions } from "../../services/fetchJsonWithTimeout";
 
 export interface SessionTabCapabilitiesDto {
@@ -9,7 +10,7 @@ export interface SessionTabCapabilitiesDto {
 }
 
 export class SessionTabCapabilitiesRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly httpError?: HttpResponseError) {
     super(message);
     this.name = "SessionTabCapabilitiesRequestError";
   }
@@ -61,23 +62,9 @@ export function decodeSessionTabCapabilities(
   };
 }
 
-function errorDetail(payload: unknown, status: number): string {
-  if (payload !== null && typeof payload === "object" && !Array.isArray(payload) && "detail" in payload) {
-    const detail = payload.detail;
-    if (typeof detail === "string") return detail;
-    if (detail !== null && typeof detail === "object" && !Array.isArray(detail) && "message" in detail
-      && typeof detail.message === "string") {
-      const code = "code" in detail && typeof detail.code === "string" ? ` (${detail.code})` : "";
-      const path = "path" in detail && typeof detail.path === "string" && detail.path
-        ? ` · ${detail.path}` : "";
-      return `${detail.message}${code}${path}`;
-    }
-  }
-  return `HTTP ${status}`;
-}
-
 function createHttpError(status: number, payload: unknown | null): Error {
-  return new SessionTabCapabilitiesRequestError(errorDetail(payload, status), status);
+  const error = decodeHttpError(status, payload);
+  return new SessionTabCapabilitiesRequestError(error.message, status, error);
 }
 
 export function fetchSessionTabCapabilities(

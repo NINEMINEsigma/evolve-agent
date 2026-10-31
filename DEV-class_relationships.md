@@ -1673,6 +1673,16 @@ LSP准备增加物理终局检查；Shell只允许已释放或可靠交给登记
 
 完整工具契约、无旧包兼容转发及用户停机部署/旧五包残留处理边界见 [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md)。此次仅实施源码和开发文档并只读审阅，未运行校验、测试、实际导入、构建或应用；不宣称字节级换行一致或运行验收通过。
 
+### API端点组件的持有与调用关系（2026-10-31，当前约定）
+
+继承为`framework.AsyncComponent → interface.api_component.APIComponent → gateway/apis/具体端点类`。APIComponent不是System槽位或BaseModel；父System通过framework的公开parent_system提供，gateway只读属性显式核对IGatewaySystem，get_system委托所属Gateway，不缓存Application/Runtime/Logger。GatewaySystem通过add_component持有91个具体组件，工厂接收现有Gateway参数并按92条路由显式登记绑定handler；不在未awake阶段经Application查询自身槽位，不新增System或后台Owner。
+
+server不再定义端点、全局router或通知兼容函数。子Agent编排器的`_push_subagent_ws`只从`gateway.notifications`导入原签名push_subagent_update；HTTP附带通知共享send_optional_ws_message，序列化/断线边界保持。共享会话前置条件、Profile投影、专属错误和导出HTTP责任位于gateway/api_support，不读取Loop protected字段。连接/请求局部sid、ws、订阅和活动标识仍留在调用局部；Gateway/FrontendSink/Agentspace/导出叶服务拥有原真实资源。
+
+新增HTTPErrorDetail为entity/puretype/http.py的消息前纯类型，仅在传输边界编码，不持久化。HTTP专用ASGI准入/Request/APIRoute不改变真实handler同步/异步性质；ApplicationStoppingError只在HTTP路由边界转换，不注册为会捕获WS的全局处理器。BaseAgentLoop.merge_sessions仅把缺失session_manager/_session_store两项内部依赖直接抛RuntimeError；其他已识别拒绝与成功结果类型不改。
+
+前端唯一SessionStore持有Confirm/Ask提交记录（kind+request_id、payload、scope、phase、detached），不是第二份待办真相或持久化。资源页复用原scope/token与三秒轮询，useWebSocket仅暴露作用域判断/通知能力；无新轮询或成功外壳。所有持久化类型/key、21槽位、资源关闭与History交接保持。仅源码实施和只读审阅，未运行校验、导入、构建或应用，人工验收仍待用户。
+
 
 
 

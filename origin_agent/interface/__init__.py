@@ -1,3 +1,4 @@
+from .api_component import APIComponent
 from .agent_sink import IAgentSink
 from .agentspace_service import IAgentspaceService
 from .approval_system import IApprovalSystem
@@ -22,6 +23,7 @@ from .tool_discovery_system import IToolDiscoverySystem
 from .tool_registry import IToolRegistry
 
 __all__ = [
+    "APIComponent",
     "IAgentSink",
     "IAgentspaceService",
     "IApprovalSystem",

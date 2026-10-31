@@ -6,6 +6,7 @@
  * external cancellation as AbortError.
  */
 import { RequestTimeoutError } from "./fetchWithTimeout";
+import { decodeHttpError } from "./httpErrors";
 
 export interface FetchJsonWithTimeoutOptions {
   timeoutMs: number;
@@ -38,26 +39,36 @@ export async function fetchJsonWithTimeout<T>(
     controller.abort();
   }, options.timeoutMs);
 
+  const checkDeadline = () => {
+    if (timedOut || performance.now() - started >= options.timeoutMs) throw timeoutError();
+    if (externalSignal?.aborted) throw abortError();
+  };
   try {
     const response = await fetch(input, { ...init, signal: controller.signal, cache: "no-store" });
     const body = await response.text();
+    checkDeadline();
     let payload: unknown;
     try {
       payload = JSON.parse(body);
-    } catch {
+    } catch (error) {
+      checkDeadline();
+      if (!(error instanceof SyntaxError)) throw error;
       if (!response.ok) {
         throw options.createHttpError?.(response.status, null)
-          ?? new Error(`HTTP ${response.status}`);
+          ?? decodeHttpError(response.status, null);
       }
       throw new Error("Invalid JSON response body");
     }
+    checkDeadline();
     if (!response.ok) {
       throw options.createHttpError?.(response.status, payload)
-        ?? new Error(`HTTP ${response.status}`);
+        ?? decodeHttpError(response.status, payload);
     }
-    return decode(payload);
+    const result = decode(payload);
+    checkDeadline();
+    return result;
   } catch (error) {
-    if (timedOut) throw timeoutError();
+    if (timedOut || performance.now() - started >= options.timeoutMs) throw timeoutError();
     if (externalSignal?.aborted) throw abortError();
     throw error;
   } finally {

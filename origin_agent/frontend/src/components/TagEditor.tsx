@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { SessionInfo } from "../types";
 import ModalWindow from "./primitives/ModalWindow";
 import { SID_SHORT_LEN } from "../constants/session";
+import errorLabels from "../services/httpErrorLabels.json";
 
 interface TagEditorProps {
   session: SessionInfo | undefined;
   allTags: string[];
   onClose: () => void;
-  onSave: (sid: string, tags: string[]) => void;
+  onSave: (sid: string, tags: string[]) => Promise<void>;
 }
 
 function validateTag(t: string): { ok: boolean; reason?: string } {
@@ -25,11 +26,23 @@ export default function TagEditor({ session, allTags, onClose, onSave }: TagEdit
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [saving, setSaving] = useState(false);
+  const generationRef = useRef(0);
+  const ownerRef = useRef(session?.id);
+  const submittingRef = useRef(false);
+  if (ownerRef.current !== session?.id) {
+    ownerRef.current = session?.id;
+    generationRef.current += 1;
+    submittingRef.current = false;
+  }
+  const close = () => { generationRef.current += 1; submittingRef.current = false; onClose(); };
+  useEffect(() => () => { generationRef.current += 1; }, []);
 
   useEffect(() => {
     setDraft(session?.tags ? [...session.tags] : []);
     setInput("");
     setError(null);
+    setSaving(false);
   }, [session?.id, session?.tags]);
 
   useEffect(() => {
@@ -69,17 +82,34 @@ export default function TagEditor({ session, allTags, onClose, onSave }: TagEdit
     <ModalWindow
       className="tag-editor"
       title="编辑标签"
-      onClose={onClose}
+      onClose={close}
       closeOnOverlayClick
       closeOnEsc
       actions={
         <>
-          <button className="modal-btn modal-btn--secondary" onClick={onClose}>取消</button>
+          <button className="modal-btn modal-btn--secondary" onClick={close}>取消</button>
           <button
             className="modal-btn modal-btn--primary"
-            onClick={() => {
-              onSave(session.id, draft);
-              onClose();
+            disabled={saving}
+            onClick={async () => {
+              if (submittingRef.current) return;
+              submittingRef.current = true;
+              const generation = ++generationRef.current;
+              const sid = session.id;
+              setSaving(true);
+              try {
+                await onSave(sid, [...draft]);
+                if (generationRef.current === generation && ownerRef.current === sid) close();
+              } catch (cause) {
+                if (generationRef.current === generation && ownerRef.current === sid) {
+                  setError(cause instanceof Error ? cause.message : errorLabels.tagsSaveFailed);
+                }
+              } finally {
+                if (generationRef.current === generation && ownerRef.current === sid) {
+                  submittingRef.current = false;
+                  setSaving(false);
+                }
+              }
             }}
           >
             保存

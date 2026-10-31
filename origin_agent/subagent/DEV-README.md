@@ -296,5 +296,11 @@ SubAgentOrchestrator删除`_runtime`及具体`runtime`覆写，继承公共查�
 
 _OrchestratorContext、SubAgentLoop、TaskAgentLoop继续不是System，既有Runtime注入/显式查询、History/反馈交接、临时Agent不持久化及权限语义均保持。无新槽位、依赖、配置或持久化格式，未运行校验、导入、测试、构建或应用。
 
+## Gateway通知路径（2026-10-31）
+
+_OrchestratorContext._push_subagent_ws从`gateway.notifications`导入push_subagent_update，旧gateway.server不再提供该函数或兼容转发。原parent_session_id/update签名、SubAgentUpdate类型和removed→_removed的传输映射保持；通知在真正WebSocket发送边界序列化，只允许明确断线跳过，模型/编码等内部错误不被新通用捕获器隐藏。
+
+本轮仅移动调用依赖，不调整子Agent既有推送时序、反馈交接、History保存、权限、停止或资源所有权，不新增System。须与网关新包同批部署；未运行测试、校验、导入、构建或应用，运行验收待用户。
+
 
 

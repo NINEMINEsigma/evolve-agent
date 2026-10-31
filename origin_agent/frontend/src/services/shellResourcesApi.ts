@@ -1,4 +1,5 @@
 import type { CleanupReport, ShellInfo, ShellStopResult } from "../types";
+import { decodeHttpErrorBody } from "./httpErrors";
 
 function objectValue(payload: unknown): Record<string, unknown> {
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
@@ -50,7 +51,7 @@ export async function fetchSessionShells(
   signal?: AbortSignal,
 ): Promise<ShellInfo[]> {
   const response = await fetch(`/api/sessions/${sessionId}/shells`, { signal });
-  if (!response.ok) throw new Error(`Shell list failed: ${response.status}`);
+  if (!response.ok) throw decodeHttpErrorBody(response.status, await response.text());
   const payload = objectValue(await response.json());
   if (!Array.isArray(payload.shells)) throw new Error("Shells payload is not an array");
   return payload.shells.map((entry) => decodeShellInfo(entry, sessionId));
@@ -60,12 +61,11 @@ export async function stopSessionShell(
   sessionId: string,
   shellId: string,
   signal?: AbortSignal,
-): Promise<ShellStopResult | null> {
+): Promise<ShellStopResult> {
   const response = await fetch(`/api/sessions/${sessionId}/shells/${shellId}/stop`, {
     method: "POST",
     signal,
   });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Shell stop failed: ${response.status}`);
+  if (!response.ok) throw decodeHttpErrorBody(response.status, await response.text());
   return decodeShellStopResult(await response.json(), sessionId, shellId);
 }

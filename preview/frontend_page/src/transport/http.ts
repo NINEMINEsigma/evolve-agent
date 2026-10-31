@@ -4,7 +4,7 @@ import { reportPreviewFault } from "../runtime/faults";
 import { handleSessionRequest } from "./sessionRoutes";
 import { handleConfigRequest } from "./configRoutes";
 import { handleFileRequest } from "./fileRoutes";
-import { PreviewHttpError, jsonResponse } from "./contracts";
+import { PreviewHttpError, PreviewValidationError, jsonResponse } from "./contracts";
 
 const staticPaths = new Set<string>(Object.values(DEMO_ASSETS));
 export function createPreviewFetch(runtime: PreviewRuntime, nativeFetch: typeof fetch): typeof fetch {
@@ -27,12 +27,13 @@ export function createPreviewFetch(runtime: PreviewRuntime, nativeFetch: typeof 
         if (response !== null) return response;
       }
       reportPreviewFault({ code: "unknown_route", path: url.pathname, message: `Unregistered ${request.method} request` });
-      return jsonResponse({ detail: "Unregistered preview endpoint" }, 501);
+      return jsonResponse({ detail: { code: "preview_endpoint_not_implemented", message: "Unregistered preview endpoint" } }, 501);
     } catch (error) {
       if (request.signal.aborted) throw request.signal.reason;
-      if (error instanceof PreviewHttpError) return jsonResponse({ detail: error.message, error: error.message }, error.status);
+      if (error instanceof PreviewValidationError) return jsonResponse({ detail: error.issues }, 422);
+      if (error instanceof PreviewHttpError) return jsonResponse({ detail: error.detail }, error.status);
       reportPreviewFault({ code: "http_handler", path: url.pathname, message: error instanceof Error ? error.message : "Preview request failed" });
-      return jsonResponse({ detail: "Preview request handler failed" }, 500);
+      return new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     } finally { runtime.pendingRequests -= 1; }
   };
 }

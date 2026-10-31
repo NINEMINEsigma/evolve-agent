@@ -3,6 +3,8 @@ import type { ChatMessage, ContentBlock, DownloadInfo, MessageContent, PendingIm
 import { generateUUID, extractContentBlocks as _extractContentBlocks } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { DIMENSIONS } from "../constants/dimensions";
+import { decodeHttpErrorBody } from "../services/httpErrors";
+import errorLabels from "../services/httpErrorLabels.json";
 
 export type { PendingImage, PendingAudio, PendingVideo } from "../types";
 
@@ -246,18 +248,22 @@ export function useUploadManager({
     if (isLocal) {
       try {
         const resp = await fetch("/api/file-picker", { method: "POST" });
+        if (!resp.ok) throw decodeHttpErrorBody(resp.status, await resp.text());
         const data = await resp.json();
-        if (data.uploaded && data.files) {
+        if (!data || typeof data.uploaded !== "boolean" || !Array.isArray(data.files)) throw new Error(errorLabels.invalidResponse);
+        if (data.uploaded) {
           for (const f of data.files) {
+            if (f.uploaded === false && typeof f.error === "string") {
+              addMessage("error", `${f.filename}: ${f.error}`);
+              continue;
+            }
+            if (f.uploaded !== true || typeof f.filename !== "string" || typeof f.size !== "number"
+              || (f.method !== "hardlink" && f.method !== "copy")) throw new Error(errorLabels.invalidResponse);
             addMessage("system", `📎 ${f.method === "hardlink" ? "硬链接" : "复制"}: ${f.filename} (${(f.size / 1024).toFixed(1)}KB)`);
           }
-        } else if (data.error) {
-          addMessage("error", `文件选择失败: ${data.error}`);
-          if (isLocal) fileInputRef.current?.click();
-        }
+        } else if (data.files.length !== 0) throw new Error(errorLabels.invalidResponse);
       } catch (err) {
-        addMessage("error", `文件选择异常: ${err}`);
-        fileInputRef.current?.click();
+        addMessage("error", `${errorLabels.uploadFailed}: ${err instanceof Error ? err.message : errorLabels.requestFailed}`);
       }
     } else {
       fileInputRef.current?.click();

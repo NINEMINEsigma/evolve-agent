@@ -548,3 +548,19 @@ hook只计算 `dirty || busy || uncertain` 的刷新保护，SettingsPage唯一�
 
 不显示全局标签、额外当前/默认数值摘要、重复字段标签、规则或悬浮说明。标题通过aria-labelledby标注输入，只有校验失败时关联错误描述；异常区按需提供“重试”确认服务端状态，正常页不出现读取操作。读写中、未保存、外部变化、成功及失败/uncertain状态按需显示短文案。接口、空白提交null、禁写和刷新保护保持，未运行构建或应用验证。
 
+## HTTP业务错误与端点组件配套（2026-10-31，当前规范）
+
+后端端点已移到gateway/apis，每个具体API端点组件一文件，对外URL与成功结构保持。前端`services/httpErrors.ts`提供唯一错误分类：business为非2xx结构化detail（code/message及完整额外信息），validation为标准422字段列表，http为其他HTTP失败（包括非JSON500）。新增通用中文文案来自httpErrorLabels.json；不新增依赖或全局恢复框架，不接受旧顶层error/业务字符串detail兼容，不把错误HTML当用户正文展示。422默认只展示loc/msg，不展示input/ctx或整段敏感输入。
+
+关键JSON请求使用完整正文、解析和DTO检查截止，JSON.parse/解码前后核对耗时，不声称能中断同步解析。AbortError与RequestTimeoutError独立保留。失败保留旧快照或脏草稿，不能提交空列表/零能力/保存成功；实际404才沿专项接口规则清空。只有明确request_accepted=false或专项确定拒绝能排除提交，未知503、网络超时或不完整成功仍可能已经写入，沿原结果不确定和GET核对流程。
+
+SessionStore内Confirm/Ask提交按kind+request_id同步登记，保存首次payload与scope。提交中重复点击不重发，不确定时只能用户主动重试同payload；清理对已提交记录只detached，不另发矛盾deny/跳过，也不abort伪装撤回。未提交记录仍沿原清理策略；完成必须核对记录身份、scope代际及detached，A→B→A后旧结果不恢复待办或通知。过期404明确结束待办，不声称本次回答被接受。
+
+ResourcesTab通过useWebSocket公开的isResourceScopeCurrent/showOperationNoticeForScope绑定结果与通知，继续唯一三秒轮询，不加主动刷新接口。Shell pending保留元数据且不移除；Cron trigger成功回执不等于真实执行，不本地伪增run_count。TagEditor等待明确保存才关闭，失败保留草稿；现有标签成功tags=null仅在updated=true和会话匹配时采用本次后台已验证的提交值，失败不走此路径。提及菜单失败不缓存空列表，正常文件选择取消仍保持成功空结果。
+
+Agentspace错误保留current_version（含null）、path和locks，409差异/423锁展示与脏草稿保护保持。导出先按HTTP解码失败，只有精确状态/code且source/proof验证通过才生成不可用资源占位；503/500/422不是资源缺失。有界reader、取消、stamp/digest/identity/MIME/长度与时间限制保持。中断从detail.result读取原权威结果，内部error文本并不是要删除的旧HTTP外壳。
+
+原WebSocket帧、EventSource事件、HEAD版本/307、原生资源加载和History正典交接保持；原生SSE无法读取HTTP错误正文时继续error/degraded，不加预请求。独立预览同步模拟新错误协议，仍无真实后端/模型/宿主文件操作；既有预览媒体身份不满足正式32位十六进制规则的限制另见预览覆盖文档，未在本轮扩范围修复。
+
+本轮仅源码与只读审阅，未运行tsc/lint/测试/构建或应用。须完整部署后端与配套前端并由用户构建/重启/刷新，人工验收P9/P19；错误协议一次切换，不支持旧页面与新后端混用。
+

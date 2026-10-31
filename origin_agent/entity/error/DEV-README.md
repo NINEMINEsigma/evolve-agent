@@ -53,3 +53,11 @@
 异常不加入 easysave 或 `entity/typeref.py`，本次源码迁移不改变持久化模型、存储结构或 easysave key，也不新增 System、装配依赖或前端协议。若未来发生真实持久化结构变化，仍须遵守原版本升级约定，不能把本次 key 未变当作通用豁免。
 
 本次仅进行源码迁移及文档同步，未运行测试、实际导入、构建、校验或应用。文档与只读文本审阅不代表运行通过，完整部署后的运行验收由用户执行。
+
+## HTTP端点组件的错误边界（2026-10-31）
+
+本轮网关组件化没有新增origin仓库自定义异常或统一异常基类；业务异常仍按本包原定义显式导入，HTTPException/RequestValidationError来自框架。HTTPErrorDetail位于entity/puretype/http.py，是不持久化的纯传输数据，不是异常类型，不进入typeref/easysave。
+
+Gateway只把明确业务拒绝映射非2xx和结构化detail；格式/字段/参数校验保持标准422列表，特殊有界导出校验排除原输入bytes和ctx异常对象。HTTPException族与HTTP在途ApplicationStoppingError有专用边界；后者不注册全局以误接WS。没有新增Exception/RuntimeError/OSError全局捕获，存储损坏、必要保存失败和其他逻辑之外错误继续传播；明确返回的正常pending/部分结果也不一律抛异常。
+
+BaseAgentLoop合并缺内部依赖直接用标准RuntimeError，不在业务包新建异常。原业务异常继承/所有权/存储版本不变；用户需同批部署网关和前端，人工验收仍未执行。

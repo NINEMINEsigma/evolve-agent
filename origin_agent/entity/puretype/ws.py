@@ -10,7 +10,7 @@ class ConfirmResponseRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: str = "deny"
+    action: Literal["allow_once", "allow_always", "deny"] = "deny"
     deny_reason: str | None = None
     denied_by: str = "user"
 

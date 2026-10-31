@@ -3,23 +3,18 @@ import type {
   DynamicSandboxSpace,
   DynamicSandboxSpacesResponse,
 } from "../types";
-import { RequestTimeoutError } from "./fetchWithTimeout";
+import { fetchJsonWithTimeout } from "./fetchJsonWithTimeout";
+import { decodeHttpErrorBody } from "./httpErrors";
 
 const SPACES_TIMEOUT_MS = 15_000;
 
-async function responseError(response: Response): Promise<Error> {
-  const data = await response.json().catch(() => ({}));
-  const detail = (data as { detail?: unknown }).detail;
-  const message = typeof detail === "string"
-    ? detail
-    : `请求失败 (${response.status})`;
-  return new Error(message);
-}
-
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
-  if (!response.ok) throw await responseError(response);
-  return response.json() as Promise<T>;
+  const body = await response.text();
+  if (!response.ok) throw decodeHttpErrorBody(response.status, body);
+  const payload: unknown = JSON.parse(body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid sandbox space response");
+  return payload as T;
 }
 
 function decodeSpacesResponse(payload: unknown): DynamicSandboxSpacesResponse {
@@ -46,33 +41,8 @@ function decodeSpacesResponse(payload: unknown): DynamicSandboxSpacesResponse {
 
 /** 列表 GET：完整 JSON 截止 + 外部取消 + 必要字段校验；其他 CRUD 保持原样。 */
 export async function listDynamicSandboxSpaces(signal?: AbortSignal): Promise<DynamicSandboxSpacesResponse> {
-  const started = performance.now();
-  const controller = new AbortController();
-  let timedOut = false;
-  if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-  const onAbort = () => controller.abort();
-  signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, SPACES_TIMEOUT_MS);
-  try {
-    const response = await fetch("/api/sandbox-spaces", { cache: "no-store", signal: controller.signal });
-    const body = await response.text();
-    if (timedOut) throw new RequestTimeoutError("sandbox-spaces", SPACES_TIMEOUT_MS, performance.now() - started);
-    if (!response.ok) throw new Error(`请求失败 (${response.status})`);
-    let payload: unknown;
-    try { payload = JSON.parse(body); } catch { throw new Error("服务端返回的动态沙盒空间列表格式无效"); }
-    if (timedOut) throw new RequestTimeoutError("sandbox-spaces", SPACES_TIMEOUT_MS, performance.now() - started);
-    return decodeSpacesResponse(payload);
-  } catch (failure) {
-    if (timedOut) throw new RequestTimeoutError("sandbox-spaces", SPACES_TIMEOUT_MS, performance.now() - started);
-    if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-    throw failure;
-  } finally {
-    window.clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
-  }
+  return fetchJsonWithTimeout("/api/sandbox-spaces", { signal },
+    { timeoutMs: SPACES_TIMEOUT_MS, phase: "sandbox-spaces" }, decodeSpacesResponse);
 }
 
 export async function createDynamicSandboxSpace(
@@ -83,6 +53,8 @@ export async function createDynamicSandboxSpace(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(space),
   });
+  if (!data.space || data.space.name !== space.name || typeof data.space.path !== "string"
+    || typeof data.space.description !== "string" || typeof data.space.is_readonly !== "boolean") throw new Error("Invalid sandbox space mutation response");
   return data.space;
 }
 
@@ -101,6 +73,8 @@ export async function updateDynamicSandboxSpace(
       body: JSON.stringify(space),
     },
   );
+  if (!data.space || data.space.name !== space.name || typeof data.space.path !== "string"
+    || typeof data.space.description !== "string" || typeof data.space.is_readonly !== "boolean") throw new Error("Invalid sandbox space mutation response");
   return data.space;
 }
 
@@ -109,6 +83,7 @@ export async function removeDynamicSandboxSpace(name: string): Promise<boolean> 
     `/api/sandbox-spaces/${encodeURIComponent(name)}`,
     { method: "DELETE" },
   );
+  if (data.removed !== true) throw new Error("Invalid sandbox space delete response");
   return data.removed;
 }
 
@@ -117,6 +92,7 @@ export async function pickDynamicSandboxDirectory(): Promise<string | null> {
     "/api/sandbox-spaces/pick-directory",
     { method: "POST" },
   );
+  if (typeof data.selected !== "boolean") throw new Error("Invalid directory picker response");
   if (!data.selected) return null;
   if (typeof data.path !== "string" || !data.path) {
     throw new Error("目录选择器返回的路径无效");

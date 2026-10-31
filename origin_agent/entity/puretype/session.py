@@ -55,7 +55,7 @@ class SessionRegenerateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    message_index: int | None = None
+    message_index: int | None = Field(default=None, ge=0)
     llm_profile_name: str
     require_tool_call: StrictBool = False
 
@@ -65,7 +65,7 @@ class SessionMergeRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    sources: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(min_length=1)
 
 
 class MainSessionActivitySource(str, Enum):

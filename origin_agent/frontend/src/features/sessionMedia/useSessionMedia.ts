@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SESSION_MEDIA } from "../../constants/sessionMedia";
 import { useChatRuntimeStore } from "../chat/chatRuntimeStore";
 import { fetchSessionMedia, SessionMediaRequestError, updateSessionMedia } from "./api";
+import { isPreExecutionRejection } from "../../services/httpErrors";
 import { mediaInputLabels } from "./labels";
 import type {
   SessionMediaAggregateDto, SessionMediaItemDto, SessionMediaListResponseDto, UseSessionMediaState,
@@ -118,8 +119,9 @@ export function useSessionMedia(sessionId: string, active: boolean, archived: bo
     } catch (failure) {
       if (generation.current !== owner || current.current.sessionId !== sessionId || !current.current.active) return;
       const message = failure instanceof Error ? failure.message : String(failure);
-      const knownRejection = failure instanceof SessionMediaRequestError
-        && [400, 403, 404, 409].includes(failure.status);
+      const knownRejection = failure instanceof SessionMediaRequestError && failure.httpError !== undefined
+        && (isPreExecutionRejection(failure.httpError)
+          || ["media_not_found", "media_conflict", "session_archived", "session_not_found", "session_not_ready", "session_rotating"].includes(failure.httpError.code ?? ""));
       if (failure instanceof SessionMediaRequestError && failure.status === 404) {
         setPage((previous) => previous !== null && previous.session_id === sessionId ? {
           ...previous, items: previous.items.filter((entry) => entry.media_id !== item.media_id),

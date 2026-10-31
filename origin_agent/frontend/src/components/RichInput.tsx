@@ -3,6 +3,8 @@ import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSo
 import MentionMenu, { type MentionItem } from "./MentionMenu";
 import { DIMENSIONS } from "../constants/dimensions";
 import { TIMING } from "../constants/timing";
+import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
+import errorLabels from "../services/httpErrorLabels.json";
 
 interface RichInputProps {
   value: string;
@@ -51,57 +53,42 @@ async function loadSkillItems(): Promise<MentionItem[]> {
   if (_skillsCache && Date.now() - _skillsCache.ts < CACHE_TTL) {
     return _skillsCache.items;
   }
-  try {
-    const res = await fetch("/api/skills/list");
-    const data = await res.json();
-    const items: MentionItem[] = (data.skills || []).map((s: any) => ({
-      id: s.name,
-      label: s.name,
-      description: s.description,
-      icon: "skill" as const,
-    }));
-    _skillsCache = { items, ts: Date.now() };
-    return items;
-  } catch {
-    return [];
-  }
+  const items = await fetchJsonWithTimeout("/api/skills/list", {},
+    { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "skill-mentions" }, (value) => {
+      if (!value || typeof value !== "object" || !("skills" in value) || !Array.isArray(value.skills)) throw new Error("Invalid skills list response");
+      return value.skills.map((entry: unknown): MentionItem => {
+        if (!entry || typeof entry !== "object" || !("name" in entry) || typeof entry.name !== "string"
+          || !("description" in entry) || typeof entry.description !== "string") throw new Error("Invalid skill entry");
+        return { id: entry.name, label: entry.name, description: entry.description, icon: "skill" };
+      });
+    });
+  _skillsCache = { items, ts: Date.now() };
+  return items;
 }
 
 // agentspace 目录缓存: dir → { items, ts }
 const _agentspaceDirCache = new Map<string, { items: MentionItem[]; ts: number }>();
 
 async function loadAgentspaceItems(query: string): Promise<MentionItem[]> {
-  try {
-    const dir = query.includes("/") ? query.substring(0, query.lastIndexOf("/")) : "";
-    const filter = query.includes("/") ? query.substring(query.lastIndexOf("/") + 1) : query;
-
-    // 先查缓存，过期则重新加载
-    let cached = _agentspaceDirCache.get(dir);
-    let entries: MentionItem[];
-    if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      entries = cached.items;
-    } else {
-      const res = await fetch(`/api/agentspace/list?path=${encodeURIComponent(dir)}`);
-      const data = await res.json();
-      const raw: any[] = data.entries || [];
-      entries = raw.map((e) => {
-        const fullPath = dir ? `${dir}/${e.name}` : e.name;
-        return {
-          id: fullPath,
-          label: e.name,
-          description: e.type === "dir" ? "目录" : "",
-          icon: e.type === "dir" ? ("dir" as const) : ("file" as const),
-        };
+  const dir = query.includes("/") ? query.substring(0, query.lastIndexOf("/")) : "";
+  const filter = query.includes("/") ? query.substring(query.lastIndexOf("/") + 1) : query;
+  const cached = _agentspaceDirCache.get(dir);
+  let entries: MentionItem[];
+  if (cached && Date.now() - cached.ts < CACHE_TTL) entries = cached.items;
+  else {
+    entries = await fetchJsonWithTimeout(`/api/agentspace/list?path=${encodeURIComponent(dir)}`, {},
+      { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "file-mentions" }, (value) => {
+        if (!value || typeof value !== "object" || !("entries" in value) || !Array.isArray(value.entries)) throw new Error("Invalid directory response");
+        return value.entries.map((entry: unknown): MentionItem => {
+          if (!entry || typeof entry !== "object" || !("name" in entry) || typeof entry.name !== "string"
+            || !("type" in entry) || (entry.type !== "dir" && entry.type !== "file")) throw new Error("Invalid directory entry");
+          return { id: dir ? `${dir}/${entry.name}` : entry.name, label: entry.name,
+            description: entry.type === "dir" ? errorLabels.directoryLabel : "", icon: entry.type === "dir" ? "dir" : "file" };
+        });
       });
-      _agentspaceDirCache.set(dir, { items: entries, ts: Date.now() });
-    }
-
-    return filter
-      ? entries.filter((e) => e.label.toLowerCase().includes(filter.toLowerCase()))
-      : entries;
-  } catch {
-    return [];
+    _agentspaceDirCache.set(dir, { items: entries, ts: Date.now() });
   }
+  return filter ? entries.filter((entry) => entry.label.toLowerCase().includes(filter.toLowerCase())) : entries;
 }
 
 // ── 组件 ──────────────────────────────────────────────────────
@@ -127,14 +114,16 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   const divRef = innerRef;
   const [isEmpty, setIsEmpty] = useState(!value);
   const [mention, setMention] = useState<MentionState>(MENTION_NONE);
+  const [mentionError, setMentionError] = useState<{ trigger: string; query: string; message: string } | null>(null);
+  const mentionLoadGeneration = useRef(0);
   const mentionRef = useRef<MentionState>(MENTION_NONE);
   mentionRef.current = mention;
   const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 组件挂载时预加载 agentspace 根目录和 skills 列表，让首次 @ 或 / 能立刻显示菜单
   useEffect(() => {
-    loadAgentspaceItems("");
-    loadSkillItems();
+    void loadAgentspaceItems("").catch(() => {});
+    void loadSkillItems().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -341,29 +330,26 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   // debounce 加载菜单数据
   useEffect(() => {
     if (loadTimer.current) clearTimeout(loadTimer.current);
+    const generation = ++mentionLoadGeneration.current;
+    setMentionError(null);
     if (mention === MENTION_NONE) return;
-
-    loadTimer.current = setTimeout(async () => {
-      const current = mentionRef.current;
-      let items: MentionItem[];
-      if (current.trigger === "/") {
-        const allSkills = await loadSkillItems();
-        items = current.query
-          ? allSkills.filter((s) =>
-              s.label.toLowerCase().includes(current.query.toLowerCase()),
-            )
-          : allSkills;
-      } else {
-        items = await loadAgentspaceItems(current.query);
-      }
-      setMention((prev) =>
-        prev === MENTION_NONE
-          ? prev
-          : { ...prev, items, selectedIndex: 0 },
-      );
+    const trigger = mention.trigger;
+    const query = mention.query;
+    const owns = () => generation === mentionLoadGeneration.current
+      && mentionRef.current.trigger === trigger && mentionRef.current.query === query;
+    loadTimer.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const all = trigger === "/" ? await loadSkillItems() : await loadAgentspaceItems(query);
+          const items = trigger === "/" && query ? all.filter((item) => item.label.toLowerCase().includes(query.toLowerCase())) : all;
+          if (owns()) setMention((previous) => previous === MENTION_NONE ? previous : { ...previous, items, selectedIndex: 0 });
+        } catch (error) {
+          if (owns()) setMentionError({ trigger, query, message: `${errorLabels.mentionLoadFailed}: ${error instanceof Error ? error.message : errorLabels.requestFailed}` });
+        }
+      })();
     }, TIMING.INPUT_DEBOUNCE);
-
     return () => {
+      mentionLoadGeneration.current += 1;
       if (loadTimer.current) clearTimeout(loadTimer.current);
     };
   }, [mention.trigger, mention.query]);
@@ -665,6 +651,9 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
         data-placeholder={placeholder}
         suppressContentEditableWarning
       />
+      {mention !== MENTION_NONE && mentionError?.trigger === mention.trigger && mentionError.query === mention.query && (
+        <div role="status" className="tag-editor-error">{mentionError.message}</div>
+      )}
       {menuOpen && (
         <MentionMenu
           items={mention.items}

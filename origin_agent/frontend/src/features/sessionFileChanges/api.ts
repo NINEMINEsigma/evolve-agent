@@ -6,6 +6,7 @@
  */
 import { TIMING } from "../../constants/timing";
 import { fetchJsonWithTimeout } from "../../services/fetchJsonWithTimeout";
+import { decodeHttpError, type HttpResponseError } from "../../services/httpErrors";
 import type {
   SessionFileChangeAction, SessionFileChangeActorDto, SessionFileChangeDisplayState, SessionFileChangeEntryDto,
   SessionFileChangeKind, SessionFileChangeToolName, SessionFileChangesPageDto,
@@ -13,7 +14,7 @@ import type {
 } from "./types";
 
 export class SessionFileChangesRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly httpError?: HttpResponseError) {
     super(message);
     this.name = "SessionFileChangesRequestError";
   }
@@ -276,16 +277,9 @@ function pageUrl(sessionId: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/file-changes`;
 }
 
-function errorDetail(payload: unknown, status: number): string {
-  if (payload !== null && typeof payload === "object" && "detail" in payload
-    && typeof (payload as { detail: unknown }).detail === "string") {
-    return (payload as { detail: string }).detail;
-  }
-  return `HTTP ${status}`;
-}
-
 function createHttpError(status: number, payload: unknown): Error {
-  return new SessionFileChangesRequestError(errorDetail(payload, status), status);
+  const error = decodeHttpError(status, payload);
+  return new SessionFileChangesRequestError(error.message, status, error);
 }
 
 export function fetchSessionFileChangesSummary(

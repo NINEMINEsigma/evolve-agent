@@ -4,7 +4,8 @@ import { generateUUID } from "../utils";
 import { STORAGE_KEYS } from "../constants/storage";
 import { WS_CLOSE_SESSION_DELETED, WS_IN, WS_OUT } from "../constants/ws";
 import { TIMING } from "../constants/timing";
-import { fetchWithTimeout, RequestTimeoutError } from "../services/fetchWithTimeout";
+import { RequestTimeoutError } from "../services/fetchWithTimeout";
+import { fetchJsonWithTimeout } from "../services/fetchJsonWithTimeout";
 import { decodeWSMessage } from "./wsMessageDecoder";
 
 export interface WebSocketConnectionHandlers {
@@ -34,6 +35,15 @@ export interface WebSocketConnection {
   recvTick: number;
   sessionLocked: boolean;
   retryConnect: () => void;
+}
+
+function decodeConnectionStatus(value: unknown, sessionId: string): { exists: boolean; occupied: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid session status response");
+  const data = value as Record<string, unknown>;
+  if (data.session_id !== sessionId || typeof data.exists !== "boolean" || typeof data.occupied !== "boolean") {
+    throw new Error("Invalid session status response");
+  }
+  return { exists: data.exists, occupied: data.occupied };
 }
 
 export function useWebSocketConnection(): WebSocketConnection {
@@ -116,15 +126,15 @@ export function useWebSocketConnection(): WebSocketConnection {
       const statusController = new AbortController();
       statusRequestAbortRef.current = statusController;
       try {
-        const response = await fetchWithTimeout(
+        const resp = await fetchJsonWithTimeout(
           `/api/sessions/${preCheckSid}/status?conn_token=${encodeURIComponent(token)}`,
           { signal: statusController.signal },
           {
             timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
             phase: "session_status_precheck",
           },
+          (value) => decodeConnectionStatus(value, preCheckSid),
         );
-        const resp = await response.json();
         if (myId !== connectIdRef.current) return; // Stale request
         if (resp.exists === false) {
           notifySessionDeleted();
@@ -196,15 +206,15 @@ export function useWebSocketConnection(): WebSocketConnection {
         const statusController = new AbortController();
         statusRequestAbortRef.current?.abort();
         statusRequestAbortRef.current = statusController;
-        fetchWithTimeout(
+        fetchJsonWithTimeout(
           `/api/sessions/${sid}/status?conn_token=${encodeURIComponent(token)}`,
           { signal: statusController.signal },
           {
             timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
             phase: "session_status_recheck",
           },
+          (value) => decodeConnectionStatus(value, sid),
         )
-          .then((r) => r.json())
           .then((data) => {
             if (myId !== connectIdRef.current) return;
             if (data.exists === false) {

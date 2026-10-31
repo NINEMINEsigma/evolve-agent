@@ -2,6 +2,8 @@
 
 `gateway/` 负责 Evolve Agent 对外的所有网络交互：前端 WebSocket 长连接、消息路由、REST API 以及会话生命周期管理。
 
+> **2026-10-31当前规范**：端点定义全部位于`apis/`，server只保留工厂。请求结构/字段/参数错误采用标准422；明确业务拒绝采用非2xx及`detail:{code,message,...}`，成功结构与专属附加字段保持。下文历史章节中的“server端点/全局router/手动解析400/旧失败载荷”均由本说明与文末当前协议章节覆盖，不表示仍提供旧接口导入或错误格式兼容。
+
 ---
 
 ## 文件结构
@@ -10,7 +12,12 @@
 gateway/
 ├── system.py                ← GatewaySystem：FastAPI/uvicorn/socket 与全部路由后台工作的唯一所有者（S21）
 ├── lifecycle.py             ← GatewayAdmission（HTTP/WS 输入准入）与 GatewayReadyTracker（真实启动就绪）
-├── server.py                ← 静态 APIRouter 路由表 + build_router_app() 运行实例工厂
+├── server.py                ← build_router_app(gateway)：无全局路由的运行实例工厂
+├── apis/                    ← 91个API端点组件，按职责分目录，显式注册92条路由
+├── api_support/             ← 会话前置条件、Profile投影、专属错误及有界导出HTTP帮助
+├── http_boundary.py         ← 新业务准入、标准422与结构化HTTP错误边界
+├── frontend_assets.py       ← 前端产物路径、hash与MIME
+├── notifications.py         ← 跨端点/子Agent共用的可选WebSocket通知
 ├── message_router.py        ← MessageRouter：WebSocket 消息按类型分发
 ├── chat.py                  ← SessionManager：会话索引、归档、合并、分支
 ├── session_manager.py       ← SessionManager：session_id → IMainSessionLoop 映射
@@ -33,7 +40,10 @@ gateway/
 |---|---|
 | `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 也在此，抛出的 `GatewayPortBusyError` 定义于 `entity/error/gateway.py`（占用按退出 0 的普通业务拒绝）。 |
 | `lifecycle.py` | `GatewayAdmission`：新业务经 `admit_business()`（要求 RUNNING）；WS 连接经 `admit_connection()`（STARTING/RUNNING）；已建立连接的每条输入经 `require_open_connection()`。`GatewayReadyTracker` 由 uvicorn 子类在 startup 成功后置位。 |
-| `server.py` | 只含静态路由定义的模块级 `APIRouter` 与 `build_router_app() -> FastAPI` 工厂（include_router、挂载 assets、计算 build_hash 存于 `app.state.build_hash`）。不再有模块级 FastAPI 实例、`_agentspace_path`/`_BUILD_HASH` 运行快照、`set_agentspace_path` 或旧 `create_server` 入口；文件上传路径经 `RuntimeSystem.context.agentspace`。 |
+| `server.py` | 仅`build_router_app(gateway: IGatewaySystem) -> FastAPI`工厂：创建局部GatewayAPIRoute路由表，通过register_apis绑定具体组件，include_router、挂载assets并将hash存于app.state。没有全局router、端点函数或通知转发；GatewaySystem传入现有self，避免未awake时查询自身。 |
+| `apis/` | 每个具体APIComponent一文件，按职责分组；显式原URL/方法/name/response_model，91组件、92注册，GET/HEAD共组件但两条登记。只在handler局部保存连接/请求数据，sync文件/ZIP保留线程池语义。 |
+| `http_boundary.py` | 原生ASGI中间件在正文读取前限制新业务；JSON字节/原生模型使用标准422；只映射HTTP与已识别停止，未知错误传播，WS不进入HTTP专属转换。 |
+| `api_support/`、`notifications.py`、`frontend_assets.py` | 按职责共享前置条件、状态投影、专属HTTP错误、有界导出、通知和静态产物定位，不持有第二份业务服务或请求状态。 |
 | `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。USER_MESSAGE 在 `route()` 内同步完成目标/字段/Profile 校验并登记输入记录（主会话 `message_queue.accept(ready=False)`），之后才经 `GatewaySystem.spawn_work` 启动准备任务（Profile 就绪、自动标题——无标题会话首条消息经 `SessionMetadataService.maybe_generate_first_title` 触发 LLM 生成+截取回退、客户端信息、子会话转发），准备完成后 `mark_ready`；准备任务非取消异常按 RV9 记录应用失败，记录保留由关闭刷新只落 History。 |
 | `chat.py` | `SessionManager`：维护会话元数据索引（`_index.json`），提供会话的创建、归档、删除、合并、分支、标签、标题等操作。 |
 | `session_manager.py` | `SessionManager`：在 `chat.py` 的 `SessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。 |
@@ -428,5 +438,24 @@ SessionManager/GatewaySystem删除`_runtime`，Gateway的具体属性覆写也�
 原关闭主体移至`virtual_prepare_shutdown`，在架构仍绑定时等待回复/队列/History交接、serve终局及导出线程池close；framework真正关闭钩子仅核对准备结果。Gateway的失败awake从叶服务资源创建起进入异常边界，`prepare_failed_startup`持有唯一真实清理：端口预检失败也释放先前创建的导出服务，serve/Owner/socket/导出独立必要释放保持可审查，原始错误与清理失败保留为异常组。单纯端口占用仍是普通拒绝；未确认安全的清理不继续拆依赖。
 
 Application仍先业务停止和History刷新、最后结束输出，再执行关闭准备与原Logger根级联。非System注入、MessageRouter查询、21槽位、协议/持久化和5秒硬截止不变；未运行校验、导入、测试、构建或应用。
+
+## API端点组件与HTTP边界（2026-10-31，当前权威）
+
+详细目录及新增端点步骤见[apis/DEV-README.md](apis/DEV-README.md)。组件通过parent_system取得唯一Gateway，不在模块导入/注册时查Application或创建连接；register_apis单次显式装配，重复绑定直接失败。server不再导出router、ws_chat、push_subagent_update或_flush_pending_changes；通知调用统一新路径gateway.notifications，真实Agentspace变更摘要仍经IAgentspaceService公开服务。
+
+### 准入、校验与错误
+
+- 原生ASGI中间件只匹配`/api`、`/dynamic`完整首段，在正文和校验之前要求RUNNING，包括查询和新建SSE。前置503明确携带request_accepted=false；在途停止503不携该保证，已提交状态不回滚。健康检查、public资源和WS原连接规则不被中间件改写。
+- 请求JSON格式/Unicode、字段/Literal/StrictBool、Path/Query范围错误采用FastAPI标准422列表。导出resource/verify先有界流读，超量413/超时408，之后校验安全转换为422，排除原body/bytes/input/ctx/url。
+- 明确业务拒绝统一结构化detail：会话缺失404、未恢复/旋转/忙碌409、归档聊天写403、交互过期404、Cron/Shell不存在404、Profile冲突409、文件锁423等。原Agentspace code/path/current_version（含null）/locks、变量path、导出source/proof和中断detail.result保留。未知异常不泛捕获；内部损坏不能变空数据或默认成功。
+- /status的exists=false、选文件/目录取消、空资源、正常取消置顶、Shell pending、垃圾桶/文件上传部分失败和元数据/广播warnings保持原正常结果。标签更新仍保留既有成功tags=null字段；后台逐项验证后才提交，前端只有明确updated成功才采用本次提交值。
+- 不提供旧顶层error/字符串detail的业务协议兼容。框架HTTP404/405按HTTP协议转换且保留Allow；非法业务路径不由SPA返回200 HTML。普通页面/文件成功、HEAD无正文、视觉307/版本头及原静态挂载次序保持。
+- handle_http_exception按Starlette的ExceptionHandler回调契约声明exc: Exception，在函数入口显式收窄为StarletteHTTPException；非该异常族直接重新抛出。注册仍限定HTTPException，不注册通用Exception捕获器，也不使用cast/Any掩盖回调参数逆变约束。
+
+### 生命周期不变量
+
+SSE与WS的订阅/任务/连接仍属于原Gateway TaskOwner、FrontendSink与Agentspace服务；新入口准入不用于逐次阻止旧输出。关闭仍先提交History再结束输出；WS旋转、旧连接保护、4001/4004/1001/1011及预期失败回调先于Owner结算保持。删除与导出仍等待真实线程/容量交接，不将取消包装等待当资源结束。同步文件和ZIP不改async。Profile根引用、锁及保存/缓存/广播顺序不变。
+
+源码已实施，未由开发助手AI运行任何测试、校验、导入、构建或应用；人工验收按任务文件P9/P19。须用户停机同批部署完整包与前端、构建并重启/刷新，外部调用方升级错误协议；开发助手AI不操作workspace或清理运行时残留。
 
 

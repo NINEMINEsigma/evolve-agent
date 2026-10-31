@@ -422,11 +422,12 @@ export interface ToolCallMeta {
 export type InterruptStatus = "idle" | "interrupting" | "cancelled" | "failed";
 
 export interface InterruptResponse {
-  interrupted?: boolean;
-  status?: "idle" | "cancelled" | "timeout" | "failed" | "not_found";
-  session_id?: string;
-  reason?: string;
-  error?: string;
+  interrupted: boolean;
+  status: "idle" | "cancelled" | "timeout" | "failed";
+  session_id: string;
+  reason?: string | null;
+  /** Authoritative interrupt result text, including detail.result on HTTP failure. */
+  error?: string | null;
 }
 
 export interface MessageMetrics {

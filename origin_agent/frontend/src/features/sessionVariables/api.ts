@@ -1,15 +1,20 @@
 import { TIMING } from "../../constants/timing";
 import { SESSION_VARIABLE_PRESENTATION } from "../../constants/sessionVariables";
 import { RequestTimeoutError } from "../../services/fetchWithTimeout";
+import { decodeHttpError, type HttpResponseError } from "../../services/httpErrors";
 import type {
   SessionVariableEntryDto, SessionVariableIssueDto, SessionVariableMetadataDto,
   SessionVariablePoolResponseDto,
 } from "./types";
 
 export class SessionVariablesRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  readonly code: string | null;
+  readonly path: string | null;
+  constructor(message: string, readonly status: number, readonly httpError?: HttpResponseError) {
     super(message);
     this.name = "SessionVariablesRequestError";
+    this.code = httpError?.code ?? null;
+    this.path = typeof httpError?.businessDetail?.path === "string" ? httpError.businessDetail.path : null;
   }
 }
 
@@ -114,17 +119,11 @@ export function decodeSessionVariablePool(payload: unknown, expectedSessionId: s
   };
 }
 
-function errorDetail(payload: unknown, status: number): string {
-  if (payload && typeof payload === "object" && "detail" in payload) {
-    const detail: unknown = payload.detail;
-    if (typeof detail === "string") return detail;
-    if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
-      const code = "code" in detail && typeof detail.code === "string" ? ` (${detail.code})` : "";
-      const path = "path" in detail && typeof detail.path === "string" && detail.path ? ` · ${detail.path}` : "";
-      return detail.message + code + path;
-    }
-  }
-  return `HTTP ${status}`;
+function errorDetail(payload: unknown, status: number): SessionVariablesRequestError {
+  const error = decodeHttpError(status, payload);
+  const path = error.businessDetail?.path;
+  const message = typeof path === "string" && path ? `${error.message} · ${path}` : error.message;
+  return new SessionVariablesRequestError(message, status, error);
 }
 
 export async function fetchSessionVariables(sessionId: string, signal: AbortSignal): Promise<SessionVariablePoolResponseDto> {
@@ -159,11 +158,11 @@ export async function fetchSessionVariables(sessionId: string, signal: AbortSign
       try { payload = JSON.parse(body); }
       catch {
         checkDeadline();
-        if (!response.ok) throw new SessionVariablesRequestError(`HTTP ${response.status}`, response.status);
+        if (!response.ok) throw errorDetail(null, response.status);
         throw new Error("Invalid JSON in session variable response");
       }
       checkDeadline();
-      if (!response.ok) throw new SessionVariablesRequestError(errorDetail(payload, response.status), response.status);
+      if (!response.ok) throw errorDetail(payload, response.status);
       const result = decodeSessionVariablePool(payload, sessionId);
       checkDeadline();
       return result;

@@ -1,12 +1,13 @@
 import { SESSION_MEDIA } from "../../constants/sessionMedia";
 import { TIMING } from "../../constants/timing";
 import { RequestTimeoutError } from "../../services/fetchWithTimeout";
+import { decodeHttpError, type HttpResponseError } from "../../services/httpErrors";
 import type {
   SessionMediaItemDto, SessionMediaListResponseDto, SessionMediaUpdateResponseDto,
 } from "./types";
 
 export class SessionMediaRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly httpError?: HttpResponseError) {
     super(message);
     this.name = "SessionMediaRequestError";
   }
@@ -136,11 +137,9 @@ export function mediaContentUrl(sessionId: string, mediaId: string): string {
   return `${mediaUrl(sessionId)}/${encodeURIComponent(mediaId)}${SESSION_MEDIA.CONTENT_SUFFIX}`;
 }
 
-function errorDetail(payload: unknown, status: number): string {
-  if (payload !== null && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string") {
-    return payload.detail;
-  }
-  return `HTTP ${status}`;
+function errorDetail(payload: unknown, status: number): SessionMediaRequestError {
+  const error = decodeHttpError(status, payload);
+  return new SessionMediaRequestError(error.message, status, error);
 }
 
 async function request<T>(
@@ -175,11 +174,11 @@ async function request<T>(
       try { payload = JSON.parse(body); }
       catch {
         checkDeadline();
-        if (!response.ok) throw new SessionMediaRequestError(`HTTP ${response.status}`, response.status);
+        if (!response.ok) throw errorDetail(null, response.status);
         throw new Error("Invalid JSON in media response");
       }
       checkDeadline();
-      if (!response.ok) throw new SessionMediaRequestError(errorDetail(payload, response.status), response.status);
+      if (!response.ok) throw errorDetail(payload, response.status);
       const result = decode(payload);
       checkDeadline();
       return result;
