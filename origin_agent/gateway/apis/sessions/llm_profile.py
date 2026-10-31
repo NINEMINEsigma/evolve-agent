@@ -34,3 +34,6 @@ class SessionLlmProfileAPI(APIComponent):
                     pass
             response.headers["Cache-Control"] = "no-store"
             return SessionLlmProfileState(session_id=session_id, profile_name=name, available=available)
+
+
+api = SessionLlmProfileAPI()

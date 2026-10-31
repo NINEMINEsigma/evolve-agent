@@ -26,3 +26,6 @@ class DeleteHistoryMessagesAPI(APIComponent):
         result = result.model_copy(update={"history_count": loop.loop.history.count})
         logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.deleted, result.remaining_count)
         return result
+
+
+api = DeleteHistoryMessagesAPI()

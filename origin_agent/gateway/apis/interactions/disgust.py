@@ -20,3 +20,6 @@ class DisgustSessionAPI(APIComponent):
         loop = require_session_loop(self.get_system(ISessionManager), session_id)
         loop.loop.disgust()
         return {"disgusted": True, "session_id": session_id}
+
+
+api = DisgustSessionAPI()

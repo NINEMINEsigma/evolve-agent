@@ -13,3 +13,6 @@ class ListSessionsAPI(APIComponent):
     async def handler(self) -> dict[str, Any]:
         """Return sessions and their metadata."""
         return {"sessions": self.get_system(ISessionManager).get_all()}
+
+
+api = ListSessionsAPI()

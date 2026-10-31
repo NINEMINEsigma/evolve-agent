@@ -17,3 +17,6 @@ class UpdateAgentLoopSettingsAPI(APIComponent):
         state = self.get_system(IRuntimeSystem).set_max_tool_turns(payload.max_tool_turns)
         response.headers["Cache-Control"] = "no-store"
         return state
+
+
+api = UpdateAgentLoopSettingsAPI()

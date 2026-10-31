@@ -22,3 +22,6 @@ class AgentspaceRenameAPI(APIComponent):
             return {"old_path": old_path, "new_path": new_path, "operation_id": operation_id}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceRenameAPI()

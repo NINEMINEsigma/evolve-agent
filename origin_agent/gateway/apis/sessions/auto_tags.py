@@ -31,3 +31,6 @@ class AutoTagsSessionAPI(APIComponent):
         manager.set_session_tags(session_id, tags)
         logger.info("Auto tags | session=%s tags=%s", session_id, tags)
         return {"tags": tags, "session_id": session_id}
+
+
+api = AutoTagsSessionAPI()

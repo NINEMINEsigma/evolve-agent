@@ -25,3 +25,6 @@ class ConfirmResponseAPI(APIComponent):
             raise business_http_error(404, GatewayErrorCode.INTERACTION_NOT_FOUND, "Interaction not found or already answered", details={"request_id": request_id})
         logger.info("HTTP confirm | request_id=%s action=%s denied_by=%s", request_id, action, payload.denied_by)
         return {"resolved": True, "request_id": request_id, "action": action}
+
+
+api = ConfirmResponseAPI()

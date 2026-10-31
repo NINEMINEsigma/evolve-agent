@@ -13,3 +13,6 @@ class GetMetadataProfileAPI(APIComponent):
     async def handler(self) -> Any:
         """Return the authoritative global metadata Profile state."""
         return self.get_system(ISessionMetadataService).get_state()
+
+
+api = GetMetadataProfileAPI()

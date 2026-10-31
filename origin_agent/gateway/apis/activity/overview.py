@@ -21,3 +21,6 @@ class ActivityOverviewAPI(APIComponent):
             tool_count=len(registry.get_all_tool_names()),
             toolset_count=len(registry.get_registered_toolset_names()),
         )
+
+
+api = ActivityOverviewAPI()

@@ -28,3 +28,6 @@ class DownloadWorkspaceFileAPI(APIComponent):
         return FileResponse(str(resolved.real), media_type="application/octet-stream", headers={
             "Content-Disposition": f'attachment; filename="{safe_ascii}"; ' + f"filename*=UTF-8''{quote(filename, safe='')}",
         })
+
+
+api = DownloadWorkspaceFileAPI()

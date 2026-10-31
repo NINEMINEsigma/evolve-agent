@@ -75,3 +75,6 @@ class DownloadDirectoryZipAPI(APIComponent):
         return Response(buf.getvalue(), media_type="application/zip", headers={
             "Content-Disposition": f'attachment; filename="{safe_ascii}"; ' + f"filename*=UTF-8''{quote(zip_filename, safe='')}",
         })
+
+
+api = DownloadDirectoryZipAPI()

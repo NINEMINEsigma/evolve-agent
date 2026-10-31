@@ -36,3 +36,6 @@ class SessionExportResourceAPI(APIComponent):
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
             SESSION_EXPORT_DIGEST_HEADER: digest, SESSION_EXPORT_IDENTITY_HEADER: identity,
         })
+
+
+api = SessionExportResourceAPI()

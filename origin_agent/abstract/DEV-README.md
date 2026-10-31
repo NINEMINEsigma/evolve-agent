@@ -8,6 +8,7 @@
 
 ```
 abstract/
+├── discovery.py                ← 严格常规源包发现，复用framework按类型收集与身份去重
 ├── llm/                        ← LLM 客户端抽象层
 │   ├── client.py               ← BaseLLMClient 抽象基类
 │   ├── retry.py                ← 空响应有界重试装饰器
@@ -32,6 +33,18 @@ abstract/
 ```
 
 ---
+
+## 通用严格实例发现（2026-10-31）
+
+`discovery.py::StrictDiscovery`是无持久化/共享缓存的运行时工具类，继承`framework.core.discovery.Discovery`。覆写`discover(root, module_fn)`及私有目录递归，继承`collect_vars_from_discover_package(root, typen)`的模块变量类型收集与对象身份去重。动态枚举只发生在发现边界，不反射已知业务字段，不调用会吞错误的父类discover/safe_import_module。
+
+仅支持root.__file__为普通`__init__.py`的本地常规源包；不支持namespace包、zip包或二进制包。每层Path.iterdir按名称排序，读取/stat失败直接传播；忽略非.py文件、__pycache__及隐藏目录，合法下划线模块也会导入。其他子目录必须是合法非关键字名称且含普通__init__.py的代码包，目录符号链接与Windows reparse目录拒绝。专用发现包内不混放资源目录，辅助.py模块允许没有目标类型实例，但仍完整导入。
+
+每层先准备并校验全部候选及完整导入名唯一性，再导入该层子项：同名foo.py与foo/__init__.py直接ValueError并报告模块名和两条源码路径，不依赖对象seen掩盖漏载。根包/祖先模块此前的导入不回滚，源码主动导入的副作用也不撤销；这是逐层预检，不是全树事务。子包先回调再递归，包入口不重复回调。同一对象别名或合法重导出只收集一次，变量名不限。
+
+读取、结构、导入及回调错误原样传播，无日志后继续或默认空结果。不修改sys.path/sys.modules，不reload，重复调用保持正常模块缓存语义。本入口不静态依赖APIComponent/Gateway/Application，不绑定组件、不登记路由，也不知道priority或SPA策略；调用方负责其应用层排序和所有权。
+
+Gateway启动使用此入口收集模块级APIComponent实例，实际装配和display归GatewaySystem。工具的TOOLSET固定声明、AST检查、扫描顺序与MCP生命周期保持原样，不迁入本入口。third只读，无新增依赖或System；未运行实际导入、测试、校验、构建或应用，运行验收由用户完成。
 
 ## 异常定义包（2026-10-30）
 

@@ -14,3 +14,6 @@ class ListLlmProfilesAPI(APIComponent):
         """Return flat Profiles from the shared v2 root without its reference graph."""
         store = self.get_system(ILLMProfileStore)
         return {"profiles": [store.to_payload(profile) for profile in store.list_profiles()]}
+
+
+api = ListLlmProfilesAPI()

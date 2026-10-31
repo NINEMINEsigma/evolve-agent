@@ -28,3 +28,6 @@ class EditHistoryMessageAPI(APIComponent):
         if not result.updated:
             raise business_http_error(400, GatewayErrorCode.MESSAGE_EDIT_REJECTED, result.error or "Message edit rejected", details={"session_id": session_id, "message_index": message_index})
         return result
+
+
+api = EditHistoryMessageAPI()

@@ -28,3 +28,6 @@ class SessionTabCapabilitiesAPI(APIComponent):
         require_session(manager, session_id)
         response.headers["Cache-Control"] = "no-store"
         return SessionTabCapabilities(session_id=session_id, media_count=loop.loop.get_session_media_count(), variables_available=variables_available)
+
+
+api = SessionTabCapabilitiesAPI()

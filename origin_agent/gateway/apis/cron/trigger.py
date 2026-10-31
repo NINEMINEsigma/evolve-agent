@@ -25,3 +25,6 @@ class TriggerSessionCronTaskAPI(APIComponent):
         if not result["success"]:
             raise business_http_error(404, GatewayErrorCode.CRON_TASK_NOT_FOUND, "Cron task not found", details={"session_id": session_id, "task_id": task_id})
         return result
+
+
+api = TriggerSessionCronTaskAPI()

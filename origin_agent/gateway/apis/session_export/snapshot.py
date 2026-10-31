@@ -25,3 +25,6 @@ class SessionExportSnapshotAPI(APIComponent):
             return await run_export_http(req, gateway, capture_response, f"session-export-snapshot:{session_id}")
         except SessionExportError as exc:
             raise business_http_error(exc.status, exc.code, str(exc)) from exc
+
+
+api = SessionExportSnapshotAPI()

@@ -40,3 +40,6 @@ class PickSandboxDirectoryAPI(APIComponent):
         if not selected:
             return {"selected": False, "path": None}
         return {"selected": True, "path": selected}
+
+
+api = PickSandboxDirectoryAPI()

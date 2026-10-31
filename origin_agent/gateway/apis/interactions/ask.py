@@ -22,3 +22,6 @@ class AskResponseAPI(APIComponent):
             raise business_http_error(404, GatewayErrorCode.INTERACTION_NOT_FOUND, "Interaction not found or already answered", details={"request_id": request_id})
         logger.info("HTTP ask response | request_id=%s answers=%d", request_id, len(payload.answers or []))
         return {"resolved": True, "request_id": request_id, "answers": [answer.model_dump(exclude_none=True) for answer in (payload.answers or [])]}
+
+
+api = AskResponseAPI()

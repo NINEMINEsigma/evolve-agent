@@ -19,3 +19,6 @@ class HistoryMediaListAPI(APIComponent):
         response.headers["Cache-Control"] = "no-store"
         info = require_session(manager, session_id)
         return loop.loop.get_session_media(offset=offset, limit=limit, editable=info.status != SessionStatus.archived)
+
+
+api = HistoryMediaListAPI()

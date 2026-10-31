@@ -19,3 +19,6 @@ class ListSkillsAPI(APIComponent):
             return {"skills": [], "total": 0}
         skills = list_skills(skills_dir=skills_dir)
         return {"skills": [{"name": item["name"], "description": item.get("description", ""), "category": item.get("category")} for item in skills], "total": len(skills)}
+
+
+api = ListSkillsAPI()

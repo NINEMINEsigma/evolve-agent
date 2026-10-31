@@ -19,3 +19,6 @@ class HistorySkeletonAPI(APIComponent):
         if start_index > loop.loop.history.count:
             raise business_http_error(400, GatewayErrorCode.HISTORY_INDEX_OUT_OF_RANGE, "History start index is out of range", details={"session_id": session_id})
         return loop.loop.get_session_history_skeleton(start_index)
+
+
+api = HistorySkeletonAPI()

@@ -18,3 +18,6 @@ class AgentspaceReadAPI(APIComponent):
             return await asyncio.to_thread(self.get_system(IAgentspaceService).read_file, path)
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceReadAPI()

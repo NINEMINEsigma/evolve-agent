@@ -29,3 +29,6 @@ class MergeSessionsAPI(APIComponent):
                 raise business_http_error(409, GatewayErrorCode.SESSION_MERGE_REJECTED, result.error or "Session merge rejected", details={"sources": sources})
             return result
         raise business_http_error(409, GatewayErrorCode.SESSION_NOT_READY, "Session connection is not ready", details={"sources": sources})
+
+
+api = MergeSessionsAPI()

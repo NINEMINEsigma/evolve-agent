@@ -23,3 +23,6 @@ class SessionExportVerifyAPI(APIComponent):
             return JSONResponse(result.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
         except SessionExportError as exc:
             raise business_http_error(exc.status, exc.code, str(exc)) from exc
+
+
+api = SessionExportVerifyAPI()

@@ -33,3 +33,6 @@ class TerminateSessionAPI(APIComponent):
         result = await loop.loop.terminate_session()
         logger.info("Terminate session complete | session=%s terminated=%s warnings=%d", session_id, result.terminated, len(result.metadata_warnings))
         return result
+
+
+api = TerminateSessionAPI()

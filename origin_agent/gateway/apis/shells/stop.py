@@ -26,3 +26,6 @@ class StopSessionShellAPI(APIComponent):
             return await self.get_system(IShellManager).stop_shell_for_user(session_id, shell_id)
         except ShellAccessError as exc:
             raise business_http_error(404, GatewayErrorCode.SHELL_NOT_FOUND, str(exc), details={"session_id": session_id, "shell_id": shell_id}) from exc
+
+
+api = StopSessionShellAPI()

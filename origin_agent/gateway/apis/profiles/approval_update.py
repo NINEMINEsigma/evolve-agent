@@ -43,3 +43,6 @@ class UpdateApprovalProfileAPI(APIComponent):
         state = manager.get_state()
         failures = await self.get_system(IFrontendSink).broadcast_approval_profile_change(state)
         return ApprovalProfileMutationResponse(state=state, notification_failures=failures)
+
+
+api = UpdateApprovalProfileAPI()

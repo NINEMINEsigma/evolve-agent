@@ -30,3 +30,6 @@ class UpdateMetadataProfileAPI(APIComponent):
             raise_metadata_http(exc)
         failures = await self.get_system(IFrontendSink).broadcast_metadata_profile_change(state)
         return MetadataProfileMutationResponse(state=state, notification_failures=failures)
+
+
+api = UpdateMetadataProfileAPI()

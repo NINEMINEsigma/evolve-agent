@@ -57,6 +57,11 @@ class GatewayErrorCode(str, Enum):
     HTTP_ERROR = "http_error"
 
 
+# API端点组件的默认登记优先级；数值越小越先display，普通组件共用此值。
+GATEWAY_API_DEFAULT_PRIORITY: int = 0
+# 唯一末尾SPA组件保留的优先级；普通组件必须小于此值。
+GATEWAY_API_FALLBACK_PRIORITY: int = 1000
+
 # 新业务HTTP路径首段；只匹配完整首段，不匹配相似名称。
 GATEWAY_BUSINESS_HTTP_PREFIXES: tuple[str, ...] = ("/api", "/dynamic")
 # 前端产物和文件服务的既有禁止缓存头；调用方不得原地修改。

@@ -23,3 +23,6 @@ class UpdateSessionTitleAPI(APIComponent):
         manager.update_title(session_id, title)
         logger.info("Update title | session=%s title=%s", session_id, title)
         return {"updated": True, "session_id": session_id, "title": title}
+
+
+api = UpdateSessionTitleAPI()

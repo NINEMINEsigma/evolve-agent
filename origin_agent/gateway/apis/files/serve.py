@@ -81,3 +81,6 @@ class ServeWorkspaceFileAPI(APIComponent):
             return failure("File not found", 404)
         except PermissionError:
             return failure("File access denied", 403)
+
+
+api = ServeWorkspaceFileAPI()

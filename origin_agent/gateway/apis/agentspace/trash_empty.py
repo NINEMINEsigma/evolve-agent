@@ -22,3 +22,6 @@ class AgentspaceTrashEmptyAPI(APIComponent):
             return {"deleted": deleted, "failures": failures, "operation_id": operation_id}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceTrashEmptyAPI()

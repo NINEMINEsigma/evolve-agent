@@ -24,3 +24,6 @@ class ServeLocalFontAPI(APIComponent):
             return HTMLResponse(str(exc), status_code=exc.status)
         media_type = LOCAL_FONT_MIME_TYPES.get(font_file.suffix.lower(), "application/octet-stream")
         return FileResponse(str(font_file), media_type=media_type, headers={**HTTP_NO_CACHE_HEADERS, "Access-Control-Allow-Origin": "*"})
+
+
+api = ServeLocalFontAPI()

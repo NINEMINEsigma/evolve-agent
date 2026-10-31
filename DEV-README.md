@@ -66,7 +66,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端，随后 `asyncio.run(App(ctx).run())`；返回后由 App 解除关闭硬截止 watchdog。
 4. `main.py::App` 只负责创建唯一 `Application`、平台信号处理（统一经 `RuntimeSystem.request_shutdown`）、等待关闭事件与退出码映射；不再持有 Gateway 实例、第二份关闭事件或各子系统清理逻辑。
 5. `Application` 继承 `AsyncArchitecture`，`start()` 串行登记21个 System 接口槽位（含 `ILoggerSystem`），登记顺序不要求按依赖排列；graphlib 仅校验依赖图完整性，实际唤醒由 framework 在依赖就绪后完成。其余20个业务 System 接口通过 `ILoggableSystem` 间接继承 `AsyncSystem`，自动声明 `ILoggerSystem` 依赖。注册失败进入同一 Logger 根节点级联回收入口并传播；全部注册完成后获取 Runtime，调用 `mark_running()` 并激活 Cron，输入接收才开放。`AgentspaceService` 的垃圾桶恢复与 watcher 在 `virtual_awake` 完成，启动失败直接传播（D2）。
-6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只保留 `build_router_app(gateway)` 工厂；`gateway/apis/` 按职责显式装配91个API端点组件（92条路由注册，文件GET/HEAD共用一个组件），运行实例、组件、socket、serve 任务与 ready 事件均由 `GatewaySystem` 持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
+6. `GatewaySystem` 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。`server.py` 只保留 `build_router_app(gateway)` 工厂；`gateway/apis/` 按职责声明91个API端点组件实例，启动时按类型发现并交给 `GatewaySystem.display_apis` 统一绑定与按优先级登记（92条路由注册，文件GET/HEAD共用一个组件），运行实例、组件、socket、serve 任务与 ready 事件均由 `GatewaySystem` 持有；启动前端口占用按退出 0 的普通业务拒绝（`GatewayPortBusyError`），bind 竞态失败属启动失败。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
 关闭由 `Application.shutdown()` 单一协调任务执行（重复请求等待同一任务）：
@@ -569,7 +569,7 @@ ToolRegistry线程池关闭的既有软观察 pending 仍由原任务/执行器�
 
 部署须由用户停机后同步新包与全部调用方。`run.py` 的合并复制不会自动删除目标侧旧五包，`force_init` 对 fast仓库同样不保证清除；用户应先保护本地进化修改，再定向处理 fast/slow/fallback仓库的旧五包，保留 component 的其他服务与用户内容，不删除整个 component 或 workspace。开发助手AI未检查或清理运行时副本；未知外部扩展使用旧导入路径时需同步修改。本轮仅源码与文档实施、只读文本审阅，未运行校验、实际导入、构建、测试或应用；字节级换行校验和运行验收未执行。
 
-## API端点组件与HTTP协议统一（2026-10-31，当前约定）
+## API端点组件与HTTP协议统一（2026-10-31，协议约定；装配见下节后续修订）
 
 GatewaySystem在自身唤醒期间将self传给`gateway/server.py::build_router_app(gateway)`；工厂通过`gateway/apis/__init__.py::register_apis`按固定顺序创建并绑定91个`APIComponent`，显式登记92条原路径/方法。每个具体端点独立文件并按职责分组，GET/HEAD文件服务共用组件，原同步文件/ZIP handler继续由FastAPI线程池执行。组件不保存当前会话、Request、WebSocket、订阅或单次结果。静态产物位置/hash/MIME由`gateway/frontend_assets.py`提供，跨模块子Agent状态通知改从`gateway/notifications.py`导入，不再依赖server或具体端点。完整目录与扩展规则见gateway及apis开发文档。
 
@@ -580,6 +580,21 @@ GatewaySystem在自身唤醒期间将self传给`gateway/server.py::build_router_
 配套前端共用`services/httpErrors.ts`，失败不回空数据、不提交成功状态，关键JSON截止覆盖正文与解码前后检查。交互提交按request_id和会话代际持有，清理提交中请求不再另发相反答案；资源操作绑定原scope、继续已有三秒轮询，不凭Cron触发回执增加实际执行次数。未知503/网络失败仍可能晚于提交，只有明确执行前拒绝可排除副作用。独立预览的模拟HTTP协议同步，不改WS帧或增加真实后端依赖。
 
 用户须同批部署完整后端与配套前端并重新构建/重启/刷新；外部错误调用方同步升级，无旧错误协议兼容层。持久化结构/type token/easysave key、21个System槽位、依赖及5秒关闭截止均不变。开发助手AI未运行测试、校验、实际导入、构建或应用，也不操作workspace副本。人工验收矩阵见`.tasks/2026-10-31_1_gateway-endpoint-components.md`的P9/P19。独立预览已有媒体ID与正式32位十六进制要求不匹配的限制已登记，未在本轮扩大为种子/身份生成修复，不能据预览断言正式媒体链路已验收。
+
+## API端点启动发现（2026-10-31，后续装配修订）
+
+本节替代前节中央`register_apis`清单的当前装配约定，HTTP协议与原资源所有权保持。`gateway/apis/__init__.py`只保留包说明，各具体模块在类定义后创建无参`APIComponent`实例；变量名不限，当前统一采用`api`，不维护中央导入或类型清单。
+
+`abstract/discovery.py::StrictDiscovery`复用只读framework的模块变量类型收集及对象身份去重，自身提供严格的常规源包遍历和导入：逐层确定性排序、完整候选预检、同名文件/包导入歧义拒绝。目录读取、结构、导入或回调失败直接传播，不使用第三方默认发现器的跳过错误行为，不修改Python模块缓存或导入路径；工具`TOOLSET`的AST发现保持原样。
+
+工厂调用`gateway.display_apis(router)`，由GatewaySystem完成收集、应用层优先级校验、稳定排序、全部`add_component`绑定后逐个`display`，最后检查相同文本路径的协议/方法重复；成功后才include_router、设置hash并按原位置挂载assets。普通组件默认优先级0，数值小者先，同值保持发现顺序；唯一1000声明由SpaFallbackAPI提供，使其位于所有普通端点之后。这不是自动URL具体程度排序，也不声称检测所有参数模板的语义重叠。
+
+组件仍在Gateway自身awake完成前装配，不能查询未awake的自身槽位或读取尚未赋值的fastapi_app。新增`APIComponent.priority`类级元数据和`GatewaySystem._api_assembly_started`一次性状态，无组件镜像表、System/持久化格式/依赖变更；同进程重复装配拒绝，不自动解绑、克隆或reload。现有91组件/92登记是本次迁移基线，不是运行时硬编码数量限制；原URL/name/响应模型、同步文件与ZIP、WS/SSE行为保持。
+
+新增内置端点仅需在合法常规Python包的独立模块声明实例，部署并重启后生效；不支持外部端点目录或运行期热加载。`run.py`合并复制保留目标侧独有旧文件，自动发现可能加载残留的已删除/移动端点；用户须先保护本地进化内容、定向处理旧文件并完整部署后重启，`force_init`对fast仓库不保证清除独有残留。开发助手AI不操作运行时副本。
+
+本次只完成源码/开发文档和只读文本审阅，未运行测试、校验、实际导入、构建或应用。人工验收见`.tasks/2026-10-31_2_gateway-api-discovery.md` P11及V12，运行结论由用户确认。
+
 
 
 

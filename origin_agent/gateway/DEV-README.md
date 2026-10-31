@@ -13,7 +13,8 @@ gateway/
 ├── system.py                ← GatewaySystem：FastAPI/uvicorn/socket 与全部路由后台工作的唯一所有者（S21）
 ├── lifecycle.py             ← GatewayAdmission（HTTP/WS 输入准入）与 GatewayReadyTracker（真实启动就绪）
 ├── server.py                ← build_router_app(gateway)：无全局路由的运行实例工厂
-├── apis/                    ← 91个API端点组件，按职责分目录，显式注册92条路由
+├── apis/                    ← 91个API端点组件的模块级实例，按类型发现后显式登记92条路由
+├── api_routes.py             ← 同文本路径的HTTP方法/WS重复登记检查
 ├── api_support/             ← 会话前置条件、Profile投影、专属错误及有界导出HTTP帮助
 ├── http_boundary.py         ← 新业务准入、标准422与结构化HTTP错误边界
 ├── frontend_assets.py       ← 前端产物路径、hash与MIME
@@ -25,6 +26,20 @@ gateway/
 ```
 
 ---
+
+## API端点启动发现与装配（2026-10-31，当前约定）
+
+各具体端点模块在类定义后创建无参APIComponent实例，变量名不限；apis包入口无中央导入、类型清单或register_apis。`GatewaySystem.display_apis(router)`通过`abstract.discovery.StrictDiscovery`收集实例，复用framework的按类型枚举和对象身份去重。StrictDiscovery仅处理受信任的常规Python源包，逐层完整候选预检后确定性导入，同名模块文件/包目录歧义、读取和导入失败直接传播，不使用第三方默认发现器的吞异常路径。
+
+System检查非空及priority后稳定排序，全部add_component绑定成功才逐个display。priority必须为真正int，默认0，负数允许，数值小者先；同值保持模块和变量发现顺序。1000必须恰好一个，当前由SpaFallbackAPI声明，普通组件不能大于或占用该末尾声明；这仅验证末尾优先级声明，不验证SPA handler语义。System不按URL具体程度自动排序。
+
+新增`api_routes.py::validate_api_routes`只检查相同文本path的HTTP方法重复和WS重复；GET/HEAD、不同方法和不同协议共路径允许，不要求route.name唯一。不识别参数名不同的等价模板、正则交叠或通配遮蔽，作者应显式选择优先级。display只登记原生APIRoute/APIWebSocketRoute；StaticFiles仍由server在include_router后挂载，不放入组件router。
+
+工厂只委托System，所有发现/display/重复登记错误发生于include_router和socket创建之前，直接终止启动，原Gateway失败启动清理继续负责其叶服务/资源。`_api_assembly_started`拒绝同Gateway重复装配；模块实例已绑定其他System时framework同样拒绝，不重试、reload、克隆或清空组件后恢复。发现列表和检查索引均为调用局部，不建立第二份服务/组件表。
+
+Gateway尚未完成awake时使用现有self完成装配，不反查自身槽位或fastapi_app。单次Request、WebSocket、会话ID、订阅及结果仍为调用局部，原TaskOwner和业务服务持有真实资源；URL/name/响应模型、同步文件与ZIP、WS/SSE关闭顺序不变。无新System、配置、持久化格式或前端改动，工具发现和third保持不变。
+
+新增内置模块在完整部署并重启后生效，无外部端点目录或运行期热加载。run.py合并复制可能残留已删除/移动旧端点，用户须先保护本地进化内容并定向处理残留；force_init不保证清除fast独有文件，开发助手AI不操作运行时副本。本轮未运行测试、校验、实际导入、构建或应用，用户人工验收见`.tasks/2026-10-31_2_gateway-api-discovery.md` P11/V12。
 
 ## 异常定义包（2026-10-30）
 
@@ -40,7 +55,7 @@ gateway/
 |---|---|
 | `system.py` | `GatewaySystem`（framework AsyncSystem）：启动时创建唯一 FastAPI 实例、在本 System 持有的 socket 上 bind、管理 uvicorn serve 任务与真实 ready 事件；`spawn_work` 登记全部路由后台任务（TaskOwner）；关闭顺序为 `stop_accepting()` → `cancel_background_work()` → `stop_server()`。端口预探测 `check_port_available` 也在此，抛出的 `GatewayPortBusyError` 定义于 `entity/error/gateway.py`（占用按退出 0 的普通业务拒绝）。 |
 | `lifecycle.py` | `GatewayAdmission`：新业务经 `admit_business()`（要求 RUNNING）；WS 连接经 `admit_connection()`（STARTING/RUNNING）；已建立连接的每条输入经 `require_open_connection()`。`GatewayReadyTracker` 由 uvicorn 子类在 startup 成功后置位。 |
-| `server.py` | 仅`build_router_app(gateway: IGatewaySystem) -> FastAPI`工厂：创建局部GatewayAPIRoute路由表，通过register_apis绑定具体组件，include_router、挂载assets并将hash存于app.state。没有全局router、端点函数或通知转发；GatewaySystem传入现有self，避免未awake时查询自身。 |
+| `server.py` | 仅`build_router_app(gateway: IGatewaySystem) -> FastAPI`工厂：创建局部GatewayAPIRoute路由表，通过gateway.display_apis委托System发现和装配实例，include_router、挂载assets并将hash存于app.state。没有全局router、端点函数或通知转发；GatewaySystem传入现有self，避免未awake时查询自身。 |
 | `apis/` | 每个具体APIComponent一文件，按职责分组；显式原URL/方法/name/response_model，91组件、92注册，GET/HEAD共组件但两条登记。只在handler局部保存连接/请求数据，sync文件/ZIP保留线程池语义。 |
 | `http_boundary.py` | 原生ASGI中间件在正文读取前限制新业务；JSON字节/原生模型使用标准422；只映射HTTP与已识别停止，未知错误传播，WS不进入HTTP专属转换。 |
 | `api_support/`、`notifications.py`、`frontend_assets.py` | 按职责共享前置条件、状态投影、专属HTTP错误、有界导出、通知和静态产物定位，不持有第二份业务服务或请求状态。 |

@@ -25,3 +25,6 @@ class SessionFileChangesSummaryAPI(APIComponent):
         require_session(manager, session_id)
         response.headers["Cache-Control"] = "no-store"
         return result
+
+
+api = SessionFileChangesSummaryAPI()

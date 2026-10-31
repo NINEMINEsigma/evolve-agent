@@ -21,3 +21,6 @@ class SessionExportViewerAPI(APIComponent):
         if path.stat().st_size > SESSION_EXPORT_VIEWER_MAX_BYTES:
             raise business_http_error(413, GatewayErrorCode.EXPORT_VIEWER_LIMIT, "Offline viewer exceeds byte budget")
         return FileResponse(str(path), media_type="text/javascript" if asset_name.endswith(".js") else "text/css", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+api = SessionExportViewerAPI()

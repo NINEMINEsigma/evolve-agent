@@ -10,7 +10,7 @@ import socket
 from typing import Any, TypeVar
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from gateway.lifecycle import GatewayAdmission, GatewayReadyTracker
 from system.lifecycle import TaskOwner, close_resources
 
@@ -28,6 +28,7 @@ from interface.shell_manager import IShellManager
 from interface.subagent_orchestrator import ISubAgentOrchestrator
 from interface.tool_discovery_system import IToolDiscoverySystem
 from entity.constant import (
+    GATEWAY_API_FALLBACK_PRIORITY,
     GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
     GATEWAY_START_TIMEOUT_SECONDS,
     SYSTEM_QUIESCE_TIMEOUT_SECONDS,
@@ -89,6 +90,7 @@ class GatewaySystem(IGatewaySystem):
         self._serve_task: asyncio.Task[None] | None = None
         self._socket: socket.socket | None = None
         self._session_exports: SessionExportService | None = None
+        self._api_assembly_started: bool = False
 
     # -- 唤醒期入口（P22 装配前由 virtual_awake 使用）--
 
@@ -119,6 +121,48 @@ class GatewaySystem(IGatewaySystem):
         if self._owner is None:
             raise LifecycleFailure("GatewaySystem has not been awakened")
         return self._owner
+
+    def display_apis(self, router: APIRouter) -> None:
+        """Discover once, assemble every endpoint, then display ordered routes."""
+        # 唤醒期间不反查尚未awake的Gateway槽位，也不在模块导入时装配组件。
+        from interface.api_component import APIComponent
+
+        if self._api_assembly_started or any(
+            isinstance(component, APIComponent) for component in self.system_components
+        ):
+            raise RuntimeError("Gateway API assembly has already started")
+        self._api_assembly_started = True
+
+        from abstract.discovery import StrictDiscovery
+        import gateway.apis as api_package
+        from gateway.api_routes import validate_api_routes
+
+        components = StrictDiscovery().collect_vars_from_discover_package(
+            api_package, typen=APIComponent,
+        )
+        if not components:
+            raise RuntimeError("Gateway discovery found no API components")
+        fallback_count = 0
+        for component in components:
+            if type(component.priority) is not int:
+                raise TypeError(f"API component priority must be an integer: {component.name}")
+            if component.priority > GATEWAY_API_FALLBACK_PRIORITY:
+                raise ValueError(f"API component priority exceeds the fallback boundary: {component.name}")
+            if component.priority == GATEWAY_API_FALLBACK_PRIORITY:
+                fallback_count += 1
+        if fallback_count != 1:
+            raise ValueError("Gateway requires exactly one terminal-priority API component")
+        # 稳定排序保留同优先级的发现次序；末尾声明是本应用策略，不属于通用发现器。
+        components.sort(key=lambda component: component.priority)
+        for component in components:
+            self.add_component(component)
+        for component in components:
+            component.display(router)
+        validate_api_routes(router)
+        logger.info(
+            "Gateway API assembly complete: %d components, %d routes",
+            len(components), len(router.routes),
+        )
 
     def spawn_work(
         self,

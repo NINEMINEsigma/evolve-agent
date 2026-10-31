@@ -1683,6 +1683,27 @@ server不再定义端点、全局router或通知兼容函数。子Agent编排器
 
 前端唯一SessionStore持有Confirm/Ask提交记录（kind+request_id、payload、scope、phase、detached），不是第二份待办真相或持久化。资源页复用原scope/token与三秒轮询，useWebSocket仅暴露作用域判断/通知能力；无新轮询或成功外壳。所有持久化类型/key、21槽位、资源关闭与History交接保持。仅源码实施和只读审阅，未运行校验、导入、构建或应用，人工验收仍待用户。
 
+### API端点实例发现与System统一display（2026-10-31，后续装配修订）
+
+本节覆盖前一节“中央显式创建/登记”的当前装配约定，其HTTP协议、处理签名和真实资源所有权保持。继承链仍为`framework.AsyncComponent → APIComponent → 具体端点类`；91个具体模块在类定义后创建实例，`gateway/apis/__init__.py`不再持有具体类型清单或register_apis。
+
+`StrictDiscovery`定义于`abstract/discovery.py`，继承只读framework.Discovery，替换会跳过错误的遍历路径，继承模块对象类型收集及id去重。常规源包按确定性目录顺序逐层准备全部候选，在该层导入前拒绝模块文件/包目录的同名导入歧义；不修改缓存、重载或取得Application。按类型枚举属于动态发现边界，业务字段仍显式访问。
+
+`IGatewaySystem.display_apis(router: APIRouter) -> None`为同步公开装配契约，接口不反向导入APIComponent。GatewaySystem实现收集、优先级检查/稳定排序，先全部add_component绑定，再逐个调用display并检查重复路由；server工厂仅委托该接口，再按原位置include_router和挂载assets。Gateway尚未awake的阶段继续使用现有self，不反查自身槽位或fastapi_app。
+
+| 归属 | 新字段/公开契约 | 访问与生命周期 |
+|---|---|---|
+| APIComponent | `priority: ClassVar[int]`，默认0 | 共享协议元数据，不属于单次请求；数值小者先，同值保持发现顺序 |
+| SpaFallbackAPI | priority=1000 | 唯一末尾优先级声明；普通组件须小于1000；检查不证明handler的SPA语义 |
+| GatewaySystem | `_api_assembly_started: bool`、`display_apis` | 同一Gateway一次性装配，失败不复位/重试；具体组件由framework父关系持有 |
+| StrictDiscovery | 无新增共享字段，复用局部seen | 全部候选、导入名索引和收集列表仅为调用局部，不持有第二个业务注册表 |
+| gateway/api_routes.py | `validate_api_routes(router)` | 局部检查同文本路径的HTTP方法/WS重复，不捕获业务请求，不猜测模板重叠 |
+
+Python模块级实例保留正常缓存引用，已有父System时framework拒绝再次绑定；本应用不支持同进程原地重新装配，不增加detach/clone/reload或启动回滚。模块实例禁止保存当前Request、WebSocket、会话ID、订阅与结果，原TaskOwner/服务继续负责真实资源。文件GET/HEAD内部顺序、同步文件和ZIP线程池、WS/SSE关闭顺序全部保持。
+
+无新System、模型、持久化版本或easysave key，第三方和工具发现不改。部署合并复制可能遗留旧端点文件，须用户保护本地修改并定向处理后重启；开发助手AI不读取或操作运行时代码。仅完成源码/文档与只读审阅，未运行测试、实际导入、校验、构建或应用，用户人工验收见本任务P11/V12。
+
+
 
 
 

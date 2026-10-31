@@ -13,3 +13,6 @@ class GetApprovalProfileAPI(APIComponent):
     async def handler(self) -> Any:
         """Return the authoritative project-level approval Profile state."""
         return self.get_system(IApprovalSystem).backend_manager.get_state()
+
+
+api = GetApprovalProfileAPI()

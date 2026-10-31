@@ -13,3 +13,6 @@ class ListLlmClientsAPI(APIComponent):
     async def handler(self) -> dict[str, Any]:
         """Return available LLM client implementations."""
         return {"clients": list_llm_clients()}
+
+
+api = ListLlmClientsAPI()

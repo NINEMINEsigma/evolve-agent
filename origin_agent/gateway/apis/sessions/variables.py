@@ -27,3 +27,6 @@ class SessionVariablesAPI(APIComponent):
             raise_variable_http(exc)
         require_session(manager, session_id)
         return result
+
+
+api = SessionVariablesAPI()

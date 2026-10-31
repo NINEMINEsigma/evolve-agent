@@ -14,3 +14,6 @@ class GetModalityProfilesAPI(APIComponent):
     async def handler(self) -> ModalityProfileStates:
         """Return separate image, audio and video fallback Profile states."""
         return get_modality_profile_states(self.get_system(ILLMProfileStore))
+
+
+api = GetModalityProfilesAPI()

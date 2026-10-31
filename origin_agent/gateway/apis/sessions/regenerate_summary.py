@@ -32,3 +32,6 @@ class RegenerateSessionSummaryAPI(APIComponent):
         except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
             raise_metadata_http(exc)
         return {"success": True, "summary": summary, "session_id": session_id}
+
+
+api = RegenerateSessionSummaryAPI()

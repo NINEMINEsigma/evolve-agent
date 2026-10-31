@@ -17,3 +17,6 @@ class CharacterAvatarsAPI(APIComponent):
         """Collect main and child Agent avatars without creating a Loop."""
         response.headers["Cache-Control"] = "no-store"
         return await asyncio.to_thread(collect_character_avatars, self.get_system(ISandbox), self.get_system(IRuntimeSystem))
+
+
+api = CharacterAvatarsAPI()

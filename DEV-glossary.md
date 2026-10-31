@@ -18,7 +18,7 @@
 | 只崩溃软件（Crash-only software） | 失败终止当前执行单元，由已有运行边界负责失败处理；HTTP 请求由 FastAPI 处理，不能据此假定共享内存或已完成的磁盘写入会自动回滚。资源释放与原子写仍属于正常生命周期约束 |
 | 角色术语与实例名分层 | 文档默认用角色术语；实例名仅特指当前部署时使用 |
 | Role 不译 | 固定搭配，直指 `puretype.Role` 枚举（user/assistant/system/tool） |
-| API端点组件 | 英文锚点：API endpoint component。继承 `APIComponent`、由唯一 GatewaySystem 持有的非持久化运行时组件；具体端点独立文件，显式注册原路径和方法。不是新增 System 或 Agent 工具，单次请求和连接状态不属于共享组件字段。 |
+| API端点组件 | 英文锚点：API endpoint component。继承 `APIComponent`、由唯一 GatewaySystem 持有的非持久化运行时组件；具体端点独立文件，在模块内创建实例，启动时按类型收集并按对象身份去重，全部绑定后由 GatewaySystem 按显式优先级调用 `display`，登记原路径和方法。普通优先级默认0，数值小者先，同值保持确定性发现顺序，1000保留给唯一末尾SPA声明。不是新增 System 或 Agent 工具，单次请求和连接状态不属于共享组件字段。 |
 | 结构化HTTP业务错误 | 英文锚点：HTTP business error detail。明确业务拒绝使用非 2xx 状态和 `detail: {code, message, ...}`，保留专属附加信息；请求校验仍为标准422列表，未知异常直接传播。只有明确执行前准入拒绝标记 `request_accepted=false`，不能据任意503推断操作未提交。 |
 | 术语双锁定 | 中文规范称谓 + 英文锚点；prompt 模板使用规范英文形态 |
 | 异常定义包 | 英文锚点：exception definitions package。`origin_agent/entity/error/` 是 origin仓库所有自定义异常（含内部控制信号）的唯一定义位置，按职责子模块组织；公共异常由 `__init__.py` 显式导出，调用方使用 `from entity.error import X`。私有 `_SourceUnavailable` 仅从 `entity.error.session_export` 显式导入，不纳入公共导出。标准库与第三方异常继续从原来源导入；保留原 Exception 家族、抛出/捕获策略及快速失败语义，不作为 BaseModel 或持久化类型。 |

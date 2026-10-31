@@ -22,3 +22,6 @@ class AgentspaceWriteAPI(APIComponent):
             return {**snapshot.model_dump(mode="json"), "operation_id": operation_id}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceWriteAPI()

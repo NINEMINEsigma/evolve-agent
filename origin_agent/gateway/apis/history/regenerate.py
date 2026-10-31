@@ -76,3 +76,6 @@ class RegenerateResponseAPI(APIComponent):
             ))
         logger.info("Regenerate ok | session=%s", session_id)
         return {"regenerate": True, "session_id": session_id, "history_count": loop.loop.history.count}
+
+
+api = RegenerateResponseAPI()

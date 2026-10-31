@@ -103,3 +103,6 @@ class DeleteSessionAPI(APIComponent):
             manager.end_session_delete(session_id)
         logger.info("Delete session ok | session=%s", session_id)
         return {"deleted": True, "session_id": session_id}
+
+
+api = DeleteSessionAPI()

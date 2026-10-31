@@ -15,3 +15,6 @@ class HistoryResourcesAPI(APIComponent):
         """Return image and download resources from the complete in-memory History."""
         loop = require_session_loop(self.get_system(ISessionManager), session_id)
         return loop.loop.get_session_history_resources()
+
+
+api = HistoryResourcesAPI()

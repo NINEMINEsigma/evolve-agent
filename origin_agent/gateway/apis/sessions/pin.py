@@ -21,3 +21,6 @@ class PinSessionAPI(APIComponent):
         pinned = manager.toggle_pin(session_id)
         logger.info("Toggle pin | session=%s pinned=%s", session_id, pinned)
         return {"pinned": pinned, "session_id": session_id}
+
+
+api = PinSessionAPI()

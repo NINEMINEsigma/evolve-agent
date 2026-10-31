@@ -13,3 +13,6 @@ class ListSandboxSpacesAPI(APIComponent):
     async def handler(self) -> dict[str, Any]:
         entries = self.get_system(ISandbox).list_dynamic_spaces_with_availability()
         return {"spaces": [{**space.model_dump(), "available": available} for space, available in entries]}
+
+
+api = ListSandboxSpacesAPI()

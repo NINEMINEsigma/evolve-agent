@@ -12,3 +12,6 @@ class AgentspaceLocksAPI(APIComponent):
 
     async def handler(self) -> dict[str, Any]:
         return {"locks": self.get_system(IAgentspaceService).locks_snapshot()}
+
+
+api = AgentspaceLocksAPI()

@@ -21,3 +21,6 @@ class SessionToolResourcesAPI(APIComponent):
         if loop is None:
             return SessionToolResources(session_id=session_id, dynamic_endpoints=endpoints)
         return loop.loop.get_tool_resources().model_copy(update={"dynamic_endpoints": endpoints})
+
+
+api = SessionToolResourcesAPI()

@@ -13,3 +13,6 @@ class ListTagsAPI(APIComponent):
     async def handler(self) -> dict[str, Any]:
         """Return all existing session tags."""
         return {"tags": self.get_system(ISessionManager).get_all_tags()}
+
+
+api = ListTagsAPI()

@@ -2,13 +2,18 @@
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
-from entity.constant import GatewayErrorCode, GATEWAY_BUSINESS_HTTP_PREFIXES, HTTP_NO_CACHE_HEADERS
+from entity.constant import (
+    GatewayErrorCode, GATEWAY_API_FALLBACK_PRIORITY,
+    GATEWAY_BUSINESS_HTTP_PREFIXES, HTTP_NO_CACHE_HEADERS,
+)
 from gateway.frontend_assets import frontend_dist, guess_media_type_with_charset
 from gateway.http_boundary import business_http_error
 from interface.api_component import APIComponent
 
 
 class SpaFallbackAPI(APIComponent):
+    priority = GATEWAY_API_FALLBACK_PRIORITY
+
     def display(self, router: APIRouter) -> None:
         router.add_api_route("/{full_path:path}", self.handler, methods=["GET"], name="spa_fallback")
 
@@ -29,3 +34,6 @@ class SpaFallbackAPI(APIComponent):
         if index_html.exists():
             return HTMLResponse(index_html.read_text(encoding="utf-8"), headers=dict(HTTP_NO_CACHE_HEADERS))
         raise HTTPException(status_code=404, detail=f"Not found: {full_path}")
+
+
+api = SpaFallbackAPI()

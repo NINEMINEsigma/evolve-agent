@@ -29,3 +29,6 @@ class DeleteHistoryMessageAPI(APIComponent):
         })
         logger.info("Delete single message result | session=%s index=%d deleted=%s remaining=%s", session_id, index, result.deleted, result.remaining_count)
         return result
+
+
+api = DeleteHistoryMessageAPI()

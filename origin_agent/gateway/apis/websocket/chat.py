@@ -193,3 +193,6 @@ class ChatWebSocketAPI(APIComponent):
                 # 旧连接不得释放已接管的新连接及其交互。
                 if sink.get_ws(sid) is ws:
                     sink.unregister_ws(sid)
+
+
+api = ChatWebSocketAPI()

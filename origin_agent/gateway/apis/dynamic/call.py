@@ -69,3 +69,6 @@ class DynamicEndpointAPI(APIComponent):
             "delivered": True, "queued": True, "endpoint_name": endpoint_name,
             "session_id": session_id, "used": used,
         }, ensure_ascii=False), media_type="application/json", status_code=202)
+
+
+api = DynamicEndpointAPI()

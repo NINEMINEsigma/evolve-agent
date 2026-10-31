@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
+
+from entity.constant import GATEWAY_API_DEFAULT_PRIORITY
 
 from fastapi import APIRouter
 from framework import AsyncComponent, AsyncSystem
@@ -15,6 +17,8 @@ SystemT = TypeVar("SystemT", bound=AsyncSystem)
 
 class APIComponent(AsyncComponent, ABC):
     """Bind one endpoint implementation to its owning Gateway System."""
+
+    priority: ClassVar[int] = GATEWAY_API_DEFAULT_PRIORITY
 
     @property
     def gateway(self) -> IGatewaySystem:

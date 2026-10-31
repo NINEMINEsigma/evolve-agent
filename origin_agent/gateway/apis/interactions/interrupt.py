@@ -32,3 +32,6 @@ class InterruptSessionAPI(APIComponent):
         if result.status == "failed":
             raise business_http_error(500, GatewayErrorCode.INTERRUPT_FAILED, "Session interruption failed", details={"result": payload})
         return payload
+
+
+api = InterruptSessionAPI()

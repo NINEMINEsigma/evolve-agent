@@ -16,3 +16,6 @@ class HistoryPageAPI(APIComponent):
         """Return full frontend content rows for a History index range."""
         loop = require_session_loop(self.get_system(ISessionManager), session_id)
         return loop.loop.get_session_history_page(start_index, limit)
+
+
+api = HistoryPageAPI()

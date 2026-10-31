@@ -17,3 +17,6 @@ class CharacterProfilesAPI(APIComponent):
         """Collect character prompts and per-entry errors without exposing credentials."""
         response.headers["Cache-Control"] = "no-store"
         return await asyncio.to_thread(collect_character_profiles, self.get_system(ISandbox), self.get_system(ILLMProfileStore))
+
+
+api = CharacterProfilesAPI()

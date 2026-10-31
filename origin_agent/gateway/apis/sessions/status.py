@@ -29,3 +29,6 @@ class SessionStatusAPI(APIComponent):
             session_id=session_id, exists=exists, occupied=occupied,
             processing=processing, activity=activity, visual_resources=visual_resources,
         )
+
+
+api = SessionStatusAPI()

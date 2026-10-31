@@ -30,3 +30,6 @@ class UpdateToolchainSummaryProfileAPI(APIComponent):
             raise_metadata_http(exc)
         failures = await self.get_system(IFrontendSink).broadcast_toolchain_summary_profile_change(state)
         return ToolchainSummaryProfileMutationResponse(state=state, notification_failures=failures)
+
+
+api = UpdateToolchainSummaryProfileAPI()

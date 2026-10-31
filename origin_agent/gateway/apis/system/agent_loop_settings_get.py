@@ -14,3 +14,6 @@ class GetAgentLoopSettingsAPI(APIComponent):
         """Read settings without creating a Loop or writing default settings."""
         response.headers["Cache-Control"] = "no-store"
         return self.get_system(IRuntimeSystem).get_agent_loop_settings()
+
+
+api = GetAgentLoopSettingsAPI()

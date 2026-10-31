@@ -38,3 +38,6 @@ class HistoryMediaContentAPI(APIComponent):
         except HistoryMediaPreviewError as exc:
             code = GatewayErrorCode.MEDIA_PREVIEW_UNSUPPORTED if exc.status_code == 415 else GatewayErrorCode.MEDIA_PREVIEW_INVALID
             raise business_http_error(exc.status_code, code, str(exc), details={"media_id": media_id}) from exc
+
+
+api = HistoryMediaContentAPI()

@@ -16,3 +16,6 @@ class ListSessionCronTasksAPI(APIComponent):
         """List scheduled tasks belonging to the selected session."""
         require_session(self.get_system(ISessionManager), session_id)
         return {"tasks": self.get_system(ICronRouter).list_cron_tasks_for_session(session_id)}
+
+
+api = ListSessionCronTasksAPI()

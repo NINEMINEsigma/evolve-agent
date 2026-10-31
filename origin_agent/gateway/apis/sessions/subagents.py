@@ -17,3 +17,6 @@ class SessionSubagentsAPI(APIComponent):
         require_session(self.get_system(ISessionManager), session_id)
         snapshot = self.get_system(ISubAgentOrchestrator).get_snapshot(parent_session_id=session_id)
         return SubAgentSnapshotResponse(session_id=session_id, subagents=snapshot.subagents)
+
+
+api = SessionSubagentsAPI()

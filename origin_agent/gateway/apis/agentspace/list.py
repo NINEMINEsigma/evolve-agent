@@ -19,3 +19,6 @@ class AgentspaceListAPI(APIComponent):
             return {"entries": [{**entry.model_dump(mode="json"), "type": entry.kind.value} for entry in entries]}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceListAPI()

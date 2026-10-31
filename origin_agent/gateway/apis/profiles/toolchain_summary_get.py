@@ -13,3 +13,6 @@ class GetToolchainSummaryProfileAPI(APIComponent):
     async def handler(self) -> Any:
         """Return the authoritative global toolchain-summary Profile state."""
         return self.get_system(ISessionMetadataService).get_toolchain_summary_state()
+
+
+api = GetToolchainSummaryProfileAPI()

@@ -19,3 +19,6 @@ class CreateSandboxSpaceAPI(APIComponent):
             return {"space": space, "created": created}
         except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
             raise_sandbox_space_http(exc)
+
+
+api = CreateSandboxSpaceAPI()

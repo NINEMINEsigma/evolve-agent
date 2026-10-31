@@ -7,7 +7,6 @@ from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
-from gateway.apis import register_apis
 from gateway.frontend_assets import compute_build_hash, frontend_dist
 from gateway.http_boundary import (
     GatewayAdmissionMiddleware, GatewayAPIRoute, handle_http_exception,
@@ -27,7 +26,7 @@ def build_router_app(gateway: IGatewaySystem) -> FastAPI:
     application.add_exception_handler(HTTPException, handle_http_exception)
     application.add_middleware(GatewayAdmissionMiddleware, admission=gateway.admission)
     router = APIRouter(route_class=GatewayAPIRoute)
-    register_apis(gateway, router)
+    gateway.display_apis(router)
     application.include_router(router)
     application.state.build_hash = compute_build_hash()
     dist = frontend_dist()

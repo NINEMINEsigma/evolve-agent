@@ -31,3 +31,6 @@ class AutoTitleSessionAPI(APIComponent):
         manager.update_title(session_id, title)
         logger.info("Auto title | session=%s title=%s", session_id, title)
         return {"title": title, "session_id": session_id}
+
+
+api = AutoTitleSessionAPI()

@@ -77,3 +77,6 @@ class FilePickerAPI(APIComponent):
             logger.info("File %s | picker src=%s dest=%s", method, src, dest)
             results.append({"uploaded": True, "path": f"{UPLOADS_WS_PREFIX}{unique_name}", "filename": safe_name, "size": dest.stat().st_size, "method": method})
         return {"uploaded": True, "files": results}
+
+
+api = FilePickerAPI()

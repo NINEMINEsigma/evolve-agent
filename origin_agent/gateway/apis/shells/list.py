@@ -16,3 +16,6 @@ class ListSessionShellsAPI(APIComponent):
         """List all Shell metadata belonging to the selected main session."""
         require_session(self.get_system(ISessionManager), session_id)
         return {"shells": self.get_system(IShellManager).list_shells(session_id)}
+
+
+api = ListSessionShellsAPI()

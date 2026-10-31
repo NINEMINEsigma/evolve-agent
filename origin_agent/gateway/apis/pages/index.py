@@ -21,3 +21,6 @@ class IndexAPI(APIComponent):
             logger.error("Frontend not built: %s missing", index_html)
             return HTMLResponse("Frontend not built. Please run the build first.", status_code=500)
         return HTMLResponse(index_html.read_text(encoding="utf-8"), headers=dict(HTTP_NO_CACHE_HEADERS))
+
+
+api = IndexAPI()

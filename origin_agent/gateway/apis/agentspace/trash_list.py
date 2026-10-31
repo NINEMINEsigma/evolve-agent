@@ -19,3 +19,6 @@ class AgentspaceTrashListAPI(APIComponent):
             return {"entries": entries}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceTrashListAPI()

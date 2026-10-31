@@ -7,6 +7,7 @@
 `api_component.py::APIComponent`继承framework.AsyncComponent和ABC，是API端点组件契约，不是System槽位，也不继承BaseModel。具体实现均位于gateway/apis，每个具体类独立文件，由唯一GatewaySystem通过add_component持有。
 
 公开能力：
+- priority类级元数据：`ClassVar[int]`，默认使用GATEWAY_API_DEFAULT_PRIORITY（0）；数值小者先display，同值保留发现顺序。Gateway应用保留1000作为唯一末尾声明，普通组件必须小于1000；通用发现入口不检查优先级。
 - gateway只读property：通过framework公开parent_system取得并显式核对IGatewaySystem；未绑定/绑定错误直接RuntimeError。
 - get_system(system_type)：委托同一父Gateway查询其他已就绪System，不缓存服务或架构镜像。
 - display(router)：具体类显式登记原URL、方法、name和响应模型；不根据类名生成路径。
@@ -16,8 +17,14 @@
 
 组件不保存当前Request、WebSocket、session_id、订阅、单次Future或结果。原System/TaskOwner负责真实资源和取消交接，组件父关系不会取代生命周期所有权。异常来自entity.error或框架，不在此包复制定义。
 
+## IGatewaySystem装配契约
+
+`display_apis(self, router: APIRouter) -> None`是同步一次性装配入口。server工厂创建局部路由表后委托此接口，GatewaySystem收集模块级实例、稳定排序，全部绑定后再逐个display，并在include_router前检查重复路由。接口只依赖APIRouter，不反向导入APIComponent或具体发现实现。
+
+模块内实例变量名不限，收集按类型并按身份去重；组件创建发生在模块导入时，构造仅建立framework内存字段，不取得运行时依赖。GatewaySystem的一次性状态拒绝重复装配，模块缓存中的已绑定实例也由framework拒绝再次绑定；不自动解绑、克隆、reload或复位重试，不承诺同进程第二次装配。
+
 ## 依赖方向
 
-api_component单向依赖framework、FastAPI APIRouter和gateway_system接口；IGatewaySystem不反向依赖具体API实现。接口包入口显式再导出APIComponent，不建立自动发现或反射。消息前纯类型不反向导入接口实现/业务包；HTTPErrorDetail仅为不持久化的数据契约。
+api_component单向依赖framework、FastAPI APIRouter和gateway_system接口；IGatewaySystem不反向依赖具体API实现。接口包入口显式再导出APIComponent，自身不执行发现或反射；按类型实例发现由独立StrictDiscovery承担，装配和display由GatewaySystem承担。消息前纯类型不反向导入接口实现/业务包；HTTPErrorDetail仅为不持久化的数据契约。
 
 其他接口与ILoggableSystem/IDPRuntimeSystem继承、关闭准备及Logger根依赖保持既有规范，见根DEV-class_relationships和system开发文档。本轮未新增依赖版本、System、持久化模型或easysave key；未运行校验、导入、构建或应用，完整部署和运行验收由用户执行。

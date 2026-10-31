@@ -19,3 +19,6 @@ class HealthAPI(APIComponent):
             payload["status"] = "ok"
             return payload
         return JSONResponse({"status": "shutting_down", **payload}, status_code=503)
+
+
+api = HealthAPI()

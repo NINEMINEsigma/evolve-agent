@@ -22,3 +22,6 @@ class AgentspaceTrashPurgeAPI(APIComponent):
             return {"success": True, "operation_id": operation_id}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceTrashPurgeAPI()

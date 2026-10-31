@@ -27,3 +27,6 @@ class UpdateSessionTagsAPI(APIComponent):
         valid = manager.set_session_tags(session_id, tags)
         logger.info("Update tags | session=%s tags=%s", session_id, valid)
         return {"updated": True, "session_id": session_id, "tags": valid}
+
+
+api = UpdateSessionTagsAPI()

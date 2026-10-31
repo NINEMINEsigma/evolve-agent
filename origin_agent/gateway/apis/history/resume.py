@@ -33,3 +33,6 @@ class ResumeSessionAPI(APIComponent):
                 token_usage=loop.get_token_usage(), context_tokens=loop.get_context_tokens(),
             ))
         return {"resumed": True, "session_id": session_id, "history_count": loop.loop.history.count}
+
+
+api = ResumeSessionAPI()

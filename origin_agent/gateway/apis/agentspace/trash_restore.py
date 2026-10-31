@@ -22,3 +22,6 @@ class AgentspaceTrashRestoreAPI(APIComponent):
             return {"entry": entry, "restored_path": restored_path, "operation_id": operation_id}
         except AgentspaceError as exc:
             raise_agentspace_http(exc)
+
+
+api = AgentspaceTrashRestoreAPI()

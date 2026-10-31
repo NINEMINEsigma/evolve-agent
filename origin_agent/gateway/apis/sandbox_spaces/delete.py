@@ -18,3 +18,6 @@ class DeleteSandboxSpaceAPI(APIComponent):
             return {"removed": removed, "name": name}
         except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
             raise_sandbox_space_http(exc)
+
+
+api = DeleteSandboxSpaceAPI()

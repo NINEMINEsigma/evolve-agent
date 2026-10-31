@@ -24,3 +24,6 @@ class HistoryMediaUpdateAPI(APIComponent):
             raise business_http_error(404, GatewayErrorCode.MEDIA_NOT_FOUND, str(exc), details={"media_id": media_id}) from exc
         except HistoryMediaConflictError as exc:
             raise business_http_error(409, GatewayErrorCode.MEDIA_CONFLICT, str(exc), details={"media_id": media_id}) from exc
+
+
+api = HistoryMediaUpdateAPI()

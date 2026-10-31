@@ -4,7 +4,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Coroutine, TypeVar
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from system.lifecycle import TaskOwner
 
 from .runtime_system import IDPRuntimeSystem
@@ -47,6 +47,11 @@ class IGatewaySystem(IDPRuntimeSystem, ABC):
     @abstractmethod
     def session_exports(self) -> SessionExportService:
         """Return the read-only session export service owned by Gateway."""
+        ...
+
+    @abstractmethod
+    def display_apis(self, router: APIRouter) -> None:
+        """Discover once, bind all endpoint instances, then display their routes."""
         ...
 
     @abstractmethod

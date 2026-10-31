@@ -39,3 +39,6 @@ class UpdateModalityProfileAPI(APIComponent):
             raise business_http_error(409, GatewayErrorCode.PROFILE_CONFLICT, str(exc)) from exc
         failures = await self.get_system(IFrontendSink).broadcast_modality_profile_change(states)
         return ModalityProfileMutationResponse(state=state, notification_failures=failures)
+
+
+api = UpdateModalityProfileAPI()

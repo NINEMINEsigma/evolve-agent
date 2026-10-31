@@ -67,7 +67,7 @@ def _module_declares_toolset(module_path: Path) -> bool:
     if declarations > 1:
         raise ValueError(f"Multiple TOOLSET declarations in {module_path}")
     # 不遍历工具类和函数主体；导入期的注册、全局注册表及旧 UI 路由导入直接拒绝。
-    pending = list(tree.body)
+    pending: list[ast.AST] = list(tree.body)
     while pending:
         node = pending.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

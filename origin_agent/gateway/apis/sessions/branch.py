@@ -26,3 +26,6 @@ class BranchSessionAPI(APIComponent):
         if not result.merged:
             raise business_http_error(409, GatewayErrorCode.SESSION_MERGE_REJECTED, result.error or "Session merge rejected", details={"sources": [session_id]})
         return result
+
+
+api = BranchSessionAPI()

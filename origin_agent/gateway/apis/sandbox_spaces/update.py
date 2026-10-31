@@ -23,3 +23,6 @@ class UpdateSandboxSpaceAPI(APIComponent):
             return {"space": space}
         except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
             raise_sandbox_space_http(exc)
+
+
+api = UpdateSandboxSpaceAPI()
