@@ -1,0 +1,14 @@
+[description]
+Prepare, validate, and activate authorized runtime code evolution.
+
+[related]
+Toolsets
+
+[keywords]
+代码进化
+运行时进化
+自我进化
+EvolveCode
+ValidateCode
+ValidateFrontend
+fork:

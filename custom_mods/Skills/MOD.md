@@ -4,7 +4,7 @@ Skills are reusable knowledge modules stored under the `skills:` namespace, usua
 
 ## Discover and load
 
-Only skill names and short descriptions are included by default. Call `RecallSkill` without a name to list available skills. Pass the exact skill name to load its full content into the conversation context.
+In contexts that provide a default skill catalog, it contains only names and short descriptions, not full instructions. Do not assume every Agent receives that catalog; temporary Agents keep no system prompt. Call `RecallSkill` without a name to list available skills. Pass the exact skill name to load its full content into the conversation context.
 
 Do not assume a skill's title or description contains all its instructions. Load it before relying on detailed procedures. If the user includes `/skill:skill-name`, use that exact name to load the referenced skill; see UserMentions mod.
 

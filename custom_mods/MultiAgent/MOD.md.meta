@@ -1,0 +1,14 @@
+[description]
+Explain shared-history multi-Agent conversations, routing, and participant behavior.
+
+[related]
+CharacterProfiles
+
+[keywords]
+多Agent
+多代理
+多人对话
+EnterMultiAgent
+ExitMultiAgent
+@visible(
+@response(

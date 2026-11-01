@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from framework import AsyncSystem
 
+from entity.messages import TextBlock
 from entity.constant import SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.puretype import ToolAvailability, ToolDangerLevel, ToolBatchDecision, ToolCallRequest
 from entity.puretype.lifecycle import SyncToolCallRecord
@@ -732,8 +733,13 @@ class ToolRegistry(IToolRegistry):
             raise LifecycleFailure("Synchronous tool body returned an awaitable")
         if not isinstance(result, ToolHandlerResult) or not isinstance(result.result, dict):
             raise TypeError(f"Tool {tool.name} must return ToolHandlerResult with a dict payload")
+        if (not isinstance(result.result_text_blocks, tuple)
+                or any(not isinstance(block, TextBlock) for block in result.result_text_blocks)
+                or (result.result_text_blocks and result.result.get("error"))):
+            raise TypeError("Invalid typed tool text result")
         execution.result = result.result
         execution.state = result.state
+        execution.result_text_blocks = result.result_text_blocks
         execution.body_completed_normally = True
         return execution
 
@@ -756,8 +762,13 @@ class ToolRegistry(IToolRegistry):
                 result = await result
             if not isinstance(result, ToolHandlerResult) or not isinstance(result.result, dict):
                 raise TypeError(f"Tool {tool.name} must return ToolHandlerResult with a dict payload")
+            if (not isinstance(result.result_text_blocks, tuple)
+                    or any(not isinstance(block, TextBlock) for block in result.result_text_blocks)
+                    or (result.result_text_blocks and result.result.get("error"))):
+                raise TypeError("Invalid typed tool text result")
             execution.result = result.result
             execution.state = result.state
+            execution.result_text_blocks = result.result_text_blocks
             execution.body_completed_normally = True
             return execution
 

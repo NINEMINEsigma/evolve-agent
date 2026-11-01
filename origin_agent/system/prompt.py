@@ -24,14 +24,13 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 from util.pathutils import find_repo_root
 from util.templates import read_template
 from system.context import RuntimeContext
-from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
+from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
 
@@ -172,7 +171,6 @@ def build_subagent_catalog_block() -> str:
     lines = [
         "Available sub-agents (dynamically refreshed; use ListSubAgents for current status):",
         "",
-        "(optional: each character directory may declare an [avatar] key in profile.md.meta to set a custom frontend avatar)",
     ]
     for profile in available_profiles:
         lines.append(f"- {profile.name} ({profile.character_type})")
@@ -285,6 +283,8 @@ def build_system_prompt(
     # 3. 工具
     tools: str = read_template("tools.txt")
     if tools:
+        if runtime_ctx is not None:
+            tools = tools.replace("{{gateway_port}}", str(runtime_ctx.gateway_port))
         blocks.append(tools)
 
     # 3a. 工具集目录 — 有已加载工具集时注入
@@ -296,9 +296,6 @@ def build_system_prompt(
 
     # 3b. Sub-agent 工具说明 — 仅在 MAIN scope 下注入
     if tool_availability_scope & ToolAvailability.MAIN:
-        subagent_tools: str = read_template("tools_subagent.txt")
-        if subagent_tools:
-            blocks.append(subagent_tools)
         subagent_catalog = build_subagent_catalog_block()
         if subagent_catalog:
             blocks.append(subagent_catalog)
@@ -324,151 +321,3 @@ def build_system_prompt(
                 blocks.append(block.strip())
 
     return blocks
-
-
-def build_session_site_block(
-    session_id: str,
-    *,
-    owner: Literal["self", "parent"] = "self",
-) -> str:
-    """构建 Session Site Deployment 约定提示词块。
-
-    从 ``templates/session_site.txt`` 读取模板并替换占位符。
-    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
-
-    Args:
-        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
-        owner: "self" 表示本会话自身的部署区；"parent" 表示子代理
-            为主会话的部署区产出内容（归属主会话）。
-    """
-    if not session_id:
-        return ""
-    template: str = read_template("session_site.txt")
-    if not template:
-        return ""
-    if owner == "parent":
-        owner_intro = (
-            "You are a sub-agent working within a parent session. "
-            "The parent session has a dedicated website deployment area. "
-            "The session ID below is the PARENT session's ID, not your own. "
-            "Deploy website content to the parent session's site directory."
-        )
-    else:
-        owner_intro = (
-            "You have a dedicated website deployment area for THIS session. "
-            "The session ID below is your current session's ID."
-        )
-    return (
-        template
-        .replace("{{owner_intro}}", owner_intro)
-        .replace("{{session_id}}", session_id)
-        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
-    )
-
-
-def build_session_stage_block(
-    session_id: str,
-    *,
-    owner: Literal["self", "parent"] = "self",
-) -> str:
-    """构建 Session Stage 舞台层约定提示词块。
-
-    从 ``templates/session_stage.txt`` 读取模板并替换占位符。
-    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
-
-    Args:
-        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
-        owner: "self" 表示本会话自身的舞台层；"parent" 表示子代理
-            为主会话的舞台层产出内容（归属主会话）。
-    """
-    if not session_id:
-        return ""
-    template: str = read_template("session_stage.txt")
-    if not template:
-        return ""
-    if owner == "parent":
-        owner_intro = (
-            "You are a sub-agent working within a parent session. "
-            "The parent session has a dedicated stage layer — a transparent background "
-            "rendering area in the chat background. "
-            "The session ID below is the PARENT session's ID, not your own. "
-            "Deploy stage content to the parent session's stage directory."
-        )
-    else:
-        owner_intro = (
-            "You have a dedicated stage layer for THIS session — a transparent background "
-            "rendering area in the chat background. "
-            "The session ID below is your current session's ID."
-        )
-    return (
-        template
-        .replace("{{owner_intro}}", owner_intro)
-        .replace("{{session_id}}", session_id)
-        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
-    )
-
-
-def build_session_variables_block(
-    session_id: str, *, owner: Literal["self", "parent"] = "self",
-) -> str:
-    """仅注入变量池协议与逻辑路径，不扫描或注入变量值。"""
-    from entity.constant import SESSION_VARIABLE_TEMPLATE_NAME, SESSION_VARIABLES_DIR_NAME
-
-    if not session_id:
-        return ""
-    template = read_template(SESSION_VARIABLE_TEMPLATE_NAME)
-    if not template:
-        return ""
-    intro = (
-        "You share the PARENT main session's variable pool. The ID below is the parent ID, not your own. "
-        "Propose changes to shared balances to the main Agent; do not independently settle them."
-        if owner == "parent" else
-        "This variable pool belongs to your current main session. All participants share this pool; "
-        "only the main Agent should settle shared state."
-    )
-    return (template.replace("{{owner_intro}}", intro)
-            .replace("{{session_id}}", session_id)
-            .replace("{{variables_dir}}", SESSION_VARIABLES_DIR_NAME))
-
-
-def build_session_chat_style_block(
-    session_id: str,
-    *,
-    owner: Literal["self", "parent"] = "self",
-) -> str:
-    """构建会话级聊天区自定义样式约定提示词块。
-
-    从 ``templates/session_chat_style.txt`` 读取模板并替换占位符。
-    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
-
-    Args:
-        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
-        owner: "self" 表示本会话自身的聊天样式；"parent" 表示子代理
-            为主会话的聊天样式产出内容（归属主会话）。
-    """
-    if not session_id:
-        return ""
-    template: str = read_template("session_chat_style.txt")
-    if not template:
-        return ""
-    if owner == "parent":
-        owner_intro = (
-            "You are a sub-agent working within a parent session. "
-            "The parent session has a dedicated chat style layer — a CSS file "
-            "that customizes the appearance of chat bubbles and fonts in the chat area. "
-            "The session ID below is the PARENT session's ID, not your own. "
-            "Deploy chat style content to the parent session's chat-style directory."
-        )
-    else:
-        owner_intro = (
-            "You have a dedicated chat style layer for THIS session — a CSS file "
-            "that customizes the appearance of chat bubbles and fonts in the chat area. "
-            "The session ID below is your current session's ID."
-        )
-    return (
-        template
-        .replace("{{owner_intro}}", owner_intro)
-        .replace("{{session_id}}", session_id)
-        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
-        .replace("{{local_font_prefix}}", LOCAL_FONT_HTTP_PREFIX)
-    )

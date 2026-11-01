@@ -24,7 +24,7 @@ from easysave import EasySaveConfig, raw_load
 from easysave.private.util import type_format
 from pydantic import BaseModel
 
-from entity.constant import History_Version
+from util.history_storage import select_history_key, normalize_loaded_history
 from entity.messages import AudioBlock, History, ImageBlock, MediaBlock, VideoBlock
 from entity.typeref import make_config
 
@@ -105,14 +105,19 @@ def project_value(value: Any, config: EasySaveConfig,
     raise TypeError(f"Unsupported History display value: {type(value).__name__}")
 
 
-def load_history(path: Path, key: str = History_Version) -> tuple[History, dict[str, Any]]:
+def load_history(path: Path, key: str | None = None) -> tuple[History, dict[str, Any]]:
     """Restore the real History using the project's type mapping and easysave."""
     path = path.resolve()
     if not (path.name.lower().endswith(".es") or path.name.lower().endswith(".es.bak")):
         raise ValueError("Only .es files or explicitly selected .es.bak files may be read")
     raw = path.read_bytes()
     document = json.loads(raw)
-    graph = document[key]
+    if not isinstance(document, dict):
+        raise TypeError("Expected an easysave key mapping")
+    selected = select_history_key(document.keys()) if key is None else key
+    if selected not in document:
+        raise ValueError(f"History key not found: {selected}")
+    graph = document[selected]
     if not isinstance(graph, dict):
         raise TypeError("Expected an easysave object graph")
     # raw_load 与 load 共用官方反序列化实现；只读一次以使指纹对应同一份字节快照。
@@ -122,7 +127,8 @@ def load_history(path: Path, key: str = History_Version) -> tuple[History, dict[
         raise TypeError("The selected easysave root is not a History")
     if not isinstance(history.messages, list):
         raise TypeError("History.messages must be a list")
-    return history, {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    history = normalize_loaded_history(history, selected)
+    return history, {"key": selected, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def iter_media(value: Any, location: str = "content",
@@ -226,7 +232,7 @@ def main() -> None:
     source.add_argument("--path", type=Path, help="Explicit history.es path")
     parser.add_argument("--sessions-root", type=Path,
                         default=REPOSITORY_ROOT / "workspace" / "sessions")
-    parser.add_argument("--key", default=History_Version)
+    parser.add_argument("--key", default=None, help="Explicit key; default prefers v2, then legacy v1")
     parser.add_argument("--start", type=int, default=0, help="Zero-based message index")
     parser.add_argument("--limit", type=positive_int, default=10)
     parser.add_argument("--max-text-chars", type=positive_int, default=4000)
@@ -243,7 +249,7 @@ def main() -> None:
         path = args.path
     history, fingerprint = load_history(path, args.key)
     view = build_view(history, args.start, args.limit, args.max_text_chars, args.summary)
-    view["source"] = {"path": str(path.resolve()), "key": args.key, **fingerprint}
+    view["source"] = {"path": str(path.resolve()), **fingerprint}
     output = json.dumps(view, ensure_ascii=False, indent=2)
     if len(output) > args.max_output_chars:
         parser.error(

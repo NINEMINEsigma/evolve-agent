@@ -1,5 +1,15 @@
 # entry/ — Agent 主循环
 
+## mod请求前准备（2026-11-01，当前约定）
+
+BaseAgentLoop.prepare_mod_context在实际模型请求前处理正式顶层Role.USER且mod_keywords_processed=false的消息。原输入先按既有投递流程保存，关闭刷新不加载文档；后续显式恢复才处理未完成输入。辅助模型和工具结果嵌入用户输入不触发，真实顶层follow-up会触发。
+
+entry/mod_context.py只产生调用级候选，不修改正式History。主会话候选History先保存、成功后按身份发布；子会话只发布内存，维持原停止保存责任。每条消息的processed仅表示该条输入评估完成，不表示mod仍已加载。自动去重只查当前可见消息的ModTextBlock元信息及真实资源归属，不全文匹配、不维护永久名单。编辑/重新生成重置目标标志但保留原mod固着器；压缩删除原消息时加载依据同时失效；旋转移动user使用副本重置标志，不改源会话对象。
+
+主/多/子/临时Loop均接入请求前准备。普通/随意聊聊/多Agent参与者/普通子Agent有动态名称简介目录，Task仍无system。四种会话功能详细块与tools_subagent全文已移出，旧build_session_*_block删除；保留动态沙盒事实、角色/工具目录、路由/身份/拒绝及fallback必需协议。本节覆盖下文旧模板注入描述。
+
+工具正常结果的附加文本通过通用result_text_blocks保存；Provider get_content与UI project_message_display_content分离，内部_meta/_queued_messages不重复显示。主聊天复用suffix与history_updated；子会话沿原快照/回放展示。错误沿既有失败边界，坏mod可能使主队列请求应用FAILURE关闭；不新增catch后继续模型。History升级v2，见util及system文档。仅源码实施，未运行校验、构建或应用。
+
 `entry/` 包含 Evolve Agent 的核心消息处理循环与相关抽象。它是用户消息进入系统后，经过 LLM、工具、审批、前端事件往返的主战场。
 
 ---

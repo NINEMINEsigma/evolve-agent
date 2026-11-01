@@ -1,0 +1,13 @@
+[description]
+Present small HTML widgets in chat and choose the correct rendering path.
+
+[related]
+FileDisplay
+
+[keywords]
+聊天组件
+消息内HTML
+HTML组件
+小组件
+<script
+<style

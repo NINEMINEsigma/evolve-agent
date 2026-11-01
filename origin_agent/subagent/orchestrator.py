@@ -20,7 +20,6 @@ from typing import Any, Coroutine
 from entity.constant import (
     SYSTEM_CHARACTER_NAME,
     USER_CHARACTER_NAME,
-    History_Version as __History_Version__,
     SUBAGENT_TEMP_DIR_NAME,
     SUBAGENT_HISTORY_SUFFIX,
 )
@@ -43,6 +42,7 @@ from entity.puretype import (
     QueuedMessage,
 )
 from entity.error import ApplicationStoppingError, LifecycleFailure
+from entry.agent_support.multimodal import content_to_text, project_message_display_content
 from util.templates import read_template
 from interface.frontend_sink import IFrontendSink
 from interface.approval_system import IApprovalSystem
@@ -542,7 +542,7 @@ class _OrchestratorContext:
                 if msg.role == Role.USER:
                     feedback.append(SubAgentFeedback(
                         role="user",
-                        content=str(msg.content),
+                        content=content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
                         character_name=character_name or USER_CHARACTER_NAME,
                     ))
                 elif msg.role == Role.ASSISTANT:
@@ -574,7 +574,7 @@ class _OrchestratorContext:
                     feedback.append(SubAgentFeedback(
                         role="tool_result",
                         tool_call_id=msg.tool_call_id,
-                        content=str(msg.content),
+                        content=content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
                         character_name=character_name,
                     ))
             status = (
@@ -793,20 +793,11 @@ class _OrchestratorContext:
 
         history_events: list[dict[str, Any]] = []
         if history_path:
-            from easysave import load
-            from entity.typeref import make_config
+            from util.history_storage import load_history_file
             from entity.messages import History, CharacterConversationMessage, ToolResultMessage
 
             path = Path(history_path)
-            if not path.exists():
-                raise FileNotFoundError(f"History file not found: {history_path}")
-
-            loaded_history = load(
-                __History_Version__,
-                make_config(path),
-                History,
-                ignore_missing_fields=True,
-            )
+            loaded_history = load_history_file(path)
             if not isinstance(loaded_history, History):
                 raise TypeError(
                     f"Loaded subagent history must be History, got {type(loaded_history).__name__}"
@@ -818,7 +809,7 @@ class _OrchestratorContext:
                 if msg.role == Role.USER:
                     history_events.append({
                         "role": "user",
-                        "content": str(msg.content),
+                        "content": content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
                     })
                 elif msg.role == Role.ASSISTANT:
                     content = str(msg.content)
@@ -839,7 +830,7 @@ class _OrchestratorContext:
                     history_events.append({
                         "role": "tool_result",
                         "tool_call_id": msg.tool_call_id,
-                        "content": str(msg.content),
+                        "content": content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
                     })
             logger.info(
                 "Subagent history loaded | session=%s entries=%d",

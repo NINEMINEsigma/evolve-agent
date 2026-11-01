@@ -1,5 +1,17 @@
 # Agent Loop 类关系图
 
+## mod消息与请求前准备（2026-11-01，当前权威约定）
+
+继承新增MessageBlock→TextBlock→ModTextBlock。后者持有mod_name/resource_session_id/visible_characters及继承text，带to_text/is_visible_to/as_fixator_text行为，属于正式消息模型。BaseMessage新增mod_fixators和mod_keywords_processed；ToolResultMessage新增通用result_text_blocks。正文与来源是同一块对象，没有独立永久加载状态或新增System。
+
+BaseAgentLoop公开get_resource_session_id/get_mod_context_characters/prepare_mod_context；SubAgentLoop返回真实父主会话资源ID，MultiAgentLoop返回实际角色集，ToolContext统一委托。entry/mod_context只返回puretype_after.ModMessageReplacement调用级候选；先保存后发布，子会话只发布内存。processed是输入评估标志，不是去重依据。去重只看当前可见typed块的名称、owner和受众，不比较全文。
+
+ToolHandlerResult/ToolExecution默认空result_text_blocks，Registry成功后与result/state一起赋值；prepare_tool_result保存到正式ToolResultMessage并配对，payload替换清空块以失效来源。Provider get_content保留正典，UI独立project_message_display_content过滤内部字段后追加文本。所有调用级对象仍不持久化；只存真实消息和块。
+
+History采用v2 key/v2::History，旧v1根有显式读取别名，ModTextBlock使用v1稳定类型名；只在无v2时读v1，损坏不回退。候选替换、导出和多模态快照显式复制新列表。既有System槽位、权限和关闭顺序不变；目录/自动准备错误仍可能沿主队列导致应用FAILURE关闭。
+
+四个旧build_session_*_block和五份详细模板已退役，本节覆盖下文相关旧类关系/提示词注入记录；保留GENE/SOUL、路由、动态事实与必要拒绝协议。普通/多/子/临时请求均准备；Task无system不变。仅源码实施与只读审阅，未运行校验/导入/构建/应用，详见任务2026-10-31_3的人工验收矩阵。
+
 > **迁移前基线说明**：本文件的继承关系图、`## 字段归属（已确认）` 表中的 `_toolsets` 行，以及 `### 工具注册表生命周期迁移（S10）`、`### 工具显式注册与发现生命周期迁移（S20）` 两节，记录的是对象工具化迁移之前的实现。自 2026-10-15 起，唯一权威的工具对象与四阶段执行契约见文末 `### 对象工具与四阶段执行迁移（2026-10-15，权威）`；`ToolEntry`/`ToolsetEntry` 元数据镜像、`register_tools(registry, ui_events)` 函数注册协议、`registry.register()` 顶层注册与 `UIEventRouter` 均已退役。本文件其余历史章节保持原文，不因本次迁移改写。
 
 > **异常定义位置的权威覆盖（2026-10-30）**：origin仓库所有自定义异常（含内部控制信号）统一定义于异常定义包 `entity/error/`，公共类型由包入口显式导出，调用方使用 `from entity.error import X`；私有 `_SourceUnavailable` 只从 `entity.error.session_export` 显式导入且不公开。标准库/第三方异常来源不变。下列历史章节中业务模块、util 或旧路径为异常定义位置的记载仅反映当时实现，现行约定以本说明及 [entity/error/DEV-README.md](origin_agent/entity/error/DEV-README.md) 为准。

@@ -5,7 +5,8 @@ entity.puretype package and the message definition layer must not import this
 package. Each phase explicitly exports its own types without a shared facade.
 """
 
+from .mods import ModMessageReplacement
 from .session import ToolChainReplacement
 from .session_export import SessionExportHistorySource
 
-__all__ = ["ToolChainReplacement", "SessionExportHistorySource"]
+__all__ = ["ModMessageReplacement", "ToolChainReplacement", "SessionExportHistorySource"]

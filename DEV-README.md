@@ -1,5 +1,17 @@
 # Evolve Agent — 开发者文档
 
+## 功能指导渐进式加载（2026-11-01，当前约定）
+
+项目根custom_mods按同级MOD.md/MOD.md.meta声明系统功能指导，名称简介常驻，全文经core的RecallMod批量读取，related机械递归、允许环、调用内去重；keywords按大小写敏感字面子串在正式顶层user消息的模型请求前触发固着器。具体扩展协议见[custom_mods开发文档](custom_mods/DEV-README.md)，不在本文件维护具体安装条目。
+
+abstract/mods提供严格本地读取与模板，system/mods提供显式运行值及简目录，entry/mod_context提供消息视图候选。BaseAgentLoop统一准备并候选保存后发布；ModTextBlock把全文与名称/资源所属主会话/受众保存在一起，删除压缩即失去该块，不使用全文比较或永久加载名单。工具结果嵌入补充不触发，真实顶层follow-up触发；Task仍无system/无磁盘History。无新增System、权限、沙盒前缀、watcher或全局服务。
+
+会话网页、舞台层、聊天样式、变量池的详细常驻块及tools_subagent模板退役，四个build_session_*_block删除；本节覆盖下文这些旧注入路径的说明。实际身份、动态映射/模态事实、工具/角色目录、路由与fallback必需协议仍常驻，不能靠先加载mod才成立。
+
+History升级easysave v2和v2::History，ModTextBlock使用稳定类型名。读取显式v2优先、无v2才兼容v1；v2损坏不降级。旧文件保存v2仍保留冻结v1快照，旧运行包不能继续使用已升级数据；应完整部署涉及的fast/fallback包。主存储、普通子历史和开发辅助同步适配；辅助读取保持单字节快照与严格未知字段诊断。
+
+Provider与UI工具正文分别投影，原_meta和嵌入输入保留在正典，界面通过专门字段展示不重复。主聊天沿用suffix/history_updated，子会话固着器沿快照/回放显示。损坏mod在主队列路径可能触发既有FAILURE关闭；本次没有增加请求恢复器。1MiB仅约束mod自有完整编码内容，不约束所有工具输入/媒体传输。仅源码和只读审阅，未运行测试、校验、构建或应用；用户按任务文件V01–V22验收。
+
 本文档面向需要理解、修改或扩展 Evolve Agent 的开发者。若你只是想安装和使用，请阅读根目录的 `README.md`。
 
 ---

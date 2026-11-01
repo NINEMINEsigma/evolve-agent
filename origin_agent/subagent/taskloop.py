@@ -113,6 +113,7 @@ class TaskAgentLoop(SubAgentLoop):
                 turn += 1
                 self._round_active = True
 
+                await self.prepare_mod_context()
                 messages = self._build_history_messages()
                 tools = self._get_effective_tool_definitions()
                 resp: LLMResponse = await self._llm.chat(

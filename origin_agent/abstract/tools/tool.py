@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import threading
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from entity.messages import ToolResultMessage
+from entity.messages import TextBlock, ToolResultMessage
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
 if TYPE_CHECKING:
@@ -19,10 +19,13 @@ class ToolHandlerResult:
     def __init__(
         self,
         result: dict[str, Any],
-        state: Any = None
+        state: Any = None,
+        *,
+        result_text_blocks: tuple[TextBlock, ...] = (),
         ) -> None:
         self.result = result
         self.state = state
+        self.result_text_blocks = result_text_blocks
 
 
 class ToolPostprocessEffect:
@@ -67,6 +70,7 @@ class ToolExecution:
         self.tool_call_id = tool_call_id
         self.result: dict[str, Any] | None = None
         self.state: Any = None
+        self.result_text_blocks: tuple[TextBlock, ...] = ()
         self.body_executed = False
         self.body_completed_normally = False
         self.history_index: int | None = None

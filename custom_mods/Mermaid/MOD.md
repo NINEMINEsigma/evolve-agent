@@ -6,7 +6,7 @@ Use Mermaid when a response needs a flowchart, sequence diagram, class diagram, 
 
 Put the diagram source in a fenced Markdown code block with the language tag `mermaid`.
 
-The frontend renders it as an interactive SVG diagram with zoom, pan, and download support. Mermaid remains part of the Markdown rendering path, so normal Markdown explanations can appear before and after the diagram in the same message.
+The frontend renders it as an SVG diagram. Clicking the diagram opens a larger view with zoom, pan, reset, and close controls. This guidance does not promise a diagram download control. Mermaid remains part of the Markdown rendering path, so normal Markdown explanations can appear before and after the diagram in the same message.
 
 ## Writing diagrams
 

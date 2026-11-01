@@ -1,0 +1,17 @@
+[description]
+Operate persistent Shell sessions, use the active Python interpreter, and preserve lifecycle ownership.
+
+[related]
+Toolsets
+
+[keywords]
+Shell
+shell
+终端
+命令行
+pip
+StartShell
+ReadShell
+WriteShell
+InterruptShell
+StopShell

@@ -62,13 +62,7 @@ from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
 )
-from system.prompt import (
-    build_dynamic_sandbox_spaces_block,
-    build_session_chat_style_block,
-    build_session_site_block,
-    build_session_stage_block,
-    build_session_variables_block,
-)
+from system.prompt import build_dynamic_sandbox_spaces_block
 from entity.error import IncompatibleHistoryError, ModalityForwardUnavailableError
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
@@ -222,18 +216,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             prompts.append(dynamic_spaces_block)
-        site_block = build_session_site_block(self.session_id, owner="self")
-        if site_block:
-            prompts.append(site_block)
-        stage_block = build_session_stage_block(self.session_id, owner="self")
-        if stage_block:
-            prompts.append(stage_block)
-        variables_block = build_session_variables_block(self.session_id)
-        if variables_block:
-            prompts.append(variables_block)
-        chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
-        if chat_style_block:
-            prompts.append(chat_style_block)
+        from system.mods import load_mod_catalog_block
+        mod_catalog = load_mod_catalog_block()
+        if mod_catalog:
+            prompts.append(mod_catalog)
         return prompts
 
     def get_tool_availability_scope(self) -> ToolAvailability:
@@ -470,6 +456,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     # 取消事件检查点：只写一次系统状态并结束当前工具循环。
                     self.append_system_status("已中断", session_id=sid)
                     return ""
+                await self.prepare_mod_context()
+                messages = self._get_full_history(sid)
                 turn.value += 1
 
                 # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，

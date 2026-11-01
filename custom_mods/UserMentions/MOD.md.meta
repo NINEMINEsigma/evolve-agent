@@ -1,0 +1,11 @@
+[description]
+Resolve frontend file and skill references instead of assuming their contents were expanded.
+
+[related]
+Skills
+
+[keywords]
+@ws:
+/skill:
+文件引用
+技能引用

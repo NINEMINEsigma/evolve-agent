@@ -19,7 +19,7 @@ from entity.constant import (
     GLOBAL_LLM_PROFILE_FILENAME,
     LOADED_TOOLSETS_FILENAME,
 )
-from easysave import save, load, contains
+from easysave import save
 from entity.typeref import make_config
 
 from util.atomic_io import write_text_atomic
@@ -98,10 +98,10 @@ class SessionStore:
     def read_history(self, session_id: str) -> History | None:
         """读取 History 实例。"""
         path = self.history_path(session_id)
-        config = make_config(path)
-        if not path.exists() or not contains(__SessionStore_Version__, config):
+        if not path.exists():
             return None
-        data = load(__SessionStore_Version__, config, History, ignore_missing_fields=True)
+        from util.history_storage import load_history_file
+        data = load_history_file(path)
         data.remove_unpaired_tool_calls()
         return data
 

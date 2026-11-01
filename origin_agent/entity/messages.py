@@ -7,7 +7,10 @@ from entity.puretype import (
     MessageContent,
     SessionMessageDeletionResult,
 )
-from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME, AUDIO_FORMAT_MIME_SUBTYPE
+from entity.constant import (
+    USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME, AUDIO_FORMAT_MIME_SUBTYPE,
+    MOD_FIXATOR_START, MOD_FIXATOR_END,
+)
 from util.templates import read_template
 from threading import Lock
 
@@ -24,11 +27,34 @@ class MessageBlock(BaseModel):
 
 class TextBlock(MessageBlock):
     text: str = Field(description="The text of the block")
+
+    def to_text(self) -> str:
+        return self.text
+
     def as_object(self) -> dict[str, str]:
-        return {
-            "type": "text",
-            "text": self.text
-        }
+        return {"type": "text", "text": self.to_text()}
+
+
+class ModTextBlock(TextBlock):
+    """Complete guidance and its provenance share the same persistent object."""
+
+    mod_name: str
+    resource_session_id: str
+    visible_characters: tuple[str, ...]
+
+    def to_text(self) -> str:
+        audience = ", ".join(self.visible_characters)
+        return (
+            f"Mod: {self.mod_name}\nResource main session: {self.resource_session_id}\n"
+            f"Audience: {audience}\n\n{self.text}"
+        )
+
+    def is_visible_to(self, character_name: str) -> bool:
+        return character_name in self.visible_characters
+
+    def as_fixator_text(self) -> str:
+        return f"{MOD_FIXATOR_START}\n{self.to_text()}\n{MOD_FIXATOR_END}"
+
 
 
 class MediaBlock(MessageBlock):
@@ -83,8 +109,31 @@ class AudioBlock(MediaBlock):
 class BaseMessage(BaseModel):
     content: str|dict[str, Any]|list[MessageBlock] = Field(description="The content of the message")
     role: Role = Field(description="The role of the message")
+    mod_fixators: list[ModTextBlock] = Field(default_factory=list)
+    mod_keywords_processed: bool = False
 
-    def as_content(
+    def get_content(self) -> str | dict[str, Any] | list[MessageBlock]:
+        return self.content
+
+    def get_message_suffix(self, current_character_agent: str | None = None) -> str | None:
+        if self.role != Role.USER:
+            return None
+        parts = [
+            block.as_fixator_text() for block in self.mod_fixators
+            if current_character_agent is None or block.is_visible_to(current_character_agent)
+        ]
+        return "\n".join(parts) or None
+
+    def as_content(self, current_character_agent: str, **kwargs) -> MessageContent | None:
+        content = self._render_content(current_character_agent, **kwargs)
+        suffix = self.get_message_suffix(current_character_agent)
+        if suffix and content is not None:
+            if isinstance(content, list):
+                return [*content, {"type": "text", "text": suffix}]
+            return f"{content}\n{suffix}"
+        return content
+
+    def _render_content(
         self,
         # 当前作为运行中的agent的角色
         current_character_agent: str,
@@ -100,7 +149,7 @@ class BaseMessage(BaseModel):
         Returns:
             str|list: 转换后的字符串或列表
         '''
-        content: str|dict[str, Any]|list[MessageBlock] = self.content
+        content: str|dict[str, Any]|list[MessageBlock] = self.get_content()
         result: MessageContent|None = None
         # 当消息为纯文本时
         if isinstance(content, str):
@@ -120,8 +169,9 @@ class BaseMessage(BaseModel):
                 cur = content[i]
                 if isinstance(cur, TextBlock):
                     temp = cur.as_object()
-                    for key, value in kwargs.items():
-                        temp["text"] = temp["text"].replace("{{" + key + "}}", str(value))
+                    if not isinstance(cur, ModTextBlock):
+                        for key, value in kwargs.items():
+                            temp["text"] = temp["text"].replace("{{" + key + "}}", str(value))
                     result[i] = temp # type: ignore
                 else:
                     result[i] = cur.as_object() # type: ignore
@@ -226,6 +276,10 @@ class CharacterConversationMessage(CharacterMessage):
     # ----------------------------------------
     # v1 方法区域
     # ----------------------------------------
+    def get_message_suffix(self, current_character_agent: str | None = None) -> str | None:
+        parts = [self.message_suffix, super().get_message_suffix(current_character_agent)]
+        return "\n".join(part for part in parts if part) or None
+
     def with_suffix(
         self, 
         message_suffix: str | None) -> "CharacterConversationMessage":
@@ -262,14 +316,18 @@ class CharacterConversationMessage(CharacterMessage):
         is_self_current = self.character_name == current_character_agent
 
         # 非持久化注入的suffix
-        non_persistent_injection_suffix = ""
-        if is_last_user_message:
-            non_persistent_injection_suffix = self.dynamic_message_suffix
+        non_persistent_injection_suffix = self.dynamic_message_suffix or "" if is_last_user_message else ""
+        fixed_suffix = self.get_message_suffix(current_character_agent) or ""
 
         global _Role_Prefix_Template
-        raw_message = super().as_content(current_character_agent, **kwargs)
-        # 如果当前是消息接收者第一人称的消息, 则直接返回原始消息
+        raw_message = self._render_content(current_character_agent, **kwargs)
+        # 自身消息保留原前缀规则；正式user仍接收mod固着器。
         if is_self_current:
+            mod_suffix = BaseMessage.get_message_suffix(self, current_character_agent)
+            if mod_suffix and raw_message is not None:
+                if isinstance(raw_message, list):
+                    return [*raw_message, {"type": "text", "text": mod_suffix}]
+                return f"{raw_message}\n{mod_suffix}"
             return raw_message
         # 如果前缀模板未加载, 则加载
         if _Role_Prefix_Template is None:
@@ -300,13 +358,13 @@ class CharacterConversationMessage(CharacterMessage):
         if isinstance(raw_message, list):
             result: list[dict[str, Any]] = [{"type": "text", "text": f"{prefix}\n---\n"}]
             result.extend(raw_message)
-            suffix = f"\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
+            suffix = f"\n---\n{fixed_suffix}{non_persistent_injection_suffix}"
             if suffix.strip():
                 result.append({"type": "text", "text": suffix})
             return result
         # 当消息为纯文本时
         else:
-            return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
+            return f"{prefix}\n---\n{raw_message}\n---\n{fixed_suffix}{non_persistent_injection_suffix}"
 
 
 class ToolResultMessage(CharacterMessage):
@@ -314,6 +372,17 @@ class ToolResultMessage(CharacterMessage):
     工具调用结果
     '''
     tool_call_id: str = Field(description="The id of the tool call")
+    result_text_blocks: list[TextBlock] = Field(default_factory=list)
+
+    def get_content(self) -> str | dict[str, Any] | list[MessageBlock]:
+        if not self.result_text_blocks:
+            return self.content
+        if isinstance(self.content, list):
+            blocks = list(self.content)
+        else:
+            text = self.content if isinstance(self.content, str) else json.dumps(self.content, ensure_ascii=False)
+            blocks = [TextBlock(text=text)]
+        return [*blocks, *self.result_text_blocks]
 
     _follow_up_messages: list[BaseMessage] | None = PrivateAttr(default=None)
 

@@ -55,7 +55,7 @@ def _is_chain_start(message: BaseMessage) -> bool:
 
 def _message_size(message: BaseMessage) -> int:
     """估算单条消息的原始文本体积（字符），含 tool_calls 参数。"""
-    content: Any = message.content
+    content: Any = message.get_content()
     if content is None:
         size = 0
     elif isinstance(content, str):

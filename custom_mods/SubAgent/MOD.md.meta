@@ -1,0 +1,15 @@
+[description]
+Delegate to ordinary sub-Agents and manage communication, approval, and saved History.
+
+[related]
+CharacterProfiles
+Approval
+
+[keywords]
+子Agent
+子代理
+RunSubAgent
+ChatSubAgent
+StopSubAgent
+ListSubAgents
+子会话

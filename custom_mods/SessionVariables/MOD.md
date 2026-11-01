@@ -2,11 +2,11 @@
 
 {{owner_intro}}
 
-The pool is at `ws:sessions/{{session_id}}/{{variables_dir}}/`. It persists numeric and string state for the main session independently of conversation history. For an ordinary sub-Agent, use the parent main session's ID. Files are the sole source of truth: do not invent a remembered balance or infer an exact value from a summary.
+The pool is at `ws:sessions/{{session_id}}/{{variables_dir}}/`. It persists numeric and string state for the main session independently of conversation history. Both ordinary and temporary Agents in separate sub-sessions use their parent main session's resource ID. Files are the sole source of truth: do not invent a remembered balance or infer an exact value from a summary.
 
 ## Read and write
 
-Load the `filesystem` toolset before using `ReadSessionVariables`. One call reads all variables, including nested groups, original values, normalized metadata, and diagnostic issues. It has no session selector: it reads the current main session, or the parent main session for an ordinary sub-Agent.
+Load the `filesystem` toolset before using `ReadSessionVariables`. One call reads all variables, including nested groups, original values, normalized metadata, and diagnostic issues. It has no session selector: it reads the current main session, or the parent main session for an ordinary or temporary Agent in a separate sub-session. Reading this guidance does not grant variable-writing tools to temporary Agents or expand any caller's tool permissions.
 
 Manage files using `Read`, `Write`, `PatchEdit`, `Copy`, `Move`, and `Delete`; there is no special variable write tool. Each `.json` file contains exactly one JSON number or string. For example, `characters/alice/hp.json` can contain `80`, and `characters/alice/name.json` can contain `"Alice"`. Escape multiline strings as JSON. Boolean, null, array, and object values are unsupported.
 

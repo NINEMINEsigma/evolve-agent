@@ -1,77 +1,21 @@
 # File Space Namespaces
 
-## Read-Write Namespaces
+File tools require canonical logical paths: `namespace:relative/path`, using `/` between segments with no leading/trailing slash, backslash, `.` or `..` segment. A namespace root uses the prefix alone. Physical paths in descriptions are facts, not file-tool arguments. There is no `self:` namespace; never modify the code copy currently executing.
 
-These namespaces allow both reading and writing (unless a mode restriction applies).
+## Read-write spaces, subject to mode and current permissions
 
-``fork:`` — Evolution target space (fast mode only; unavailable in fallback)
-- Maps to: ``{{fork_path}}``
-- Contains: A full copy of your runtime codebase — the slow agent space where you write
-  evolved versions of yourself.
-- When to use: When evolving your own code. Write improved code here, then exit with
-  code -1 to trigger the fast-slow swap. This is the ONLY space where self-modification
-  happens — there is no ``self:`` namespace.
+- `fork:`: the configured evolution target `{{fork_path}}`, available only in fast mode. It is not the running fast copy. Authorized activation is coordinated by the formal evolution tools after verification and result submission; do not simulate it by manually exiting.
+- `fix:`: the repair target configured for the current fallback assignment, available only in fallback mode. It is the broken target to repair, not a hardcoded mapping to the fallback runtime. Follow the actual assignment's target, log and completion protocol.
+- `ws:`: the working space `{{agentspace}}` for session resources, uploads and outputs. Shell uses this working directory unless configured otherwise, but command text does not itself resolve logical path prefixes.
+- `skills:`: shared skill files under the project-root skills directory. Skill guidance does not authorize additional tools or filesystem access.
 
-``fix:`` — Fallback repair space (fallback mode only; unavailable in fast)
-- Maps to: ``.fallback/`` directory under the workspace root.
-- Contains: A backup copy of the last known-good agent codebase, used to repair a
-  crashed fast agent.
-- When to use: Only when running in fallback mode. Read the error log, then read and
-  fix the broken code here. This space does not exist during normal (fast) operation.
+## Read-only extension spaces
 
-``ws:`` — General workspace
-- Maps to: ``{{agentspace}}``
-- Contains: Your working directory — SOUL.md (your acquired personality), uploads/,
-  output files, MCP config, and any files you create during a session.
-- When to use: For all general-purpose file I/O — saving outputs, reading uploads,
-  storing intermediate data, editing your SOUL. Shell commands run with ``ws:`` as
-  their working directory unless overridden.
+- `third:`: bundled third-party libraries.
+- `custom_hooks:`: context-extension hook sources.
+- `custom_llm_client:`: LLM client implementations.
+- `custom_tools:`: custom tool sources. Tools declare module-level TOOLSET objects and are registered by discovery, not by import-time registry.register calls.
 
-``skills:`` — Skill modules
-- Maps to: ``skills/`` directory under the project root.
-- Contains: Reusable skill modules (SKILL.md files with optional scripts and references).
-- When to use: When creating or modifying skills via the ``RecallSkill`` tool, or when
-  you need to inspect skill definitions. Only skill names and one-line descriptions are
-  injected into the system prompt by default; load full content with ``RecallSkill``.
+Read-only spaces may be inspected with available read/search tools; write, delete, copy/move mutations are refused by the Sandbox. Inspecting an extension does not authorize editing it or bypassing the boundary with Shell.
 
-## Read-Only Namespaces
-
-These namespaces are READ-ONLY in both fast and fallback modes. You MAY read their
-full contents via ``Read`` or ``SearchFiles`` (needed to understand the system before
-evolving), but any write operation (Write, PatchEdit, Copy, Move, Delete) will be
-denied by the sandbox.
-
-``third:`` — Third-party submodules
-- Maps to: ``third/`` directory under the project root.
-- Contains: Git submodules — third-party libraries bundled with the project (e.g.
-  easysave, framework).
-- When to use: When you need to understand how a bundled library works before using
-  or evolving around it (e.g. reading easysave's serialization API to correctly
-  persist BaseModel instances).
-
-``custom_hooks:`` — Custom hooks
-- Maps to: ``custom_hooks/`` directory under the project root.
-- Contains: Hook modules that inject context into each conversation turn — memory,
-  time, session metadata, recent uploads, agentspace changes, client info, token usage.
-- When to use: When you need to understand or evolve the per-turn context injection
-  system (e.g. adding a new hook, modifying what context is injected).
-
-``custom_llm_client:`` — Custom LLM client implementations
-- Maps to: ``custom_llm_client/`` directory under the project root.
-- Contains: Custom LLM client classes that integrate alternative providers or endpoints
-  with the OpenAI-compatible interface.
-- When to use: When you need to understand or add support for a non-standard LLM
-  backend (e.g. a local llama-server, a proprietary API).
-
-``custom_tools:`` — Custom tools
-- Maps to: ``custom_tools/`` directory under the project root.
-- Contains: User-defined tool modules registered at import time via
-  ``registry.register()`` — extends the built-in toolset with project-specific
-  capabilities (e.g. memory_tools/remember.py, memory_tools/forget.py).
-- When to use: When you need to understand existing custom tools before evolving,
-  or when inspecting how a specific custom tool is implemented (its schema, handler,
-  and danger level).
-
-In fast mode, user-authorized global dynamic sandbox spaces may be provided in a
-separate **Global Dynamic Sandbox Spaces** system block. That runtime block is the
-authoritative source for dynamic prefixes; the fixed list above is not a closed set.
+The runtime may separately provide user-authorized dynamic namespace mappings in fast mode. That current block is authoritative for their names, access and availability; this fixed list is not a closed set. Purpose descriptions grant no permissions. The guidance loader reads mods by exact names; there is no custom_mods: file namespace.

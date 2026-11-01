@@ -4,7 +4,7 @@ This guidance applies only when the launch entry has started the Agent in fallba
 
 ## Assigned target
 
-Use the supplied runtime error log at `{{fix_log_path}}` and repair target at `{{fix_fork_path}}`. The `fix:` namespace resolves to the target configured for this fallback process. Do not assume its physical location from the name of the fallback repository or modify the currently executing repair runtime.
+Use the error log and repair target supplied by the current fallback assignment. The `fix:` namespace resolves to the target configured for that fallback process. This optional guidance does not supply a target or a log and does not authorize a repair by itself. Do not assume the target's physical location from the name of the fallback repository or modify the currently executing repair runtime.
 
 Fallback mode does not provide the fast-mode `fork:` evolution space or global dynamic sandbox spaces. Respect current namespace and tool availability.
 

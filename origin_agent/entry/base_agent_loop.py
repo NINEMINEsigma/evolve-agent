@@ -87,6 +87,7 @@ from entry.agent_support.multimodal import (
     content_to_text,
     blocks_from_dicts,
     content_to_serializable,
+    project_message_display_content,
     extract_tool_call_meta,
 )
 from entity.error import (
@@ -263,11 +264,7 @@ class ToolContext(BaseModel):
     @property
     def resource_session_id(self) -> str:
         """返回长期资源归属的主会话 ID。"""
-        from subagent.loop import SubAgentLoop
-
-        if isinstance(self.loop, SubAgentLoop):
-            return self.loop.parent_session_id
-        return self.session_id
+        return self.loop.get_resource_session_id()
 
     @property
     def sink(self) -> IAgentSink:
@@ -309,13 +306,7 @@ def _serialize_message_entry(
     修复 MultiAgentLoop 中 str(raw_content) 的 bug（应使用 content_to_text）。
     """
     raw_content = msg.content
-    if isinstance(raw_content, list):
-        content: str | list[dict[str, Any]] = [
-            b.as_object() if isinstance(b, MessageBlock) else b
-            for b in raw_content
-        ]
-    else:
-        content = content_to_text(raw_content)
+    content = project_message_display_content(msg)
 
     # character_name: CharacterMessage 有角色名，否则回退到 fallback
     character_name = (
@@ -327,7 +318,7 @@ def _serialize_message_entry(
     # CharacterConversationMessage 专属字段
     visible_characters: list[str] | None = None
     response_characters: list[str] | None = None
-    message_suffix: str | None = None
+    message_suffix: str | None = msg.get_message_suffix(None)
     dynamic_message_suffix: str | None = None
     reasoning_content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
@@ -335,7 +326,7 @@ def _serialize_message_entry(
     if isinstance(msg, CharacterConversationMessage):
         visible_characters = msg.visible_characters or None
         response_characters = msg.response_characters or None
-        message_suffix = msg.message_suffix or None
+        message_suffix = msg.get_message_suffix(None)
         dynamic_message_suffix = msg.dynamic_message_suffix or None
         reasoning_content = msg.reasoning or None
         if msg.tool_calls:
@@ -745,6 +736,49 @@ class BaseAgentLoop(ABC):
     def history(self) -> History:
         """返回当前 loop 的 History 实例（只读访问）。"""
         return self._history
+
+    def get_resource_session_id(self) -> str:
+        return self.session_id
+
+    def get_mod_context_characters(self) -> tuple[str, ...]:
+        return (self.current_character_agent,)
+
+    async def prepare_mod_context(self) -> None:
+        from abstract.mods.loader import discover_mods
+        from entry.mod_context import prepare_mod_replacements
+        from system.mods import get_mods_root, build_mod_render_context
+
+        snapshot = tuple(self._history.iter_messages())
+        if not any(message.role == Role.USER and not message.mod_keywords_processed for message in snapshot):
+            return
+        runtime = self.app.get_system(IRuntimeSystem)
+        runtime.require_running()
+        if self.is_interrupted():
+            raise asyncio.CancelledError
+        original_history = self._history
+        root = get_mods_root()
+        replacements = prepare_mod_replacements(
+            snapshot, root=root, catalog=discover_mods(root),
+            render_context=build_mod_render_context(runtime.context, self.get_resource_session_id()),
+            characters=self.get_mod_context_characters(),
+        )
+        current_messages = tuple(self._history.iter_messages())
+        if (self._history is not original_history or len(current_messages) != len(snapshot)
+                or any(current is not previous for current, previous in zip(current_messages, snapshot))):
+            raise RuntimeError("History changed during mod preparation")
+        candidate_messages = list(snapshot)
+        for item in replacements:
+            if self._history.get_message(item.index) is not item.original:
+                raise RuntimeError("Mod preparation message identity changed")
+            candidate_messages[item.index] = item.replacement
+        candidate = self._history.model_copy(update={"messages": candidate_messages})
+        candidate.update_last_user_message()
+        if self._session_store is not None:
+            self._persist_history_value(self.session_id, candidate)
+        for item in replacements:
+            self._history.set_message(item.index, item.replacement)
+        if any(len(item.replacement.mod_fixators) > len(item.original.mod_fixators) for item in replacements):
+            await self.get_sink().emit_history_updated(self.session_id)
 
     def set_session_id(self, session_id: str) -> None:
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
@@ -1262,6 +1296,8 @@ class BaseAgentLoop(ABC):
                 updates["content"] = content
         if visible_characters is not None:
             updates["visible_characters"] = visible_characters
+        if msg.role == Role.USER:
+            updates["mod_keywords_processed"] = False
         updated_msg = msg.model_copy(update=updates)
         self._history.set_message(index, updated_msg)
         self.save_history(self.session_id)
@@ -1398,12 +1434,17 @@ class BaseAgentLoop(ABC):
         hooks_context, fixator_context = self._collect_hooks_context()
         if isinstance(last_user_msg, CharacterConversationMessage):
             updated = last_user_msg.model_copy(update={
+                "mod_keywords_processed": False,
                 "message_suffix": fixator_context or None,
                 "dynamic_message_suffix": hooks_context or None,
             })
             self._history.set_message(last_user_idx, updated)
             self.save_history(self.session_id)
             last_user_msg = updated
+        else:
+            last_user_msg = last_user_msg.model_copy(update={"mod_keywords_processed": False})
+            self._history.set_message(last_user_idx, last_user_msg)
+            self.save_history(self.session_id)
 
         result = SessionRegenerateResult(
             regenerate=True,
@@ -1411,7 +1452,7 @@ class BaseAgentLoop(ABC):
             last_user_content=last_user_content,
             remaining_count=self._history.count,
             message_index=last_user_idx,
-            message_suffix=fixator_context or None,
+            message_suffix=last_user_msg.get_message_suffix(None),
             dynamic_message_suffix=hooks_context or None,
             visible_characters=(
                 last_user_msg.visible_characters

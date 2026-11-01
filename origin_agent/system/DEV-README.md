@@ -1,5 +1,15 @@
 # system/ — 基础设施与异步生命周期
 
+## mod组装与History v2（2026-11-01，当前约定）
+
+system/mods.py是无持久化、无缓存的业务组装函数：通过项目根定位文档目录，从显式RuntimeContext和资源主会话ID构造受控值，提供名称简介目录。不读取密钥、不猜测子Agent的主SOUL、不伪造fallback目标；不可用的必要模板值明确失败。没有新增System或Application镜像。
+
+system/prompt.py保留实际GENE/SOUL、运行事实、命名空间、工具/角色目录、模态事实和mode必需协议；四个build_session_*_block及旧详细模板已删除，功能教程改由mod读取。tools端口占位在主/子装配点使用真实端口替换。下文旧详细块注入记录不再表示当前行为。
+
+SessionStore只对真正不存在的History返回None；存在但无支持key、损坏或非法对象直接失败。共享util/history_storage优先读取v2，只有无v2且有明确v1时兼容；运行时v1跳过退役未知字段、v2严格。写入仍直接将History模型交easysave v2，保存失败沿既有必要History责任。旧文件保留冻结v1项，新程序不回退损坏v2，也不双写v1；完整部署fast/fallback相关包后再读新数据，旧程序不可借冻结项降级运行。
+
+自动mod准备错误沿现有Loop/主队列传播，可能触发应用FAILURE关闭；关闭只落输入，不再次读取坏配置。未新增恢复器或后台重试。仅源码与只读审阅，未运行校验、构建或应用。
+
 ## 异常定义包（2026-10-30）
 
 origin仓库所有自定义异常（含内部控制信号）只在 `entity/error/` 定义。本包的 Shell、Sandbox、Profile、元数据、生命周期、资源清理、搜索、会话变量/视觉/文件统计及 Agentspace 异常统一位于 `entity/error/system.py`，公共类型从 `entity.error` 显式导入；标准库/第三方异常继续使用原来源。`LifecycleFailure`、`ApplicationStoppingError`、`HistoryPersistenceError` 等不再定义于业务模块。

@@ -36,3 +36,32 @@ class InvalidMcpUrlError(ValueError):
 
 class OAuthNonInteractiveError(RuntimeError):
     """Raised when OAuth requires browser interaction in a non-interactive env."""
+
+
+class ModConfigurationError(ValueError):
+    """Invalid local mod declaration; never treated as an empty catalog."""
+
+    def __init__(self, message: str, mod_name: str = "") -> None:
+        super().__init__(message)
+        self.mod_name = mod_name
+
+
+class ModRequestError(ValueError):
+    """Invalid explicit mod request."""
+
+
+class ModBudgetExceededError(ValueError):
+    """A complete mod delivery exceeds its declared budget."""
+
+
+class ModSourceChangedError(RuntimeError):
+    """A local declaration changed during an operation."""
+
+
+class ModTemplateError(ValueError):
+    """Unsupported or unavailable template value."""
+
+    def __init__(self, message: str, mod_name: str = "") -> None:
+        super().__init__(message)
+        self.mod_name = mod_name
+

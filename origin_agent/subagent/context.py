@@ -65,7 +65,7 @@ async def build_subagent_context(
 
     tools_doc: str = read_template("tools.txt")
     if tools_doc:
-        prompts.append(tools_doc)
+        prompts.append(tools_doc.replace("{{gateway_port}}", str(parent_ctx.gateway_port)))
 
     for prompt in get_character_system_prompts(profile):
         prompts.append(prompt)

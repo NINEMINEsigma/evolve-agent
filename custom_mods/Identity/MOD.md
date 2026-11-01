@@ -6,7 +6,9 @@ Use this guidance when the user wants to inspect or change the main Agent's pers
 
 `GENE.md` defines the innate identity set by the user. You cannot modify it.
 
-The active LLM Profile selects a SOUL file. Its current name is `{{soul_file}}`, stored at `ws:{{soul_file}}`. It contains acquired personality, constraints, character, language style, and other personalized traits. Read it before editing and use `Write` or `PatchEdit` for requested changes. SOUL text changes take effect when the next conversation turn builds its system prompt.
+The main Agent's active LLM Profile selects its SOUL file. Use the actual active Profile and the current main Agent system identity facts to determine the selected logical path; this optional guidance does not identify it for every caller. The file contains acquired personality, constraints, character, language style, and other personalized traits. Read the selected file before editing and use `Write` or `PatchEdit` for requested changes. SOUL text changes take effect when the next main Agent turn builds its system prompt.
+
+Ordinary sub-Agents obtain their custom system prompts from their character profiles. Do not treat a sub-Agent's model Profile as proof of which SOUL file the main Agent currently uses.
 
 ## Main Agent character name
 

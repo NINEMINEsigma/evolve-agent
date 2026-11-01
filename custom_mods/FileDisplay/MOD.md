@@ -26,6 +26,6 @@ The frontend supplies open-in-new-tab and fullscreen controls for chat iframes. 
 
 Create or confirm the file before presenting a link. Put general outputs in a workspace subdirectory, such as `ws:output`, rather than directly in the workspace root. A filesystem location and a display URL serve different purposes; make that distinction clear to the user.
 
-Use Markdown for ordinary image and download links. Audio and iframe tags use the raw HTML rendering path; see ChatHtml mod before mixing them with surrounding text.
+Use Markdown for ordinary image and download links. Audio tags remain in the Markdown/raw-HTML pipeline, and iframe tags use the dedicated iframe component; neither tag alone selects whole-message isolated HTML rendering. See ChatHtml mod for the detection rules before mixing HTML with surrounding text.
 
 For a persistent multi-file webpage, see SessionSite mod instead of repeatedly embedding a complete page in chat.

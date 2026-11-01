@@ -15,7 +15,7 @@
 
 | 模块 | 职责与类型 |
 |---|---|
-| `abstract.py` | LLM 与 MCP：`UnsupportedModalityError`、`LLMEmptyResponseError`、`LLMAPIStatusError`、`InvalidMcpUrlError`、`OAuthNonInteractiveError` |
+| `abstract.py` | LLM、MCP及mod：`UnsupportedModalityError`、`LLMEmptyResponseError`、`LLMAPIStatusError`、`InvalidMcpUrlError`、`OAuthNonInteractiveError`；mod使用`ModConfigurationError`、`ModRequestError`、`ModBudgetExceededError`、`ModSourceChangedError`、`ModTemplateError`，配置/模板异常携带mod_name，I/O和内部错误不统一包装 |
 | `entry.py` | History兼容、工具中断及主会话媒体：`IncompatibleHistoryError`、`ToolInterrupted`、`HistoryMediaNotFoundError`、`HistoryMediaConflictError`、`HistoryMediaPreviewError`、`ModalityForwardUnavailableError` |
 | `gateway.py` | 端口占用与连接级控制信号：`GatewayPortBusyError`、`AgentspaceSendTimeout`、`AgentspaceConnectionClosed` |
 | `session_export.py` | 唯一 `SessionExportError` 及全部公共导出子类；另含私有 `_SourceUnavailable` |

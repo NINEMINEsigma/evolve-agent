@@ -282,6 +282,14 @@ class MultiAgentWorker:
             if self._turn_counter.value >= max_tool_turns:
                 break
             self._loop.loop.app.get_system(IRuntimeSystem).require_running()
+            await self._loop.loop.prepare_mod_context()
+            from system.mods import load_mod_catalog_block
+            mod_catalog = load_mod_catalog_block()
+            prompts = [*self._system_prompts, *([mod_catalog] if mod_catalog else [])]
+            full_messages = [
+                CharacterSystemMessage(role=Role.SYSTEM, character_name=self.character_name, content=prompt)
+                for prompt in prompts
+            ] + self._loop.loop.history.get_messages(current_character_agent=self.character_name)
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"

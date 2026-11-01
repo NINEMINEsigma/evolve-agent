@@ -124,7 +124,7 @@ def _extract_content_with_suffix(msg: CharacterConversationMessage) -> str:
     from entry.agent_support.history_summary import _content_to_text
 
     text = _content_to_text(msg.content)
-    suffix = msg.message_suffix
+    suffix = msg.get_message_suffix(None)
     if suffix:
         text += suffix
     dynamic_suffix = msg.dynamic_message_suffix

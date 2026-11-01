@@ -270,7 +270,7 @@ class LoopSessionManager:
             else None
         ) or History()
         if moved_message is not None:
-            new_history.add_message(moved_message)
+            new_history.add_message(moved_message.model_copy(update={"mod_keywords_processed": False}))
         self._loop.load_history(new_history)
         self._loop.save_history(new_sid)
         # 通知前端之前，Loop 必须已经挂到延续会话，历史接口才能读到它。

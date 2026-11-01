@@ -15,6 +15,7 @@ from entity.puretype import Role, ToolCallMeta, ToolResultNotification
 from abstract.tools.tool import ToolExecution, ToolPostprocessEffect
 from entry.agent_support.multimodal import (
     tool_result_to_content, tool_result_to_follow_up, content_to_text, extract_tool_embedded_messages,
+    project_message_display_content,
 )
 
 if TYPE_CHECKING:
@@ -66,11 +67,13 @@ class PreparedToolResult(BaseModel):
                 payload["_queued_messages"] = notice.ui_result["_queued_messages"]
         content = tool_result_to_content(payload, tool_call_id=self.message.tool_call_id)
         self.message.content = content
+        self.message.result_text_blocks = []
         if notice is not None:
-            notice.display_content = content_to_text(content)
+            notice.display_content = content_to_text(project_message_display_content(self.message))
             notice.ui_result = payload
         if self.execution is not None:
             self.execution.result = payload
+            self.execution.result_text_blocks = ()
 
     async def emit(self, sink: IAgentSink) -> None:
         notice = self.notification
@@ -181,14 +184,22 @@ def prepare_tool_result(
             follow_up, content = tool_result_to_follow_up(result, character_name, tool_call_id=tool_call_id)
         else:
             content = tool_result_to_content(result, tool_call_id=tool_call_id)
-        message = ToolResultMessage(role=Role.TOOL, character_name=character_name,
-                                    tool_call_id=tool_call_id, content=content)
+        text_blocks = (
+            execution.result_text_blocks
+            if execution is not None and execution.body_completed_normally else ()
+        )
+        if text_blocks and result.get("error"):
+            raise RuntimeError("Failed tool results cannot carry typed text blocks")
+        message = ToolResultMessage(
+            role=Role.TOOL, character_name=character_name, tool_call_id=tool_call_id,
+            content=content, result_text_blocks=list(text_blocks),
+        )
         message._follow_up_messages = follow_up
         prepared = PreparedToolResult(
             message=message,
             notification=ToolResultNotification(
                 tool_name=tool_name, session_id=session_id, tool_call_id=tool_call_id,
-                character_name=character_name, display_content=content_to_text(content),
+                character_name=character_name, display_content=content_to_text(project_message_display_content(message)),
                 tool_call_meta=meta, embedded_messages=embedded,
                 consumed_client_message_ids=consumed, ui_result=result,
             ),

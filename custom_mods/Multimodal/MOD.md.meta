@@ -1,0 +1,15 @@
+[description]
+Explain media capability detection, forwarding Profiles, and History media controls.
+
+[related]
+LlmProfiles
+
+[keywords]
+多模态
+媒体转发
+图片识别
+音频识别
+视频识别
+forwarded_vision
+forwarded_audio
+forwarded_video

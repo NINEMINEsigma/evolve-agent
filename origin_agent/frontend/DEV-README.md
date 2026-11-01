@@ -1,5 +1,11 @@
 # frontend/ — Web 前端
 
+## mod正文显示边界（2026-11-01）
+
+后端新增类型化功能指导，但保持现有主聊天message_suffix和history_updated协议：请求前成功提交新增固着器后按原路径重载历史页，扩展仍由现有上下文扩展区显示。工具正文的Provider与UI投影分离，内部_meta与嵌入用户输入不能因为追加文档而在普通文本重复出现；历史页/重连/离线导出共用后端UI投影。
+
+本次不增加mod管理界面、目录选择器或实时子会话suffix协议；子会话自动固着器保存在实际上下文及History，现有快照/回放可显示，工具全文按原工具事件实时回显。HTML/CSS/Mermaid指导只修正为已实现能力，未借此改造前端渲染或新增下载功能。React/TypeScript运行源码未改；前端构建/运行验收未执行，由用户按任务V01–V22检查。
+
 `frontend/` 是 Evolve Agent 的 Web 用户界面，基于 React + Vite + TypeScript。用户通过浏览器与 Agent 进行对话、审批工具调用、管理子代理、查看任务进度、浏览 agentspace 文件等。
 
 ---

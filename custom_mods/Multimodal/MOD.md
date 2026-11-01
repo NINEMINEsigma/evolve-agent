@@ -4,7 +4,7 @@ The system handles images, audio, and video according to the active model's capa
 
 ## Capability paths
 
-Each modality has separate support states for tool messages and user messages. Current runtime capability information, when provided, is authoritative for the active model and provider.
+Each of the three modalities has separate support states for tool messages and user messages, giving six capability paths. Current runtime capability information, when provided, is authoritative for the active model and provider.
 
 An unknown state is probed automatically on first multimodal use. There is no manual probe tool to call. Unknown is not the same as unsupported.
 

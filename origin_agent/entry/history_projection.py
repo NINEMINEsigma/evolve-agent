@@ -34,6 +34,7 @@ from entity.puretype import (
 )
 from entry.agent_support.multimodal import (
     content_to_serializable,
+    project_message_display_content,
     content_to_text,
     extract_tool_call_meta,
     extract_tool_embedded_messages,
@@ -226,13 +227,13 @@ def _message_content_row(
     character_name = _character_name(message, fallback_character)
     visible_characters: list[str] | None = None
     response_characters: list[str] | None = None
-    message_suffix: str | None = None
+    message_suffix: str | None = message.get_message_suffix(None)
     dynamic_message_suffix: str | None = None
     reasoning_content: str | None = None
     if isinstance(message, CharacterConversationMessage):
         visible_characters = message.visible_characters or None
         response_characters = message.response_characters or None
-        message_suffix = message.message_suffix or None
+        message_suffix = message.get_message_suffix(None)
         dynamic_message_suffix = message.dynamic_message_suffix or None
         reasoning_content = message.reasoning or None
     return SessionHistoryContentRow(
@@ -242,7 +243,7 @@ def _message_content_row(
         role=message.role.value,
         character_name=character_name,
         is_system_status=isinstance(message, SystemStatusMessage),
-        content=_serialized_content(message.content),
+        content=project_message_display_content(message),
         visible_characters=visible_characters,
         response_characters=response_characters,
         message_suffix=message_suffix,
@@ -274,7 +275,7 @@ def _tool_card_content_row(
     embedded_messages: list[dict[str, Any]] | None = None
     is_error = False
     if result is not None:
-        result_content = _serialized_content(result.message.content)
+        result_content = project_message_display_content(result.message)
         result_history_index = result.history_index
         tool_call_meta = extract_tool_call_meta(result.message.content)
         embedded_messages = extract_tool_embedded_messages(result.message.content)

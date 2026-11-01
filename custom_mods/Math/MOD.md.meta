@@ -1,0 +1,11 @@
+[description]
+Format mathematical formulas for the chat Markdown renderer.
+
+[keywords]
+数学公式
+LaTeX
+KaTeX
+公式排版
+$$
+\(
+\[

@@ -1,0 +1,9 @@
+[description]
+Delegate one-shot safe work to temporary Agents without persistent History.
+
+[keywords]
+临时Agent
+临时代理
+一次性任务
+RunTaskAgent
+StopTaskAgent

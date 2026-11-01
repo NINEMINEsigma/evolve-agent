@@ -6,7 +6,6 @@ from types import MappingProxyType
 SESSION_VARIABLES_DIR_NAME = "variables"
 SESSION_VARIABLE_VALUE_SUFFIX = ".json"
 SESSION_VARIABLE_SOURCE_GROUP_NAME = "sources"
-SESSION_VARIABLE_TEMPLATE_NAME = "session_variables.txt"
 # 扫描深度按变量根下目录段计；节点包括目录和非变量文件。
 SESSION_VARIABLE_MAX_DEPTH = 16
 SESSION_VARIABLE_MAX_NODES = 4096

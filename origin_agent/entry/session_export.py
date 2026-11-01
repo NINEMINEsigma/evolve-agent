@@ -19,7 +19,7 @@ from entity.constant import (
 )
 from entity.messages import (
     AudioBlock, BaseMessage, CharacterConversationMessage, CharacterMessage,
-    CharacterSystemMessage, ImageBlock, SystemStatusMessage, TextBlock,
+    CharacterSystemMessage, ImageBlock, ModTextBlock, SystemStatusMessage, TextBlock,
     ToolResultMessage, VideoBlock,
 )
 from entity.puretype import MessageMetrics, SessionExportHistorySnapshot
@@ -91,7 +91,7 @@ def _copy_value(value: Any, budget: _CopyBudget) -> Generator[None, None, Any]:
             children = iter(current.items()) if type(current) is dict else enumerate(current)
             active.add(id(current))
             stack.append((children, copied, depth + 1, id(current)))
-        elif type(current) in (TextBlock, ImageBlock, AudioBlock, VideoBlock):
+        elif type(current) in (TextBlock, ModTextBlock, ImageBlock, AudioBlock, VideoBlock):
             # 当前四个正式块仅含不可变标量字段；浅复制保留全部声明字段。
             copied = current.model_copy()
             if isinstance(current, TextBlock):
@@ -102,6 +102,11 @@ def _copy_value(value: Any, budget: _CopyBudget) -> Generator[None, None, Any]:
                 budget.visit(current.data, depth)
             else:
                 budget.visit(current.video_url, depth)
+            if isinstance(current, ModTextBlock):
+                budget.visit(current.mod_name, depth)
+                budget.visit(current.resource_session_id, depth)
+                for character in current.visible_characters:
+                    budget.visit(character, depth)
             if current.forward_result_content:
                 budget.visit(current.forward_result_content, depth)
         elif current is None or type(current) in (str, int, float, bool):
@@ -130,7 +135,11 @@ def _copy_messages(messages: tuple[BaseMessage, ...]) -> Generator[None, None, t
             raise SessionExportError("unsupported_history", "Unsupported History message type")
         budget.visit(message, 0)
         content = yield from _copy_value(message.content, budget)
-        copied = message.model_copy(update={"content": content})
+        mod_fixators = yield from _copy_value(message.mod_fixators, budget)
+        copied = message.model_copy(update={"content": content, "mod_fixators": mod_fixators})
+        if isinstance(message, ToolResultMessage):
+            text_blocks = yield from _copy_value(message.result_text_blocks, budget)
+            copied = copied.model_copy(update={"result_text_blocks": text_blocks})
         if isinstance(message, CharacterConversationMessage):
             visible = yield from _copy_value(message.visible_characters, budget)
             response = yield from _copy_value(message.response_characters, budget)

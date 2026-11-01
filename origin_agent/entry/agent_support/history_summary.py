@@ -45,7 +45,7 @@ def messages_to_text(messages: list[BaseMessage]) -> str:
 
         # 工具结果消息：紧凑输出 + 截断
         if isinstance(msg, ToolResultMessage):
-            text = _content_to_text(msg.content)
+            text = _content_to_text(msg.get_content())
             lines.append(f"## {character_str} ({msg.tool_call_id})")
             if len(text) > TOOL_RESULT_PREVIEW_CHARS:
                 lines.append(text[:TOOL_RESULT_PREVIEW_CHARS] + "...")
@@ -171,7 +171,7 @@ def _content_to_text(content: str | dict[str, Any] | list | None) -> str:
             if isinstance(block, str):
                 parts.append(block)
             elif isinstance(block, TextBlock):
-                parts.append(block.text)
+                parts.append(block.to_text())
             elif isinstance(block, ImageBlock):
                 parts.append(_safe_media_ref("image", block.image_url))
             elif isinstance(block, VideoBlock):

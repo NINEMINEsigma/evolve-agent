@@ -1,5 +1,13 @@
 # buildin_tools/ — 内置工具与 BrowserSystem
 
+## 功能指导读取（2026-11-01，当前约定）
+
+`tools/mods.py`以标准TOOLSET声明RecallMod（core/safe/EVERY、同步handler）。省略names列名称/简介/关联/关键词，非空数组批量读取当前全文及机械递归关联；显式重复读取不依赖会话已加载状态。参数精确校验、同次去重、允许关联环；不调用LoadToolset、不扩权、无专属after副作用。
+
+轻量结果字典与`result_text_blocks`分别交付，正文不重复放进字典。mod正文与名称/资源主会话/受众在ModTextBlock中保存；自有完整编码内容额度在handler返回之前检查，不包含框架追加的用户输入/媒体，不改预订协议。失败沿既有Registry/工具边界，输入参数错误有明确结果，读文件/模板错误不静默略过。
+
+会话搜索仍只检索原对话消息范围，后缀提取使用统一get_message_suffix；主动工具正文不因此纳入检索。旧会话功能详细模板退役不改变各功能的工具实现或权限。仅源码和只读审阅，未运行校验、构建或应用。
+
 `buildin_tools/` 承载从 `component/` 整体迁入的五个内置工具子包，目录名按项目约定使用 `buildin_tools`。审批、Cron 路由与任务模型、动态端点服务和 MCP 管理入口仍在 [`component/`](../component/DEV-README.md)；本次只迁五包，不代表 `component/` 已完成最终 Component 专用整理。
 
 ## 文件结构与边界

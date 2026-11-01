@@ -118,7 +118,7 @@ def to_summary_dict(
     including those not visible to the current agent.
     """
     # Extract raw text directly from .content field, skipping non-text blocks
-    raw = message.content
+    raw = message.get_content() if isinstance(message, ToolResultMessage) else message.content
     if isinstance(raw, str):
         text = raw
     elif isinstance(raw, dict):
@@ -128,7 +128,7 @@ def to_summary_dict(
         parts: list[str] = []
         for block in raw:
             if isinstance(block, TextBlock):
-                parts.append(block.text)
+                parts.append(block.to_text())
         text = "[Resources Block]".join(parts)
     else:
         raise ValueError(f"Invalid content type: {type(raw)}")

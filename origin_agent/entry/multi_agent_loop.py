@@ -44,13 +44,7 @@ from util.templates import render_multi_agent_prompt
 from system.session_store import SessionStore
 from entity.error import ApplicationStoppingError, LifecycleFailure
 from system.lifecycle import requires_lifecycle_propagation
-from system.prompt import (
-    build_dynamic_sandbox_spaces_block,
-    build_session_chat_style_block,
-    build_session_site_block,
-    build_session_stage_block,
-    build_session_variables_block,
-)
+from system.prompt import build_dynamic_sandbox_spaces_block
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.session_message_queue import SessionMessageQueue, activity_source_for_items
@@ -161,6 +155,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     def get_agents(self) -> dict[str, AgentProfile]:
         """返回当前多 Agent loop 中的 agent 配置档案副本。"""
         return dict(self._agents)
+
+    def get_mod_context_characters(self) -> tuple[str, ...]:
+        return tuple(self._agents)
 
     async def append_user_message(
         self,
@@ -989,21 +986,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         # 最后一轮：追加 final-round 提示词
         system_prompts = profile.system_prompts
-        # 主 agent 动态注入会话站点约定块（不写入 AgentProfile.system_prompts，
-        # 以确保会话旋转后 session_id 自动更新）
-        if character_name == self._main_agent_name:
-            site_block = build_session_site_block(self.session_id, owner="self")
-            if site_block:
-                system_prompts = system_prompts + [site_block]
-            stage_block = build_session_stage_block(self.session_id, owner="self")
-            if stage_block:
-                system_prompts = system_prompts + [stage_block]
-            chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
-            if chat_style_block:
-                system_prompts = system_prompts + [chat_style_block]
-        variables_block = build_session_variables_block(self.session_id)
-        if variables_block:
-            system_prompts = system_prompts + [variables_block]
         dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             system_prompts = system_prompts + [dynamic_spaces_block]

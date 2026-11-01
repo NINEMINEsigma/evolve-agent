@@ -1,0 +1,13 @@
+[description]
+Configure MCP transports and authentication, refresh connections, and load server tools.
+
+[related]
+Toolsets
+
+[keywords]
+MCP
+mcp_config
+MCPRefresh
+mcpServers
+OAuth
+oauth

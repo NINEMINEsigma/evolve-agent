@@ -1,0 +1,12 @@
+[description]
+Use and manage user-authorized global dynamic sandbox spaces.
+
+[related]
+Toolsets
+
+[keywords]
+动态沙盒
+沙盒空间
+映射目录
+AddSandboxSpace
+RemoveSandboxSpace

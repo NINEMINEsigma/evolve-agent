@@ -1,5 +1,13 @@
 # abstract/ — 抽象层
 
+## mod与类型化工具正文（2026-11-01，当前约定）
+
+新增`mods/`纯本地加载包，严格解析同级meta、可环关联先序遍历、区分大小写关键词与受控模板；完整契约见[mods/DEV-README.md](mods/DEV-README.md)。不复用技能中的宽松路径、脚本展开或未知变量置空行为，技能既有机制不变。
+
+ToolHandlerResult和ToolExecution新增默认空的`result_text_blocks: tuple[TextBlock, ...]`，同步/异步invoke仅在完整正常返回后发布。ToolResultMessage保存原结果字典和独立类型化文本列表，失败不交付残留块。接口不认识具体mod工具，不新增注册器或System；默认空块的既有工具语义保持。
+
+功能目录不等于工具定义/权限，主动读取走现有core工具与同步执行器。目录发现或自动准备失败沿现有Loop/队列传播，可能导致主队列FAILURE关闭；没有新恢复器。仅源码实施与只读审阅，未运行校验、构建、导入或应用。
+
 `abstract/` 是 Evolve Agent 的抽象层，定义 LLM 客户端、工具注册表、AST 发现、技能、插件、MCP 客户端等核心抽象。这些模块不依赖具体实现，可被 `buildin_tools/`、保留服务所在的 `component/`、`custom_tools/`、`custom_llm_client/` 等复用。
 
 ---

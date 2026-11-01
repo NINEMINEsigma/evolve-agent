@@ -2,20 +2,20 @@
 
 Use raw HTML in an assistant message for a small visual status bar, progress indicator, interactive widget, stat table, mini-game, or other self-contained layout.
 
-## Rendering capabilities
+## Rendering paths
 
-The frontend renders HTML inside a sandboxed iframe. Self-contained `script` and `style` tags, inline styles, event handlers, SVG, canvas, animations, and interactive elements are supported. Keep the widget's resources and state within its own page; do not assume access to the host application's DOM or internal state.
+After removing fenced and inline code for detection, the frontend checks for `script`, `style`, `link`, `object`, or `embed` tags, case-insensitively. A match sends the whole message to the isolated `SafeHtml` iframe path. Use this path for self-contained CSS and JavaScript widgets; keep resources and state within the widget and do not assume access to the host application's DOM or internal state.
 
-Prefer inline styles or self-contained stylesheets. The scope of a chat widget is different from the host chat area's style layer; see SessionChatStyle mod to customize chat bubbles and other chat elements.
+Ordinary raw HTML without these tags stays in the Markdown pipeline with `rehypeRaw`. An `iframe` tag is handled by a dedicated iframe component and does not itself select the whole-message HTML path. An `audio` tag likewise does not select it. Do not promise that event-handler attributes in ordinary Markdown HTML execute JavaScript.
 
-## Choose HTML or Markdown per message
+The scope of a chat widget is different from the host chat area's style layer; see SessionChatStyle mod to customize chat bubbles and other chat elements.
 
-A message containing raw HTML uses the HTML rendering path. Markdown formatting and ordinary Markdown line breaks in that same message may appear as literal text rather than formatting.
+## Choose content for the rendering path
 
-Choose one form per message:
+In the isolated HTML path, use HTML paragraphs, headings, and lists for accompanying text; Markdown formatting and ordinary Markdown line breaks are not a substitute for HTML markup there. Ordinary HTML in the Markdown path can coexist with Markdown, subject to that parser's behavior.
 
-- Markdown for text-heavy explanations, ordinary links, Mermaid, and mathematical formulas.
-- Raw HTML for visual or interactive content. Use HTML paragraphs, headings, and lists for accompanying text.
+- Use Markdown for text-heavy explanations, ordinary links, Mermaid, and mathematical formulas.
+- Use a self-contained HTML document with its own styles or scripts for visual or interactive widgets.
 
 Do not wrap HTML in a code fence when the user should see the rendered widget. Use a code fence only when displaying source is the goal.
 

@@ -1,5 +1,13 @@
 # util/ — 前置辅助模块
 
+## History版本读取（2026-11-01）
+
+新增history_storage.py：select_history_key显式v2优先/legacy v1回退，仅无v2时允许v1，未知key拒绝；load_history_file逐key contains后load；normalize_loaded_history核对正式对象并对v1仅在内存置旧输入processed=true、清空新mod字段，不解析正文重建加载记录。无Application、System、Loop依赖，无写盘或配对清理。
+
+新增依赖为已核实无反向依赖的entity.messages、entity.typeref、相关常量及easysave；messages不依赖history_storage，util包入口仍为空。运行时v1跳过退役未知字段、v2严格，开发辅助单快照raw_load两版均严格，二者差别明确记录而不伪装成同一兼容承诺。旧key冻结项不用于错误恢复，新保存只写v2。
+
+该模块可被主/子History恢复及开发辅助读取复用，不是新的存储协议。未运行校验、导入、构建或应用。
+
 本包承载无需 Application 装配即可导入和复用的辅助函数模块。前置辅助模块的规范定义见根目录 `DEV-glossary.md`；“前置”表示依赖方向，不等于所有函数无 I/O，也不表示把本包整体提前初始化。
 
 ## 异常定义包（2026-10-30）

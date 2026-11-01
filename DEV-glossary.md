@@ -194,6 +194,10 @@
 | 固着器（fixator） | 实现 `hook_fixator` 的钩子：产出**持久化**扩展块（`message_suffix`，写盘保留） |
 | 非固着器 | 仅实现 `hook_message` 的钩子：产出**非持久化**扩展块（`dynamic_message_suffix`，当轮注入） |
 | 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
+| mod | 英文锚点：mod。`custom_mods/<名称>/MOD.md` 中按需读取的系统功能指导，由同级 `MOD.md.meta` 提供简介、关联和关键词。名称与简介用于发现，正文不默认常驻；读取不执行功能、不加载工具集、不扩大权限。 |
+| mod关联 | 英文锚点：related mod。元数据 `related` 中按行声明的机械递归读取关系；允许自关联和环，单次读取按规范名称去重，不等于正文中的普通交叉引用。 |
+| mod关键词触发 | 英文锚点：mod keyword trigger。正式顶层 Role 为 user 的新消息正文，在实际模型请求前按 `keywords` 的区分大小写字面子串匹配；不检查工具结果内嵌用户输入、媒体载荷或已附加扩展。 |
+| mod固着器 | 英文锚点：mod fixator。关键词命中产生的类型化持久上下文扩展块，正文与名称、资源所属主会话及角色受众保存在一起；仅在当前可见上下文仍有相同归属的全文时免于自动重复加载，不使用永久加载名单或全文匹配。 |
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
 | 内置工具 | 英文锚点：built-in tool。正式五个工具来源子包位于 `origin_agent/buildin_tools/` 下的 `tools/`、`extools/`、`multiagenttools/`、`automation/`、`browser/`，声明模块级 `TOOLSET` 并由 ToolDiscoverySystem 发现；区别于可选 `custom_tools/` 扩展，MCP 管理入口 `component/mcp_tools.py` 仍单独注册。BrowserSystem 和共享模块随所属包归档，不代表它们本身是工具或架构 Component |
 | 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展，声明模块级 `TOOLSET: BaseToolSet` 对象，由 ToolDiscoverySystem 发现并注册 | custom tool |

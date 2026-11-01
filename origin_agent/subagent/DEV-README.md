@@ -1,5 +1,15 @@
 # subagent/ — 子代理与多代理系统
 
+## mod与历史版本（2026-11-01，当前约定）
+
+普通/临时子Agent均在实际模型请求前调用继承的prepare_mod_context，匹配正式顶层user原正文，父Agent与人类来源不区分；工具结果内嵌补充不触发。资源归属由公开get_resource_session_id返回真实parent_session_id，不能拿子会话ID生成父资源目录。
+
+普通子system只增加名称简介目录，原site/stage/variables/chat-style详细注入已删除；角色档案、身份/投递协议、动态空间事实与工具集目录保持。TaskAgent继续system=[]、safe权限交集和不持久化，不自动获得父会话已读全文。显式工具可查询目录和重读全文。
+
+候选加载和去重元信息随ModTextBlock保存在真实消息中，普通子Agent维持停止时保存、写History v2；显式恢复通过共享load_history_file，v2优先，v1明确定义兼容，坏文件/未知key仍拒绝启动。ToolContext归属与各Loop共用一个公开契约，没有新增系统或永久加载集合。
+
+子快照/回放使用独立UI正文投影，工具附加文档不丢，user后缀可见；不新增实时子会话后缀更新协议，不向父主会话发送子History更新指令。目录/自动准备故障沿原任务边界，不静默略过。下文旧会话功能模板注入和v1-only说明由本节更新。仅源码实施与只读审阅，未运行校验/构建/应用。
+
 `subagent/` 与 `buildin_tools/multiagenttools/` 共同实现 Evolve Agent 的多代理运行时。它包含两套系统：主 Agent → 子 Agent 的编排模式，以及多 Agent 广播协作模式。
 
 ---

@@ -57,13 +57,7 @@ from abstract.tools.tool import ToolExecution
 from entry.tool_post_dispatch import PreparedToolResult, ToolPostprocessor, prepare_tool_result
 from entry.tool_executor import _interrupted_result, cancel_tool_wait
 from system.lifecycle import requires_lifecycle_propagation
-from system.prompt import (
-    build_dynamic_sandbox_spaces_block,
-    build_session_chat_style_block,
-    build_session_site_block,
-    build_session_stage_block,
-    build_session_variables_block,
-)
+from system.prompt import build_dynamic_sandbox_spaces_block
 
 logger = logging.getLogger(__name__)
 
@@ -241,22 +235,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     def _build_system_prompt(self) -> list[str]:
         prompts = list(self._ctx.system_prompts)
-        # 子代理注入父会话的 site 约定块（owner="parent"），告知子代理
-        # 网站部署区属于父会话而非自身
-        site_block = build_session_site_block(self._parent_session_id, owner="parent")
-        if site_block:
-            prompts.append(site_block)
-        # 子代理注入父会话的 stage 约定块（owner="parent"），告知子代理
-        # 舞台层属于父会话而非自身
-        stage_block = build_session_stage_block(self._parent_session_id, owner="parent")
-        if stage_block:
-            prompts.append(stage_block)
-        variables_block = build_session_variables_block(self._parent_session_id, owner="parent")
-        if variables_block:
-            prompts.append(variables_block)
-        chat_style_block = build_session_chat_style_block(self._parent_session_id, owner="parent")
-        if chat_style_block:
-            prompts.append(chat_style_block)
         dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.get_system(ISandbox))
         if dynamic_spaces_block:
             prompts.append(dynamic_spaces_block)
@@ -265,6 +243,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         catalog = build_toolset_catalog_block(self._loaded_toolsets, self.get_tool_availability_scope())
         if catalog:
             prompts.append(catalog)
+        from system.mods import load_mod_catalog_block
+        mod_catalog = load_mod_catalog_block()
+        if mod_catalog:
+            prompts.append(mod_catalog)
         return prompts
 
     async def _on_context_over_limit(self) -> None:
@@ -302,6 +284,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         )
 
     # ── 公共接口 ─────────────────────────────────────────────────────
+
+    def get_resource_session_id(self) -> str:
+        return self._parent_session_id
 
     @property
     def parent_session_id(self) -> str:
@@ -448,6 +433,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._round_active = True  # 新一轮响应开始
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
+                await self.prepare_mod_context()
                 messages = self._build_history_messages()
                 # 工具定义按已加载工具集动态计算（loaded ∩ SUBAGENT ∩ check_fn），
                 # LoadToolset 后下一轮 LLM 调用即见新工具，与执行期口径一致。

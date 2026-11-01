@@ -1,0 +1,10 @@
+[description]
+Store and inspect session variables with metadata and explicit inheritance rules.
+
+[keywords]
+会话变量
+变量池
+共享余额
+共享状态
+ReadSessionVariables
+/variables/

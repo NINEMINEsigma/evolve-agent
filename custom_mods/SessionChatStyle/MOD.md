@@ -6,9 +6,9 @@ You have a session-level CSS layer for the chat area. The source directory is `w
 
 Use standard file tools to deploy or modify the CSS and referenced resources. Relative font and image paths resolve under this directory. A sibling `chat-style.meta` can redirect to another logical directory; see SessionVisualRedirect mod.
 
-## Scope restriction
+## Selector scoping
 
-The system scopes selectors to `.chat-area`. This feature cannot style the left sidebar, header, input bar, other Tabs, lightbox, or approval dialogs. Do not attempt to escape the scope with global selectors. A rule that cannot be safely scoped causes the entire file to be rejected.
+The system prefixes ordinary selectors with `.chat-area` unless they already start with that prefix. Target only chat content; this feature is intended for the chat area, not the left sidebar, header, input bar, other Tabs, lightbox, or approval dialogs. This prefix transformation is not a general CSS safety analysis or a strong isolation boundary. Do not attempt to escape the intended scope or assume every unsafe selector or declaration will be detected.
 
 ## Public style selectors
 
@@ -38,7 +38,7 @@ Prefer these stable public attributes over internal class names:
 
 An `@font-face` family name must start with `ChatStyle-`, such as `ChatStyle-MyFont`. Always provide fallback fonts, for example `"ChatStyle-MyFont", "Segoe UI", sans-serif`.
 
-Font sources can use relative resource paths, HTTP/HTTPS URLs, or the local font proxy at `{{local_font_prefix}}`. For local fonts, use a proxy URL such as `{{local_font_prefix}}/C:/Windows/Fonts/arial.ttf` rather than expecting the browser to read a physical path directly. Supported local font extensions are `woff2`, `woff`, `ttf`, and `otf`, with a 20 MiB limit per file. Data URIs are unsupported.
+Font sources can use relative resource paths, HTTP/HTTPS URLs, or the local font proxy at `{{local_font_prefix}}`. For local fonts, use a proxy URL such as `{{local_font_prefix}}/C:/Windows/Fonts/arial.ttf` rather than expecting the browser to read a physical path directly. Supported local font extensions are `woff2`, `woff`, `ttf`, and `otf`, with a 20 MiB limit per file. The live URL rewriter preserves data URIs rather than rejecting them; browser support and applicable policies still determine whether a resource loads. Preserving a `file:` URL likewise does not grant browser access to a local file.
 
 ## Rules and limits
 

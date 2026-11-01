@@ -17,7 +17,7 @@ There is no `self:` namespace. Use `fork:` for evolution changes, not the curren
 
 Use the current tool definitions and load their toolsets first. These are capabilities of the runtime Agent, not instructions to bypass any user restriction on validation, execution, or startup.
 
-Successful `EvolveCode` processing submits its tool result before requesting the coordinated evolution shutdown. Do not simulate success by killing a process, manually exiting with a success code, or copying runtime repositories yourself.
+Successful `EvolveCode` processing records a call-local evolution intent. The tool-result commit and subsequent post-commit processing request the coordinated evolution shutdown only after the result is saved. Do not simulate success by killing a process, manually exiting with a success code, or copying runtime repositories yourself.
 
 ## Activation and recovery
 

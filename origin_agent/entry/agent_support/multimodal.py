@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from pydantic import BaseModel
 from typing import * # type: ignore
 
-from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, History, ImageBlock, MessageBlock, TextBlock, VideoBlock
+from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, History, ImageBlock, MessageBlock, TextBlock, ToolResultMessage, VideoBlock
 from entity.puretype import MessageContent, Role, ModalityCapability, ModalityDescriptionResult
 from entity.error import ModalityForwardUnavailableError
 from entity.constant import (
@@ -82,7 +82,13 @@ class PreparedMultimodalRequest(BaseModel):
                 content = [block.model_copy() for block in content]
             elif isinstance(content, dict):
                 content = content.copy()
-            snapshot = message.model_copy(update={"content": content})
+            updates: dict[str, Any] = {
+                "content": content,
+                "mod_fixators": [block.model_copy() for block in message.mod_fixators],
+            }
+            if isinstance(message, ToolResultMessage):
+                updates["result_text_blocks"] = [block.model_copy() for block in message.result_text_blocks]
+            snapshot = message.model_copy(update=updates)
             copied.append(snapshot)
             if message is last_user_message:
                 if not isinstance(snapshot, CharacterConversationMessage):
@@ -336,7 +342,7 @@ def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|No
         parts: list[str] = []
         for block in content:
             if isinstance(block, TextBlock):
-                parts.append(_strip_internal_fields(block.text))
+                parts.append(_strip_internal_fields(block.to_text()))
             elif isinstance(block, ImageBlock):
                 parts.append("[image]")
             elif isinstance(block, AudioBlock):
@@ -508,6 +514,23 @@ def extract_tool_embedded_messages(
         if isinstance(message, dict) and "content" in message:
             messages.append(dict(message))
     return messages or None
+
+
+def project_message_display_content(message: BaseMessage) -> str | list[dict[str, Any]]:
+    """Keep internal tool fields out of UI text without changing Provider input."""
+    raw = message.content
+    if isinstance(message, ToolResultMessage) and message.result_text_blocks:
+        if isinstance(raw, list):
+            blocks = [
+                {"type": "text", "text": _strip_internal_fields(block.to_text())}
+                if isinstance(block, TextBlock) else block.as_object()
+                for block in raw
+            ]
+        else:
+            blocks = [{"type": "text", "text": content_to_text(raw)}]
+        return [*blocks, *(block.as_object() for block in message.result_text_blocks)]
+    serialized = content_to_serializable(raw)
+    return content_to_text(serialized) if isinstance(serialized, dict) else serialized
 
 
 def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:

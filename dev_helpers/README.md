@@ -42,7 +42,7 @@ python dev_helpers/read_history.py --path "D:\__TEMP__\evolve-agent\workspace\se
 - `range` 使用原消息的 0-based 半开区间 `[start, stop)`，`remaining` 是该区间后的消息数。`--summary` 不输出正文；它仍统计全历史媒体。
 - 默认 `--start 0 --limit 10`。每个文字字段默认最多4000字符，可通过 `--max-text-chars` 调整；超限追加明确标记，并在 `truncated_fields` 列出字段位置。工具参数/结果中的JSON字符串被截断后不能作为完整JSON使用。需要全文时显式提高有限上限并缩小消息范围。
 - 总JSON输出默认最多24000字符，由 `--max-output-chars` 调整；超预算直接失败，不打印正文，也不截出无效JSON。媒体清单过大时摘要也可能超预算，需明确提高上限。
-- `source` 包含输入路径、ES key、读取字节数及SHA-256，方便比较不同读取是否使用相同内容。默认 key 直接取项目 `History_Version`（当前为 `v1`），根类型必须是正式 `History`；类型兼容性遵循项目 `make_config()` 和easysave的规则，不在辅助脚本中硬编码版本/稳定名白名单。
+- `source` 包含输入路径、ES key、读取字节数及SHA-256，方便比较不同读取是否使用相同内容。默认优先选择当前 `History_Version`（v2），仅无v2时读取明确的legacy v1；显式 `--key` 必须存在。根类型必须是正式 `History`，复用 `util.history_storage` 的版本选择和规范化；不在辅助脚本重写类型映射。运行时v1为保留既有兼容可跳过退役字段，而本辅助脚本对v1/v2均严格拒绝未知字段，诊断失败不等于运行时一定无法读取。
 
 ### 安全与失败行为
 

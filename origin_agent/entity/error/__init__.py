@@ -1,6 +1,8 @@
 """Project-wide custom exception types grouped by responsibility."""
 
 from .abstract import (
+    ModConfigurationError, ModRequestError, ModBudgetExceededError,
+    ModSourceChangedError, ModTemplateError,
     InvalidMcpUrlError,
     LLMAPIStatusError,
     LLMEmptyResponseError,
@@ -77,6 +79,8 @@ from .system import (
 from .util import LocalFontAccessError, MetaFormatError
 
 __all__ = [
+    "ModConfigurationError", "ModRequestError", "ModBudgetExceededError",
+    "ModSourceChangedError", "ModTemplateError",
     "AgentspaceAlreadyExistsError",
     "AgentspaceConnectionClosed",
     "AgentspaceError",
