@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from entity.constant.application import InputDeliveryState, TaskOwnership
+from ._base import MessageContent
 from .approval import ToolCallMeta
 
 PayloadT = TypeVar("PayloadT", bound=BaseModel)
@@ -72,7 +73,7 @@ class ToolResultNotification(BaseModel):
     session_id: str
     tool_call_id: str
     character_name: str
-    display_content: str
+    display_content: MessageContent
     tool_call_meta: ToolCallMeta
     embedded_messages: list[dict[str, Any]] | None = None
     consumed_client_message_ids: list[str] | None = None

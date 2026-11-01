@@ -1,5 +1,13 @@
 # Evolve Agent — 开发者文档
 
+## Read 实时工具媒体展示（2026-11-02，当前约定）
+
+工具结果实时通知与历史内容页共用 `project_message_display_content`，保留图片、音频、视频的原生块，不再经 `content_to_text` 转成 `[image]` 等标签。`ToolResultNotification`、`IAgentSink` 及两个 Sink 的工具结果内容统一为 `MessageContent`；前端直接复用现有工具卡片与媒体渲染。所有工具正文文本块过滤内部字段，耗时和工具结果嵌入消息从原始 dict 或正式生成的尾部元数据 TextBlock 独立提取，历史交接后不因正文过滤而丢失。
+
+子会话工具结果实时、快照和显式历史回放同样保留媒体，前端按 `(role, tool_call_id)` 处理快照/实时双向到达及同批重复；非工具实时消息继续追加。日志、摘要和父Agent反馈保持纯文本占位；不新增 System、缓存、媒体请求、轮询或工具权限，不改变媒体发送开关、History 字段和 easysave key。`_user_blocks` 的独立 follow-up 路由与交付时机保持，不在工具结果里复制媒体。
+
+用户应停止应用后配套部署本次后端与前端，按既有运行时前端流程构建、重启并刷新浏览器；旧前端不支持新的数组工具结果。开发助手AI不操作运行时副本，也未执行测试、校验、构建、实际导入或应用；仅源码实施与只读差异审阅，人工验收见 `.tasks/2026-11-02_1_read-live-media-display.md` V01–V20。
+
 ## 功能指导渐进式加载（2026-11-01，当前约定）
 
 项目根custom_mods按同级MOD.md/MOD.md.meta声明系统功能指导，名称简介常驻，全文经core的RecallMod批量读取，related机械递归、允许环、调用内去重；keywords按大小写敏感字面子串在正式顶层user消息的模型请求前触发固着器。具体扩展协议见[custom_mods开发文档](custom_mods/DEV-README.md)，不在本文件维护具体安装条目。

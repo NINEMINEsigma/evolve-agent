@@ -141,7 +141,7 @@
 |---|---|
 | Role（不译） | `puretype.Role` 协议层枚举（user/assistant/system/tool） |
 | 角色（character）/ 角色名（character_name） | 会话参与者层标识（main-agent/end-user/system/子Agent名） |
-| 事件出口 | sink 体系：`AgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口 |
+| 事件出口 | sink 体系：`IAgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口。工具结果内容统一为 `MessageContent`（字符串或媒体块数组），与历史内容页共用过滤内部字段但保留媒体的展示投影；日志占位文本不作为媒体展示内容（2026-11-02） |
 | 入站缓冲 / 出站缓冲 | inbox / outbox（异步消息缓冲；代码标识改名为可选遗留） |
 | 消息体系 | `entity/messages.py` 的 `BaseMessage` 多态模型与 `History` |
 | 消息前纯类型 | 英文锚点：pre-message pure types。`entity.puretype` 中不依赖正式消息类的纯数据类型，可在 `entity.messages` 定义前加载；不得直接、间接或仅在 `TYPE_CHECKING` 下反向依赖消息体系或消息后纯类型 |
@@ -154,7 +154,7 @@
 | 流式事件 | 前端实时输出的 `StreamDeltaEvent` / `StreamDoneEvent`；按 `type` 区分的纯数据模型，进程内保留工具载荷与计时模型，WebSocket发送边界才序列化；不同于 Provider 产生的 `StreamChunk`（英文锚点：stream event） |
 | 空响应（empty LLM response） | LLM正常返回但正文长度为零且没有工具调用的异常结果；思考内容不构成有效完成。正式客户端加载入口对这类结果最多尝试3次（初次加2次重试，等待1秒、2秒），耗尽明确失败，不写空assistant消息。纯工具调用合法，非零长度空白正文保持原语义；已有工具参数增量但没有完整工具调用且无正文时明确失败、不重试。流式重试保留同一流标识与连续思考展示，不把失败尝试加入重试输入；其usage和结束原因不作为成功终态。辅助模型调用同样适用，能力探针持续空时失败而不缓存支持/不支持。 |
 | 思考内容 | reasoning_content / reasoning_delta，模型响应中的思考正文或流式思考增量 |
-| 工具结果嵌入消息 | 工具调用期间排队、随后被下一个工具结果携带展示的用户消息；内部以 `_queued_messages` 保存，通过 `embedded_messages` 独立传输，在工具调用卡片结果区特殊渲染，不作为普通 JSON 正文显示 | embedded tool message |
+| 工具结果嵌入消息 | 工具调用期间排队、随后被下一个工具结果携带展示的用户消息；内部以 `_queued_messages` 保存，通过 `embedded_messages` 独立传输，在工具调用卡片结果区特殊渲染，不作为普通 JSON 正文显示。工具媒体结果的独立字段从原始内容末尾元数据 TextBlock 只读提取，正文过滤后仍可在历史交接与刷新时展示（2026-11-02） | embedded tool message |
 
 ---
 

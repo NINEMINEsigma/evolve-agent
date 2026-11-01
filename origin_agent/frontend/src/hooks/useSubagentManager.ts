@@ -1,6 +1,18 @@
 import { useCallback, useState } from "react";
-import { SubagentSession, WSMessage } from "../types";
+import { SubagentMessage, SubagentSession, WSMessage } from "../types";
 import { CONTENT_PREVIEW_LEN } from "../constants/session";
+import { contentToText } from "../features/chat/messageCollapse";
+
+function subagentFeedbackKey(message: SubagentMessage): string {
+  if ((message.role === "tool_call" || message.role === "tool_result") && message.tool_call_id) {
+    return JSON.stringify([message.role, message.tool_call_id]);
+  }
+  return JSON.stringify([
+    message.role,
+    contentToText(message.content ?? "").slice(0, CONTENT_PREVIEW_LEN),
+    message.tool_call_id || "",
+  ]);
+}
 
 export interface SubagentManager {
   subagentSessionsMap: Record<string, Record<string, SubagentSession>>;
@@ -27,11 +39,9 @@ export function useSubagentManager(): SubagentManager {
           merged[sKey] = snap;
           continue;
         }
-        const snapIds = new Set(
-          (snap.feedback || []).map((f) => `${f.role}::${f.content?.slice(0, CONTENT_PREVIEW_LEN)}::${f.tool_call_id || ""}`)
-        );
+        const snapIds = new Set((snap.feedback || []).map(subagentFeedbackKey));
         const wsOnly = (existing.feedback || []).filter(
-          (f) => !snapIds.has(`${f.role}::${f.content?.slice(0, CONTENT_PREVIEW_LEN)}::${f.tool_call_id || ""}`)
+          (feedback) => !snapIds.has(subagentFeedbackKey(feedback))
         );
         merged[sKey] = {
           ...snap,
@@ -79,17 +89,20 @@ export function useSubagentManager(): SubagentManager {
         const existing = prev[subId];
         const prevFeedback = existing?.feedback || [];
         const prevApprovals = existing?.pending_approvals || [];
-        const realFeedback: Array<{
-          role: string;
-          content: string;
-          tool_name?: string;
-          tool_call_id?: string;
-          tool_args?: Record<string, unknown>;
-          reasoning?: string;
-        }> = [];
+        const realFeedback: SubagentMessage[] = [];
+        const toolFeedbackKeys = new Set(
+          prevFeedback
+            .filter((feedback) => (feedback.role === "tool_call" || feedback.role === "tool_result") && feedback.tool_call_id)
+            .map(subagentFeedbackKey),
+        );
         for (const item of rawFeedback) {
           if (item.role === "countdown") continue;
           if (item.role === "status" && !item.content) continue;
+          if ((item.role === "tool_call" || item.role === "tool_result") && item.tool_call_id) {
+            const key = subagentFeedbackKey(item);
+            if (toolFeedbackKeys.has(key)) continue;
+            toolFeedbackKeys.add(key);
+          }
           realFeedback.push(item);
         }
         const newApprovals = Array.isArray(data.pending_approvals) ? data.pending_approvals : [];

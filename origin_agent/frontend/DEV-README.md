@@ -1,5 +1,15 @@
 # frontend/ — Web 前端
 
+## 实时工具媒体与子会话合并（2026-11-02，当前约定）
+
+`NonStreamWSMessage` 以 `type/result` 组成判别联合，仅 `tool_result.result` 允许 `MessageContent`（字符串或 `ContentBlock[]`）；其他非流式事件的 `result` 仍为字符串，因此 `task_progress` 和 `subagent_update` 外层 JSON 协议保持。解码器仍只对旧非流式事件做原有基础检查，不在此次增加完整媒体校验。
+
+`parseToolResult` 对原生块数组直接保留内容，字符串分支继续解析 JSON 特殊预览、下载与嵌入消息。主聊天实时工具结果与历史内容页均复用现有 `ToolCardResult`、`MessageBody`、灯箱和播放器；不新增媒体请求、刷新、轮询或渲染组件，卡片默认折叠规则不变。独立耗时和嵌入消息不作为媒体正文中的内部 JSON 重复显示，日志占位不影响真实展示。
+
+`SubagentMessage.content` 同样为 `MessageContent`。`useSubagentManager` 对有 ID 的 `tool_call` / `tool_result` 按 `(role, tool_call_id)` 合并，快照同键优先；实时入口对已有同键保留首份，并登记同批新键，覆盖快照先到、实时先到及同批重复。无 ID 工具结果和其他实时反馈仍顺序追加；非工具快照匹配保留原有有限文本前缀粒度，复用 `contentToText`，不序列化或哈希媒体载荷。reasoning 与审批描述等仅文本位置显式转换，工具结果正文不转换。
+
+要求新后端与新前端配套部署；新前端仍接受旧字符串结果。不改变正典交接、追底、History 格式、离线导出资源协议及媒体输入开关。仅源码实施与只读审阅，未运行类型检查、Lint、测试、构建或应用；用户人工验收见 `.tasks/2026-11-02_1_read-live-media-display.md` V01–V20。
+
 ## mod正文显示边界（2026-11-01）
 
 后端新增类型化功能指导，但保持现有主聊天message_suffix和history_updated协议：请求前成功提交新增固着器后按原路径重载历史页，扩展仍由现有上下文扩展区显示。工具正文的Provider与UI投影分离，内部_meta与嵌入用户输入不能因为追加文档而在普通文本重复出现；历史页/重连/离线导出共用后端UI投影。

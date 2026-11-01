@@ -53,7 +53,7 @@ class IAgentSink(ABC):
         session_id: str,
         tool_name: str,
         tool_call_id: str,
-        content: str,
+        content: MessageContent,
         character_name: str | None = None,
         tool_call_meta: dict | None = None,
         embedded_messages: list[dict] | None = None,

@@ -332,15 +332,12 @@ export interface HistoryRowLink {
 }
 
 /**
- * 非流式 WebSocket 入站消息的统一结构。
- * type 显式排除 stream_delta/stream_done —— 流式事件由
- * StreamDeltaEvent / StreamDoneEvent 承载，不再走此宽类型。
- * 流式专用字段（delta/reasoning_delta/finish_reason/metrics）
- * 已移至流式事件类型，此接口不再声明；stream_id 因
- * TOOL_CALLS_DISCARDED 需要标识被丢弃调用所属的流而保留在此。
+ * 非流式 WebSocket 入站消息的公共字段。
+ * 流式专用字段由 StreamDeltaEvent / StreamDoneEvent 承载。
+ * type/result 由下方判别联合声明，仅工具结果允许完整媒体块数组。
+ * stream_id 因 TOOL_CALLS_DISCARDED 需要标识被丢弃调用所属的流而保留。
  */
-export interface NonStreamWSMessage {
-  type: NonStreamMessageType;
+interface NonStreamWSMessageBase {
   session_id?: string;
   content?: MessageContent;
   message?: string;
@@ -349,7 +346,6 @@ export interface NonStreamWSMessage {
   tool_call_ids?: string[];                // TOOL_CALLS_DISCARDED：被丢弃的工具调用 ID
   stream_id?: string;                      // TOOL_CALLS_DISCARDED：被丢弃调用所属的流标识
   args?: Record<string, unknown>;
-  result?: string;
   request_id?: string;
   approved?: boolean;
   action?: string;
@@ -402,6 +398,12 @@ export interface NonStreamWSMessage {
   agentspace_event?: AgentspaceEvent;        // AGENTSPACE_EVENT：聊天页视觉资源变化
   client_diagnostic?: ClientDiagnostic;      // CLIENT_DIAGNOSTIC：脱敏传输诊断
 }
+
+/** 仅工具结果的 result 可携带媒体；其他非流式事件仍传字符串。 */
+export type NonStreamWSMessage = NonStreamWSMessageBase & (
+  | { type: "tool_result"; result?: MessageContent }
+  | { type: Exclude<NonStreamMessageType, "tool_result">; result?: string }
+);
 
 /**
  * WebSocket 入站消息的判别联合：流式事件使用具体结构化类型，
@@ -636,7 +638,7 @@ export interface PendingApproval {
 
 export interface SubagentMessage {
   role: string;
-  content: string;
+  content: MessageContent;
   tool_name?: string;
   tool_call_id?: string;
   tool_args?: Record<string, unknown>;

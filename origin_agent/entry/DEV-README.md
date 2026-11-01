@@ -1,5 +1,13 @@
 # entry/ — Agent 主循环
 
+## 工具结果实时媒体展示（2026-11-02，当前约定）
+
+`prepare_tool_result` 与 `PreparedToolResult.update_result_payload` 直接使用 `project_message_display_content` 生成 `ToolResultNotification.display_content: MessageContent`，不再通过 `content_to_text` 把图片、音频、视频降为占位文本。`IAgentSink.emit_tool_result`、`FrontendSink` 与 `ParentAgentSink` 统一接收字符串或媒体块数组。主会话直接构造 `Message(type=TOOL_RESULT, result=content)`，复用原发送请求所有权、停止期输出准入及发送截止；旧 `_send_msg` 的工具结果字符串分支移除，其他分支不变。
+
+展示投影对所有 `ToolResultMessage` 的文本块统一过滤内部字段、保留媒体顺序，并追加 `result_text_blocks`；非工具消息和 Provider 原内容不变。`_tool_result_metadata_fields` 只读识别原生 dict 或 `_blocks` 转换后追加的末尾 `TextBlock` JSON 对象，供 `extract_tool_call_meta` / `extract_tool_embedded_messages` 共用；不扫描媒体载荷或前部文本。历史页因此能在隐藏内部 JSON 的同时独立保留耗时与嵌入消息，兼容旧 `queued_messages` 包装。普通非 JSON 尾块仅表示没有该元数据来源，未知内部异常继续传播。
+
+日志与摘要继续使用纯文本媒体占位；原始 `History`、存储 key、审批、媒体开关、提交后通知顺序及 `_user_blocks` follow-up 时机不变。需要前后端同步部署。本次仅源码实施与只读差异审阅，未运行测试、校验、构建、实际导入或应用；人工验收见 `.tasks/2026-11-02_1_read-live-media-display.md` V01–V20。
+
 ## mod请求前准备（2026-11-01，当前约定）
 
 BaseAgentLoop.prepare_mod_context在实际模型请求前处理正式顶层Role.USER且mod_keywords_processed=false的消息。原输入先按既有投递流程保存，关闭刷新不加载文档；后续显式恢复才处理未完成输入。辅助模型和工具结果嵌入用户输入不触发，真实顶层follow-up会触发。

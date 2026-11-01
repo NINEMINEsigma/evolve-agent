@@ -1,5 +1,13 @@
 # subagent/ — 子代理与多代理系统
 
+## 工具结果媒体展示（2026-11-02，当前约定）
+
+`SubAgentFeedback.content` 使用 `MessageContent`，普通/临时子Agent的工具媒体结果通过 `ParentAgentSink → emit_event → SubAgentFeedback → subagent_update` 保留原生块数组。`get_snapshot` 与显式 `history_path` 回放的工具结果共用 `project_message_display_content`，不再把工具图片、音频、视频转换为纯文本占位；`result_text_blocks` 随共享投影保留。快照与实时工具事件由前端按角色和工具调用 ID 双向幂等合并，非工具实时反馈仍追加。
+
+本次只修工具结果媒体，不扩展非工具 user/assistant 的既有展示策略，不新增实时 user 后缀或 `_user_blocks` follow-up 推送。`SubAgentFeedbackDelivery.text`、父Agent纯文本反馈、审批、停止与普通子Agent保存/临时Agent不持久化的责任保持不变。没有新 History 字段、key、System 或服务；原始媒体发送开关不受 UI 传输影响。
+
+外层 `subagent_update.result` 仍为 JSON 字符串，其 `feedback[].content` 可以为媒体数组，需前后端配套更新。仅源码实施与只读审阅，未运行测试、校验、实际导入、构建或应用；人工验收见 `.tasks/2026-11-02_1_read-live-media-display.md` V10–V12、V20。
+
 ## mod与历史版本（2026-11-01，当前约定）
 
 普通/临时子Agent均在实际模型请求前调用继承的prepare_mod_context，匹配正式顶层user原正文，父Agent与人类来源不区分；工具结果内嵌补充不触发。资源归属由公开get_resource_session_id返回真实parent_session_id，不能拿子会话ID生成父资源目录。

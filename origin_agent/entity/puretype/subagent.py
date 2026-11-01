@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ._base import MessageContent
+
 
 class SubAgentStatus(str, Enum):
     """子Agent及临时Agent的运行状态。"""
@@ -18,7 +20,7 @@ class SubAgentFeedback(BaseModel):
     """子Agent反馈或前端面板事件。"""
 
     role: str
-    content: str = ""
+    content: MessageContent = ""
     tool_name: str | None = None
     tool_call_id: str | None = None
     tool_args: dict[str, Any] | None = None

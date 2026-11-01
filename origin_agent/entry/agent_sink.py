@@ -724,18 +724,29 @@ class FrontendSink(IFrontendSink):
         session_id: str,
         tool_name: str,
         tool_call_id: str,
-        content: str,
+        content: MessageContent,
         character_name: str | None = None,
         tool_call_meta: dict | None = None,
         embedded_messages: list[dict] | None = None,
         consumed_client_message_ids: list[str] | None = None
         ) -> None:
-        await self._send_msg(session_id, "tool_result", tool_name, content,
-                             tool_call_id=tool_call_id,
-                             character_name=character_name,
-                             tool_call_meta=tool_call_meta,
-                             embedded_messages=embedded_messages,
-                             consumed_client_message_ids=consumed_client_message_ids)
+        msg = Message(
+            type=MessageType.TOOL_RESULT,
+            session_id=session_id,
+            tool=tool_name,
+            result=content,
+            tool_call_id=tool_call_id,
+            character_name=character_name,
+            tool_call_meta=tool_call_meta,
+            embedded_messages=embedded_messages,
+            consumed_client_message_ids=consumed_client_message_ids,
+        )
+        await self._requests.run_request(
+            lambda: self._send_message_model(session_id, msg),
+            name="frontend-send-tool_result",
+            admission=self._admit_send,
+            cancel_timeout=SHUTDOWN_SEND_TIMEOUT_SECONDS,
+        )
 
     async def emit_history_updated(self, session_id: str) -> None:
         event = HistoryUpdatedEvent(session_id=session_id)
@@ -963,14 +974,6 @@ class FrontendSink(IFrontendSink):
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
                           tool_call_id=tool_call_id or None,
                           character_name=character_name)
-        elif event_type == "tool_result":
-            msg_type = MessageType.TOOL_RESULT
-            msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
-                          result=payload, tool_call_id=tool_call_id,
-                          character_name=character_name,
-                          tool_call_meta=tool_call_meta,
-                          embedded_messages=embedded_messages,
-                          consumed_client_message_ids=consumed_client_message_ids)
         elif event_type == "usage_update":
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
         elif event_type == "task_progress":
@@ -1107,7 +1110,7 @@ class ParentAgentSink(IAgentSink):
         session_id: str,
         tool_name: str,
         tool_call_id: str,
-        content: str,
+        content: MessageContent,
         character_name: str | None = None,
         tool_call_meta: dict | None = None,
         embedded_messages: list[dict] | None = None,

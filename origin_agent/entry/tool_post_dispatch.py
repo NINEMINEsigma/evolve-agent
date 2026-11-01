@@ -14,7 +14,7 @@ from entity.messages import ToolResultMessage
 from entity.puretype import Role, ToolCallMeta, ToolResultNotification
 from abstract.tools.tool import ToolExecution, ToolPostprocessEffect
 from entry.agent_support.multimodal import (
-    tool_result_to_content, tool_result_to_follow_up, content_to_text, extract_tool_embedded_messages,
+    tool_result_to_content, tool_result_to_follow_up, extract_tool_embedded_messages,
     project_message_display_content,
 )
 
@@ -69,7 +69,7 @@ class PreparedToolResult(BaseModel):
         self.message.content = content
         self.message.result_text_blocks = []
         if notice is not None:
-            notice.display_content = content_to_text(project_message_display_content(self.message))
+            notice.display_content = project_message_display_content(self.message)
             notice.ui_result = payload
         if self.execution is not None:
             self.execution.result = payload
@@ -199,7 +199,7 @@ def prepare_tool_result(
             message=message,
             notification=ToolResultNotification(
                 tool_name=tool_name, session_id=session_id, tool_call_id=tool_call_id,
-                character_name=character_name, display_content=content_to_text(project_message_display_content(message)),
+                character_name=character_name, display_content=project_message_display_content(message),
                 tool_call_meta=meta, embedded_messages=embedded,
                 consumed_client_message_ids=consumed, ui_result=result,
             ),

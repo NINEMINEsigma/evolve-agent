@@ -20,7 +20,8 @@ const KNOWN_INBOUND_TYPES = new Set<string>(Object.values(WS_IN));
  *    非法载荷丢弃并输出不含正文/参数的诊断，不得静默成为其他消息或污染 store；
  * 4. TOOL_CALLS_DISCARDED 经同一守卫严格校验 session_id / stream_id / tool_call_ids，
  *    非法载荷丢弃；校验通过后按判别联合收窄，不做无校验断言；
- * 5. 旧非流事件暂仅基础检查后透传为 NonStreamWSMessage，未在本次全面迁移；
+ * 5. 非流事件仍仅做基础检查，透传为按 type/result 区分的 NonStreamWSMessage；
+ *    仅 tool_result.result 可为媒体块数组，其他 result 仍为字符串；未全面迁移载荷校验；
  * 6. 未知 type 丢弃。
  *
  * 日志只输出已验证且已知的消息 type，避免原始 typeField 包含对象/正文导致泄露或字符串转换异常。

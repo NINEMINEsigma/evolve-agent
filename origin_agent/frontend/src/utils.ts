@@ -1,5 +1,6 @@
-import type { ChatMessage, ContentBlock, DownloadInfo, EmbeddedToolMessage, PendingImage, PendingAudio, PendingVideo, SubagentSession } from "./types";
+import type { ChatMessage, ContentBlock, DownloadInfo, EmbeddedToolMessage, MessageContent, PendingImage, PendingAudio, PendingVideo, SubagentSession } from "./types";
 import { WS_IN } from "./constants/ws";
+import { contentToText } from "./features/chat/messageCollapse";
 
 export function formatTimeSec(sec: number): string {
   if (!isFinite(sec) || sec < 0) return "0:00";
@@ -18,7 +19,7 @@ export function formatTime(ts: number): string {
 }
 
 export interface ParsedToolResult {
-  content?: string;
+  content?: MessageContent;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
   embeddedMessages?: EmbeddedToolMessage[];
@@ -46,7 +47,8 @@ function parseEmbeddedToolMessages(value: unknown): EmbeddedToolMessage[] | unde
   return messages.length > 0 ? messages : undefined;
 }
 
-export function parseToolResult(raw: string, _toolName?: string): ParsedToolResult {
+export function parseToolResult(raw: MessageContent, _toolName?: string): ParsedToolResult {
+  if (Array.isArray(raw)) return { content: raw, isError: false };
   try {
     const parsed = JSON.parse(raw);
     const isError = !!parsed.error;
@@ -168,7 +170,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         messages.push({ role: "assistant", content: msg.content || "", id, reasoningContent: msg.reasoning, characterName: msg.character_name });
         break;
       case "reasoning":
-        messages.push({ role: "assistant", content: "", id, reasoningContent: msg.reasoning || msg.content, characterName: msg.character_name });
+        messages.push({ role: "assistant", content: "", id, reasoningContent: msg.reasoning || contentToText(msg.content), characterName: msg.character_name });
         break;
       case "status":
       case "completed":
@@ -179,7 +181,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         messages.push({ role: "system", content: `⏸ 待审批: ${msg.tool_name || "tool"}\n${msg.tool_args ? JSON.stringify(msg.tool_args, null, 2) : ""}`, id });
         break;
       case "approval_decision":
-        messages.push({ role: "system", content: `${msg.tool_name ? `${msg.tool_name}: ` : ""}${msg.content}`, id });
+        messages.push({ role: "system", content: `${msg.tool_name ? `${msg.tool_name}: ` : ""}${contentToText(msg.content)}`, id });
         break;
       default:
         messages.push({ role: "system", content: msg.content || "", id });

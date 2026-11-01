@@ -1,5 +1,13 @@
 # Agent Loop 类关系图
 
+## 工具结果媒体通知类型（2026-11-02，当前权威约定）
+
+`ToolResultNotification.display_content` 与 `SubAgentFeedback.content` 改用消息前纯类型 `MessageContent`。`IAgentSink.emit_tool_result` 的 `content` 参数及 `FrontendSink` / `ParentAgentSink` 两个实现同步为该类型，消息关系为正式 `ToolResultMessage → project_message_display_content → 调用级通知 → Sink → 前端工具卡片`，中间不再转成纯文本。首次结果与 after 替换结果共用投影；FrontendSink 直接构造通用 Message 并复用原请求/发送边界，ParentAgentSink 透传子会话事件。
+
+共享展示投影过滤所有工具文本块的内部字段并保留媒体和附加文本；私有 `_tool_result_metadata_fields` 只读解析原生 dict 或末尾元数据 TextBlock，两个已有提取函数复用它，历史卡片独立耗时与嵌入消息不丢失。子会话工具快照/回放使用相同完整投影，父Agent收到的 `SubAgentFeedbackDelivery.text` 不变。
+
+无新增 protected 字段、跨类访问、System、持久化字段或对象图关系；History/easysave key/typeref 均不变。两个字段所属模型仍只用于通知与前端视图，不写入 History。前后端需配套部署；本次仅源码实施与只读审阅，未运行测试、校验、实际导入、构建或应用。
+
 ## mod消息与请求前准备（2026-11-01，当前权威约定）
 
 继承新增MessageBlock→TextBlock→ModTextBlock。后者持有mod_name/resource_session_id/visible_characters及继承text，带to_text/is_visible_to/as_fixator_text行为，属于正式消息模型。BaseMessage新增mod_fixators和mod_keywords_processed；ToolResultMessage新增通用result_text_blocks。正文与来源是同一块对象，没有独立永久加载状态或新增System。

@@ -1,5 +1,11 @@
 # interface/ — System与事件、端点组件契约
 
+## 工具结果内容契约（2026-11-02）
+
+`IAgentSink.emit_tool_result` 的 `content` 参数为 `entity.puretype.MessageContent`：字符串或序列化媒体块列表。其余参数、默认值、工具调用 ID、独立耗时与嵌入消息通道保持不变。`FrontendSink` 将完整内容放在 `tool_result.result`，`ParentAgentSink` 将其放在子会话 `tool_result` 事件的 `content`；两个实现都不在接口边界把媒体转换成占位文本。
+
+内容来自已提交工具消息的共享展示投影，日志文本视图仍独立。没有新增 System、服务依赖、事件名称或持久化字段；父Agent纯文本反馈与关闭/发送所有权保持。前后端需同步更新，实际运行、校验与构建未由开发助手AI执行。
+
 本包声明公开接口与公共能力基类，不承载具体业务服务实现，也不创建Application、连接或后台任务。System查询/依赖/装配使用I...接口槽位；实现及资源所有权仍在各业务包，现有21个System槽位不因API端点组件增加。
 
 ## APIComponent

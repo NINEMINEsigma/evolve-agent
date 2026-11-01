@@ -479,13 +479,29 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
     return result
 
 
+def _tool_result_metadata_fields(
+    content: str | dict[str, Any] | list[MessageBlock],
+) -> dict[str, Any] | None:
+    """只读识别原生结果字典或 _blocks 转换时追加的尾部元数据文本。"""
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, list) or not content or not isinstance(content[-1], TextBlock):
+        return None
+    try:
+        fields = json.loads(content[-1].to_text())
+    except json.JSONDecodeError:
+        return None
+    return fields if isinstance(fields, dict) else None
+
+
 def extract_tool_call_meta(
     content: str | dict[str, Any] | list[MessageBlock],
 ) -> dict[str, Any] | None:
     """读取工具结果内部 ``_meta``，不改变原始 content。"""
-    if not isinstance(content, dict):
+    fields = _tool_result_metadata_fields(content)
+    if fields is None:
         return None
-    meta = content.get("_meta")
+    meta = fields.get("_meta")
     return dict(meta) if isinstance(meta, dict) else None
 
 
@@ -498,11 +514,12 @@ def extract_tool_embedded_messages(
     旧 History 中已经持久化的 ``queued_messages`` 字段，并归一化旧版的
     ``{"queued_message": {...}}`` 包装结构。
     """
-    if not isinstance(content, dict):
+    fields = _tool_result_metadata_fields(content)
+    if fields is None:
         return None
-    raw = content.get("_queued_messages")
+    raw = fields.get("_queued_messages")
     if not isinstance(raw, list):
-        raw = content.get("queued_messages")
+        raw = fields.get("queued_messages")
     if not isinstance(raw, list):
         return None
     messages: list[dict[str, Any]] = []
@@ -516,10 +533,10 @@ def extract_tool_embedded_messages(
     return messages or None
 
 
-def project_message_display_content(message: BaseMessage) -> str | list[dict[str, Any]]:
-    """Keep internal tool fields out of UI text without changing Provider input."""
+def project_message_display_content(message: BaseMessage) -> MessageContent:
+    """Keep tool media intact and internal fields out of UI without changing Provider input."""
     raw = message.content
-    if isinstance(message, ToolResultMessage) and message.result_text_blocks:
+    if isinstance(message, ToolResultMessage):
         if isinstance(raw, list):
             blocks = [
                 {"type": "text", "text": _strip_internal_fields(block.to_text())}
@@ -527,7 +544,10 @@ def project_message_display_content(message: BaseMessage) -> str | list[dict[str
                 for block in raw
             ]
         else:
-            blocks = [{"type": "text", "text": content_to_text(raw)}]
+            text = content_to_text(raw)
+            if not message.result_text_blocks:
+                return text
+            blocks = [{"type": "text", "text": text}]
         return [*blocks, *(block.as_object() for block in message.result_text_blocks)]
     serialized = content_to_serializable(raw)
     return content_to_text(serialized) if isinstance(serialized, dict) else serialized

@@ -530,7 +530,7 @@ class _OrchestratorContext:
         self._interrupted = False
 
     def get_snapshot(self) -> SubAgentSnapshotResponse:
-        # TODO: msg.content没有多模态
+        # TODO: 非工具用户消息仍使用纯文本展示；工具结果已保留媒体块。
         """返回所有活跃子会话的快照（供前端刷新时拉取）。"""
         snapshots: dict[str, SubAgentSnapshot] = {}
         for session_id, sub in self._active.items():
@@ -574,7 +574,7 @@ class _OrchestratorContext:
                     feedback.append(SubAgentFeedback(
                         role="tool_result",
                         tool_call_id=msg.tool_call_id,
-                        content=content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
+                        content=project_message_display_content(msg),
                         character_name=character_name,
                     ))
             status = (
@@ -830,7 +830,7 @@ class _OrchestratorContext:
                     history_events.append({
                         "role": "tool_result",
                         "tool_call_id": msg.tool_call_id,
-                        "content": content_to_text(project_message_display_content(msg)) + ("\n" + msg.get_message_suffix(None) if msg.get_message_suffix(None) else ""),
+                        "content": project_message_display_content(msg),
                     })
             logger.info(
                 "Subagent history loaded | session=%s entries=%d",
