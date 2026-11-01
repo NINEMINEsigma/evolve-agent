@@ -2,9 +2,9 @@
 会话元数据 hook。
 
 在每轮用户消息中，通过 hook_message 注入：
-1. 当前会话标题 + tags
+1. 当前会话标题 + 完整会话 ID + tags
 2. 当前审批模式（manual / handsfree / yolo）
-3. 父子会话簇（主链遍历 + 多父合并标注）
+3. 父子会话簇（主链遍历 + 多父合并标注，每个会话保留标题与完整 ID）
 4. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
 
 所有数据通过 Application.current().get_system(ISessionManager).get(sid) 获取 SessionInfo。
@@ -41,15 +41,20 @@ def _get_session_title(sid: str, sm: ISessionManager) -> str:
     return info.title or "(untitled)"
 
 
+def _format_session_identity(sid: str, sm: ISessionManager) -> str:
+    """统一保留标题和完整会话 ID，供会话召回使用。"""
+    return f"{_get_session_title(sid, sm)} (id: {sid})"
+
+
 def _collect_merge_sources(
     info: SessionInfo | None,
     sm: ISessionManager,
     visited: set[str],
 ) -> str:
-    """收集 parents[1:] 的额外父会话标题，返回内联标注文本。
+    """收集 parents[1:] 的额外父会话标题与完整 ID，返回内联标注文本。
 
     多父合并场景下，parents[0] 是主父系（已在主链中），
-    parents[1:] 是合并来源，以 '(also from: title1, title2)' 标注。
+    parents[1:] 是合并来源，以 '(also from: title (id: ...), ...)' 标注。
     """
     if not info or len(info.parents) <= 1:
         return ""
@@ -58,7 +63,7 @@ def _collect_merge_sources(
         if ep_sid in visited:
             continue
         visited.add(ep_sid)
-        extras.append(_get_session_title(ep_sid, sm))
+        extras.append(_format_session_identity(ep_sid, sm))
     if not extras:
         return ""
     return f" (also from: {', '.join(extras)})"
@@ -70,7 +75,8 @@ def _build_cluster_tree(
     visited: set[str] | None = None,
 ) -> list[tuple[str, int, bool]]:
     """
-    构建会话簇树，返回 [(title, indent_level, is_current), ...] 的扁平列表。
+    构建会话簇树，返回 [(identity, indent_level, is_current), ...] 的扁平列表。
+    identity 保留会话标题与完整 ID，并可附加合并来源标注。
 
     主链：沿 parents[0] 向上 → 当前 → 沿 continuation 向下。
     多父合并：对主链中每个节点，额外父会话以 '(also from: ...)' 内联标注。
@@ -119,13 +125,13 @@ def _build_cluster_tree(
         level = i
         anc_info = sm.get(anc_sid)
         merge_note = _collect_merge_sources(anc_info, sm, visited)
-        title = _get_session_title(anc_sid, sm) + merge_note
+        title = _format_session_identity(anc_sid, sm) + merge_note
         result.append((title, level, False))
 
     # 当前会话
     current_level = len(ancestor_stack)
     merge_note = _collect_merge_sources(info, sm, visited)
-    current_title = _get_session_title(session_id, sm) + merge_note
+    current_title = _format_session_identity(session_id, sm) + merge_note
     result.append((current_title, current_level, True))
 
     # 后代：缩进递增
@@ -133,7 +139,7 @@ def _build_cluster_tree(
         level = current_level + 1 + i
         desc_info = sm.get(desc_sid)
         merge_note = _collect_merge_sources(desc_info, sm, visited)
-        title = _get_session_title(desc_sid, sm) + merge_note
+        title = _format_session_identity(desc_sid, sm) + merge_note
         result.append((title, level, False))
 
     return result
@@ -244,7 +250,6 @@ def _format_visual_resources(session_id: str) -> str:
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     try:
         from system.application import Application
-        from entity.constant import COLLOQUY_SESSION_ID
 
         from interface.session_manager import ISessionManager
         sm = Application.current().get_system(ISessionManager)
@@ -252,8 +257,8 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         if info is None:
             return ""
 
-        # 标题处理
-        title = "随意聊聊" if session_id == COLLOQUY_SESSION_ID else (info.title or "(untitled)")
+        # 会话身份处理：标题与完整 ID 使用统一格式
+        identity = _format_session_identity(session_id, sm)
 
         # tags 处理
         tags_str = f" [{', '.join(info.tags)}]" if info.tags else ""
@@ -266,7 +271,7 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         nav_text = _format_navigation(session_id, workspace)
 
         # 拼接
-        parts: list[str] = [f"Session: {title}{tags_str}"]
+        parts: list[str] = [f"Session: {identity}{tags_str}"]
         approval_text = _format_approval_mode(session_id)
         if approval_text:
             parts.append(approval_text)
