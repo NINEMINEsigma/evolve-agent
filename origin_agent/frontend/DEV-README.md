@@ -1,5 +1,17 @@
 # frontend/ — Web 前端
 
+## 手动终结的等待与归档同步（2026-11-02，当前约定）
+
+`fetchJsonWithTimeout` 的 `timeoutMs` 支持数字或显式 `null`：数字仍对请求、响应正文和解码执行原有硬截止，`null` 仅关闭前端定时截止，仍保留外部 AbortSignal、HTTP错误、解析错误和内部错误。`useSessionStore.requestSessionJson` 默认仍为15秒；只有手动终结 POST 显式传 `null`，不因摘要、标签或资源停止超过15秒就中止等待。其他会话动作、会话预检和 History关键读取的截止不变，`fetchWithTimeout` 与 `RequestTimeoutError` 未改。
+
+手动终结按目标 sid 同步登记唯一 AbortController，并以 `terminatingSessions` 投影“终结中”。成功回执严格验证 `terminated`、目标 `session_id`、`metadata_warnings` 及可选 `error`；明确成功后先使旧列表请求失效并把已有目标条目标记为 `archived`，再独立刷新完整会话列表和标签目录。不存在的条目不凭空重建，`terminated=false` 或非法回执不本地归档。元数据警告仍显示为“已归档，但部分元数据未生成”，后续读取失败不会回滚已确认归档，也不算终结 POST失败。
+
+列表和标签读取分别使用单调请求代际：只有最新代际可提交全局数据，失败提示还须属于发起时的页面会话代际。两个内部 `refreshSessions` / `refreshAllTags` 接收 `SessionRefreshOptions`，为终结派生的读取传递通知归属和专属失败文案；公开 `fetchSessions` / `fetchAllTags` 仍为无参入口。切换会话不取消已提交终结，不切回原会话；迟到的终结提示和派生读取错误不能覆盖新会话提示。空依赖挂载清理先使列表/标签读取失效、清空终结请求归属，再取消本地等待，阻止这些迟到结果在卸载后写状态。
+
+终结请求失败保留原错误详情，并说明没有取得有效成功回执，只触发一次会话列表读取，不自动重发 POST、不轮询、不按 TypeError 猜测网络来源。后端终结顺序、元数据生成和 Shell会话停止语义不变，没有新端点、WebSocket事件、服务或持久化格式。浏览器取消不保证服务端撤销；网络或代理中断后，一次列表读取不能保证取得未来完成结果，仍沿用原有重连同步。若后端/模型连接长期不返回也未报错，界面会持续显示终结中，不伪造成功或任意固定时限失败。
+
+仅完成源码实施与只读差异审阅，未运行类型检查、Lint、测试、校验、实际导入、构建或应用。用户按既有流程部署前端，在运行时前端目录构建并刷新浏览器一次加载新产物，再按 `.tasks/2026-11-02_2_session-termination-request-sync.md` V01–V19人工验收；开发助手AI不操作运行时副本。重点验证耗时超过15秒/180秒、元数据警告、旧列表迟到、成功后读取失败、同sid防重、跨会话操作/提示、卸载/StrictMode及其他请求截止保持。
+
 ## 实时工具媒体与子会话合并（2026-11-02，当前约定）
 
 `NonStreamWSMessage` 以 `type/result` 组成判别联合，仅 `tool_result.result` 允许 `MessageContent`（字符串或 `ContentBlock[]`）；其他非流式事件的 `result` 仍为字符串，因此 `task_progress` 和 `subagent_update` 外层 JSON 协议保持。解码器仍只对旧非流式事件做原有基础检查，不在此次增加完整媒体校验。
@@ -73,7 +85,7 @@ frontend/
 │   │   ├── agentspaceApi.ts ← 独立 Agentspace 编辑器 REST/SSE 适配层
 │   │   ├── chatAgentspaceEventBus.ts ← 聊天 WebSocket Agentspace事件页面内扇出
 │   │   ├── fetchWithTimeout.ts ← 关键请求可取消15秒硬截止
-│   │   └── fetchJsonWithTimeout.ts ← 覆盖响应体、JSON解析和解码的可取消硬截止
+│   │   └── fetchJsonWithTimeout.ts ← 覆盖响应体、JSON解析和解码的可取消截止；手动终结显式null等待
 │   ├── styles/              ← CSS 样式
 │   └── utils/
 │       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数

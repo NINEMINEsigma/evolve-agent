@@ -1,15 +1,14 @@
 /**
- * Cancellable fetch helper whose hard deadline covers the response body and
- * decode step, not just the response headers. Unlike fetchWithTimeout (which
- * only guards the header handshake), this helper aborts the whole read and can
- * be externally cancelled; timeouts surface as RequestTimeoutError and
- * external cancellation as AbortError.
+ * Cancellable fetch helper whose optional hard deadline covers the response body
+ * and decode step, not just the response headers. Numeric deadlines abort the
+ * whole read with RequestTimeoutError; null disables only the deadline.
+ * External cancellation remains available and surfaces as AbortError.
  */
 import { RequestTimeoutError } from "./fetchWithTimeout";
 import { decodeHttpError } from "./httpErrors";
 
 export interface FetchJsonWithTimeoutOptions {
-  timeoutMs: number;
+  timeoutMs: number | null;
   phase: string;
   createHttpError?: (status: number, payload: unknown | null) => Error;
 }
@@ -32,15 +31,16 @@ export async function fetchJsonWithTimeout<T>(
 
   if (externalSignal?.aborted) throw abortError();
   externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
-  const timeoutError = () =>
-    new RequestTimeoutError(options.phase, options.timeoutMs, performance.now() - started);
-  const timer = window.setTimeout(() => {
+  const timeoutMs = options.timeoutMs;
+  const timer = timeoutMs === null ? null : window.setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, options.timeoutMs);
+  }, timeoutMs);
 
   const checkDeadline = () => {
-    if (timedOut || performance.now() - started >= options.timeoutMs) throw timeoutError();
+    if (timeoutMs !== null && (timedOut || performance.now() - started >= timeoutMs)) {
+      throw new RequestTimeoutError(options.phase, timeoutMs, performance.now() - started);
+    }
     if (externalSignal?.aborted) throw abortError();
   };
   try {
@@ -68,11 +68,10 @@ export async function fetchJsonWithTimeout<T>(
     checkDeadline();
     return result;
   } catch (error) {
-    if (timedOut || performance.now() - started >= options.timeoutMs) throw timeoutError();
-    if (externalSignal?.aborted) throw abortError();
+    checkDeadline();
     throw error;
   } finally {
-    window.clearTimeout(timer);
+    if (timer !== null) window.clearTimeout(timer);
     externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }

@@ -48,9 +48,38 @@ function responseRecord(value: unknown): Record<string, unknown> {
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
-function requestSessionJson(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+function requestSessionJson(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs: number | null = TIMING.CRITICAL_REQUEST_TIMEOUT,
+): Promise<Record<string, unknown>> {
   return fetchJsonWithTimeout(path, init,
-    { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase: "session-operation" }, responseRecord);
+    { timeoutMs, phase: "session-operation" }, responseRecord);
+}
+
+interface SessionTerminationResponse {
+  terminated: boolean;
+  session_id: string;
+  error?: string | null;
+  metadata_warnings: string[];
+}
+
+function decodeSessionTerminationResult(value: unknown, expectedSessionId: string): SessionTerminationResponse {
+  const data = responseRecord(value);
+  const { terminated, session_id, error, metadata_warnings } = data;
+  if (typeof terminated !== "boolean" || typeof session_id !== "string" || session_id !== expectedSessionId
+    || !stringList(metadata_warnings)
+    || (error !== undefined && error !== null && typeof error !== "string")) {
+    throw new Error(errorLabels.invalidResponse);
+  }
+  const result: SessionTerminationResponse = { terminated, session_id, metadata_warnings };
+  if (error !== undefined) result.error = error;
+  return result;
+}
+
+interface SessionRefreshOptions {
+  noticeScope?: SessionResourceScope;
+  failureMessage?: string;
 }
 
 export interface SessionStoreCallbacks {
@@ -162,6 +191,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   );
 
   const interactionSubmissionsRef = useRef(new Map<string, InteractionSubmission>());
+  const terminationRequestsRef = useRef(new Map<string, AbortController>());
+  const sessionsRequestGenerationRef = useRef(0);
+  const tagsRequestGenerationRef = useRef(0);
   const pendingAsksRef = useRef<AskRequest[]>([]);
   const pendingConfirmsRef = useRef<ConfirmRequest[]>([]);
   const callbacksRef = useRef(callbacks);
@@ -172,6 +204,14 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const shellResource = useSessionResourceSnapshot<ShellInfo[]>(resourceScopeRef);
   const cronResource = useSessionResourceSnapshot<CronTask[]>(resourceScopeRef);
   const dynamicEndpointResource = useSessionResourceSnapshot<DynamicEndpoint[]>(resourceScopeRef);
+
+  useEffect(() => () => {
+    sessionsRequestGenerationRef.current += 1;
+    tagsRequestGenerationRef.current += 1;
+    const controllers = [...terminationRequestsRef.current.values()];
+    terminationRequestsRef.current.clear();
+    for (const controller of controllers) controller.abort();
+  }, []);
 
   const isResourceScopeCurrent = useCallback(
     (scope: SessionResourceScope): boolean => {
@@ -283,20 +323,42 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setPendingConfirms([]);
   }, [submitInteraction]);
 
-  const fetchSessions = useCallback(() => {
+  const refreshSessions = useCallback((options: SessionRefreshOptions = {}): void => {
+    const generation = ++sessionsRequestGenerationRef.current;
+    const noticeScope = { ...(options.noticeScope ?? resourceScopeRef.current) };
+    const failureMessage = options.failureMessage;
     void requestSessionJson("/api/sessions").then((data) => {
+      if (sessionsRequestGenerationRef.current !== generation) return;
       if (!Array.isArray(data.sessions) || !data.sessions.every((item) => item && typeof item === "object" && typeof item.id === "string")) {
         throw new Error(errorLabels.invalidResponse);
       }
       setSessions(data.sessions as SessionInfo[]);
-    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
-  }, []);
-  const fetchAllTags = useCallback(() => {
+    }).catch((error: unknown) => {
+      if (sessionsRequestGenerationRef.current !== generation || !isResourceScopeCurrent(noticeScope)) return;
+      const detail = error instanceof Error ? error.message : errorLabels.requestFailed;
+      setOperationNotice({ kind: "error", message: failureMessage ? `${failureMessage}\n${detail}` : detail });
+    });
+  }, [isResourceScopeCurrent]);
+  const fetchSessions = useCallback((): void => {
+    refreshSessions();
+  }, [refreshSessions]);
+  const refreshAllTags = useCallback((options: SessionRefreshOptions = {}): void => {
+    const generation = ++tagsRequestGenerationRef.current;
+    const noticeScope = { ...(options.noticeScope ?? resourceScopeRef.current) };
+    const failureMessage = options.failureMessage;
     void requestSessionJson("/api/tags").then((data) => {
+      if (tagsRequestGenerationRef.current !== generation) return;
       if (!stringList(data.tags)) throw new Error(errorLabels.invalidResponse);
       setAllTags(data.tags);
-    }).catch((error: unknown) => setOperationNotice({ kind: "error", message: error instanceof Error ? error.message : errorLabels.requestFailed }));
-  }, []);
+    }).catch((error: unknown) => {
+      if (tagsRequestGenerationRef.current !== generation || !isResourceScopeCurrent(noticeScope)) return;
+      const detail = error instanceof Error ? error.message : errorLabels.requestFailed;
+      setOperationNotice({ kind: "error", message: failureMessage ? `${failureMessage}\n${detail}` : detail });
+    });
+  }, [isResourceScopeCurrent]);
+  const fetchAllTags = useCallback((): void => {
+    refreshAllTags();
+  }, [refreshAllTags]);
 
   const handleMessage = useCallback((message: WSMessage) => {
     if (message.type === WS_IN.SYSTEM) {
@@ -495,24 +557,42 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, [fetchSessions]);
 
   const terminateSession = useCallback(async (sid: string) => {
+    if (terminationRequestsRef.current.has(sid)) return;
+    const controller = new AbortController();
+    const noticeScope = { ...resourceScopeRef.current };
+    terminationRequestsRef.current.set(sid, controller);
     setTerminatingSessions((previous) => new Set(previous).add(sid));
     setOperationNotice(null);
     try {
-      const data = await requestSessionJson(`/api/sessions/${sid}/terminate`, { method: "POST" });
-      if (data.terminated !== true) throw new Error(errorLabels.invalidResponse);
-      const warnings = Array.isArray(data.metadata_warnings)
-        ? data.metadata_warnings.filter((item: unknown): item is string => typeof item === "string" && Boolean(item))
-        : [];
-      if (warnings.length) {
-        setOperationNotice({ kind: "warning", message: `会话已归档，但部分元数据未生成：\n${warnings.join("\n")}` });
+      const response = await requestSessionJson(`/api/sessions/${sid}/terminate`, {
+        method: "POST", signal: controller.signal,
+      }, null);
+      if (terminationRequestsRef.current.get(sid) !== controller) return;
+      const data = decodeSessionTerminationResult(response, sid);
+      if (!data.terminated) throw new Error(data.error || errorLabels.terminationFailed);
+      sessionsRequestGenerationRef.current += 1;
+      setSessions((previous) => previous.map((item): SessionInfo =>
+        item.id === sid ? { ...item, status: "archived" } : item));
+      refreshSessions({ noticeScope, failureMessage: errorLabels.terminationArchivedListRefreshFailed });
+      refreshAllTags({ noticeScope, failureMessage: errorLabels.terminationArchivedTagsRefreshFailed });
+      const warnings = data.metadata_warnings;
+      if (warnings.length && isResourceScopeCurrent(noticeScope)) {
+        setOperationNotice({ kind: "warning", message: `${errorLabels.terminationArchivedWithWarnings}\n${warnings.join("\n")}` });
       }
-      fetchSessions();
     } catch (cause) {
-      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "会话终结失败" });
+      if (terminationRequestsRef.current.get(sid) !== controller) return;
+      if (isResourceScopeCurrent(noticeScope)) {
+        const detail = cause instanceof Error ? cause.message : errorLabels.terminationFailed;
+        setOperationNotice({ kind: "error", message: `${detail}\n${errorLabels.terminationUnconfirmed}` });
+      }
+      refreshSessions({ noticeScope, failureMessage: errorLabels.terminationUnconfirmedListRefreshFailed });
     } finally {
-      setTerminatingSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+      if (terminationRequestsRef.current.get(sid) === controller) {
+        terminationRequestsRef.current.delete(sid);
+        setTerminatingSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+      }
     }
-  }, [fetchSessions]);
+  }, [isResourceScopeCurrent, refreshAllTags, refreshSessions]);
   const togglePinSession = useCallback((sid: string) => {
     void requestSessionJson(`/api/sessions/${sid}/pin`, { method: "POST" }).then((data) => {
       if (typeof data.pinned !== "boolean") throw new Error(errorLabels.invalidResponse);
