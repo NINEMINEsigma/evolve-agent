@@ -8,7 +8,7 @@
 
 会话搜索仍只检索原对话消息范围，后缀提取使用统一get_message_suffix；主动工具正文不因此纳入检索。旧会话功能详细模板退役不改变各功能的工具实现或权限。仅源码和只读审阅，未运行校验、构建或应用。
 
-`buildin_tools/` 承载从 `component/` 整体迁入的五个内置工具子包，目录名按项目约定使用 `buildin_tools`。审批、Cron 路由与任务模型、动态端点服务和 MCP 管理入口仍在 [`component/`](../component/DEV-README.md)；本次只迁五包，不代表 `component/` 已完成最终 Component 专用整理。
+`buildin_tools/` 承载从 `component/` 整体迁入的五个内置工具子包，目录名按项目约定使用 `buildin_tools`。审批已进一步迁入 [`system/approval/`](../system/approval/DEV-README.md)；Cron 路由与任务模型、动态端点服务和 MCP 管理入口仍在 [`component/`](../component/DEV-README.md)，该目录尚未完成最终 Component 专用整理。
 
 ## 文件结构与边界
 
@@ -268,7 +268,7 @@ Runtime 依赖继承记录（2026-10-30）：`IBrowserSystem` 改继承 `IDPRunt
 
 Runtime 属性与关闭准备（2026-10-30，当前约定）：Browser 移除 Runtime 缓存与具体属性覆写，统一继承 `runtime`。关闭主体更名为 `virtual_prepare_shutdown`，Application 在绑定期间等待它，真正 framework 钩子只核对结果。释放 Browser 等服务前先有 Registry 真实工作屏障，不把图上独立视为工具运行时不会使用这些服务。Browser 的登记器 release 闭包仅使用既有 browser/driver 引用，纯连接释放 pending 由原登记器承接；自有进程仍实际等待，不查杀用户浏览器。
 
-无新增槽位或依赖边，不改 third、前端、持久化、审批授权或 5 秒硬截止。日志退出和工具线程池软观察的既存限制不在本轮扩大修复。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。Approval、Cron、DynamicEndpoint 的对应约定保留在 [`component/DEV-README.md`](../component/DEV-README.md#runtime-属性与关闭准备2026-10-30当前约定)。
+无新增槽位或依赖边，不改 third、前端、持久化、审批授权或 5 秒硬截止。日志退出和工具线程池软观察的既存限制不在本轮扩大修复。仅源码及只读审阅，未运行校验、导入、测试、构建或应用。审批的对应约定见[`system/approval/DEV-README.md`](../system/approval/DEV-README.md)；Cron、DynamicEndpoint 的对应约定保留在 [`component/DEV-README.md`](../component/DEV-README.md#runtime-属性与关闭准备2026-10-30当前约定)。
 
 ## 包迁移与完整部署边界
 
@@ -276,6 +276,8 @@ origin仓库的旧 `component/tools/`、`component/extools/`、`component/multia
 
 `run.py` 的合并复制不会清除目标侧独有的旧文件：fast仓库从来不先删除；进化时 fast→fallback 备份和 slow→fast 提升也采用合并覆盖。`force_init` 对 slow仓库与 fallback仓库是先删除再复制，但对 fast仓库仍只是合并覆盖，因此即使启用 `force_init`，fast 中旧五包也不会自动清除。本次不改 `run.py`、`.gitignore` 或复制过滤规则。
 
-用户应在停止应用后完整部署新 `buildin_tools/` 和全部直接调用方，避免运行进程内混装新旧代码；在确认并保护本地进化内容与其他本地修改后，按实际部署范围定向处理 fast/slow/fallback 仓库中的旧 `component` 五包。处理对象仅为 `tools`、`extools`、`multiagenttools`、`browser`、`automation`，保留 `component` 的审批、Cron、动态端点、MCP 与其他用户内容；不能以删除整个 `component/` 或整个 `workspace/` 运行时根目录作为默认处理方式。
+用户应在停止应用后完整部署新 `buildin_tools/` 和全部直接调用方，避免运行进程内混装新旧代码；在确认并保护本地进化内容与其他本地修改后，按实际部署范围定向处理 fast/slow/fallback 仓库中的旧 `component` 五包。处理对象仅为 `tools`、`extools`、`multiagenttools`、`browser`、`automation`，保留 `component` 的其他服务与用户内容；不能以删除整个 `component/` 或整个 `workspace/` 运行时根目录作为默认处理方式。
+
+2026-11-02审批包后续迁移独立于上述五包：其新包、调用方、共享宿主扩展的一致部署与旧`component/approval/`定向处理应遵循[审批系统文档](../system/approval/DEV-README.md)，不将审批目录直接并入旧五包删除清单；MCP/Cron/动态端点和所有持久化数据继续保留。
 
 开发助手AI不检查、读取、修改或清理运行时副本，不替用户运行应用、实际导入、校验、测试或构建。上述部署说明供用户执行，不构成开发助手AI操作运行时副本的授权；本文保留各项既有未运行验收声明，不将文档迁移或只读审阅视为运行通过。

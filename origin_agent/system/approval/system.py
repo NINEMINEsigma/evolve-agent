@@ -7,9 +7,9 @@ from contextlib import contextmanager
 
 from framework import AsyncSystem
 
-from component.approval.allowlist import ToolAllowlistStore
-from component.approval.manager import ApprovalBackendManager
-from component.approval.mode_store import ApprovalModeStore
+from system.approval.allowlist import ToolAllowlistStore
+from system.approval.manager import ApprovalBackendManager
+from system.approval.mode_store import ApprovalModeStore
 from entity.constant import SESSIONS_DIR_NAME, SYSTEM_QUIESCE_TIMEOUT_SECONDS
 from entity.messages import BaseMessage
 from entity.error import ApplicationStoppingError

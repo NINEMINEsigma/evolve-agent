@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 import threading
 
-from easysave import load, save
+from easysave import contains, load, save
 from entity.constant import (
     SESSION_APPROVAL_MODE_ES_FILENAME,
     SESSION_APPROVAL_MODE_ES_KEY,
@@ -45,9 +45,18 @@ class ApprovalModeStore:
         if not path.exists():
             return ApprovalMode.MANUAL
         try:
+            config = make_config(path)
+            if not contains(SESSION_APPROVAL_MODE_ES_KEY, config):
+                logger.warning(
+                    "Approval mode key missing; using manual | session=%s path=%s key=%s",
+                    session_id,
+                    path,
+                    SESSION_APPROVAL_MODE_ES_KEY,
+                )
+                return ApprovalMode.MANUAL
             state = load(
                 SESSION_APPROVAL_MODE_ES_KEY,
-                make_config(path),
+                config,
                 SessionApprovalModeState,
                 ignore_missing_fields=True,
             )

@@ -370,7 +370,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
         因此采用更严格的阈值——safe 直接执行，write/dangerous 需审批。
         """
-        from component.approval.handsfree import get_approval_mode, ApprovalMode
+        from system.approval.handsfree import get_approval_mode, ApprovalMode
         if get_approval_mode(self._parent_session_id) == ApprovalMode.YOLO:
             return True
         from system.application import Application
@@ -378,7 +378,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         entry = tool_registry.get_tool(name)
         if entry is None:
             return False
-        from component.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
+        from system.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
         approval_mode = get_approval_mode(self._parent_session_id)
         return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, approval_mode)
 
@@ -389,7 +389,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         ) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
         try:
-            from component.approval.allowlist import is_allowed
+            from system.approval.allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
             logger.warning("Failed to check approval allowlist for subagent tool=%s", name, exc_info=True)
@@ -822,7 +822,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         子 Agent 进入暂停状态，直到父 Agent 通过 approve_tools() 审批。
         """
-        from component.approval import (
+        from system.approval import (
             build_denied_tool_result,
             is_handsfree_mode,
             request_user_confirm,

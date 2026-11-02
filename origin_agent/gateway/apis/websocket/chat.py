@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 async def _send_approval_mode_state(ws: WebSocket, session_id: str) -> None:
     """Send the authoritative session approval mode to this connection."""
-    from component.approval import ApprovalMode, get_approval_mode
+    from system.approval import ApprovalMode, get_approval_mode
     mode = get_approval_mode(session_id)
     await ws.send_text(Message(
         type=MessageType.HANDSFREE_MODE, session_id=session_id,

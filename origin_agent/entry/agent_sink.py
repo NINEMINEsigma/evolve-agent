@@ -1039,7 +1039,7 @@ class ParentAgentSink(IAgentSink):
         """
         import uuid
         from entity.puretype import ApprovalResult, ToolCallRequest
-        from component.approval import is_handsfree_mode, request_user_confirm
+        from system.approval import is_handsfree_mode, request_user_confirm
         from subagent.loop import PendingToolCall
 
         # 脱手模式：直接向父 session 发起审批（走 approval 模型）

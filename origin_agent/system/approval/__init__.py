@@ -14,8 +14,8 @@ from entity.puretype import (
     ApprovalProfileUpdateRequest,
     ApprovalResult,
 )
-from component.approval.backend import ApprovalBackend, ProfileApprovalBackend
-from component.approval.handsfree import (
+from system.approval.backend import ApprovalBackend, ProfileApprovalBackend
+from system.approval.handsfree import (
     disable_all_handsfree_modes,
     disable_all_non_manual_modes,
     get_approval_mode,
@@ -24,10 +24,10 @@ from component.approval.handsfree import (
     set_approval_mode,
     set_handsfree_mode,
 )
-from component.approval.core import build_denied_tool_result, request_user_confirm
-from component.approval.executor import execute_with_approval
-from component.approval.allowlist import add_allowed, is_allowed
-from component.approval.policy import MAIN_SESSION_POLICY, SUB_SESSION_POLICY, needs_approval
+from system.approval.core import build_denied_tool_result, request_user_confirm
+from system.approval.executor import execute_with_approval
+from system.approval.allowlist import add_allowed, is_allowed
+from system.approval.policy import MAIN_SESSION_POLICY, SUB_SESSION_POLICY, needs_approval
 
 __all__ = [
     "ApprovalResult",

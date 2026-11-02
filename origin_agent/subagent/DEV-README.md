@@ -1,5 +1,9 @@
 # subagent/ — 子代理与多代理系统
 
+## 共享审批业务包（2026-11-02）
+
+普通子Agent的策略、白名单与审批公共入口改从`system.approval`及其子模块导入，保留原函数内加载。仍使用父主会话模式：手动模式需审批调用由父Agent处理，脱手模式走审批模型，YOLO免审批；临时Agent保持`TASKAGENT ∩ safe`，不进入审批。完整共享规范见[审批系统开发文档](../system/approval/DEV-README.md)。本次只更新模块来源，不改变等待/中断、工具权限、History或反馈生命周期，未运行校验、实际导入、测试、构建或应用。
+
 ## 工具结果媒体展示（2026-11-02，当前约定）
 
 `SubAgentFeedback.content` 使用 `MessageContent`，普通/临时子Agent的工具媒体结果通过 `ParentAgentSink → emit_event → SubAgentFeedback → subagent_update` 保留原生块数组。`get_snapshot` 与显式 `history_path` 回放的工具结果共用 `project_message_display_content`，不再把工具图片、音频、视频转换为纯文本占位；`result_text_blocks` 随共享投影保留。快照与实时工具事件由前端按角色和工具调用 ID 双向幂等合并，非工具实时反馈仍追加。

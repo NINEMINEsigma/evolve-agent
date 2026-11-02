@@ -1,5 +1,15 @@
 # Agent Loop 类关系图
 
+## 审批业务包迁移（2026-11-02，当前约定）
+
+`component/approval/`的10个Python文件整体迁至`system/approval/`，旧路径不保留源码或兼容转发。`ApprovalSystem`继续只继承`IApprovalSystem`，通过原接口槽位由Application持有；其Runtime/Logger依赖来自`IDPRuntimeSystem`，显式Profile依赖、21个System槽位、装配顺序及绑定期间关闭准备不变。`ApprovalModeStore`、`ApprovalBackendManager`、`ToolAllowlistStore`、`TaskOwner`仍由同一System唯一持有，后端管理器仍持有`ProfileApprovalBackend`及其客户端缓存。
+
+Application只在`_build_system_manifest`内延迟导入新实现，接口的三个具体叶类型来源只在TYPE_CHECKING切换，包内Application查询相关导入继续在函数体内。主/子会话、Gateway及必要宿主调用方只改前缀，公共24项__all__与原业务签名保留；无新增类、protected字段、跨类访问、反射、服务镜像或System依赖边。
+
+唯一非路径逻辑补齐在模式Store的既有加载函数内：contains确认v1后才load，缺key明确warning并回退手动模式、不写盘；其他加载/缓存/保存和审批分流策略保持。纯数据类型仍在entity/puretype/approval.py，typeref稳定类型名、easysave key及持久化引用关系不变，不升级格式。
+
+完整约定见[审批系统文档](origin_agent/system/approval/DEV-README.md)。本节覆盖下文“Approval目录化”、旧Application直接持有审批服务、旧审批包位置及五包迁移时审批仍留component的历史描述；历史记录不全量改写。用户停机配套部署新包、调用方与共享扩展，并定向处理旧源码残留；开发助手AI不操作运行时副本。本次仅源码/文档与只读文本审阅，未运行测试、实际导入、校验、构建或应用。
+
 ## 工具结果媒体通知类型（2026-11-02，当前权威约定）
 
 `ToolResultNotification.display_content` 与 `SubAgentFeedback.content` 改用消息前纯类型 `MessageContent`。`IAgentSink.emit_tool_result` 的 `content` 参数及 `FrontendSink` / `ParentAgentSink` 两个实现同步为该类型，消息关系为正式 `ToolResultMessage → project_message_display_content → 调用级通知 → Sink → 前端工具卡片`，中间不再转成纯文本。首次结果与 after 替换结果共用投影；FrontendSink 直接构造通用 Message 并复用原请求/发送边界，ParentAgentSink 透传子会话事件。
@@ -1024,7 +1034,7 @@ classDiagram
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
 | 全局 `Application.current()` | `session_manager`, `get_system(IFrontendSink)`, `get_system(ISubAgentOrchestrator)`, `get_system(IApprovalSystem)` | `Application` | 多处 | 各模块通过单例访问子系统；编排器、frontend_sink与审批均迁移为 `get_system(T)` |
-| 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `component/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 Application持有的 Store恢复、更新和显式重置模式 |
+| 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `system/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 ApprovalSystem持有的 Store恢复、更新和显式重置模式 |
 | Gateway主会话生命周期 | `initialize_session()` / `inherit_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py`、`entry/session_manager.py` | 新建普通/派生/随意聊聊主会话及分支/合并会话初始化手动模式；上下文超限自动延续继承来源主会话当前模式；永久删除成功后清理缓存 |
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`gateway/message_router.py`（首条用户消息经 `maybe_generate_first_title` 触发一次性 LLM 标题生成+截取回退，SessionManager/FrontendSink 由服务动态取得）、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `buildin_tools/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |

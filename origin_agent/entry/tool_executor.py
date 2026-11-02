@@ -3,7 +3,7 @@
 封装单个工具调用的完整流程：取消检查、parse error 处理、审批、
 registry 分发、异常转换、前端事件推送和 UI 事件路由。
 
-审批流程直接复用 ``component.approval.executor.execute_with_approval``。
+审批流程直接复用 ``system.approval.executor.execute_with_approval``。
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ class ToolExecutor:
                 None 时回退到 loop.active_llm_profile。
         """
         from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_LOG_ARGUMENT_CHARS
-        from component.approval import execute_with_approval
+        from system.approval import execute_with_approval
         from system.application import Application
 
         char_name = character_name or self._loop.current_character_agent

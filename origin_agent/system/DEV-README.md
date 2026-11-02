@@ -129,7 +129,9 @@ _admit_generation在Runtime接收锁内只校验服务接收状态，不执行I/
 
 ## 审批系统接入
 
-`component/approval/system.py::ApprovalSystem`已实现，依赖RuntimeSystem和LLMProfileStore；会话审批模式、后端管理器和白名单均为该System的叶对象。Application不再定义ApprovalBackendManager或提供审批服务属性。模型请求采用TaskOwner.run_request，关闭先结束实际请求再清除后端缓存引用；审批Profile未配置仍是原有业务状态，三种审批模式与白名单持久化策略保持。
+`system/approval/system.py::ApprovalSystem`已实现，依赖RuntimeSystem和LLMProfileStore；会话审批模式、后端管理器和白名单均为该System的叶对象。Application不再定义ApprovalBackendManager或提供审批服务属性。模型请求采用TaskOwner.run_request，关闭先结束实际请求再清除后端缓存引用；审批Profile未配置仍是原有业务状态，三种审批模式与白名单持久化策略保持。完整模块地图、公共入口、存储与关闭约定见[审批系统开发文档](approval/DEV-README.md)。
+
+2026-11-02审批包整体从component迁入system/approval，旧Python路径不保留转发，21个接口槽位、继承与关闭准备不变。唯一非路径逻辑补齐是在模式load前contains确认v1 key，缺key明确warning后手动模式、不load、不写盘；easysave key/type token和数据结构保持。用户须停机配套部署全部调用方与共享宿主扩展，所有可能运行、提升或承担修复的fast/slow/fallback仓库均需完整新包；合并复制及fast的force_init不会自动清除旧审批源码，须保护本地进化改动后定向处理，不能删除整个component/system/workspace或会话数据。开发助手AI只修改源码与文档并只读审阅，未运行校验、实际导入、测试、构建或应用，不操作运行时副本。
 
 ## FrontendSink接入
 

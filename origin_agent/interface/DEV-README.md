@@ -1,5 +1,9 @@
 # interface/ — System与事件、端点组件契约
 
+## 审批叶类型注解来源（2026-11-02）
+
+`IApprovalSystem`的`ToolAllowlistStore/ApprovalBackendManager/ApprovalModeStore`类型注解来源随审批包迁移至`system.approval`各子模块，仍仅在`TYPE_CHECKING`中导入，不增加运行期实现导入、接口基类或属性/方法签名变化。`ApprovalSystem`仍按原接口槽位装配，完整归属见[审批系统文档](../system/approval/DEV-README.md)。本次仅来源同步与文本审阅，未运行校验、实际导入、测试、构建或应用。
+
 ## 工具结果内容契约（2026-11-02）
 
 `IAgentSink.emit_tool_result` 的 `content` 参数为 `entity.puretype.MessageContent`：字符串或序列化媒体块列表。其余参数、默认值、工具调用 ID、独立耗时与嵌入消息通道保持不变。`FrontendSink` 将完整内容放在 `tool_result.result`，`ParentAgentSink` 将其放在子会话 `tool_result` 事件的 `content`；两个实现都不在接口边界把媒体转换成占位文本。

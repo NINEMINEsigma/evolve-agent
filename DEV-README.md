@@ -1,5 +1,15 @@
 # Evolve Agent — 开发者文档
 
+## 审批业务包归属迁移（2026-11-02，当前约定）
+
+审批10个Python模块由`component/approval/`整体迁至`system/approval/`，公共入口为`system.approval`；旧模块路径不保留源码、兼容转发或别名。它是通过`IApprovalSystem`装配的业务System及其叶对象，不属于架构Component。Application的局部实现导入、接口TYPE_CHECKING、主/子会话、Gateway及必要宿主调用方同步新前缀，原延迟导入位置保持。
+
+唯一非路径逻辑补齐：ApprovalModeStore读取前以contains确认v1 key，已有文件缺key明确warning后返回手动模式，不load、不写盘；原损坏/类型错误保守回退、先更新内存再尽力保存、白名单和三种模式策略保持。24项公共导出、21个System槽位、依赖/关闭准备、模型模板、entity类型定义、typeref、easysave key/type token与前端协议均不变。具体模块、流程及存储见[审批系统开发文档](origin_agent/system/approval/DEV-README.md)。本节覆盖下文历史五包迁移中“审批仍留component”的当前归属，不改写历史记录。
+
+用户须停机保护本地进化内容后，配套部署完整新包、全部调用方及共享宿主扩展，使所有可能运行、提升或承担修复的fast/slow/fallback仓库均具备一致版本；尚不存在的副本也须从完整新版本创建/恢复。run.py合并复制及fast的force_init不会自动清除旧审批源码，应在实际部署范围定向处理旧component/approval，保留其他服务、用户内容与所有会话/白名单数据，不删除整个component/system/workspace。未知外部扩展旧导入由用户同步，无需因本次迁移重建前端。
+
+本次仅源码与文档实施、只读文本审阅，未运行测试、校验、实际导入、构建或应用；开发助手AI不读取或操作运行时副本，不宣称字节级换行或运行验收通过。用户人工验收见任务`.tasks/2026-11-02_3_approval-package-relocation.md` V01–V14及R3，未运行副本的部署核对不等于运行通过。
+
 ## 手动终结会话的前端同步（2026-11-02，当前约定）
 
 手动终结 POST 显式选择 `fetchJsonWithTimeout.timeoutMs=null`，等待后端摘要、标签、归档和资源停止的真实结果，不再沿用短查询的15秒固定截止；其他会话动作、会话列表、会话预检和 History关键读取保持原有截止。终结回执严格核对目标会话与字段，成功后先失效旧列表请求并同步更新已有会话为已归档，再独立读取完整列表和标签目录；列表读取失败不回滚已确认归档。
@@ -151,10 +161,10 @@ origin仓库所有自定义异常（含内部控制信号）只在 `origin_agent
 | `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop`、`TaskAgentLoop`（临时Agent：无系统提示词、无持久化、纯文本回复即终止） | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
 | `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理 | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
 | `buildin_tools/` | 内置工具的五个子包（`tools/`、`extools/`、`multiagenttools/`、`automation/`、`browser/`）及随包 BrowserSystem、共享构造逻辑 | [buildin_tools/DEV-README.md](origin_agent/buildin_tools/DEV-README.md) |
-| `component/` | 当前保留审批系统、MCP 管理入口、Cron 路由与任务模型、动态端点服务；本轮尚未完成 Component 专用整理 | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
+| `component/` | MCP 管理入口、Cron 路由与任务模型、动态端点服务；审批已迁入 system/approval，尚未完成 Component 专用整理 | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
 | `abstract/` | 抽象层：LLM 客户端、对象工具注册表（`BaseTool`/`BaseToolSet` 工具集元数据与渐进式加载）、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
-| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、会话存储、生命周期、业务提示词组装与 LSP（`lsp.py`） | [system/DEV-README.md](origin_agent/system/DEV-README.md) |
+| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、会话存储、生命周期、审批系统（`approval/`）、业务提示词组装与 LSP（`lsp.py`） | [system/DEV-README.md](origin_agent/system/DEV-README.md) |
 | `util/` | 前置辅助模块：路径、模板读取、文本/元数据解析、转换、日志、包管理器检测与原子文件操作 | [util/DEV-README.md](origin_agent/util/DEV-README.md) |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
 | `entity/` | 常量、异常与消息体系：`error/`（异常定义包）、`puretype/`（消息前纯类型）、`messages.py`（`BaseMessage` 体系）、`puretype_after/`（消息后纯类型），以及 `constant/`（按职责拆分的全局常量包，`__init__.py` 统一导出） | [异常定义包](origin_agent/entity/error/DEV-README.md)及相关模块文档 |
@@ -178,7 +188,7 @@ sequenceDiagram
     participant FS as entry/agent_sink.py (FrontendSink)
     participant LLM as abstract/llm/ (BaseLLMClient)
     participant TR as abstract/tools/registry.py
-    participant APP as component/approval/
+    participant APP as system/approval/
 
     FE->>GW: WS user_message
     GW->>MR: MessageRouter.route()
@@ -203,7 +213,7 @@ sequenceDiagram
 - **消息接收**：`gateway/apis/websocket/chat.py` 的 `ChatWebSocketAPI` 通过 WebSocket 接收 `user_message`，`gateway/message_router.py` 在路由内同步完成目标校验并登记输入记录，再由 `GatewaySystem.spawn_work` 启动准备任务，交给 `SessionManager` 分配到对应 `ParentAgentLoop`。
 - **上下文组装**：`entry/agent_support/messages.py` 加载钩子与 system prompt，将钩子返回的上下文扩展块和历史消息组装成 `BaseMessage` 列表。
 - **流式生成**：通过 `abstract/llm/` 抽象层的 `BaseLLMClient.chat_stream()` 调用大模型（具体后端由 `custom_llm_client/` 插件提供），`ParentAgentLoop` 实时解析 `StreamChunk` 中的文本增量与工具调用。正式 `create_llm_client()` 统一返回 `EmptyResponseRetryClient` 装饰器：正文零长度且无工具调用的正常返回最多尝试3次（初次+2次，等待1秒/2秒），耗尽通过现有错误出口结束，不写空assistant；纯工具调用合法，网络/认证/解析错误、取消和关闭失败不由这层重试。流式正文/思考/工具增量实时透传，失败空尝试的usage与结束原因不作为完成；各尝试的思考在同一流中连续展示但不加入重试输入。已有工具参数片段而无完整调用且无正文时明确失败、不重播。子Agent、临时Agent的非流式调用与辅助模型同样适用；模态探针持续空会整体失败且不写能力缓存，审批持续空不放行。该预算独立于Provider/SDK已有网络重试，实际HTTP次数和耗时可能更多，详细边界见 `abstract/DEV-README.md`。仅完成源码与只读审阅，未运行校验或启动应用，等待用户人工验收。
-- **工具执行**：工具来源为 `BaseTool` 子类，各模块以顶层固定名称 `TOOLSET` 声明 `BaseToolSet`；`ToolRegistry` 直接持有 `BaseTool` 对象，模型返回的整批 tool calls 在写入 assistant 消息前经 `accept_tool_batch()` 按每个工具的 `accepts_following_calls` 声明截断，后续调用不审批、不执行、不配对并向前端发送 `tool_calls_discarded`。`ToolExecutor` 在审批前做前置快速拒绝，`async_dispatch(execution)` 执行工具调用前的 `before_handle` 与工具主体 `handle` 并写回 `body_executed`/`body_completed_normally`/`result`/`state`；工具结果写入 History 后，`ToolPostprocessor.after_committed()` 对已提交调用调用工具调用后的 `after_handle`。工具集加载检查在分发中统一拦截未加载工具（工具对象与四阶段执行已按任务文件 v8 实施并静态复核，完整任务复核与用户验收仍待完成）。主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`component/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
+- **工具执行**：工具来源为 `BaseTool` 子类，各模块以顶层固定名称 `TOOLSET` 声明 `BaseToolSet`；`ToolRegistry` 直接持有 `BaseTool` 对象，模型返回的整批 tool calls 在写入 assistant 消息前经 `accept_tool_batch()` 按每个工具的 `accepts_following_calls` 声明截断，后续调用不审批、不执行、不配对并向前端发送 `tool_calls_discarded`。`ToolExecutor` 在审批前做前置快速拒绝，`async_dispatch(execution)` 执行工具调用前的 `before_handle` 与工具主体 `handle` 并写回 `body_executed`/`body_completed_normally`/`result`/`state`；工具结果写入 History 后，`ToolPostprocessor.after_committed()` 对已提交调用调用工具调用后的 `after_handle`。工具集加载检查在分发中统一拦截未加载工具（工具对象与四阶段执行已按任务文件 v8 实施并静态复核，完整任务复核与用户验收仍待完成）。主会话 safe 始终免审批，write 在手动模式也直接执行；dangerous 在手动模式由用户审批，write/dangerous 在脱手模式由审批模型审批，非 critical 可由参数匹配的白名单放行；critical 在手动/脱手模式均由用户审批，YOLO 则全部免审批（`system/approval/`，不改变工具权限与执行校验）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。手动/脱手/YOLO 模式由 Application持有的 ApprovalSystem 内唯一的 `ApprovalModeStore` 按主会话缓存，并将 `SessionApprovalModeState` BaseModel直接交给 easysave保存到 `approval_mode.es`；Gateway连接时读取恢复后的服务端权威值，前端不持久化该模式。
 - **前端推送**：实时事件（流式文本、工具调用、工具结果、任务进度、子代理更新）通过 `FrontendSink` 经 WebSocket 推回前端。正典聊天历史不再在连接时整体回放：Gateway 先发送 typed `history_sync` 元数据，前端再通过 REST 取得全历史骨架与可见范围的历史内容页；`History` / `history.es` 仍保持整体存储。工具请求和匹配结果在前端以每个 `tool_call_id` 一张工具调用卡片显示；工具结果内部 `_meta` 与 `_queued_messages` 不作为普通 JSON 正文展示，分别通过耗时元数据和 `embedded_messages` 独立渲染；孤立结果保留降级行。聊天页会话视觉所需的 Agentspace 变化也通过同一会话 WebSocket的 typed `agentspace_event`推送，页面内事件总线扇出到三个视觉 hook；独立 Agentspace 编辑器仍使用 SSE。会话状态预检、History骨架和历史内容页具有15秒硬截止；超时显示持久通知，并在 WebSocket可用时以不进入 History 的脱敏 `client_diagnostic`记录 Gateway warning。
 
 - **流式事件类型边界**：`StreamConsumer` 将 `ToolCallRequest` / `ToolCallDelta` 实例直接传入 `IAgentSink`；`FrontendSink` 构造 `StreamDeltaEvent` / `StreamDoneEvent`，仅在 `_send_stream_event()` 中序列化一次。工具增量是 WebSocket顶层对象，计时元信息保持 `MessageMetrics` 类型，不再经过内部 JSON往返或前端 `JSON.parse(content)`。两种事件在前端组成按 `type` 区分的联合，并在接收边界验证结构。Gateway未使用的字符串事件回调和启动注册已移除，其他非流式协议保持不变；部署时前后端同步更新并刷新旧页面。
@@ -334,9 +344,9 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/application.py`：`Application` 进程级唯一单例（继承 `AsyncArchitecture`），通过 `Application.current()` 访问。`start()` 用 graphlib 校验依赖图后按固定拓扑顺序串行注册全部 20 个 System，全部唤醒后 `mark_running()` 并激活 Cron；`shutdown()` 是唯一关闭协调任务，先业务停止与 History 提交，再按逆拓扑 `unregister`（RV10 顺序），失败合并上抛并保留 RuntimeSystem 失败记录。`Application` 不保留服务镜像字段，也不暴露 `runtime_context` 属性；各业务系统经类型化 `app.get_system(IRuntimeSystem).context` 取得唯一 `RuntimeContext`。
 - `system/runtime.py`：`RuntimeSystem`（`AsyncSystem`），持有唯一 `RuntimeContext`、应用状态、输入接收同步边界、跨线程关闭请求与失败记录；还持有进程级**主Agent角色名**（启动时从 `ws:SOUL.md.meta` 的 `[character_name]` 读取，缺失回退到 `DEFAULT_MAIN_AGENT_CHARACTER_NAME`，运行期由 `RefreshIdentity` 工具刷新）。`context` 为只读属性；完整应用装配在 P22 完成，中间阶段代码不具备启动条件。
 - `system/character_avatars.py`：角色头像映射的纯函数组装（非 System、无缓存）。`collect_character_avatars()` 实时读 `ws:SOUL.md.meta` 与 `ws:characters/roleplay|task/*` 的 `[avatar]` 键，产出「角色名 → /files URL」条目（`CharacterAvatarsResponse`）；仅校验可读、是文件与 ≤`AVATAR_MAX_BYTES`（5 MiB），不限扩展名。Gateway `GET /api/characters/avatars`（no-store + `to_thread`）调用；声明无效仅条目级 error，不阻断。
-- `component/approval/system.py`：`ApprovalSystem` 已改为 AsyncSystem，依赖 RuntimeSystem、LLMProfileStore，持有唯一模式Store、后端管理器和白名单Store。类型化入口是 `Application.current().get_system(IApprovalSystem)`；模型审批作为请求级任务等待，生命周期及清理失败继续传播，完整应用装配尚待后续阶段。
+- `system/approval/system.py`：`ApprovalSystem` 通过 `IApprovalSystem` 装配，依赖 RuntimeSystem、LLMProfileStore，持有唯一模式Store、后端管理器和白名单Store。类型化入口是 `Application.current().get_system(IApprovalSystem)`；模型审批作为请求级任务等待，生命周期及清理失败继续传播，原21个接口槽位与关闭准备不变。完整约定见[审批系统开发文档](origin_agent/system/approval/DEV-README.md)。
 - `entry/agent_sink.py::FrontendSink`：已继承 `AsyncSystem` 与 `AgentSink`，依赖 RuntimeSystem；无参构造，`virtual_awake` 取得 RuntimeSystem 并创建 TaskOwner。`Application.frontend_sink` 属性已移除，全量引用迁移为 `get_system(IFrontendSink)`。发送与交互属请求级操作：新交互（审批/提问）只在 RUNNING 接收，既有结果与 History 回显在 STOPPING 仍允许到关闭输出，发送期限不超过 `SHUTDOWN_SEND_TIMEOUT_SECONDS`（1秒）；网络断线/发送超时不回滚 History，模型构造/序列化错误与内部错误传播。`cancel_pending_interactions` 同步解除所有待审批/提问 Future；`close_all_connections` 以标准 1001 关闭所有连接，结束连接前等待/取消真实发送任务及交接，不把自身登记进同一 Owner 再等待；`close_session` 保留永久删除 4004 语义。所有原 emit 签名与消息协议保持不变，typed stream boundary 不退化。`ParentAgentSink` 不作为 System，转发经 `get_system(IFrontendSink)` 取得唯一实例。
-- `component/approval/mode_store.py`：由 ApprovalSystem 持有的唯一会话级审批模式存储。按会话惰性读取 `approval_mode.es` 的 easysave `v1` key，并通过 `entity/typeref.py` 的 stable type token重建 `SessionApprovalModeState`；业务 `RLock`保护缓存事务，easysave负责路径锁、前置 `.bak`、同目录临时文件与原子替换。模式变更先更新内存再尽力保存，写入失败不回滚；损坏、缺 key或类型错误回退手动模式。新建、单源分支、多父合并产生的主会话统一初始化为手动模式；上下文超限产生的自动延续通过 `inherit_session()` 继承来源模式。归档保留，永久删除随会话目录清理。
+- `system/approval/mode_store.py`：由 ApprovalSystem 持有的唯一会话级审批模式存储。按会话惰性读取 `approval_mode.es`，在 load 前用 contains 确认 easysave `v1` key，并通过 `entity/typeref.py` 的 stable type token重建 `SessionApprovalModeState`；业务 `RLock`保护缓存事务，easysave负责路径锁、前置 `.bak`、同目录临时文件与原子替换。模式变更先更新内存再尽力保存，写入失败不回滚；损坏、缺 key或类型错误回退手动模式。新建、单源分支、多父合并产生的主会话统一初始化为手动模式；上下文超限产生的自动延续通过 `inherit_session()` 继承来源模式。归档保留，永久删除随会话目录清理。
 - `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`、`Sandbox`），由 `virtual_awake` 取得依赖并完成原 start 工作（绑定 EventHub、恢复垃圾桶、启动 watcher）；持有 `visual_resources: SessionVisualResourceService` 只读叶服务。统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、`AgentspaceEventHub`和用户变更摘要；Gateway 将同一事件总线适配为独立编辑器 SSE与聊天 WebSocket typed事件，内置工具通过该服务协作。watcher 启动失败不再降级（D2）。
 - `system/llm_profile_store.py`：`LLMProfileStore` 已注册为 framework `AsyncSystem`（依赖 `RuntimeSystem`），无参构造，由 `virtual_awake` 取得 `RuntimeContext` 确定 agentspace 路径并加载 v2 根对象。Store 自身创建唯一的共享 `threading.RLock`，通过 `locked()` 上下文管理器暴露同一把锁，替代原 `Application.profile_lock`；SessionMetadataService、审批后端及 Gateway Profile CRUD 经此接口进入事务边界。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工、审批 Profile、全局元数据 Profile、工具链摘要 Profile以及图片/音频/视频三条全局多模态回退引用均使用根列表中的实例引用，Gateway 通过 `get_system(ILLMProfileStore)` 的单 Profile CRUD 和全局用途引用接口修改。写入先准备候选根、成功保存后提交共享内存，不再捕获任意异常做内存回滚；更新通过显式两阶段复制并重连引用图准备候选，提交保留原 Profile 实例身份和引用身份。删除可在同次根保存中清空审批/元数据/工具链摘要引用，但其他 Profile 与全局多模态引用仍阻止删除。不存在的文件允许初始化，已有文件缺 v2 key 直接失败；不启用未知存储字段跳过，缺失字段仍遵循 easysave/Pydantic 默认值语义。存储层保留外层临时文件原子替换，不做备份清理专属重试；Profile 文件与会话名称指针不构成跨文件事务。
 - 前端模型配置抽屉通过“模型配置 / 全局配置引用”分页分别管理 Profile 定义和全局用途引用。模型定义按客户端、端点纵向分组，详情单项展开、先只读后编辑；切分页保留内存草稿，离开未保存配置时明确确认。会话待用 Profile 选择只在顶部栏修改，浏览器按会话独立保存名称；无本地覆盖时通过 `GET /api/sessions/{id}/llm-profile` 读取持久化指针及既有全局最近使用回退。选择本身不写服务端，发送到主会话或重新生成才提交；`resume` 保持后端当前配置。全局配置引用页还管理工具链摘要 Profile 与图片、音频、视频三条独立回退引用，状态分别经 `/api/toolchain-summary/profile`、`/api/modality/profiles` 和 `toolchain_summary_profile_changed`、`modality_profile_changed` 同步。旧浏览器全局选择不猜测迁移到任何会话。
@@ -509,7 +519,8 @@ Application 的 20 个 AsyncSystem 使用 `origin_agent/interface/` 中对应的
    - 改主循环、消息处理 -> `entry/DEV-README.md`
    - 改网关、会话、前端协议 -> `gateway/DEV-README.md`
    - 改工具、浏览器或桌面自动化 -> `buildin_tools/DEV-README.md`
-   - 改审批、MCP 管理、Cron 或动态端点服务 -> `component/DEV-README.md`
+   - 改审批 -> `origin_agent/system/approval/DEV-README.md`
+   - 改 MCP 管理、Cron 或动态端点服务 -> `component/DEV-README.md`
    - 改抽象层、注册表、LLM 客户端 -> `abstract/DEV-README.md`
    - 改前端 UI -> `frontend/DEV-README.md`
    - 改子代理 -> `subagent/DEV-README.md`

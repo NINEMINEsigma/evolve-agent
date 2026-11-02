@@ -1,5 +1,9 @@
 # entry/ — Agent 主循环
 
+## 审批业务包来源（2026-11-02）
+
+ToolExecutor与ParentAgentSink复用的公共审批入口已迁至`system.approval`，仍在原函数体内延迟导入；主会话与普通子会话分流、调用参数、结果提交与中断等待保持不变。完整审批规范见[审批系统开发文档](../system/approval/DEV-README.md)。本次仅来源更新及文档同步，未运行实际导入、校验、测试、构建或应用。
+
 ## 工具结果实时媒体展示（2026-11-02，当前约定）
 
 `prepare_tool_result` 与 `PreparedToolResult.update_result_payload` 直接使用 `project_message_display_content` 生成 `ToolResultNotification.display_content: MessageContent`，不再通过 `content_to_text` 把图片、音频、视频降为占位文本。`IAgentSink.emit_tool_result`、`FrontendSink` 与 `ParentAgentSink` 统一接收字符串或媒体块数组。主会话直接构造 `Message(type=TOOL_RESULT, result=content)`，复用原发送请求所有权、停止期输出准入及发送截止；旧 `_send_msg` 的工具结果字符串分支移除，其他分支不变。
@@ -238,7 +242,7 @@ sequenceDiagram
     participant SC as StreamConsumer
     participant TE as ToolExecutor
     participant TR as ToolRegistry
-    participant APP as component/approval/
+    participant APP as system/approval/
     participant FS as FrontendSink
 
     GW->>PAL: process_message(user_message)

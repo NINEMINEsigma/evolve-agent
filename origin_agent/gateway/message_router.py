@@ -570,7 +570,7 @@ class MessageRouter:
 
     async def handle_handsfree_mode(self, msg: Message) -> None:
         """处理审批模式切换，回送服务端权威状态。"""
-        from component.approval import set_approval_mode
+        from system.approval import set_approval_mode
         from entity.puretype import ApprovalMode
 
         mode_str = str(msg.content or "").strip().lower()

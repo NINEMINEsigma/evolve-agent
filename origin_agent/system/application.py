@@ -38,7 +38,7 @@ def _build_system_manifest(
     from abstract.mcp.system import MCPSystem
     from abstract.tools.discover import ToolDiscoverySystem
     from abstract.tools.registry import ToolRegistry
-    from component.approval.system import ApprovalSystem
+    from system.approval.system import ApprovalSystem
     from buildin_tools.browser.system import BrowserSystem
     from component.cron_router import CronRouter
     from component.dynamic_endpoints import DynamicEndpointSystem

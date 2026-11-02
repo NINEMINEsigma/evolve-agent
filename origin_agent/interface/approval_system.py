@@ -7,9 +7,9 @@ from entity.messages import BaseMessage
 from .runtime_system import IDPRuntimeSystem
 
 if TYPE_CHECKING:
-    from component.approval.allowlist import ToolAllowlistStore
-    from component.approval.manager import ApprovalBackendManager
-    from component.approval.mode_store import ApprovalModeStore
+    from system.approval.allowlist import ToolAllowlistStore
+    from system.approval.manager import ApprovalBackendManager
+    from system.approval.mode_store import ApprovalModeStore
 
 
 class IApprovalSystem(IDPRuntimeSystem, ABC):

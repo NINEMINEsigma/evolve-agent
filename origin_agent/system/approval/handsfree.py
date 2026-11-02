@@ -22,7 +22,7 @@ from entity.puretype import ApprovalResult, ApprovalMode, Role
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from component.approval.mode_store import ApprovalModeStore
+    from system.approval.mode_store import ApprovalModeStore
 
 
 def _get_approval_mode_store() -> ApprovalModeStore:

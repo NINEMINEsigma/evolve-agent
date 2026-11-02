@@ -202,7 +202,7 @@ def _format_navigation(session_id: str, workspace: str) -> str:
 def _format_approval_mode(session_id: str) -> str:
     """返回当前会话的审批模式状态文本。"""
     try:
-        from component.approval import (
+        from system.approval import (
             ApprovalMode,
             get_approval_mode,
             is_handsfree_available,

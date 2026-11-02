@@ -14,11 +14,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from entity.puretype import ApprovalOutcome, ApprovalMode, ApprovalResult, ToolDangerLevel
-from component.approval.handsfree import get_approval_mode, is_handsfree_mode
-from component.approval.core import build_denied_tool_result, request_user_confirm
-from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
-from component.approval.allowlist import is_allowed as is_tool_allowlisted
-from component.approval.policy import needs_approval as _policy_needs_approval, MAIN_SESSION_POLICY
+from system.approval.handsfree import get_approval_mode, is_handsfree_mode
+from system.approval.core import build_denied_tool_result, request_user_confirm
+from system.approval.allowlist import add_allowed as add_tool_allowlist_entry
+from system.approval.allowlist import is_allowed as is_tool_allowlisted
+from system.approval.policy import needs_approval as _policy_needs_approval, MAIN_SESSION_POLICY
 
 if TYPE_CHECKING:
     from interface.agent_sink import IAgentSink

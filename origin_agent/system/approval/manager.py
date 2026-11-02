@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from component.approval.backend import ApprovalBackend, ProfileApprovalBackend
+from system.approval.backend import ApprovalBackend, ProfileApprovalBackend
 from entity.puretype import ApprovalProfileState
 from system.context import RuntimeContext
 from interface.llm_profile_store import ILLMProfileStore

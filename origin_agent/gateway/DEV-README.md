@@ -1,5 +1,9 @@
 # gateway/ — WebSocket / HTTP 网关与会话管理
 
+## 审批公共入口迁移（2026-11-02）
+
+`MessageRouter.handle_handsfree_mode`与聊天WebSocket握手的审批模式读取统一从`system.approval`导入，保留原函数内延迟导入位置。`IApprovalSystem`查询、模式恢复/切换、REST与WebSocket字段、路由及连接生命周期保持不变；审批包与模式load前contains缺key策略见[审批系统文档](../system/approval/DEV-README.md)。仅源码来源与文档同步，未运行校验、实际导入、测试、构建或应用。
+
 ## 工具结果媒体传输（2026-11-02，当前约定）
 
 下行 `tool_result.result` 使用字符串或原生媒体块数组，与历史内容页的工具结果展示内容一致；不把数组再次编码为 JSON 字符串或媒体占位文本。工具调用 ID、独立 `tool_call_meta`、`embedded_messages` 与消费确认字段不变。`FrontendSink` 直接构造原通用 `Message` 并复用现有发送所有权，Gateway 路由、准入、关闭顺序与消息类型不变。
