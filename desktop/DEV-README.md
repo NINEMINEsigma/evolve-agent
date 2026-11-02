@@ -50,6 +50,8 @@
 
 旧`prepare-embed`入口及prepare-embed-python.ps1已移除。桌面打包不再默认复制根目录 `check_env.py` 和 `SOUL.md`，这两个文件不属于默认随包资源；本调整不修改 `run.py` 的可选 SOUL 文件处理逻辑。发布只白名单复制`.runtime-staging/runtime`的六类文件，不分发开发Python、项目虚拟环境、cache/state/租约。`release-spec.json`另外包含在asar内供唯一规格读取。
 
+桌面打包通过 `extraFiles` 将根目录 `custom_mods/` 复制到 exe 同级的 `custom_mods/`，保留目录结构、`MOD.md`、`MOD.md.meta` 及关联资源，仅排除 `.git`、`__pycache__` 和 `.pyc`；不在打包时渲染模板或执行 mod 加载。
+
 输入摘要算法：依次对标签`requirements.txt`、`requirements-runtime.in`、`release-spec.json`，拼接标签无BOM UTF-8字节、NUL、对应文件原始字节、NUL，再对整体计算SHA-256；不归一化换行或编码。meta的inputSha256/lockSha256与发布清单实际摘要不符时停止，不把未知格式当作空数据。
 
 uv归档与`.sha256`从固定官方GitHub Releases获取，先核对后执行；许可证来自同tag。文件摘要使用.NET SHA-256流式计算，不依赖`Get-FileHash`命令或PowerShell模块自动加载；摘要仍为小写十六进制，文件读取/计算错误直接失败。校验与下载失败保留真实原因并非零退出，不改用PATH uv或latest。允许uv为没有wheel的可信纯Python依赖做隔离构建，因此不宣称所有构建工具也完全可复现；遇到编译器需求不在用户电脑自动安装系统工具链。

@@ -63,6 +63,12 @@ extraFiles:
       - "!**/.git"
       - "!**/__pycache__"
       - "!**/*.pyc"
+  - from: ../custom_mods
+    to: custom_mods
+    filter:
+      - "!**/.git"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
   - from: ../pre-skills
     to: skills
   - from: .runtime-staging/runtime
