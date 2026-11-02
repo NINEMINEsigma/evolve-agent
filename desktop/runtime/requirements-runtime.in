@@ -1,0 +1,5 @@
+# Desktop distribution input; release versions are fixed in the generated lock.
+-r ../../requirements.txt
+pip
+setuptools
+wheel

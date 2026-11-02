@@ -15,7 +15,7 @@
  *   ├── config.json
  *   ├── origin_agent/
  *   ├── third/
- *   ├── venv/                     ← 可选，自动探测
+ *   ├── runtime/                  ← uv、独立 Python 与依赖均保留在安装目录
  *   └── workspace/               ← 运行时生成
  */
 
@@ -24,7 +24,9 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { configManager, BackendManager } = require('./requires');
+const crypto = require('crypto');
+const { configManager, LauncherController } = require('./requires');
+const { sanitize } = require('./owned-process');
 
 // ── 路径常量 ──────────────────────────────────────────────
 
@@ -44,57 +46,44 @@ const ICON_PATH = app.isPackaged
   ? path.join(REPO_ROOT, 'resources', 'app.asar', 'assets', 'icon.ico')
   : path.join(DESKTOP_DIR, '..', 'assets', 'icon.ico');
 
-// ── Python 路径探测 ───────────────────────────────────────
-
-function detectPythonPath() {
-  const venvScripts = path.join(REPO_ROOT, 'venv', 'Scripts', 'python.exe');
-  const venvRootExe = path.join(REPO_ROOT, 'venv', 'python.exe');
-  const venvBin = path.join(REPO_ROOT, 'venv', 'bin', 'python');
-  console.log('[launcher] REPO_ROOT:', REPO_ROOT);
-  console.log('[launcher] venvScripts exists:', fs.existsSync(venvScripts), venvScripts);
-  console.log('[launcher] venvRootExe exists:', fs.existsSync(venvRootExe), venvRootExe);
-  if (fs.existsSync(venvScripts)) return venvScripts;
-  if (fs.existsSync(venvRootExe)) return venvRootExe;
-  if (fs.existsSync(venvBin)) return venvBin;
-  console.warn('[launcher] No venv python found, falling back to system python');
-  return 'python';
-}
-
-// ── 壳设置 ────────────────────────────────────────────────
+// ── 壳设置：空路径仅表示使用内部托管环境 ──────────────────────
 
 const SETTINGS_DEFAULTS = { pythonPath: '' };
 
 function loadSettings() {
-  try {
-    const raw = fs.readFileSync(SETTINGS_JSON, 'utf-8');
-    return { ...SETTINGS_DEFAULTS, ...JSON.parse(raw) };
-  } catch {
-    return { ...SETTINGS_DEFAULTS };
+  let raw;
+  try { raw = fs.readFileSync(SETTINGS_JSON, 'utf-8'); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { ...SETTINGS_DEFAULTS };
+    throw error;
   }
+  const settings = JSON.parse(raw);
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)
+    || (Object.hasOwn(settings, 'pythonPath') && typeof settings.pythonPath !== 'string')) {
+    throw new TypeError('Desktop settings must be an object with a string Python path');
+  }
+  return { ...SETTINGS_DEFAULTS, ...settings };
 }
 
 function saveSettings(values) {
-  const dir = path.dirname(SETTINGS_JSON);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(SETTINGS_JSON, JSON.stringify(values, null, 2), 'utf-8');
-}
-
-function getEffectivePythonPath() {
-  const settings = loadSettings();
-  if (settings.pythonPath && settings.pythonPath.trim()) {
-    return settings.pythonPath.trim();
+  if (!values || typeof values !== 'object' || typeof values.pythonPath !== 'string') {
+    throw new TypeError('Desktop Python path must be a string');
   }
-  return detectPythonPath();
+  const settings = { ...loadSettings(), pythonPath: values.pythonPath.trim() };
+  const temporary = `${SETTINGS_JSON}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(settings, null, 2), { encoding: 'utf-8', flag: 'wx' });
+  fs.renameSync(temporary, SETTINGS_JSON);
 }
 
 // ── 全局状态 ──────────────────────────────────────────────
 
 let controlWindow = null;
 let webviewWindow = null;
-let backend = null;
-let backendRunning = false;
+let controller = null;
 let tray = null;
 let isQuitting = false;
+let quitPending = null;
+let allowQuit = false;
 
 // ── 窗口创建 ──────────────────────────────────────────────
 
@@ -115,7 +104,7 @@ function createControlWindow() {
 
   // 关闭按钮 → 最小化到托盘（不退出）
   controlWindow.on('close', (e) => {
-    if (!isQuitting) {
+    if (!allowQuit) {
       e.preventDefault();
       controlWindow.hide();
     }
@@ -132,8 +121,11 @@ function createControlWindow() {
 }
 
 function createWebviewWindow(host, port) {
+  const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  const url = `http://${authority}:${port}`;
   if (webviewWindow && !webviewWindow.isDestroyed()) {
-    // 已存在 → 显示并聚焦
+    // 新启动可以使用不同端口，不能只展示旧窗口继续连接旧后端。
+    if (webviewWindow.webContents.getURL().replace(/\/$/, '') !== url) webviewWindow.loadURL(url);
     webviewWindow.show();
     webviewWindow.focus();
     return;
@@ -150,11 +142,11 @@ function createWebviewWindow(host, port) {
     },
   });
 
-  webviewWindow.loadURL(`http://${host}:${port}`);
+  webviewWindow.loadURL(url);
 
   // 关闭按钮 → 隐藏窗口（不杀后端，不退出）
   webviewWindow.on('close', (e) => {
-    if (!isQuitting) {
+    if (!allowQuit) {
       e.preventDefault();
       webviewWindow.hide();
     }
@@ -203,6 +195,7 @@ function createTray() {
 }
 
 function updateTrayMenu() {
+  if (!tray) return;
   const contextMenu = Menu.buildFromTemplate([
     {
       label: controlWindow && !controlWindow.isDestroyed() && controlWindow.isVisible()
@@ -233,16 +226,12 @@ function updateTrayMenu() {
           }
         }
       },
-      enabled: backendRunning,
+      enabled: controller !== null && controller.getState().status === 'running',
     },
     { type: 'separator' },
     {
       label: '退出',
-      click: () => {
-        isQuitting = true;
-        if (backend) backend.kill();
-        app.quit();
-      },
+      click: () => { requestQuit(); },
     },
   ]);
 
@@ -277,8 +266,8 @@ function registerIpc() {
   ipcMain.handle('settings:load', () => {
     const settings = loadSettings();
     return {
-      pythonPath: settings.pythonPath || '',
-      detectedPythonPath: detectPythonPath(),
+      pythonPath: settings.pythonPath,
+      runtime: controller.runtime.describe(),
     };
   });
 
@@ -287,136 +276,82 @@ function registerIpc() {
     return true;
   });
 
-  ipcMain.handle('backend:launch', (event, configKey, overrides, pythonPath) => {
-    launchBackend(event, configKey, overrides, pythonPath);
-    return true;
-  });
-
-  ipcMain.on('backend:kill', () => {
-    isQuitting = true;
-    if (backend) backend.kill();
-    app.quit();
-  });
+  ipcMain.handle('backend:launch', (event, configKey, overrides, pythonPath) => controller.launch(configKey, overrides, pythonPath));
+  ipcMain.handle('backend:get-state', () => controller.getState());
+  ipcMain.handle('backend:cancel', () => controller.cancel());
+  ipcMain.on('backend:kill', () => { requestQuit(); });
 }
 
-// ── 后端启动流程编排 ──────────────────────────────────────
+// ── 唯一退出与状态出口 ────────────────────────────────────────
 
-function launchBackend(event, configKey, overrides, pythonPath) {
-  // 所有配置检查必须在创建后端进程之前完成。
-  const prepared = configManager.prepareLaunch(CONFIG_JSON, configKey, overrides ?? {});
-  const host = prepared.values.gateway_host;
-  const port = prepared.values.gateway_port;
-  const healthHost = host === '0.0.0.0' ? '127.0.0.1' : host;
-  const py = (pythonPath && pythonPath.trim()) || getEffectivePythonPath();
-  const cliArgs = ['run.py', '--load', configKey, ...prepared.cliArgs];
-
-  backend = new BackendManager();
-
-  console.log('[launcher] launchBackend | py:', py, '| REPO_ROOT:', REPO_ROOT);
-  console.log('[launcher] launchBackend | configKey:', configKey);
-
-  backend.onLog((log) => {
-    if (controlWindow && !controlWindow.isDestroyed()) {
-      controlWindow.webContents.send('backend:log-line', log);
-    }
-  });
-
-  backend.onExit((exitCode) => {
-    backendRunning = false;
-    updateTrayMenu();
-
-    if (exitCode === -1) {
-      sendStatus(event, 'evolving');
-      return;
-    }
-
-    if (exitCode === 0) {
-      sendStatus(event, 'stopped');
-      // 仅在用户主动退出时才真正退出
-      if (isQuitting) {
-        app.quit();
-      } else {
-        // 后端自行退出但用户未要求退出 → 显示通知，保持壳运行
-        if (controlWindow && !controlWindow.isDestroyed()) {
-          controlWindow.webContents.send('backend:log-line', {
-            stream: 'stderr',
-            line: '[launcher] 后端进程已停止（退出码 0）',
-            ts: Date.now(),
-          });
-        }
-      }
-      return;
-    }
-
-    sendStatus(event, 'crashed');
-    if (controlWindow && !controlWindow.isDestroyed()) {
-      controlWindow.webContents.send('backend:log-line', {
-        stream: 'stderr',
-        line: `[launcher] 后端进程退出，退出码: ${exitCode}`,
-        ts: Date.now(),
-      });
-      // 显示控制窗口让用户看到错误
-      controlWindow.show();
-    }
-    // 不再强制退出 — 让用户通过托盘菜单手动退出
-  });
-
-  backend.start(REPO_ROOT, cliArgs, py);
-  backendRunning = true;
-  sendStatus(event, 'starting');
-
-  backend.waitForHealth(
-    healthHost,
-    port,
-    () => {
-      sendStatus(event, 'running');
-      if (controlWindow && !controlWindow.isDestroyed()) {
-        controlWindow.webContents.send('backend:health-ok');
-      }
-      createWebviewWindow(healthHost, port);
-
-      // 后端就绪后最小化控制窗口到托盘
-      if (controlWindow && !controlWindow.isDestroyed()) {
-        controlWindow.hide();
-      }
-
-      updateTrayMenu();
-    },
-    () => {
-      sendStatus(event, 'timeout');
-      if (controlWindow && !controlWindow.isDestroyed()) {
-        controlWindow.webContents.send('backend:log-line', {
-          stream: 'stderr',
-          line: '[launcher] 健康检查超时（120s），后端未就绪',
-          ts: Date.now(),
-        });
-      }
-    }
-  );
-}
-
-// ── 工具函数 ──────────────────────────────────────────────
-
-function sendStatus(event, status) {
-  if (controlWindow && !controlWindow.isDestroyed()) {
-    controlWindow.webContents.send('backend:status', status);
+function send(channel, payload) {
+  if (controlWindow && !controlWindow.isDestroyed() && !controlWindow.webContents.isDestroyed()) {
+    controlWindow.webContents.send(channel, payload);
   }
+}
+
+function requestQuit() {
+  if (quitPending) return quitPending;
+  isQuitting = true;
+  quitPending = (async () => {
+    try {
+      if (controller) await controller.shutdown();
+      allowQuit = true;
+      app.quit();
+    } catch (error) {
+      isQuitting = false;
+      send('backend:log-line', { stream: 'stderr', line: sanitize(`Exit cleanup failed: ${error.message || error}`), ts: Date.now() });
+      if (controlWindow && !controlWindow.isDestroyed()) controlWindow.show();
+    } finally { quitPending = null; }
+  })();
+  return quitPending;
 }
 
 // ── App 生命周期 ──────────────────────────────────────────
 
-app.whenReady().then(() => {
-  registerIpc();
-  createControlWindow();
-  createTray();
-});
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) {
+  allowQuit = true;
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.show();
+      controlWindow.focus();
+    }
+  });
+  app.whenReady().then(() => {
+    controller = new LauncherController({
+      repoRoot: REPO_ROOT,
+      configPath: CONFIG_JSON,
+      onState: (state) => {
+        send('backend:status', state);
+        updateTrayMenu();
+        if (['setup_failed', 'crashed', 'timeout'].includes(state.status)
+          && controlWindow && !controlWindow.isDestroyed()) controlWindow.show();
+      },
+      onLog: (log) => send('backend:log-line', log),
+      onReady: (host, port) => {
+        if (isQuitting) return;
+        send('backend:health-ok');
+        createWebviewWindow(host, port);
+        if (controlWindow && !controlWindow.isDestroyed()) controlWindow.hide();
+        updateTrayMenu();
+      },
+    });
+    registerIpc();
+    createControlWindow();
+    createTray();
+    updateTrayMenu();
+  });
+}
 
-// 窗口全部关闭时不退出（托盘保持运行）
 app.on('window-all-closed', () => {
-  // 不做任何事 — 窗口隐藏而非销毁
+  // 窗口关闭仍仅隐藏，退出由统一资源清理边界完成。
 });
 
-// 仅 isQuitting=true 时才真正退出
-app.on('before-quit', () => {
-  if (backend) backend.kill();
+app.on('before-quit', (event) => {
+  if (allowQuit) return;
+  event.preventDefault();
+  requestQuit();
 });

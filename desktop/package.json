@@ -5,8 +5,11 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "prepare-embed": "powershell -ExecutionPolicy Bypass -File scripts/prepare-embed-python.ps1 -ConfigKey default",
-    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& pnpm run prepare-embed && electron-builder --win",
+    "runtime:lock": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-assets.ps1 -RefreshLock",
+    "prepare:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-assets.ps1",
+    "prepare:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-assets.ps1 -StageDev",
+    "prepare:frontend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-frontend.ps1 -ConfigKey default",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& pnpm run prepare:runtime && pnpm run prepare:frontend && electron-builder --win --x64",
     "postinstall": "electron-builder install-app-deps"
   },
   "pnpm": {

@@ -3,7 +3,10 @@ productName: EvolveAgent
 directories:
   output: dist
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch:
+        - x64
   icon: assets/icon.ico
 nsis:
   oneClick: false
@@ -13,6 +16,7 @@ files:
   - src/**/*
   - renderer/**/*
   - assets/**/*
+  - runtime/release-spec.json
 
 # 后端文件复制到安装目录（exe 同级），匹配 main.js 中 REPO_ROOT 的预期布局
 extraFiles:
@@ -65,10 +69,14 @@ extraFiles:
       - "!**/*.pyc"
   - from: ../pre-skills
     to: skills
-  - from: ../venv
-    to: venv
+  - from: .runtime-staging/runtime
+    to: runtime
     filter:
-      - "!**/__pycache__"
-      - "!**/*.pyc"
+      - uv/uv.exe
+      - uv/LICENSE-MIT
+      - uv/LICENSE-APACHE
+      - release.json
+      - requirements-win-x64.lock
+      - support/probe_environment.py
   - from: .frontend-staging/frontend
     to: workspace/fast_agent_space/frontend

@@ -12,7 +12,8 @@ let profileValues = {};
 let rawValues = {};
 let workingValues = {};
 let dirtyFields = new Set();
-let backendLaunched = false;
+let launcherState = null;
+let runtimeDescription = null;
 let launchPending = false;
 let formBusy = false;
 let editingProfile = false;
@@ -31,6 +32,29 @@ const pythonPathInput = document.getElementById('python-path-input');
 const btnViewLog = document.getElementById('btn-view-log');
 const configError = document.getElementById('config-error');
 const modelNotice = document.getElementById('model-notice');
+const pythonRuntimeInfo = document.getElementById('python-runtime-info');
+const pythonPathHint = document.getElementById('python-path-hint');
+
+function applyLauncherState(state) {
+  if (!state || !Number.isInteger(state.revision) || typeof state.status !== 'string'
+    || typeof state.canLaunch !== 'boolean' || typeof state.canCancel !== 'boolean') return false;
+  if (launcherState && state.revision <= launcherState.revision) return false;
+  launcherState = state;
+  if (fieldDefinitions) {
+    updateControls();
+    updatePythonDescription();
+  }
+  return true;
+}
+
+function updatePythonDescription() {
+  if (!fieldDefinitions) return;
+  const ui = fieldDefinitions.ui.launcher;
+  const manual = pythonPathInput.value.trim();
+  const location = manual || (launcherState && launcherState.pythonPath)
+    || (runtimeDescription && (runtimeDescription.managedExecutable || runtimeDescription.environmentPath));
+  pythonRuntimeInfo.textContent = `${manual ? ui.manual : ui.managed}\n${location || ui.unknownLocation}`;
+}
 
 function showError(message, error) {
   configError.textContent = error ? `${message}\n${error.message || String(error)}` : message;
@@ -43,23 +67,30 @@ function clearError() {
 }
 
 function updateControls() {
-  const blocked = formBusy || launchPending || editingProfile;
+  if (!fieldDefinitions) return;
+  const blocked = formBusy || launchPending || editingProfile || !launcherState || !launcherState.canLaunch;
   profileSelect.disabled = blocked;
   btnNewProfile.disabled = blocked;
   btnSaveProfile.disabled = blocked || !currentProfile;
-  btnLaunch.disabled = blocked || !currentProfile || backendLaunched;
+  btnLaunch.disabled = blocked || !currentProfile;
   pythonPathInput.disabled = blocked;
   for (const input of fieldsContainer.querySelectorAll('[data-field]')) {
     input.disabled = blocked;
   }
   const ui = fieldDefinitions.ui;
   btnSaveProfile.textContent = savePending ? ui.saving : (saveSucceeded ? ui.saved : ui.save);
-  btnLaunch.textContent = launchPending ? ui.launchPending : (backendLaunched ? ui.running : ui.launch);
+  btnLaunch.textContent = launchPending ? ui.launchPending : launcherState && !launcherState.canLaunch
+    ? (launcherState.status === 'running' ? ui.running : ui.launcher.busy) : ui.launch;
 }
 
 async function init() {
   fieldDefinitions = await api.config.getFieldDefinitions();
   modelNotice.textContent = fieldDefinitions.ui.modelNotice;
+  pythonPathInput.placeholder = fieldDefinitions.ui.launcher.pythonPlaceholder;
+  pythonPathHint.textContent = fieldDefinitions.ui.launcher.pythonHint;
+  pythonPathInput.addEventListener('input', updatePythonDescription);
+  updatePythonDescription();
+  window.dispatchEvent(new Event('launcher-ui-ready'));
   profileSelect.addEventListener('change', loadSelectedProfile);
   btnNewProfile.addEventListener('click', onNewProfile);
   btnSaveProfile.addEventListener('click', onSaveProfile);
@@ -77,10 +108,9 @@ async function init() {
   let settingsError = null;
   try {
     const settings = await api.settings.load();
-    pythonPathInput.value = settings.pythonPath || '';
-    if (settings.detectedPythonPath && settings.detectedPythonPath !== 'python') {
-      pythonPathInput.placeholder = settings.detectedPythonPath + fieldDefinitions.ui.detectedPython;
-    }
+    pythonPathInput.value = settings.pythonPath;
+    runtimeDescription = settings.runtime;
+    updatePythonDescription();
   } catch (error) {
     settingsError = error;
   }
@@ -354,7 +384,7 @@ function showLogPanel() {
 
 async function onLaunch() {
   if (formBusy || launchPending || editingProfile) return;
-  if (backendLaunched) {
+  if (!launcherState || !launcherState.canLaunch) {
     showLogPanel();
     return;
   }
@@ -365,14 +395,18 @@ async function onLaunch() {
   clearError();
   if (!refreshValues(true)) return;
   const overrides = Object.fromEntries([...dirtyFields].map((name) => [name, workingValues[name]]));
+  const profile = currentProfile;
+  const requestedPython = pythonPathInput.value.trim();
   launchPending = true;
+  btnViewLog.style.display = '';
+  showLogPanel();
   updateControls();
   try {
-    await api.backend.launch(currentProfile, overrides, pythonPathInput.value.trim());
-    backendLaunched = true;
-    btnViewLog.style.display = '';
-    showLogPanel();
+    await api.backend.launch(profile, overrides, requestedPython);
+    // 接受应答不代表运行成功；包括已经到达的失败状态在内，都以主进程快照为准。
   } catch (error) {
+    configPanel.classList.add('active');
+    logPanel.classList.remove('active');
     showError(fieldDefinitions.ui.launchRejected, error);
   } finally {
     launchPending = false;

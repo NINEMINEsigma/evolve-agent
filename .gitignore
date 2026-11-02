@@ -211,6 +211,9 @@ custom_models/*.gguf
 desktop/node_modules/
 desktop/dist/
 desktop/desktop-settings.json
+/runtime/
+/desktop/.runtime-staging/
+/desktop/.runtime-assets.lock
 
 # perview
 !/preview/frontend_page/build/

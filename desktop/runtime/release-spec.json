@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "uvVersion": "0.9.8",
+  "uvAsset": "uv-x86_64-pc-windows-msvc.zip",
+  "pythonRequest": "cpython-3.12.12-windows-x86_64-none",
+  "pythonVersion": "3.12.12",
+  "platform": "win32",
+  "arch": "x64",
+  "index": "https://pypi.org/simple"
+}

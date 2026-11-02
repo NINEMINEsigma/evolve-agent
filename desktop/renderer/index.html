@@ -21,8 +21,9 @@
     <!-- Python 路径栏 -->
     <div class="python-path-bar">
       <label for="python-path-input">Python 路径</label>
-      <input type="text" id="python-path-input" class="field-input" placeholder="python（使用环境变量）" disabled />
-      <span class="path-hint">留空则使用系统 PATH 中的 python</span>
+      <input type="text" id="python-path-input" class="field-input" placeholder="Managed Python" aria-describedby="python-path-hint python-runtime-info" disabled />
+      <span id="python-path-hint" class="path-hint"></span>
+      <p id="python-runtime-info" class="python-runtime-info" aria-live="polite"></p>
     </div>
 
     <!-- Profile 选择栏 -->
@@ -47,19 +48,19 @@
   <!-- ═══════════════ 日志面板 ═══════════════ -->
   <div id="log-panel" class="panel">
     <header class="panel-header">
-      <h2>后端日志</h2>
+      <h2>启动与后端日志</h2>
       <span id="status-badge" class="status-badge status-idle">等待启动</span>
     </header>
+    <section id="preparation-panel" class="preparation-panel" aria-live="polite" hidden>
+      <div id="preparation-spinner" class="spinner" aria-hidden="true" hidden></div>
+      <p id="preparation-text"></p>
+    </section>
+    <div id="launch-error" class="config-error launch-error" role="alert" hidden></div>
     <div id="log-output" class="log-output"></div>
     <div class="log-footer">
+      <button id="btn-cancel-launch" class="btn btn-small" disabled hidden></button>
       <button id="btn-back-to-config" class="btn btn-small">返回配置</button>
     </div>
-  </div>
-
-  <!-- ═══════════════ 等待覆盖层 ═══════════════ -->
-  <div id="waiting-overlay" class="waiting-overlay hidden">
-    <div class="spinner"></div>
-    <p id="waiting-text">等待后端就绪...</p>
   </div>
 
   <script src="../src/field-defs.js"></script>

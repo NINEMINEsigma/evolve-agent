@@ -1,112 +1,96 @@
-/**
- * log.js — 实时日志流显示与状态切换
- *
- * 职责：
- *   - 接收 backend:log-line 推送，按行追加到日志面板
- *   - 接收 backend:status 推送，更新状态徽章
- *   - 后端就绪后切换视图
- *   - 保留最近 2000 行防止内存无限增长
- */
-
+/** Launcher snapshots and installation/backend logs; waiting never obscures the controls. */
 'use strict';
 
-// config.js 已声明 const api，此处直接复用，不重复声明
-
-var MAX_LINES = 2000;
-
-// ── DOM 引用 ───────────────────────────────────────────────
-
-var logOutput = document.getElementById('log-output');
-var statusBadge = document.getElementById('status-badge');
-var btnBackToConfig = document.getElementById('btn-back-to-config');
-var cfgPanel = document.getElementById('config-panel');
-var logPanelEl = document.getElementById('log-panel');
-var waitingOverlay = document.getElementById('waiting-overlay');
-var waitingText = document.getElementById('waiting-text');
-
-// ── 状态映射 ───────────────────────────────────────────────
-
-const STATUS_MAP = {
-  idle:      { text: '等待启动', class: 'status-idle' },
-  starting:  { text: '启动中', class: 'status-starting' },
-  running:   { text: '运行中', class: 'status-running' },
-  evolving:  { text: '进化中', class: 'status-evolving' },
-  crashed:   { text: '已崩溃', class: 'status-crashed' },
-  timeout:   { text: '超时', class: 'status-timeout' },
-  stopped:   { text: '已停止', class: 'status-stopped' },
-};
-
-// ── 事件注册 ───────────────────────────────────────────────
-
-api.backend.onLog((log) => {
-  appendLogLine(log);
-});
-
-api.backend.onStatus((status) => {
-  updateStatus(status);
-});
-
-api.backend.onHealthOk(() => {
-  waitingOverlay.classList.add('hidden');
-});
-
-// ── 返回配置按钮 ──────────────────────────────────────────
-
-btnBackToConfig.addEventListener('click', () => {
-  cfgPanel.classList.add('active');
-  logPanelEl.classList.remove('active');
-});
-
-// ── 日志追加 ───────────────────────────────────────────────
+// api, fieldDefinitions and applyLauncherState are shared with config.js.
+const MAX_LINES = 2000;
+const logOutput = document.getElementById('log-output');
+const statusBadge = document.getElementById('status-badge');
+const btnBackToConfig = document.getElementById('btn-back-to-config');
+const btnCancelLaunch = document.getElementById('btn-cancel-launch');
+const preparationPanel = document.getElementById('preparation-panel');
+const preparationText = document.getElementById('preparation-text');
+const preparationSpinner = document.getElementById('preparation-spinner');
+const launchError = document.getElementById('launch-error');
+let cancelRequestPending = false;
+let stateReadError = null;
+let cancelError = null;
 
 function appendLogLine(log) {
   const line = document.createElement('div');
-  line.className = `log-line ${log.stream}`;
+  line.className = `log-line ${log.stream === 'stderr' ? 'stderr' : 'stdout'}`;
   const ts = new Date(log.ts).toLocaleTimeString('zh-CN', { hour12: false });
   line.textContent = `[${ts}] ${log.line}`;
   logOutput.appendChild(line);
-
-  // 自动滚动到底部
+  while (logOutput.children.length > MAX_LINES) logOutput.firstChild.remove();
   logOutput.scrollTop = logOutput.scrollHeight;
-
-  // 限制行数
-  while (logOutput.children.length > MAX_LINES) {
-    logOutput.removeChild(logOutput.firstChild);
-  }
 }
 
-// ── 状态更新 ───────────────────────────────────────────────
-
-function updateStatus(status) {
-  const info = STATUS_MAP[status] || STATUS_MAP.idle;
-  statusBadge.textContent = info.text;
-  statusBadge.className = `status-badge ${info.class}`;
-
-  // starting 状态显示等待覆盖层
-  if (status === 'starting') {
-    waitingOverlay.classList.remove('hidden');
-    waitingText.textContent = '等待后端就绪...';
+function renderLauncherState() {
+  if (!fieldDefinitions) return;
+  const ui = fieldDefinitions.ui.launcher;
+  btnCancelLaunch.textContent = ui.cancelLaunch;
+  if (!launcherState) {
+    btnCancelLaunch.disabled = true;
+    if (stateReadError) {
+      launchError.hidden = false;
+      launchError.textContent = `${ui.stateFailed}\n${stateReadError.message || stateReadError}`;
+    }
+    return;
   }
-
-  // evolving 状态更新等待文本
-  if (status === 'evolving') {
-    waitingOverlay.classList.remove('hidden');
-    waitingText.textContent = '进化完成，正在重启后端...';
-  }
-
-  // running 状态隐藏覆盖层
-  if (status === 'running') {
-    waitingOverlay.classList.add('hidden');
-  }
-
-  // crashed / timeout 显示等待文本
-  if (status === 'crashed') {
-    waitingOverlay.classList.remove('hidden');
-    waitingText.textContent = '后端已崩溃，将在 3 秒后退出...';
-  }
-
-  if (status === 'timeout') {
-    waitingOverlay.classList.remove('hidden');
-    waitingText.textContent = '健康检查超时，后端未就绪';
-  }
+  const state = launcherState;
+  statusBadge.textContent = ui.status[state.status] || state.status;
+  statusBadge.className = `status-badge status-${state.status}`;
+  const waiting = ['preparing', 'starting', 'cancelling', 'evolving'].includes(state.status);
+  const failed = ['setup_failed', 'crashed', 'timeout'].includes(state.status);
+  preparationPanel.hidden = !waiting && !failed && state.status !== 'cancelled';
+  preparationSpinner.hidden = !waiting;
+  preparationText.textContent = ui.phase[state.phase] || ui.status[state.status] || state.status;
+  btnCancelLaunch.hidden = !waiting;
+  btnCancelLaunch.disabled = cancelRequestPending || !state.canCancel;
+  const messages = [];
+  if (state.errorCode) messages.push(ui.errors[state.errorCode] || state.errorCode);
+  if (state.detail) messages.push(state.detail);
+  if (failed && !state.canLaunch) messages.push(ui.cleanupBlocked);
+  if (cancelError) messages.push(ui.cancelFailed, cancelError.message || String(cancelError));
+  launchError.textContent = messages.join('\n');
+  launchError.hidden = messages.length === 0;
 }
+
+function receiveState(state) {
+  if (!applyLauncherState(state)) return;
+  stateReadError = null;
+  cancelError = null;
+  renderLauncherState();
+}
+
+api.backend.onLog(appendLogLine);
+api.backend.onStatus(receiveState);
+// 注册监听后再读取快照；revision可拒绝比事件更晚到达的旧读取结果。
+api.backend.getState().then(receiveState).catch((error) => {
+  stateReadError = error;
+  appendLogLine({ stream: 'stderr', line: error.message || String(error), ts: Date.now() });
+  renderLauncherState();
+});
+window.addEventListener('launcher-ui-ready', renderLauncherState);
+renderLauncherState();
+
+btnBackToConfig.addEventListener('click', () => {
+  configPanel.classList.add('active');
+  logPanel.classList.remove('active');
+});
+
+btnCancelLaunch.addEventListener('click', async () => {
+  if (cancelRequestPending || !launcherState || !launcherState.canCancel) return;
+  cancelRequestPending = true;
+  cancelError = null;
+  renderLauncherState();
+  try {
+    await api.backend.cancel();
+  } catch (error) {
+    cancelError = error;
+    appendLogLine({ stream: 'stderr', line: error.message || String(error), ts: Date.now() });
+  } finally {
+    cancelRequestPending = false;
+    renderLauncherState();
+  }
+});

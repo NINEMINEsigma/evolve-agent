@@ -1,5 +1,119 @@
 # desktop/ — 桌面启动器开发文档
 
+## 桌面托管 Python 环境（2026-11-02，当前约定）
+
+本节取代下文2026-10-29记录中“Python只做路径探测、生命周期和打包适配延后”的旧边界。十二项Config配置与其存储协议继续保持。
+
+空Python路径表示使用**桌面托管 Python 环境**；用户点击启动后才进行**环境准备**。安装包携带固定uv，Python、虚拟环境、依赖缓存和安装临时文件均放在exe所在目录的`runtime/`内，不复制开发venv，不使用系统或Conda解释器兜底，不修改系统PATH或登记Windows全局Python。手动非空路径只读诊断，要求Python3.12/x64及必要依赖，不替外部环境安装或修改包。
+
+### 模块关系与入口
+
+| 模块 | 职责 |
+|---|---|
+| `runtime/release-spec.json` | 唯一人工工具链规格：uv0.9.8、CPython3.12.12、Windows x64、固定PyPI；不随启动查询latest |
+| `runtime/requirements-runtime.in` | 引用根requirements.txt，补入pip/setuptools/wheel；不复制开发site-packages |
+| `runtime/requirements-win-x64.lock`及`.lock.meta.json` | 开发者显式解析生成的完整发布锁和输入/产物摘要；正式跟踪，不能伪造或以freeze代替 |
+| `runtime/probe_environment.py` | 正式运行支持代码，仅诊断解释器/关键包；不导入origin/third或应用入口，不创建浏览器、ConPTY或Application |
+| `scripts/prepare-runtime-assets.ps1` | 验证固定官方uv归档与许可证，显式刷新依赖锁，准备最小随包资源，可部署开发资源 |
+| `scripts/prepare-frontend.ps1` | 仅复制已有前端构建产物；不构建前端、不准备Python |
+| `src/owned-process.js` | 真实spawn/close所有权、有界取消、UTF-8半行日志及脱敏 |
+| `src/runtime-env.js` | 子进程环境隔离与内部目录映射，不修改process.env或系统变量 |
+| `src/python-runtime-manager.js` | 资源核对、运行期租约、离线诊断、独立Python安装、唯一固定虚拟环境与成功状态提交 |
+| `src/backend-manager.js` | 显式解释器执行run.py、真实结束与可销毁的健康轮询 |
+| `src/launcher-controller.js` | 唯一启动状态、取消/超时/退出裁决、端口准入及完成屏障 |
+| `src/main.js` | Electron窗口/托盘、IPC装配、单实例和统一异步退出，不自行探测系统Python |
+| `renderer/config.js`、`log.js` | 主进程快照驱动的配置/日志界面，保留草稿与可达的取消、错误和返回操作 |
+
+桌面对象只由Electron主进程直接/间接持有，不加入项目Application或origin仓库System。后端始终通过根run.py启动，fast/slow/fallback进化与回退语义不变。
+
+### 安装布局与权限
+
+- `runtime/uv/uv.exe`及`LICENSE-MIT`、`LICENSE-APACHE`：随安装包携带。
+- `runtime/release.json`、`requirements-win-x64.lock`、`support/probe_environment.py`：随包资源，运行前核对实际摘要；探针必须位于asar外。
+- `runtime/python/`：uv管理的独立基础Python，子目录由uv确定，不拼接猜测。
+- `runtime/venv/`：唯一固定的项目虚拟环境；目录不带哈希、UUID或版本号，只在没有成功环境时准备，不创建第二套。
+- `runtime/cache/uv/`、`cache/python/`、`cache/pip/`、`runtime/tmp/`：依赖/下载缓存与临时文件。
+- `runtime/state.json`：schemaVersion=2的成功环境记录，保存installRoot、pythonRelativePath、prefixRelativePath、basePythonRelativePath、pythonVersion、platform、arch、readyAt；不保存environmentKey、generationId或发布哈希。虚拟环境路径严格限定`venv`及`venv/Scripts/python.exe`，不是Config/easysave文件。
+- `runtime/prepare.lock`：覆盖环境准备和后端整个运行活动的租约，而非安装完即删除的短锁。
+
+先做真实创建/写入/关闭/删除探测；目录不可写时明确拒绝，不自动提权、改ACL或改装到AppData。拒绝管理路径符号链接/junction或越界。安装到Program Files等保护目录可能不可用，应选择可写目录。
+内部安装不是整个Electron应用的文件系统沙盒：Electron原有用户数据、Windows自身行为和第三方主动写入不承诺全面重定位。自动管理后端的TEMP/TMP/TMPDIR和pip/uv默认缓存也指定在runtime内，但其他程序或项目工具可以主动采用不同路径。
+
+### 开发与发布准备（只由开发者执行）
+
+以下入口在`desktop/`目录使用Windows的`pnpm.cmd`，开发助手AI不执行。
+
+1. 首次或依赖/工具链规格变化时，开发者运行`pnpm.cmd run runtime:lock`。此步骤明确联网下载并校验固定uv、安装内部基础Python、解析完整带哈希依赖锁，生成lock/meta。它不复用开发venv，也不自动启动应用。
+2. 开发启动前运行`pnpm.cmd run prepare:dev`，只将核对后的uv/许可证、release、lock、probe部署到根runtime。随后`pnpm.cmd start`仍只启动Electron；点击启动才准备项目环境。
+3. 发布前按既有运行时工作流自行准备前端产物。`pnpm.cmd run build`顺序执行`prepare:runtime`、`prepare:frontend`及Windows x64打包。普通准备拒绝缺失/陈旧lock，不偷偷重新解析依赖。
+4. 准备/刷新/打包前退出全部桌面实例；这些发布操作必须串行，不支持多个electron-builder共享输出目录并行打包。
+
+旧`prepare-embed`入口及prepare-embed-python.ps1已移除。发布只白名单复制`.runtime-staging/runtime`的六类文件，不分发开发Python、项目虚拟环境、cache/state/租约。`release-spec.json`另外包含在asar内供唯一规格读取。
+
+输入摘要算法：依次对标签`requirements.txt`、`requirements-runtime.in`、`release-spec.json`，拼接标签无BOM UTF-8字节、NUL、对应文件原始字节、NUL，再对整体计算SHA-256；不归一化换行或编码。meta的inputSha256/lockSha256与发布清单实际摘要不符时停止，不把未知格式当作空数据。
+
+uv归档与`.sha256`从固定官方GitHub Releases获取，先核对后执行；许可证来自同tag。文件摘要使用.NET SHA-256流式计算，不依赖`Get-FileHash`命令或PowerShell模块自动加载；摘要仍为小写十六进制，文件读取/计算错误直接失败。校验与下载失败保留真实原因并非零退出，不改用PATH uv或latest。允许uv为没有wheel的可信纯Python依赖做隔离构建，因此不宣称所有构建工具也完全可复现；遇到编译器需求不在用户电脑自动安装系统工具链。
+
+### 状态、通信与取消
+
+`backend:launch`同步校验配置与准入，返回`{accepted, attemptId}`，不代表就绪。`backend:get-state`读取完整快照，`backend:status`发送同格式快照，`backend:cancel`只接受准备/启动中的取消；preload不暴露任意命令或任意文件写入。
+快照字段：revision、attemptId、status、phase、canLaunch、canCancel、pythonPath、errorCode、detail。页面按revision忽略旧读取结果，按钮以主进程canLaunch/canCancel为准；接受应答不覆写先到达的失败快照。
+
+| 状态 | 行为 |
+|---|---|
+| idle / stopped / cancelled，canLaunch=true | 可接受新的启动 |
+| preparing | preflight、downloading_python、creating_environment、installing_dependencies、verifying_environment；不启动健康轮询 |
+| starting | 已准备环境，检查端口后spawn；spawn成功后开始120秒健康等待 |
+| running | 有效starting、无终止意图、当前进程仍活跃且当前健康代际通过，才打开会话窗口 |
+| cancelling | 先登记terminationIntent，废弃健康回调，再终止并等待真实工作；不能接收新启动 |
+| setup_failed | 环境资源/安装/诊断失败，与后端崩溃分开；清理完成后才可重试 |
+| crashed / timeout | 后端失败或120秒未就绪；超时先停止后端，清理完成才可重试 |
+
+同attempt的迟到健康成功、极短退出后的start续体、取消/超时杀进程产生的退出通知，都不能覆盖既定终态。完成屏障包含准备链、端口探测、后端close、健康请求close和租约释放；屏障未过不能canLaunch=true。
+OwnedProcess.cancel共用首次调用起10秒观察预算，taskkill自身最多5秒；调用使用固定绝对taskkill.exe和独立参数，无shell拼接。失败/超时不删除真实子进程、观察任务和租约，不把包装Promise结束当作资源释放。直接子进程close不证明任意脱离进程树的后台任务终止；不确定时保守禁止重试，只有显式退出可重新核对。
+点窗口X仍只隐藏，安装继续；托盘退出、backend:kill与before-quit进入同一异步shutdown。实际退出前确认准备/后端结束；清理失败保留壳和日志，可再次显式退出复查，仍不确定时由用户处理，不能称作优雅业务停机。
+日志每行最多16KiB、错误尾部最多64KiB、界面最多2000行，使用textContent并脱敏URL/凭据。没有下载百分比时只显示真实阶段，不显示虚假退出倒计时；阶段区不覆盖日志与按钮。
+
+### 探针、状态提交与恢复边界
+
+探针通过Python `-I -B`执行，64KiB内单JSON，退出码与errorCode必须一致：0成功；10缺包；11版本；12前缀；13位数；70探针内部错误。已有成功state时按其记录的Python版本离线诊断并复用；任何诊断失败、解释器缺失、未知退出码、信号、非法JSON、70或spawn ENOENT/EACCES均报错，不自动重建。base/manual失败不自动重装，新建环境最终诊断失败也不循环安装。
+
+state采用同目录临时文件和原子替换。只清理本次排他创建、尚未成功提交且真实进程已结束的`runtime/venv`。发出替换前先标记preserve，替换在途或完成后取消只阻止继续启动，允许保留完整已准备环境，不能再删除state可能引用的目录。替换结果不明、锁释放失败或后端失败都不能反向删除已提交环境。此处原子性不等于断电持久化保证。
+
+存在成功state就不再根据依赖锁、发布清单、工具链规格或路径变化创建新环境或自动升级包；资源摘要仍用于检查随包文件完整性，但不驱动环境失效。安装根移动时直接报错，由用户退出全部相关进程后自行检查、删除旧`runtime/venv`及对应`runtime/state.json`，然后点击启动重新准备；不自动迁移或修改pyvenv.cfg。旧schema1多环境记录明确拒绝并提示人工处理，不自动迁移；其他未知格式继续失败。没有成功记录却已有固定目录时，拒绝认领或覆盖该未知目录，用户自行处理后才能重试。旧`runtime/envs/`目录不会被启动器扫描、使用或删除。
+
+prepare.lock使用排他创建，带schemaVersion、attemptId、pid、installRoot、startedAt、token；释放前核对自身身份。发布先获取`.runtime-assets.lock`再获取同一runtime租约。强杀留下的锁不会按时间/PID猜测删除：先人工确认所有相关进程结束，再只处理日志中那个精确锁文件。损坏state、未知schema和路径逃逸明确失败，不自动清空。
+
+本期使用独占临时bind检查目标端口，已被占用即拒绝；释放端口到后端bind仍有抢占竞态，HTTP200没有启动令牌。本期不改origin的/health协议，不宣称健康响应具有强身份确认。
+NSIS升级/卸载可能处理安装目录数据；不因文件未列入extraFiles就承诺它们永久保留。更新、卸载和移动前应退出所有实例并备份配置、会话及其他业务数据。
+
+### 人工验收与当前状态
+
+源码实施与只读审阅不代替运行验证。开发助手AI未执行安装、依赖解析、探针、校验、构建或应用，真实lock/meta、uv资源和安装包仍待开发者亲自准备。
+
+| 编号 | 人工验收重点 |
+|---|---|
+| V01–V03 | 干净Windows x64、无系统Python也能准备；忽略开发venv/Miniconda；不新增全局PATH、注册表Python和AppData环境缓存 |
+| V04–V06 | UV/PIP/PYTHON/Conda污染、外部配置、中文/空格/长路径、不可写目录均有明确边界，不回退全局 |
+| V07–V09 | 下载/安装网络失败可见；各准备阶段取消和成功竞态；X隐藏、托盘退出真正确认进程结束 |
+| V10–V12 | 重复IPC/双开只一活动；强杀留下锁明确阻断；首次成功后断网离线复用 |
+| V13–V15 | 依赖/发布规格变化复用成功环境；搬路径或成功环境诊断失败时提示人工处理，不另建；损坏state明确拒绝 |
+| V16–V18 | 外部junction被拒；资源摘要不符不执行；手动路径不被安装/修改，清空恢复内部模式 |
+| V19–V21 | 安装不消耗120秒健康预算；退出/应答/快照竞态；包不含开发环境且陈旧lock/摘要/许可证错误阻断发布 |
+| V22–V24 | 无wheel的纯Python包安装日志完整；窄窗口/键盘/UTF-8日志可用；十二项配置及原进化入口无回归 |
+| V25–V28 | 严格探针错误分类且不自动重建；rename各边界取消不删已提交环境；taskkill失败/超时保留所有权；同attempt迟到事件不覆写终态 |
+| V29–V31 | prepare:dev可准备缺失资源；运行中发布/双准备被锁拒绝；后端pip默认缓存/临时目录内部化；已占用端口不能误开旧服务 |
+
+| R3-A | 首次仅创建runtime/venv，正常重复启动离线复用，不生成哈希或UUID环境目录 |
+| R3-B | 更换合法发布资源/依赖锁/工具链规格不自动安装或另建；原成功环境诊断失败仅报错 |
+| R3-C | 移动安装目录后明确提示用户手动处理；保留成功state但删除venv不会自动重建 |
+| R3-D | 旧schema1记录拒绝自动迁移；没有state但已有未知venv目录时拒绝覆盖 |
+| R3-E | 初建失败/取消确认进程结束后仅清理本次目录；状态提交在途或成功后绝不删成功环境，失败重试始终同一固定目录 |
+
+完整细分场景见任务`2026-11-02_2_desktop-local-uv-runtime`；R3替代V13–V15/V25中旧自动重建与迁移行为及未实施的R2方案。上述表格不代表已经通过，开发助手AI未运行任何验证或准备命令。
+
+## 2026-10-29 配置更新记录（历史）
+
 `desktop/` 是独立的 Electron 桌面启动器，负责启动配置编辑、Python 路径设置、通过根目录 `run.py` 启动后端，以及显示后端提供的 Web 前端。它不属于 origin仓库，也不维护第二套聊天界面。
 
 ## 本次改动边界

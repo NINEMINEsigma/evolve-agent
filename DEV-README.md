@@ -71,6 +71,14 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 
 `desktop/` 是 origin仓库之外的独立 Electron 启动器，负责启动配置编辑、Python 路径设置、调用根目录 `run.py`，并加载后端提供的 Web 前端。详细说明见 [desktop/DEV-README.md](desktop/DEV-README.md)。
 
+2026-11-02 当前约定：空 Python 路径使用桌面托管 Python 环境，随包固定 uv 在exe同级`runtime/`内准备独立Python、虚拟环境及依赖，缓存和安装临时文件也位于内部；不复制开发venv、不全局登记、不回退到系统/Conda/AppData。环境准备成功后才spawn根run.py，之后才开始120秒健康等待；已有环境通过离线探针即可复用。手动绝对路径是显式高级选择，只诊断而不改外部依赖。
+
+桌面唯一LauncherController持有PythonRuntimeManager/BackendManager，OwnedProcess持有真实进程与有界取消结果；这些不是项目Application或新增System。状态由主进程完整revision快照驱动，准备失败与后端崩溃分开，取消/超时/退出后的迟到回调不能重开窗口；未确认进程清理和租约释放时禁止重试。提交后环境即使取消启动仍保留。当前只管理唯一固定`runtime/venv/`，成功state为schema2；已有成功环境按记录Python版本离线诊断后复用，不因发布哈希、依赖或工具链变化另建或升级。移动目录或成功环境诊断失败只报错，用户自行删除旧环境与对应state后再准备；旧schema1明确拒绝自动迁移。没有成功state却已有未知固定目录时禁止覆盖。
+
+发布入口拆分为显式`runtime:lock`、`prepare:runtime`、`prepare:dev`和`prepare:frontend`；旧prepare-embed入口已移除。开发者先生成真实带哈希lock/meta，再准备开发资源或串行打包。安装目录须可写，异常锁人工确认后定向处理；安装/升级/卸载前退出进程并备份数据。健康端口准入不等于响应身份认证，进程清理也不宣称控制任意脱离进程树的外部任务。当前只完成源码与只读审阅，未运行安装、解析、探针、校验、构建或应用；实际验收需按桌面文档的V01–V31及R3替代场景由开发者完成，不能将用户已提供的部分安装日志当作全流程通过。
+
+以下2026-10-29配置记录继续适用于十二项配置与存储；其中“生命周期与打包延后”的历史边界已由上述当前约定取代。
+
 2026-10-29 配置项更新以 `config.py::Config` 的 12 个字段为依据：桌面端字段与中文文案集中于 `desktop/src/config-fields.json`，主进程和配置页面共用 `field-defs.js` 的解析与校验，预加载脚本只提供 IPC 桥接；旧 `llm_*` 字段不进入表单或启动参数，保存时保留文件中的未知字段。模型连接配置继续由应用内模型配置 Tab 管理，Python 路径仍是独立桌面设置。启动前在创建进程之前校验最终配置，不再强制覆盖 `console_log`。
 
 根目录 `config.py` 的 `console_log` 参数正确解析显式布尔值；`force_init`、`frontend_force_build` 同时支持裸开关（等于 true）及显式 true/false，未传时仍不覆盖已保存配置。本轮未修改 Config 结构、持久化格式或 origin仓库源码；关闭接口、进程生命周期与打包适配延后。仅完成源码与静态审阅，未运行校验、构建或应用，人工验收见桌面开发文档。

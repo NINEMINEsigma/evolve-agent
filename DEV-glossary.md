@@ -26,6 +26,13 @@
 
 ---
 
+## 桌面启动环境
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| 桌面托管 Python 环境 | 桌面启动器用随包 uv 在安装目录 `runtime/` 内安装的独立 Python 与项目虚拟环境；不复用开发 venv、系统 Python 或 Conda，不登记全局解释器。手动指定 Python 是明确的独立选择，不由启动器安装依赖。 | desktop-managed Python environment |
+| 环境准备 | 点击桌面启动后、执行根目录 `run.py` 前的资源核对、内部 Python 安装、虚拟环境创建、依赖安装与诊断阶段；不同于后端启动或健康检查。 | environment preparation |
+
 ## §2 协作角色
 
 | 规范称谓 | 指代 | 英文锚点 |
