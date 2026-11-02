@@ -69,6 +69,8 @@ function internalEnvironment(baseEnv, paths) {
 function buildInstallerEnv(baseEnv, paths) {
   const env = internalEnvironment(baseEnv, paths);
   env.UV_MANAGED_PYTHON = 'true';
+  // 与发布准备脚本一致，使用 Windows 系统信任库，保留 TLS 证书校验。
+  env.UV_NATIVE_TLS = 'true';
   env.PYTHONDONTWRITEBYTECODE = '1';
   const pollutedRoots = Object.entries(baseEnv)
     .filter(([key, value]) => /^(VIRTUAL_ENV|CONDA_PREFIX(?:_\d+)?|_?CONDA_ROOT|PYTHONHOME)$/i.test(key) && path.isAbsolute(value))

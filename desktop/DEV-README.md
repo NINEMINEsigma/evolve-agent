@@ -48,11 +48,17 @@
 3. 发布前按既有运行时工作流自行准备前端产物。`pnpm.cmd run build`顺序执行`prepare:runtime`、`prepare:frontend`及Windows x64打包。普通准备拒绝缺失/陈旧lock，不偷偷重新解析依赖。
 4. 准备/刷新/打包前退出全部桌面实例；这些发布操作必须串行，不支持多个electron-builder共享输出目录并行打包。
 
-旧`prepare-embed`入口及prepare-embed-python.ps1已移除。发布只白名单复制`.runtime-staging/runtime`的六类文件，不分发开发Python、项目虚拟环境、cache/state/租约。`release-spec.json`另外包含在asar内供唯一规格读取。
+旧`prepare-embed`入口及prepare-embed-python.ps1已移除。桌面打包不再默认复制根目录 `check_env.py` 和 `SOUL.md`，这两个文件不属于默认随包资源；本调整不修改 `run.py` 的可选 SOUL 文件处理逻辑。发布只白名单复制`.runtime-staging/runtime`的六类文件，不分发开发Python、项目虚拟环境、cache/state/租约。`release-spec.json`另外包含在asar内供唯一规格读取。
 
 输入摘要算法：依次对标签`requirements.txt`、`requirements-runtime.in`、`release-spec.json`，拼接标签无BOM UTF-8字节、NUL、对应文件原始字节、NUL，再对整体计算SHA-256；不归一化换行或编码。meta的inputSha256/lockSha256与发布清单实际摘要不符时停止，不把未知格式当作空数据。
 
 uv归档与`.sha256`从固定官方GitHub Releases获取，先核对后执行；许可证来自同tag。文件摘要使用.NET SHA-256流式计算，不依赖`Get-FileHash`命令或PowerShell模块自动加载；摘要仍为小写十六进制，文件读取/计算错误直接失败。校验与下载失败保留真实原因并非零退出，不改用PATH uv或latest。允许uv为没有wheel的可信纯Python依赖做隔离构建，因此不宣称所有构建工具也完全可复现；遇到编译器需求不在用户电脑自动安装系统工具链。
+
+### uv 下载的证书信任（2026-11-02）
+
+发布准备脚本的 `New-InstallerEnvironment` 和桌面环境准备的 `buildInstallerEnv` 均在清理继承的 `UV_*` 变量后，显式设置 `UV_NATIVE_TLS=true`，使 uv 下载 Python 和解析/安装依赖时使用 Windows 系统信任库。系统已信任的企业/代理 CA 可参与正常 TLS 校验；不关闭证书或主机名校验，不自动导入证书，不增加失败重试或解释器回退。已有 `SSL_CERT_FILE` / `SSL_CERT_DIR` 的继承行为不变，显式证书配置仍可能覆盖默认信任来源；该设置只属于安装工具子进程，不修改系统环境，也不额外传入后端环境。
+
+此修改针对 uv 的 `invalid peer certificate: UnknownIssuer`，不保证修复所有证书问题或网络连接失败；Windows 本身不信任签发机构时仍应失败。开发者可重新执行 `pnpm.cmd run runtime:lock`，后续实际桌面首次准备也使用相同的信任策略。仅完成源码修改与只读差异审阅，未执行下载、安装、依赖解析、校验、构建或应用。
 
 ### 状态、通信与取消
 

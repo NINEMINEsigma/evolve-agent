@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Prepare verified Windows x64 desktop runtime resources; never reuse a developer venv.
@@ -392,6 +392,8 @@ function New-InstallerEnvironment($Spec) {
   $environment['UV_PYTHON_INSTALL_REGISTRY'] = 'false'
   $environment['UV_MANAGED_PYTHON'] = 'true'
   $environment['UV_NO_CONFIG'] = 'true'
+  # 使用 Windows 系统信任库验证 TLS，兼容已受系统信任的代理 CA；不跳过证书校验。
+  $environment['UV_NATIVE_TLS'] = 'true'
   $environment['UV_HTTP_TIMEOUT'] = '30'
   $environment['UV_HTTP_RETRIES'] = '2'
   $environment['UV_KEYRING_PROVIDER'] = 'disabled'

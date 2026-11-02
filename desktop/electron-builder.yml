@@ -28,12 +28,8 @@ extraFiles:
     to: config.py
   - from: ../config_tui.py
     to: config_tui.py
-  - from: ../check_env.py
-    to: check_env.py
   - from: ../requirements.txt
     to: requirements.txt
-  - from: ../SOUL.md
-    to: SOUL.md
   - from: ../origin_agent
     to: origin_agent
     filter:
