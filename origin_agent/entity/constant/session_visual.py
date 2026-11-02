@@ -20,6 +20,10 @@ VISUAL_KIND_PARAM: str = "visual_kind"
 VISUAL_QUERY_ENABLED: str = "1"
 # 最终 HEAD 响应的资源版本头，不从中间 307 响应取版本。
 VISUAL_VERSION_HEADER: str = "X-Session-Visual-Version"
+# 最终探测响应回显模式，防止把普通文件响应误认为入口探测成功。
+VISUAL_PROBE_MODE_HEADER: str = "X-Session-Visual-Probe"
+# 仅排除 Git 内部数据；不影响文件访问权限或目录下载内容。
+VISUAL_SCAN_IGNORED_NAMES: frozenset[str] = frozenset({".git"})
 # 单次目录签名扫描的条目数上限与软时间预算（秒）。
 VISUAL_SCAN_MAX_ENTRIES: int = 10000
 VISUAL_SCAN_BUDGET_SECONDS: float = 0.2

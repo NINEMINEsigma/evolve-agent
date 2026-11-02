@@ -1,14 +1,18 @@
 import { useMemo } from "react";
 import { useSessionVisualResource } from "./useSessionVisualResource";
 import { buildSiteUrls } from "../utils";
+import type { SessionVisualResourceState, SessionVisualUpdateStatus } from "../types/sessionVisual";
 
-export type SiteStatus = "idle" | "missing" | "ready";
+export type SiteStatus = SessionVisualResourceState["status"];
 
 export interface SessionSiteState {
   status: SiteStatus;
   reloadKey: number;
   urls: ReturnType<typeof buildSiteUrls>;
   refresh: () => void;
+  error: string | null;
+  updateStatus: SessionVisualUpdateStatus;
+  updateError: string | null;
 }
 
 export function useSessionSite(sessionId: string | undefined): SessionSiteState {
@@ -18,7 +22,10 @@ export function useSessionSite(sessionId: string | undefined): SessionSiteState 
     ? { ...sourceUrls, indexUrl: resource.finalUrl }
     : sourceUrls;
   return {
-    status: resource.status === "ready" ? "ready" : resource.status === "idle" ? "idle" : "missing",
+    status: resource.status,
+    error: resource.error,
+    updateStatus: resource.updateStatus,
+    updateError: resource.updateError,
     reloadKey: resource.reloadKey,
     urls,
     refresh: resource.refresh,

@@ -5,10 +5,10 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from entity.constant import (
     HTTP_NO_CACHE_HEADERS, STATIC_FILE_HTTP_PREFIX, VISUAL_RAW_PARAM,
     VISUAL_PROBE_PARAM, VISUAL_SID_PARAM, VISUAL_KIND_PARAM,
-    VISUAL_QUERY_ENABLED, VISUAL_VERSION_HEADER,
+    VISUAL_QUERY_ENABLED, VISUAL_VERSION_HEADER, VISUAL_PROBE_MODE_HEADER,
 )
 from entity.error import SandboxError, SessionVisualResourceError, SessionVisualVersionUnavailable
-from entity.puretype import SessionVisualKind, SessionVisualSource, SessionVisualStatus
+from entity.puretype import SessionVisualKind, SessionVisualProbeMode, SessionVisualSource, SessionVisualStatus
 from gateway.frontend_assets import guess_media_type_with_charset
 from interface.api_component import APIComponent
 from interface.agentspace_service import IAgentspaceService
@@ -26,12 +26,20 @@ class ServeWorkspaceFileAPI(APIComponent):
         service = self.get_system(IAgentspaceService).visual_resources
         logical = f"{namespace}:{file_path}"
         raw = request.query_params.get(VISUAL_RAW_PARAM) == VISUAL_QUERY_ENABLED
-        probe = request.query_params.get(VISUAL_PROBE_PARAM) == VISUAL_QUERY_ENABLED
+        probe_value = request.query_params.get(VISUAL_PROBE_PARAM)
+        probe = probe_value not in (None, "", "0")
         headers = {**HTTP_NO_CACHE_HEADERS, "Cache-Control": "no-store"} if probe else dict(HTTP_NO_CACHE_HEADERS)
         state = None
 
         def failure(message: str, code: int) -> Response:
             return Response(content=b"" if request.method == "HEAD" else message, status_code=code, headers=headers, media_type="text/plain")
+
+        probe_mode = SessionVisualProbeMode.version
+        if probe:
+            try:
+                probe_mode = SessionVisualProbeMode(probe_value)
+            except ValueError:
+                return failure("Invalid visual probe mode", 400)
 
         try:
             resolved = sandbox.resolve_read(logical)
@@ -57,7 +65,7 @@ class ServeWorkspaceFileAPI(APIComponent):
                     if state.redirected and state.status == SessionVisualStatus.ready:
                         expected = sandbox.resolve_read(service.build_entry_logical_path(state))
                         if expected.namespace != resolved.namespace or expected.real != resolved.real:
-                            return RedirectResponse(url=service.build_entry_url(state, source=source if probe else None), status_code=307, headers={**HTTP_NO_CACHE_HEADERS, "Cache-Control": "no-store"})
+                            return RedirectResponse(url=service.build_entry_url(state, source=source if probe else None, probe_mode=probe_mode), status_code=307, headers={**HTTP_NO_CACHE_HEADERS, "Cache-Control": "no-store"})
             if probe and state is None:
                 return failure("Invalid visual probe", 400)
             if not resolved.real.is_file():
@@ -65,7 +73,12 @@ class ServeWorkspaceFileAPI(APIComponent):
             with resolved.real.open("rb"):
                 pass
             if probe and state is not None:
-                headers[VISUAL_VERSION_HEADER] = service.get_version(state)
+                headers[VISUAL_VERSION_HEADER] = (
+                    service.get_entry_version(state)
+                    if probe_mode == SessionVisualProbeMode.entry
+                    else service.get_version(state)
+                )
+                headers[VISUAL_PROBE_MODE_HEADER] = probe_mode.value
             media_type = guess_media_type_with_charset(resolved.real)
             if request.method == "HEAD":
                 headers["Content-Length"] = str(resolved.real.stat().st_size)

@@ -376,6 +376,10 @@ async def _describe_media_block(
         return ModalityDescriptionResult(
             status="unavailable", profile_name=ref_profile.name, reason="incomplete_profile",
         )
+    logger.info(
+        "describe_media | session=%s profile=%s media_type=%s media_id=%s started",
+        context.session_id, ref_profile.name, media_type, block.media_id,
+    )
     try:
         description = await _request_media_description(system, ref_profile, media_type, block)
     except UnsupportedModalityError:
@@ -391,8 +395,8 @@ async def _describe_media_block(
     if not description.strip():
         raise ModalityDescriptionError("Referenced Profile returned an empty media description")
     logger.info(
-        "describe_media | session=%s profile=%s media_type=%s success",
-        context.session_id, ref_profile.name, media_type,
+        "describe_media | session=%s profile=%s media_type=%s media_id=%s success",
+        context.session_id, ref_profile.name, media_type, block.media_id,
     )
     return ModalityDescriptionResult(
         status="success", description=description, profile_name=ref_profile.name,

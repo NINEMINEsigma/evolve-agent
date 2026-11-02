@@ -4,6 +4,7 @@ import { TAB_PREVIEW } from "../../constants/tabPreview";
 import { useAnchoredHoverPreview } from "../../hooks/useAnchoredHoverPreview";
 import { useTabPreview } from "./useTabPreview";
 import TabHoverPreview from "./TabHoverPreview";
+import visualMessages from "../../constants/sessionVisualMessages.json";
 
 interface TabRailProps {
   tabs: readonly TabDefinition[];
@@ -45,6 +46,13 @@ export default function TabRail({ tabs, activeTab, enabledTabs, onSwitch, render
           const active = tab.id === activeTab;
           const eligible = enabled && !active;
           const showPreview = eligible && !previewBlocked && tab.preview !== undefined;
+          const site = renderContext.siteStatus;
+          const disabledDetail = tab.id === "site" && !enabled
+            ? site.status === "idle" ? visualMessages.checking
+              : site.status === "missing" ? visualMessages.missing
+                : `${visualMessages.entryError}: ${site.error ?? visualMessages.probeError}`
+            : null;
+          const title = disabledDetail === null ? tab.title : `${tab.title}: ${disabledDetail}`;
           return (
             <button
               key={tab.id}
@@ -55,8 +63,8 @@ export default function TabRail({ tabs, activeTab, enabledTabs, onSwitch, render
               aria-describedby={hover.openKey === tab.id ? TOOLTIP_ID : undefined}
               disabled={!enabled}
               onClick={() => onSwitch(tab.id)}
-              data-tooltip={showPreview ? undefined : tab.title}
-              aria-label={tab.title}
+              data-tooltip={showPreview ? undefined : title}
+              aria-label={title}
               {...hover.getTriggerProps(tab.id)}
             >
               {tab.icon}

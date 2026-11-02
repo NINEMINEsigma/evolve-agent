@@ -15,9 +15,10 @@ from entity.constant import (
     STATIC_FILE_HTTP_PREFIX, VISUAL_REDIRECT_KEY, VISUAL_RAW_PARAM,
     VISUAL_PROBE_PARAM, VISUAL_SID_PARAM, VISUAL_KIND_PARAM,
     VISUAL_QUERY_ENABLED, VISUAL_SCAN_BUDGET_SECONDS, VISUAL_SCAN_MAX_ENTRIES,
+    VISUAL_SCAN_IGNORED_NAMES,
 )
 from entity.puretype import (
-    SessionVisualKind, SessionVisualResourceState, SessionVisualResources,
+    SessionVisualKind, SessionVisualProbeMode, SessionVisualResourceState, SessionVisualResources,
     SessionVisualSource, SessionVisualStatus,
 )
 from util.file_metadata import parse_meta_content
@@ -201,14 +202,15 @@ class SessionVisualResourceService:
         self,
         state: SessionVisualResourceState,
         *,
-        source: SessionVisualSource | None = None
+        source: SessionVisualSource | None = None,
+        probe_mode: SessionVisualProbeMode = SessionVisualProbeMode.version,
         ) -> str:
         namespace, relative = self.build_entry_logical_path(state).split(":", 1)
         path = "/".join(quote(part, safe="") for part in relative.split("/"))
         query = {VISUAL_RAW_PARAM: VISUAL_QUERY_ENABLED}
         if source is not None:
             query.update({
-                VISUAL_PROBE_PARAM: VISUAL_QUERY_ENABLED,
+                VISUAL_PROBE_PARAM: probe_mode.value,
                 VISUAL_SID_PARAM: source.session_id,
                 VISUAL_KIND_PARAM: source.kind.value,
             })
@@ -224,18 +226,28 @@ class SessionVisualResourceService:
             raise SessionVisualResourceError("视觉入口不存在")
         return state, self._check_entry(state.effective_path, state.entry_name)
 
+    def get_entry_version(self, state: SessionVisualResourceState) -> str:
+        """只读取入口；目录规模不参与可用性探测。"""
+        try:
+            entry = self._check_entry(state.effective_path, state.entry_name)
+            digest = hashlib.sha256(self.build_entry_logical_path(state).encode("utf-8"))
+            digest.update(str(entry.real).encode("utf-8"))
+            with entry.real.open("rb") as stream:
+                for block in iter(lambda: stream.read(65536), b""):
+                    digest.update(block)
+            return digest.hexdigest()
+        except (SandboxError, OSError, ValueError) as exc:
+            raise SessionVisualVersionUnavailable("Visual entry version unavailable") from exc
+
     def get_version(self, state: SessionVisualResourceState) -> str:
-        """stage 只看入口；site/style 看目录整体。由调用方放在线程池执行。"""
+        """stage 只看入口；site/style 独立检测目录变化，不决定入口可用性。"""
+        if state.kind == SessionVisualKind.stage:
+            return self.get_entry_version(state)
         try:
             entry = self._check_entry(state.effective_path, state.entry_name)
             digest = hashlib.sha256(self.build_entry_logical_path(state).encode("utf-8"))
             # 同命名空间重新映射到其他目录也必须刷新，不把物理身份暴露给客户端。
             digest.update(str(entry.real).encode("utf-8"))
-            if state.kind == SessionVisualKind.stage:
-                with entry.real.open("rb") as stream:
-                    for block in iter(lambda: stream.read(65536), b""):
-                        digest.update(block)
-                return digest.hexdigest()
             root = self._sandbox.resolve_read(state.effective_path).real
             started = time.monotonic()
             count = 0
@@ -248,6 +260,9 @@ class SessionVisualResourceService:
                         count += 1
                         if count > VISUAL_SCAN_MAX_ENTRIES or time.monotonic() - started > VISUAL_SCAN_BUDGET_SECONDS:
                             raise SessionVisualVersionUnavailable("目录签名扫描超出预算")
+                        name = item.name.casefold() if os.name == "nt" else item.name
+                        if name in VISUAL_SCAN_IGNORED_NAMES:
+                            continue
                         info = item.stat(follow_symlinks=False)
                         # Windows junction 与其他 reparse point 均不能递归跟随。
                         if item.is_symlink() or (

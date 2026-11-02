@@ -10,6 +10,11 @@ class SessionVisualKind(str, Enum):
     chat_style = "chat_style"
 
 
+class SessionVisualProbeMode(str, Enum):
+    entry = "entry"
+    version = "1"
+
+
 class SessionVisualStatus(str, Enum):
     ready = "ready"
     missing = "missing"

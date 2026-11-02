@@ -1,5 +1,19 @@
 # frontend/ — Web 前端
 
+## 视觉入口独立探测与失败隔离（2026-11-03，当前约定）
+
+`services/sessionVisualApi.ts`是无状态HEAD适配：构建稳定源URL、跟随307、剥离探测参数并保留visual_raw；最终200须模式头与非空版本头匹配，否则明确失败，不猜测兼容。`useSessionVisualResource`先请求entry，成功立即发布入口ready与最终URL；site/chat_style随后独立请求mode=1目录版本，stage只请求entry。入口version不与目录version比较。目录失败保留入口与已加载网页/CSS，只设置updateStatus/updateError；入口404/403清空可用状态，其他失败可保留当前会话旧快照并明确error，error不再折为missing。
+
+每Hook由一个effect持有会话/kind/暂停归属、当前请求代际、AbortController、唯一轮询timer/事件防抖timer及合并pending。每链至多正常入口2次、目录1次、异常后的入口重验2次；重验后终结链，不立即再进目录。失败链结算后至少5秒才自动启动下一链，目录失败后至少15秒再检测；普通事件和页面可见性恢复不能绕过截止。正常轮询也是整链结束后5秒，不是独立固定频率，慢目录请求会延迟下一入口查询。手动刷新可以取消旧等待并重置截止，但旧catch/finally不得改新请求状态；取消不是服务端同步扫描已结束的证明。
+
+事件读取源.meta、源目录和已解析ws目标目录，忽略.git内部路径但不忽略资源根删除；非ws目标继续轮询。页面隐藏不启动自动请求，恢复可见合并一次并遵守失败截止。新会话首次render立即隐藏旧URL。完整目录基线提交后才触发刷新：新入口首次目录确认、签名变化或失败恢复可保守补刷，因此入口先刷新后目录确认可能再刷新一次；签名不变不重复刷新。不提供跨请求原子快照保证。
+
+Site保持首次显式激活才挂iframe，未激活时reloadKey变化也不GET正文；同会话Tab切换保留iframe，会话key重建与删除后重部署规则不变。`SiteTab`在网页可用时不显示入口检查失败或引用资源检测失败的常驻提示，不额外输出控制台日志；后台状态与手动刷新保持。入口缺失/拒绝仍显示原错误状态，`TabRail`禁用态区分检查中/未部署/入口失败；四按钮与整站下载语义不变。
+
+`useSessionChatStyle`把CSS加载错误、入口错误和目录检测错误分开；CSS获取仅由会话/暂停、可加载状态、URL及reloadKey驱动，不依赖探测错误。每次获取/转换有独立effect代际和AbortController，切会话同步屏蔽旧CSS，迟到结果不能覆盖新内容。成功HEAD不清CSS加载错误，真实GET/转换成功才恢复；目录检测失败不清有效CSS。Layout命令菜单区分有效旧快照的检查失败、更新检测失败与真正加载失败。新增中文文案集中`constants/sessionVisualMessages.json`。
+
+无新npm依赖、全局服务或持久化；配套部署后端、在既有运行时前端目录由用户构建并刷新浏览器。本次仅源码/文档及只读审阅，未运行类型检查、Lint、测试、实际导入、构建或应用；用户验收见任务2026-11-03_1 V01–V27及R1–R5。本节覆盖下文旧单阶段视觉Hook说明。
+
 ## 手动终结的等待与归档同步（2026-11-02，当前约定）
 
 `fetchJsonWithTimeout` 的 `timeoutMs` 支持数字或显式 `null`：数字仍对请求、响应正文和解码执行原有硬截止，`null` 仅关闭前端定时截止，仍保留外部 AbortSignal、HTTP错误、解析错误和内部错误。`useSessionStore.requestSessionJson` 默认仍为15秒；只有手动终结 POST 显式传 `null`，不因摘要、标签或资源停止超过15秒就中止等待。其他会话动作、会话预检和 History关键读取的截止不变，`fetchWithTimeout` 与 `RequestTimeoutError` 未改。

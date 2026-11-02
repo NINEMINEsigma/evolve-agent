@@ -1,5 +1,13 @@
 # gateway/ — WebSocket / HTTP 网关与会话管理
 
+## 视觉HEAD两阶段协议（2026-11-03，当前约定）
+
+原`/files/{namespace}/{file_path:path}`的HEAD/GET保持。`visual_probe=entry`仅调用入口内容签名，`visual_probe=1`保持完整资源版本；缺失/空/0沿普通文件请求，其余模式400。visual_raw仍只接受1。两种探测均使用原沙盒校验、单层源.meta重定向、raw最终源目标核对与no-store；307必须携带同一模式，最终200同时包含`X-Session-Visual-Probe`（entry或1）及`X-Session-Visual-Version`，版本不得跨模式比较。
+
+404缺失、403拒绝、409来源变化、503签名不可用的边界保持，普通未知错误直接传播。目录503不是入口请求失败，前端已分开处理；服务端不返回部分签名或伪200。普通文件GET/HEAD无探测时不额外扫描/哈希，status REST、ZIP和离线导出未改变。
+
+新后端仍接受旧前端mode=1，但旧前端无法获得解耦修复；新前端强制核对模式回显，旧后端不认识entry时不能伪装成功，需配套部署。同步线程池归属不变，浏览器取消不保证服务端I/O立即停止。仅源码/文档与只读审阅，未运行校验、构建或应用；人工验收见任务2026-11-03_1 V01–V27。
+
 ## 审批公共入口迁移（2026-11-02）
 
 `MessageRouter.handle_handsfree_mode`与聊天WebSocket握手的审批模式读取统一从`system.approval`导入，保留原函数内延迟导入位置。`IApprovalSystem`查询、模式恢复/切换、REST与WebSocket字段、路由及连接生命周期保持不变；审批包与模式load前contains缺key策略见[审批系统文档](../system/approval/DEV-README.md)。仅源码来源与文档同步，未运行校验、实际导入、测试、构建或应用。

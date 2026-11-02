@@ -15,11 +15,14 @@ export interface SessionVisualServerState {
 
 export type SessionVisualResources = Readonly<Record<SessionVisualKind, SessionVisualServerState>>;
 
-export interface SessionVisualProbeResult {
-  readonly finalUrl: string | null;
-  readonly version: string | null;
-  readonly available: boolean;
-}
+export type SessionVisualProbeMode = "entry" | "1";
+export type SessionVisualUpdateStatus = "idle" | "checking" | "ready" | "error";
+
+export type SessionVisualProbeResult =
+  | { readonly status: "ready"; readonly finalUrl: string; readonly version: string }
+  | { readonly status: "missing"; readonly error: string }
+  | { readonly status: "forbidden"; readonly error: string }
+  | { readonly status: "conflict"; readonly error: string };
 
 /** 浏览器加载状态，与服务端资源快照分开。 */
 export interface SessionVisualResourceState {
@@ -28,5 +31,7 @@ export interface SessionVisualResourceState {
   readonly version: string | null;
   readonly reloadKey: number;
   readonly error: string | null;
+  readonly updateStatus: SessionVisualUpdateStatus;
+  readonly updateError: string | null;
   readonly refresh: () => void;
 }

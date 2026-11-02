@@ -1,0 +1,17 @@
+{
+  "paused": "已暂停",
+  "enabled": "已启用",
+  "notConfigured": "未配置",
+  "checking": "正在检查网页入口",
+  "missing": "尚未部署网页",
+  "entryError": "入口探测失败",
+  "accessDenied": "入口访问被拒绝",
+  "conflict": "视觉资源来源发生变化，请稍后重试",
+  "probeError": "视觉资源探测失败",
+  "protocolError": "视觉探测协议不匹配，请确认前后端已配套部署",
+  "styleUpdateUnavailable": "已启用，资源更新检测失败",
+  "stageError": "入口检查失败",
+  "entryCheckUnavailable": "已启用，上次入口检查失败",
+  "sourceChanged": "视觉资源来源发生变化，尚未确认资源更新状态",
+  "styleLoadError": "样式加载失败"
+}

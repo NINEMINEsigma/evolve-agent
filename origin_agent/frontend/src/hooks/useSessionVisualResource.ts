@@ -1,37 +1,46 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchWithTimeout } from "../services/fetchWithTimeout";
 import { subscribeChatAgentspaceEvents } from "../services/chatAgentspaceEventBus";
+import { requestSessionVisualProbe } from "../services/sessionVisualApi";
 import type { AgentspaceEvent } from "../types";
-import type { SessionVisualKind, SessionVisualResourceState } from "../types/sessionVisual";
+import type { SessionVisualKind, SessionVisualProbeResult, SessionVisualResourceState } from "../types/sessionVisual";
 import { SESSION_VISUAL, SESSION_VISUAL_LAYOUT } from "../constants/sessionVisual";
+import messages from "../constants/sessionVisualMessages.json";
 
-interface ProbeResult {
-  url: string;
-  version: string | null;
-}
+type VisualSnapshot = Omit<SessionVisualResourceState, "refresh">;
+type ReadyProbe = Extract<SessionVisualProbeResult, { status: "ready" }>;
 
-function sourcePrefix(sessionId: string, kind: SessionVisualKind): string {
-  return `sessions/${sessionId}/${SESSION_VISUAL_LAYOUT[kind].directory}`;
-}
-
-function sourceMetaPath(sessionId: string, kind: SessionVisualKind): string {
-  return `${sourcePrefix(sessionId, kind)}${SESSION_VISUAL.META_SUFFIX}`;
+function emptySnapshot(idle: boolean): VisualSnapshot {
+  return {
+    status: idle ? "idle" : "missing", finalUrl: null, version: null,
+    reloadKey: 0, error: null, updateStatus: "idle", updateError: null,
+  };
 }
 
 function matchesPath(path: string | null, root: string): boolean {
-  return !!path && (path === root || path.startsWith(`${root}/`));
+  return !!path && (root === "" || path === root || path.startsWith(`${root}/`));
 }
 
-function stripProbeQuery(raw: string): string {
-  try {
-    const url = new URL(raw, window.location.href);
-    for (const name of [SESSION_VISUAL.PROBE_PARAM, SESSION_VISUAL.SID_PARAM, SESSION_VISUAL.KIND_PARAM]) {
-      url.searchParams.delete(name);
-    }
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return raw;
-  }
+function matchesResourcePath(path: string | null, root: string): boolean {
+  if (!matchesPath(path, root) || path === null) return false;
+  if (path === root) return true;
+  const relative = root === "" ? path : path.slice(root.length + 1);
+  return !relative.split("/").some(
+    (part) => SESSION_VISUAL.SCAN_IGNORED_NAMES.includes(part.toLowerCase()),
+  );
+}
+
+function targetRoot(finalUrl: string | null): string | null {
+  if (!finalUrl) return null;
+  const path = new URL(finalUrl, window.location.href).pathname;
+  const prefix = `${SESSION_VISUAL.FILES_PREFIX}ws/`;
+  if (!path.startsWith(prefix)) return null;
+  const relative = path.slice(prefix.length).split("/").map(decodeURIComponent).join("/");
+  const separator = relative.lastIndexOf("/");
+  return separator === -1 ? "" : relative.slice(0, separator);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : messages.probeError;
 }
 
 export function useSessionVisualResource(
@@ -39,163 +48,264 @@ export function useSessionVisualResource(
   kind: SessionVisualKind,
   paused: boolean = false,
 ): SessionVisualResourceState {
-  const [status, setStatus] = useState<SessionVisualResourceState["status"]>("idle");
-  const [finalUrl, setFinalUrl] = useState<string | null>(null);
-  const [version, setVersion] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const sequenceRef = useRef(0);
-  const timerRef = useRef<number | null>(null);
-  const debounceRef = useRef<number | null>(null);
-  const conflictRef = useRef(0);
-  const finalUrlRef = useRef<string | null>(null);
-  const versionRef = useRef<string | null>(null);
-
-  const stableUrl = useCallback(() => {
-    if (!sessionId) return null;
-    const encoded = encodeURIComponent(sessionId);
-    const directory = SESSION_VISUAL_LAYOUT[kind].directory;
-    const entry = SESSION_VISUAL_LAYOUT[kind].entry;
-    const params = new URLSearchParams({
-      visual_probe: "1",
-      visual_sid: sessionId,
-      visual_kind: kind,
-    });
-    return `/files/ws/sessions/${encoded}/${directory}/${entry}?${params.toString()}`;
-  }, [sessionId, kind]);
-
-  const clearTimers = useCallback(() => {
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-    timerRef.current = null;
-    debounceRef.current = null;
-  }, []);
-
-  const probe = useCallback(async (preserveReady = false): Promise<ProbeResult | null> => {
-    const url = stableUrl();
-    if (!url || paused) return null;
-    const sequence = ++sequenceRef.current;
-    try {
-      const response = await fetchWithTimeout(url, { method: "HEAD", cache: "no-store", redirect: "follow" }, {
-        timeoutMs: SESSION_VISUAL.TIMEOUT_MS,
-        phase: `${kind} 视觉资源探测`,
-      });
-      if (sequence !== sequenceRef.current) return null;
-      if (response.status === 409 && conflictRef.current < SESSION_VISUAL.CONFLICT_RETRIES) {
-        conflictRef.current += 1;
-        return probe(preserveReady);
-      }
-      conflictRef.current = 0;
-      if (response.status === 503) {
-        if (!preserveReady) setStatus("error");
-        return null;
-      }
-      if (!response.ok) {
-        if (!preserveReady || response.status === 404) {
-          setStatus("missing");
-          setFinalUrl(null);
-          setVersion(null);
-          finalUrlRef.current = null;
-          versionRef.current = null;
-        }
-        return null;
-      }
-      const result = {
-        url: stripProbeQuery(response.url),
-        version: response.headers.get(SESSION_VISUAL.VERSION_HEADER),
-      };
-      const resourceChanged = (
-        finalUrlRef.current !== result.url
-        || versionRef.current !== result.version
-      );
-      finalUrlRef.current = result.url;
-      versionRef.current = result.version;
-      if (preserveReady && resourceChanged) {
-        setReloadKey((value) => value + 1);
-      }
-      setStatus("ready");
-      setFinalUrl(result.url);
-      setVersion(result.version);
-      setError(null);
-      return result;
-    } catch (caught) {
-      if (sequence !== sequenceRef.current) return null;
-      if (!preserveReady) {
-        setStatus("error");
-        setError(caught instanceof Error ? caught.message : "视觉资源探测失败");
-      }
-      return null;
-    }
-  }, [kind, paused, stableUrl]);
-
+  const scope = JSON.stringify([sessionId, kind, paused]);
+  const [owned, setOwned] = useState<{ scope: string; value: VisualSnapshot }>(() => ({
+    scope, value: emptySnapshot(paused || !!sessionId),
+  }));
+  const refreshRef = useRef<{ scope: string; run: () => void } | null>(null);
   const refresh = useCallback(() => {
-    clearTimers();
-    setReloadKey((value) => value + 1);
-    void probe(false);
-  }, [clearTimers, probe]);
+    if (refreshRef.current?.scope === scope) refreshRef.current.run();
+  }, [scope]);
 
   useEffect(() => {
-    clearTimers();
-    ++sequenceRef.current;
-    setReloadKey(0);
-    setFinalUrl(null);
-    setVersion(null);
-    finalUrlRef.current = null;
-    versionRef.current = null;
-    setError(null);
-    if (!sessionId || paused) {
-      setStatus(paused ? "idle" : "missing");
-      return () => clearTimers();
-    }
-    setStatus("idle");
-    void probe();
-    return () => {
-      ++sequenceRef.current;
-      clearTimers();
-    };
-  }, [sessionId, kind, paused, probe, clearTimers]);
-
-  useEffect(() => {
+    let snapshot = emptySnapshot(paused || !!sessionId);
+    setOwned({ scope, value: snapshot });
     if (!sessionId || paused) return;
-    const sourceRoot = sourcePrefix(sessionId, kind);
-    const metaPath = sourceMetaPath(sessionId, kind);
-    let targetRoot: string | null = null;
-    const schedule = () => {
-      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-      debounceRef.current = window.setTimeout(() => {
-        debounceRef.current = null;
-        void probe(true);
+
+    const sid = sessionId;
+    const sourceRoot = `sessions/${sid}/${SESSION_VISUAL_LAYOUT[kind].directory}`;
+    const metaPath = `${sourceRoot}${SESSION_VISUAL.META_SUFFIX}`;
+    let alive = true;
+    let generation = 0;
+    let controller: AbortController | null = null;
+    let inFlight = false;
+    let pending = false;
+    let timer: number | null = null;
+    let debounce: number | null = null;
+    let nextChainAt = 0;
+    let nextDirectoryAt = 0;
+    let directoryVersion: string | null = null;
+    let directoryOutcome: "idle" | "ready" | "error" = "idle";
+
+    const publish = (patch: Partial<VisualSnapshot>) => {
+      if (!alive) return;
+      snapshot = { ...snapshot, ...patch };
+      setOwned({ scope, value: snapshot });
+    };
+    const clearTimer = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    };
+    const clearDebounce = () => {
+      if (debounce !== null) window.clearTimeout(debounce);
+      debounce = null;
+    };
+    const current = (token: number, signal: AbortSignal) => (
+      alive && generation === token && !signal.aborted
+    );
+    const entryFailure = (detail: string) => {
+      publish({ status: snapshot.finalUrl ? "ready" : "error", error: detail });
+      nextChainAt = performance.now() + SESSION_VISUAL.POLL_MS;
+    };
+    const directoryFailure = (detail: string) => {
+      directoryOutcome = "error";
+      publish({ updateStatus: "error", updateError: detail });
+      nextDirectoryAt = performance.now() + SESSION_VISUAL.RETRY_MS;
+      nextChainAt = performance.now() + SESSION_VISUAL.POLL_MS;
+    };
+
+    const canRequest = (manual: boolean) => {
+      if (!manual && document.visibilityState === "hidden") {
+        pending = true;
+        return false;
+      }
+      return true;
+    };
+    const readEntry = async (token: number, signal: AbortSignal, manual: boolean): Promise<ReadyProbe | null> => {
+      if (!canRequest(manual)) return null;
+      try {
+        let result = await requestSessionVisualProbe(sid, kind, "entry", signal);
+        if (!current(token, signal)) return null;
+        for (let retry = 0; result.status === "conflict" && retry < SESSION_VISUAL.CONFLICT_RETRIES; retry += 1) {
+          if (!canRequest(manual)) {
+            entryFailure(`${messages.conflict}: ${result.error}`);
+            return null;
+          }
+          result = await requestSessionVisualProbe(sid, kind, "entry", signal);
+          if (!current(token, signal)) return null;
+        }
+        if (result.status === "conflict") {
+          entryFailure(`${messages.conflict}: ${result.error}`);
+          return null;
+        }
+        if (result.status === "missing" || result.status === "forbidden") {
+          directoryVersion = null;
+          directoryOutcome = "idle";
+          nextDirectoryAt = 0;
+          publish({
+            status: result.status === "missing" ? "missing" : "error",
+            finalUrl: null, version: null,
+            error: result.status === "forbidden" ? `${messages.accessDenied}: ${result.error}` : null,
+            updateStatus: "idle", updateError: null,
+          });
+          if (result.status === "forbidden") nextChainAt = performance.now() + SESSION_VISUAL.POLL_MS;
+          return null;
+        }
+        const identityChanged = snapshot.finalUrl !== result.finalUrl || snapshot.version !== result.version;
+        const wasAvailable = snapshot.finalUrl !== null;
+        if (identityChanged) {
+          directoryVersion = null;
+          directoryOutcome = "idle";
+          nextDirectoryAt = 0;
+        }
+        publish({
+          status: "ready", finalUrl: result.finalUrl, version: result.version, error: null,
+          reloadKey: snapshot.reloadKey + (wasAvailable && identityChanged ? 1 : 0),
+          ...(identityChanged ? { updateStatus: "idle" as const, updateError: null } : {}),
+        });
+        return result;
+      } catch (error) {
+        if (current(token, signal)) entryFailure(`${messages.entryError}: ${errorMessage(error)}`);
+        return null;
+      }
+    };
+
+    const arm = (at: number) => {
+      clearTimer();
+      if (!alive || document.visibilityState === "hidden") return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void run(false);
+      }, Math.max(0, at - performance.now()));
+    };
+
+    const run = async (manual: boolean) => {
+      if (!alive || inFlight) return;
+      if (!manual && document.visibilityState === "hidden") {
+        pending = true;
+        return;
+      }
+      if (!manual && performance.now() < nextChainAt) {
+        arm(nextChainAt);
+        return;
+      }
+      clearTimer();
+      clearDebounce();
+      pending = false;
+      inFlight = true;
+      const token = ++generation;
+      const requestController = new AbortController();
+      controller = requestController;
+      const { signal } = requestController;
+      try {
+        const previousReload = snapshot.reloadKey;
+        const entry = await readEntry(token, signal, manual);
+        if (!current(token, signal) || !entry) return;
+        if (manual && snapshot.reloadKey === previousReload) {
+          publish({ reloadKey: snapshot.reloadKey + 1 });
+        }
+        if (kind === "stage") {
+          publish({ updateStatus: "ready", updateError: null });
+          return;
+        }
+        if ((!manual && document.visibilityState === "hidden") || performance.now() < nextDirectoryAt) return;
+        publish({ updateStatus: "checking" });
+        let result: SessionVisualProbeResult;
+        try {
+          result = await requestSessionVisualProbe(sid, kind, "1", signal);
+        } catch (error) {
+          if (current(token, signal)) directoryFailure(errorMessage(error));
+          return;
+        }
+        if (!current(token, signal)) return;
+        if (snapshot.finalUrl !== entry.finalUrl || snapshot.version !== entry.version) return;
+        if (result.status !== "ready" || result.finalUrl !== entry.finalUrl) {
+          directoryFailure(messages.sourceChanged);
+          // Revalidation is terminal: never enter the directory stage again in this chain.
+          await readEntry(token, signal, manual);
+          if (!current(token, signal)) return;
+          nextDirectoryAt = performance.now() + SESSION_VISUAL.RETRY_MS;
+          nextChainAt = performance.now() + SESSION_VISUAL.POLL_MS;
+          if (snapshot.finalUrl) {
+            directoryOutcome = "error";
+            publish({ updateStatus: "error", updateError: messages.sourceChanged });
+          }
+          return;
+        }
+        const reload = directoryVersion === null || directoryVersion !== result.version || directoryOutcome === "error";
+        // Commit the complete baseline before refreshing; entry loading may precede this sample.
+        directoryVersion = result.version;
+        directoryOutcome = "ready";
+        nextDirectoryAt = 0;
+        publish({
+          updateStatus: "ready", updateError: null,
+          reloadKey: snapshot.reloadKey + (reload ? 1 : 0),
+        });
+      } finally {
+        if (current(token, signal)) {
+          inFlight = false;
+          controller = null;
+          const at = pending ? performance.now() : performance.now() + SESSION_VISUAL.POLL_MS;
+          arm(Math.max(at, nextChainAt));
+        }
+      }
+    };
+
+    const queue = () => {
+      pending = true;
+      if (!inFlight) arm(Math.max(performance.now(), nextChainAt));
+    };
+    const scheduleEvent = () => {
+      clearDebounce();
+      if (document.visibilityState === "hidden") {
+        pending = true;
+        return;
+      }
+      debounce = window.setTimeout(() => {
+        debounce = null;
+        queue();
       }, SESSION_VISUAL_LAYOUT[kind].debounceMs);
     };
     const handle = (event: AgentspaceEvent) => {
       if (event.kind === "resync") {
-        schedule();
+        scheduleEvent();
         return;
       }
       if (["watcher_error", "locks", "trash_changed"].includes(event.kind)) return;
-      if (event.path === metaPath || event.new_path === metaPath || matchesPath(event.path, sourceRoot) || matchesPath(event.new_path, sourceRoot)) {
-        schedule();
-        return;
+      const target = targetRoot(snapshot.finalUrl);
+      if (event.path === metaPath || event.new_path === metaPath
+        || matchesResourcePath(event.path, sourceRoot) || matchesResourcePath(event.new_path, sourceRoot)
+        || (target !== null && (matchesResourcePath(event.path, target) || matchesResourcePath(event.new_path, target)))) {
+        scheduleEvent();
       }
-      if (targetRoot && (matchesPath(event.path, targetRoot) || matchesPath(event.new_path, targetRoot))) schedule();
     };
-    const unsubscribe = subscribeChatAgentspaceEvents(handle);
-    const poll = () => {
+    const visibilityChanged = () => {
       if (document.visibilityState === "hidden") {
-        timerRef.current = window.setTimeout(poll, SESSION_VISUAL.POLL_MS);
-        return;
+        clearTimer();
+        clearDebounce();
+        pending = true;
+      } else {
+        queue();
       }
-      void probe(true).then(() => {
-        timerRef.current = window.setTimeout(poll, SESSION_VISUAL.POLL_MS);
-      });
     };
-    timerRef.current = window.setTimeout(poll, SESSION_VISUAL.POLL_MS);
+    const manualRefresh = () => {
+      ++generation;
+      controller?.abort();
+      controller = null;
+      inFlight = false;
+      clearTimer();
+      clearDebounce();
+      nextChainAt = 0;
+      nextDirectoryAt = 0;
+      if (snapshot.updateStatus === "checking") publish({ updateStatus: directoryOutcome });
+      void run(true);
+    };
+    refreshRef.current = { scope, run: manualRefresh };
+    const unsubscribe = subscribeChatAgentspaceEvents(handle);
+    document.addEventListener("visibilitychange", visibilityChanged);
+    void run(false);
     return () => {
+      alive = false;
+      ++generation;
+      controller?.abort();
+      clearTimer();
+      clearDebounce();
       unsubscribe();
-      clearTimers();
-      targetRoot = null;
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      if (refreshRef.current?.run === manualRefresh) refreshRef.current = null;
     };
-  }, [sessionId, kind, paused, probe, clearTimers]);
+  }, [scope, sessionId, kind, paused]);
 
-  return { status, finalUrl, version, reloadKey, error, refresh };
+  const value = owned.scope === scope ? owned.value : emptySnapshot(paused || !!sessionId);
+  return { ...value, refresh };
 }

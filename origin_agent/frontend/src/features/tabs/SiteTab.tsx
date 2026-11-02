@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { TabRenderContext } from "./registry";
+import messages from "../../constants/sessionVisualMessages.json";
 
 /**
  * Session site tab: iframe preview + bottom toolbar for ws:sessions/<id>/site/.
@@ -11,7 +12,7 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
   const [hasBeenActivated, setHasBeenActivated] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
-  const { status, reloadKey, urls, refresh } = ctx.siteStatus;
+  const { status, reloadKey, urls, refresh, error } = ctx.siteStatus;
 
   useEffect(() => {
     if (ctx.activeTab === "site") setHasBeenActivated(true);
@@ -49,8 +50,10 @@ export default function SiteTab({ ctx }: { ctx: TabRenderContext }) {
   return (
     <div className="site-tab">
       <div className="site-tab-body">
-        {status === "missing" || status === "idle" ? (
-          <div className="drawer-empty">尚未部署网页</div>
+        {status !== "ready" ? (
+          <div className="drawer-empty">
+            {status === "idle" ? messages.checking : status === "missing" ? messages.missing : `${messages.entryError}: ${error ?? messages.probeError}`}
+          </div>
         ) : (hasBeenActivated || ctx.activeTab === "site") && status === "ready" && urls !== null ? (
           <>
             <div className="site-viewport" ref={frameRef}>

@@ -27,6 +27,7 @@ from entry.history_media import HistoryMediaOccurrence, project_media_item
 from interface.modality_capability_system import IModalityCapabilitySystem
 from interface.runtime_system import IRuntimeSystem
 from util.templates import read_template
+from system.lifecycle import requires_lifecycle_propagation
 from system.modality_capability import (
     resolve_active_model_base_url,
     wrap_forwarded_description,
@@ -100,6 +101,29 @@ class PreparedMultimodalRequest(BaseModel):
         )
 
 
+def _raise_media_preparation_error(error: BaseExceptionGroup) -> NoReturn:
+    """保留原错误类型与完整失败树，兼容现有模型请求的错误出口。"""
+    if requires_lifecycle_propagation(error):
+        raise error
+    leaves: list[BaseException] = []
+    pending: list[BaseException] = [error]
+    while pending:
+        member = pending.pop()
+        if isinstance(member, BaseExceptionGroup):
+            pending.extend(reversed(member.exceptions))
+        else:
+            leaves.append(member)
+    if any(not isinstance(leaf, Exception) for leaf in leaves):
+        raise error
+    if len(leaves) == 1:
+        raise leaves[0] from error
+    if all(isinstance(leaf, ModalityForwardUnavailableError) for leaf in leaves):
+        raise ModalityForwardUnavailableError("\n".join(str(leaf) for leaf in leaves)) from error
+    details = "; ".join(f"{type(leaf).__name__}: {leaf}" for leaf in leaves)
+    # 所有叶均为Exception时，标准库自动构造ExceptionGroup，保留原成员树。
+    raise BaseExceptionGroup(f"Media preparation failed: {details}", error.exceptions) from error
+
+
 async def prepare_main_multimodal_request(
     messages: list[BaseMessage],
     context: ToolContext,
@@ -145,71 +169,118 @@ async def prepare_main_multimodal_request(
     if has_enabled_media and profile is not None and model_name:
         capability = await system.ensure_modality_capability(context)
     placeholder: str | None = None
+
+    async def prepare_media_block(occurrence: HistoryMediaOccurrence) -> MessageBlock:
+        nonlocal placeholder
+        block = occurrence.block
+        runtime.require_running()
+        if context.loop.is_interrupted():
+            raise asyncio.CancelledError
+        tool_path = occurrence.message.role == Role.TOOL
+        if isinstance(block, ImageBlock):
+            media_type = "image"
+            tag = FORWARDED_VISION_TAG
+            supported = capability.vision if tool_path and capability is not None else capability.user_vision if capability is not None else False
+        elif isinstance(block, AudioBlock):
+            media_type = "audio"
+            tag = FORWARDED_AUDIO_TAG
+            supported = capability.audio if tool_path and capability is not None else capability.user_audio if capability is not None else False
+        else:
+            media_type = "video"
+            tag = FORWARDED_VIDEO_TAG
+            supported = capability.video if tool_path and capability is not None else capability.user_video if capability is not None else False
+        if block.send_multimodal and (supported or profile is None or not model_name):
+            return block
+        if block.forward_result_verified and block.forward_result_content and block.forward_result_content.strip():
+            return TextBlock(text=wrap_forwarded_description(block.forward_result_content, tag))
+        result = (
+            await system.describe_media_block(context, profile, block)
+            if profile is not None else ModalityDescriptionResult(status="unavailable", reason="no_reference")
+        )
+        runtime.require_running()
+        if context.loop.is_interrupted():
+            raise asyncio.CancelledError
+        if result.status == "success":
+            if result.description is None or not result.description.strip() or result.reason is not None:
+                raise RuntimeError("Invalid successful media description result")
+            # 网络等待可并发，候选保存与原块更新仍在本事件循环中同步完成。
+            context.loop.commit_media_description(
+                request.source_session_id, request.source_history, block.media_id, result.description,
+            )
+            return TextBlock(text=wrap_forwarded_description(result.description, tag))
+        if result.status != "unavailable" or result.reason is None or result.description is not None:
+            raise RuntimeError("Invalid unavailable media description result")
+        if block.send_multimodal:
+            raise ModalityForwardUnavailableError(
+                f"Active model does not support {media_type} on this message path and forwarding is unavailable "
+                f"({result.reason}). Configure a usable reference Profile or switch to a supporting model."
+            )
+        if placeholder is None:
+            placeholder = read_template(SESSION_MEDIA_PLACEHOLDER_TEMPLATE)
+        source = project_media_item(occurrence).source_path
+        text = (
+            placeholder.replace("{{media_type}}", media_type)
+            .replace("{{media_id}}", block.media_id)
+            .replace("{{source_path}}", source or "unknown")
+            .replace("{{reason}}", result.reason)
+        )
+        return TextBlock(text=text)
+
+    occurrences = [
+        HistoryMediaOccurrence(
+            history_index=message_index, block_index=block_index, message=message, block=block,
+        )
+        for message_index, message in enumerate(request.messages)
+        if isinstance(message.content, list)
+        for block_index, block in enumerate(message.content)
+        if isinstance(block, (ImageBlock, AudioBlock, VideoBlock))
+    ]
+    if not occurrences:
+        runtime.require_running()
+        if context.loop.is_interrupted():
+            raise asyncio.CancelledError
+        return request
+
+    media_tasks: dict[tuple[int, int], asyncio.Task[MessageBlock]] = {}
+    try:
+        async with asyncio.TaskGroup() as group:
+            for occurrence in occurrences:
+                media_tasks[(occurrence.history_index, occurrence.block_index)] = group.create_task(
+                    prepare_media_block(occurrence), name=f"prepare-media-{occurrence.block.media_id}",
+                )
+            interrupt_task = group.create_task(context.loop.cancel_event.wait(), name="media-preparation-interrupt")
+            try:
+                pending = set(media_tasks.values())
+                while pending:
+                    await asyncio.wait([*pending, interrupt_task], return_when=asyncio.FIRST_COMPLETED)
+                    if interrupt_task.done() or context.loop.is_interrupted():
+                        raise asyncio.CancelledError
+                    completed = {task for task in pending if task.done()}
+                    for task in completed:
+                        # TaskGroup不会因单项取消自动取消兄弟，由父协程升级为整批取消。
+                        if task.cancelled():
+                            raise asyncio.CancelledError
+                        # 普通失败只由TaskGroup收集，避免同一异常又从组主体抛出。
+                        if task.exception() is None:
+                            task.result()
+                    pending.difference_update(completed)
+            finally:
+                if not interrupt_task.done():
+                    interrupt_task.cancel()
+    except BaseExceptionGroup as error:
+        _raise_media_preparation_error(error)
+
+    runtime.require_running()
+    if context.loop.is_interrupted():
+        raise asyncio.CancelledError
     for message_index, message in enumerate(request.messages):
         if not isinstance(message.content, list):
             continue
-        blocks: list[MessageBlock] = []
-        for block_index, block in enumerate(message.content):
-            if not isinstance(block, (ImageBlock, AudioBlock, VideoBlock)):
-                blocks.append(block)
-                continue
-            runtime.require_running()
-            if context.loop.is_interrupted():
-                raise asyncio.CancelledError
-            tool_path = message.role == Role.TOOL
-            if isinstance(block, ImageBlock):
-                media_type = "image"
-                tag = FORWARDED_VISION_TAG
-                supported = capability.vision if tool_path and capability is not None else capability.user_vision if capability is not None else False
-            elif isinstance(block, AudioBlock):
-                media_type = "audio"
-                tag = FORWARDED_AUDIO_TAG
-                supported = capability.audio if tool_path and capability is not None else capability.user_audio if capability is not None else False
-            else:
-                media_type = "video"
-                tag = FORWARDED_VIDEO_TAG
-                supported = capability.video if tool_path and capability is not None else capability.user_video if capability is not None else False
-            if block.send_multimodal and (supported or profile is None or not model_name):
-                blocks.append(block)
-                continue
-            if block.forward_result_verified and block.forward_result_content and block.forward_result_content.strip():
-                blocks.append(TextBlock(text=wrap_forwarded_description(block.forward_result_content, tag)))
-                continue
-            result = (
-                await system.describe_media_block(context, profile, block)
-                if profile is not None else ModalityDescriptionResult(status="unavailable", reason="no_reference")
-            )
-            runtime.require_running()
-            if context.loop.is_interrupted():
-                raise asyncio.CancelledError
-            if result.status == "success":
-                if result.description is None or not result.description.strip() or result.reason is not None:
-                    raise RuntimeError("Invalid successful media description result")
-                context.loop.commit_media_description(
-                    request.source_session_id, request.source_history, block.media_id, result.description,
-                )
-                blocks.append(TextBlock(text=wrap_forwarded_description(result.description, tag)))
-                continue
-            if result.status != "unavailable" or result.reason is None or result.description is not None:
-                raise RuntimeError("Invalid unavailable media description result")
-            if block.send_multimodal:
-                raise ModalityForwardUnavailableError(
-                    f"Active model does not support {media_type} on this message path and forwarding is unavailable "
-                    f"({result.reason}). Configure a usable reference Profile or switch to a supporting model."
-                )
-            if placeholder is None:
-                placeholder = read_template(SESSION_MEDIA_PLACEHOLDER_TEMPLATE)
-            source = project_media_item(HistoryMediaOccurrence(
-                history_index=message_index, block_index=block_index, message=message, block=block,
-            )).source_path
-            text = (
-                placeholder.replace("{{media_type}}", media_type)
-                .replace("{{media_id}}", block.media_id)
-                .replace("{{source_path}}", source or "unknown")
-                .replace("{{reason}}", result.reason)
-            )
-            blocks.append(TextBlock(text=text))
-        message.content = blocks
+        message.content = [
+            media_tasks[(message_index, block_index)].result()
+            if isinstance(block, (ImageBlock, AudioBlock, VideoBlock)) else block
+            for block_index, block in enumerate(message.content)
+        ]
     runtime.require_running()
     if context.loop.is_interrupted():
         raise asyncio.CancelledError

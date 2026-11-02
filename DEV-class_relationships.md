@@ -1,5 +1,23 @@
 # Agent Loop 类关系图
 
+## 会话视觉两阶段请求所有权（2026-11-03，当前约定）
+
+`AgentspaceService`继续唯一持有`SessionVisualResourceService`。新增`get_entry_version`复用入口内容哈希，原`get_version`承担site/chat_style有界目录签名并在递归前跳过.git；stage委托入口方法。`ServeWorkspaceFileAPI`通过显式`SessionVisualProbeMode`解析entry/1，在原/files路由返回最终模式回显与版本头，不新增接口槽位、System、缓存、watcher或持久化模型。SessionVisualProbeMode为不持久化枚举，公开导出；原会话status模型保持。
+
+前端`sessionVisualApi`为无状态HEAD适配；每个既有`useSessionVisualResource`实例独立持有当前会话/kind代际、唯一在途浏览器请求、定时器、有限pending、入口及完整目录基线。入口先发布ready，目录失败单独投影；入口重验终结当前异常链，5秒整链/15秒目录失败截止防止跨轮忙循环。旧请求finally不能解除新请求所有权。浏览器取消不代表同步服务端扫描已结束。
+
+`SiteTab`的首次激活和会话key保持，入口与目录确认可分两次保守刷新；`useSessionChatStyle`单独持有CSS获取/转换的effect代际，探测错误不驱动加载，成功HEAD不清CSS加载错误。没有新增Agent Loop字段、跨类私有访问、History字段或easysave key变更。前后端须配套部署；仅源码与只读审阅，运行验收由用户执行。
+
+## 请求级媒体并发所有权（2026-11-02，当前约定）
+
+`prepare_main_multimodal_request` 在既有 PreparedMultimodalRequest 快照和能力探测后，创建请求局部 TaskGroup、原消息/块位置到 `Task[MessageBlock]` 的映射及公开 `context.loop.cancel_event` 等待任务。内嵌 `prepare_media_block(occurrence)` 执行独立路由、描述校验与同步 `commit_media_description`，任务组成功退出后才按原位置组装请求视图；无新增模型或持久化字段，消息/块/最后用户副本关联保持。
+
+请求级组持有包装任务，ModalityCapabilitySystem原TaskOwner持有每项真实描述任务及清理交接。父协程观察单项取消并升级为整批取消，中断等待任务由同组finally收尾；普通异常不由父协程重复抛出。私有 `_raise_media_preparation_error` 复用 `requires_lifecycle_propagation`，原样传播生命周期异常组，兼容裸单项错误、纯不可用配置指引及混合普通错误的完整树。TaskOwner、BaseAgentLoop及两个调用方无需修改。
+
+缓存按描述完成顺序在同一事件循环同步提交候选，保留最新开关、first-success-wins及迟到身份校验；输出顺序与提交顺序独立。原消息视图不被描述文字覆盖，多Agent的last_user_message=None行为保持。无跨类私有字段访问、protected字段、System槽位、接口、typeref或easysave key变化。system模块仅新增含media_id的started/success诊断，不承担批次调度。
+
+本次仅源码与文档实施、只读差异审阅，未运行测试、校验、实际导入、构建或应用；用户部署后按 `.tasks/2026-11-02_4_media-description-concurrency.md` V01–V19验收。
+
 ## 审批业务包迁移（2026-11-02，当前约定）
 
 `component/approval/`的10个Python文件整体迁至`system/approval/`，旧路径不保留源码或兼容转发。`ApprovalSystem`继续只继承`IApprovalSystem`，通过原接口槽位由Application持有；其Runtime/Logger依赖来自`IDPRuntimeSystem`，显式Profile依赖、21个System槽位、装配顺序及绑定期间关闭准备不变。`ApprovalModeStore`、`ApprovalBackendManager`、`ToolAllowlistStore`、`TaskOwner`仍由同一System唯一持有，后端管理器仍持有`ProfileApprovalBackend`及其客户端缓存。

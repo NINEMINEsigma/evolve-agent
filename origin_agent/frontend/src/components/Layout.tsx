@@ -27,6 +27,7 @@ import TabStage from "../features/tabs/TabStage";
 import { TabDataProvider } from "../features/tabs/TabDataContext";
 import type { TabRenderContext } from "../features/tabs/registry";
 import { useOnboardingTour } from "../features/onboarding/useOnboardingTour";
+import visualMessages from "../constants/sessionVisualMessages.json";
 
 const onboardingTabs = TAB_REGISTRY.map(({ id, title }) => ({ id, title }));
 
@@ -72,8 +73,16 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   });
   const stageState = useSessionStage(ws.sessionId, stagePaused);
   const chatStyleState = useSessionChatStyle(ws.sessionId, chatStylePaused);
-  const stageStatusText = stagePaused ? "已暂停" : stageState.status === "ready" ? "已启用" : stageState.status === "idle" ? "未配置" : "未配置";
-  const chatStyleStatusText = chatStylePaused ? "已暂停" : chatStyleState.status === "ready" ? "已启用" : chatStyleState.status === "error" ? "加载失败" : "未配置";
+  const stageStatusText = stagePaused ? visualMessages.paused
+    : stageState.status === "error" ? visualMessages.stageError
+      : stageState.status === "ready" ? stageState.error ? visualMessages.entryCheckUnavailable : visualMessages.enabled
+        : visualMessages.notConfigured;
+  const chatStyleStatusText = chatStylePaused ? visualMessages.paused
+    : chatStyleState.status === "error" ? visualMessages.styleLoadError
+      : chatStyleState.status === "ready"
+        ? chatStyleState.entryError ? visualMessages.entryCheckUnavailable
+          : chatStyleState.updateError ? visualMessages.styleUpdateUnavailable : visualMessages.enabled
+        : visualMessages.notConfigured;
 
   const [activeSubagentId, setActiveSubagentId] = usePersistentSessionState<string | null>(
     STORAGE_KEYS.ACTIVE_SUBAGENT_ID, ws.sessionId, null);

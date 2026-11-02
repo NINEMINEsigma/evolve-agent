@@ -1,5 +1,21 @@
 # system/ — 基础设施与异步生命周期
 
+## 视觉入口与资源版本分离（2026-11-03，当前约定）
+
+`SessionVisualResourceService.get_entry_version(state)`只校验并分块哈希入口，摘要包括有效逻辑路径、物理路径身份和完整入口内容；不扫描兄弟文件。`get_version(state)`对stage委托该方法，对site/chat_style保留排序后的完整普通文件元数据签名和10000条/0.2秒软预算。目录遍历先计数/检查预算，再按名称跳过.git，发生在stat、resolve_read和入栈之前；Windows大小写折叠，其他平台精确比较。其他隐藏目录、依赖和构建资源保持参与；符号链接/junction/reparse仍不跟随。
+
+`build_entry_url`新增默认version的`probe_mode: SessionVisualProbeMode`，source存在时携带原模式，普通URL仍只有visual_raw。get_state/get_all_states依旧只读轻量状态、不扫描目录。预算超限或已有路径读取失败仍返回既有异常，不生成部分或默认签名；入口HTTP成功与目录请求失败现在由前端独立消费。物理路径只进摘要，不外泄。
+
+该服务仍由AgentspaceService持有，无新缓存、任务或System。ZIP、watcher、文件权限与存储均不变。软预算不保证单次阻塞I/O/排序的硬截止；两次探测不是事务快照。仅源码/文档和只读审阅，未运行校验、实际导入、构建或应用；配套部署及用户验收见根文档与任务2026-11-03_1。
+
+## 媒体描述并发与诊断（2026-11-02，当前约定）
+
+主会话请求准备在 entry 层通过请求级 TaskGroup 并发调用单媒体 `describe_media_block`，跨所有可见消息的图片/音频/视频，不增加全局并发锁或固定上限。ModalityCapabilitySystem 的公开签名、引用选择与快照、结构化成功/不可用、六路能力探针及缓存均不变；每项真实描述请求仍通过原 `TaskOwner.run_request` 管理。包装任务取消遵循 Owner 既有真实任务清理、固定期限、重复取消和迟到失败归属，不能把批次退出当成外部连接释放证明。
+
+`_describe_media_block` 仅在引用与必需配置有效、调用模型前打印 INFO `describe_media ... media_id=... started`；有效非空描述返回后打印同身份的 `success`。日志仅包含 session/profile/media_type/media_id，不包含媒体URL、载荷、提示词、描述或密钥。success表示模型描述成功，不表示 entry 层的 History 缓存已提交；无引用或配置不完整不打印started。多项started先于首项success可观察调用层并发，不证明Provider实际调度或精确HTTP耗时。
+
+无新System、模型字段、存储key、接口或前端变更；本次只修改描述诊断日志，并发与消息位置/缓存提交归 entry 层。仅源码与文档实施、只读差异审阅，未运行测试、校验、实际导入、构建或应用；用户验收见 `.tasks/2026-11-02_4_media-description-concurrency.md` V01–V19。
+
 ## mod组装与History v2（2026-11-01，当前约定）
 
 system/mods.py是无持久化、无缓存的业务组装函数：通过项目根定位文档目录，从显式RuntimeContext和资源主会话ID构造受控值，提供名称简介目录。不读取密钥、不猜测子Agent的主SOUL、不伪造fallback目标；不可用的必要模板值明确失败。没有新增System或Application镜像。

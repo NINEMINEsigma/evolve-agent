@@ -148,6 +148,7 @@ from .skills import (
 )
 from .session_visual import (
     SessionVisualKind,
+    SessionVisualProbeMode,
     SessionVisualStatus,
     SessionVisualSource,
     SessionVisualResourceState,
@@ -324,6 +325,7 @@ __all__ = [
     "ToolResultNotification",
     "SubAgentFeedbackDelivery",
     "SessionVisualKind",
+    "SessionVisualProbeMode",
     "SessionVisualStatus",
     "SessionVisualSource",
     "SessionVisualResourceState",

@@ -8,10 +8,13 @@ export const SESSION_VISUAL = {
   KIND_PARAM: "visual_kind",
   ENABLED: "1",
   VERSION_HEADER: "X-Session-Visual-Version",
+  PROBE_MODE_HEADER: "X-Session-Visual-Probe",
+  // 与后端过滤集合一致；只过滤即时事件，文件权限和下载不受影响。
+  SCAN_IGNORED_NAMES: [".git"] as readonly string[],
   FILES_PREFIX: "/files/",
   ZIP_PREFIX: "/zip/",
   META_SUFFIX: ".meta",
-  // 普通轮询、失败重试和单请求截止，单位毫秒。
+  // 普通轮询按整链结算后计时；目录失败的最短间隔独立控制，单位毫秒。
   POLL_MS: 5000,
   RETRY_MS: 15000,
   TIMEOUT_MS: 15000,
