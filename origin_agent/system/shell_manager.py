@@ -1030,6 +1030,7 @@ class ShellManager(IShellManager):
             "custom_hooks": "EVOLVE_CUSTOM_HOOKS",
             "custom_llm_client": "EVOLVE_CUSTOM_LLM_CLIENT",
             "custom_tools": "EVOLVE_CUSTOM_TOOLS",
+            "custom_mods": "EVOLVE_CUSTOM_MODS",
         }
         for namespace, path in sorted(self.sandbox.namespace_bases().items()):
             fixed_env_name = fixed_names.get(namespace)

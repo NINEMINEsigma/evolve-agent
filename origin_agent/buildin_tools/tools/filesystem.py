@@ -12,6 +12,7 @@
   - ``custom_hooks:``      只读（自定义钩子）
   - ``custom_llm_client:`` 只读（自定义 LLM 客户端）
   - ``custom_tools:``      只读（自定义工具）
+  - ``custom_mods:``       只读（功能指导原文件）
   - fast 模式还可使用 Sandbox 单例全局注册的动态命名空间；动态列表不是固定闭集，
     每个空间按自身配置提供工具层只读或读写权限。
 """
@@ -1177,7 +1178,7 @@ def _handle_move(execution: ToolExecution) -> dict:
         return tool_error("destination is required")
     created_parent_directories: list[str] = []
     try:
-        resolved = _s().resolve_read(source)
+        resolved = _s().resolve_write(source)
         if not resolved.real.exists():
             return tool_error("Source not found", source=source)
         is_directory = resolved.real.is_dir()
@@ -1742,12 +1743,12 @@ Errors:
 
 
 _COPY_SCHEMA = {
-        "description": """Copy a file or directory. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying (e.g. from fork: to ws:). The branch is auto-detected from the source type:
+        "description": """Copy a file or directory. Both source and destination must use a namespace available in the current mode. Supports cross-namespace copying (e.g. from custom_mods: to ws:). The branch is auto-detected from the source type:
 - **File branch**: copies a single file; the destination is overwritten if it already exists.
 - **Directory branch**: recursively copies the whole directory tree; the destination must **not** already exist (shutil.copytree limitation) — delete it first with Delete if needed.
 
 ## Prerequisites
-- The source file or directory must exist.
+- The source file or directory must exist and its namespace must be readable.
 - The destination must not be the same path as the source.
 - The destination namespace must be writable.
 
@@ -1766,7 +1767,7 @@ Copies the source file/directory to the destination path. File branch overwrites
 ## Side Effects / Notes
 - Writes to the file system. File branch overwrites the destination if it already exists.
 - Directory branch requires the destination to **not** exist (unlike the file branch, copytree does not overwrite).
-- Cross-namespace copy requires a writable destination namespace.""",
+- Cross-namespace copy requires a readable source and a writable destination namespace; read-only sources such as custom_mods: may be copied without modifying them.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1787,11 +1788,11 @@ Copies the source file/directory to the destination path. File branch overwrites
 
 
 _MOVE_SCHEMA = {
-        "description": """Move or rename a file/directory. The destination can include a new name, effectively renaming. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace moving (implemented as copy + delete, not atomic).
+        "description": """Move or rename a file/directory. The destination can include a new name, effectively renaming. Both source and destination must use a namespace available in the current mode and must be writable. Supports cross-namespace moving (implemented as copy + delete, not atomic).
 
 ## Prerequisites
 - The source file or directory must exist.
-- The destination namespace must be writable.
+- Both source and destination namespaces must be writable.
 
 ## Effect
 Moves a file or directory to the destination path. If the destination includes a different filename, the move also acts as a rename. If the destination already exists and is a file, it will be overwritten.
@@ -1809,6 +1810,7 @@ Moves a file or directory to the destination path. If the destination includes a
 ## Side Effects / Notes
 - Writes to the file system. Overwrites destination if it already exists.
 - The source path no longer exists after the move.
+- Read-only sources such as custom_mods: cannot be moved out or renamed.
 - Cross-namespace moves use shutil.move (copy + delete internally), not atomic.""",
         "parameters": {
             "type": "object",

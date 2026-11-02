@@ -61,7 +61,7 @@
 
 | 规范称谓 | 定义 |
 |---|---|
-| 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系；内置前缀由 `Namespace` 枚举定义 |
+| 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系；内置前缀由 `Namespace` 枚举定义，含映射项目根功能指导目录且在 fast/fallback 均只读的 `custom_mods:` |
 | 动态沙盒空间 | 用户授权的全局逻辑路径映射（英文锚点：`global dynamic sandbox space`）；独立持久化、仅 fast 模式启用，由 Sandbox 单例管理并供所有 Agent 共享。`is_readonly` 仅表示标准 Sandbox 文件 API 层只读，不是操作系统 ACL |
 | 动态沙盒空间 Tab | 右侧 Tab 栏的动态沙盒空间 tab（`SandboxTab`，原命令菜单弹窗去模态化迁移）的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批（英文锚点：`dynamic sandbox spaces tab`） |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径。逻辑路径格式为 `命名空间:相对路径`，路径段之间统一使用 `/`；不能以 `/` 或 `\` 开始或结束，也不能包含 `\`。文档中目录示例的末尾 `/` 只是目录说明，不是文件工具参数的一部分 |

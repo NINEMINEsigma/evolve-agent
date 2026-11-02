@@ -25,6 +25,7 @@ Sandbox path prefixes:
 - custom_hooks: → custom_hooks/ (custom hooks, ro)
 - custom_llm_client: → custom_llm_client/ (custom LLM clients, ro)
 - custom_tools: → custom_tools/ (custom tools, ro)
+- custom_mods: → custom_mods/ (feature guidance, ro)
 
 Read-only (ro) namespaces: reading is always safe; writing must be denied.
 Read-write (rw) namespaces: all operations are sandboxed and isolated, but writing still requires review of the actual content.

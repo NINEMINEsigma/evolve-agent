@@ -89,6 +89,7 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         Namespace.CUSTOM_HOOKS.value:      [Access.READ],
         Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
         Namespace.CUSTOM_TOOLS.value:      [Access.READ],
+        Namespace.CUSTOM_MODS.value:       [Access.READ],
     },
     "fallback": {
         Namespace.FIX.value:    [Access.READ, Access.WRITE],
@@ -99,6 +100,7 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         Namespace.CUSTOM_HOOKS.value:      [Access.READ],
         Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
         Namespace.CUSTOM_TOOLS.value:      [Access.READ],
+        Namespace.CUSTOM_MODS.value:       [Access.READ],
     },
 }
 
@@ -183,6 +185,7 @@ class Sandbox(ISandbox):
                 Namespace.CUSTOM_HOOKS.value: repo_root / Namespace.CUSTOM_HOOKS.value,
                 Namespace.CUSTOM_LLM_CLIENT.value: repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
                 Namespace.CUSTOM_TOOLS.value: repo_root / Namespace.CUSTOM_TOOLS.value,
+                Namespace.CUSTOM_MODS.value: repo_root / Namespace.CUSTOM_MODS.value,
             }.items()
             if base is not None and ns in _PERMISSIONS.get(ctx.mode, {})
         }
@@ -913,8 +916,8 @@ class Sandbox(ISandbox):
         logical_src: str,
         logical_dst: str
         ) -> ResolvedPath:
-        """移动或重命名文件/目录（源只读、目标写入）。"""
-        src: ResolvedPath = self.resolve_read(logical_src)
+        """移动或重命名文件/目录（源和目标均需写入权限）。"""
+        src: ResolvedPath = self.resolve_write(logical_src)
         dst: ResolvedPath = self.resolve_write(logical_dst)
         if not src.real.exists():
             raise SandboxError(f"Source does not exist: {logical_src}")

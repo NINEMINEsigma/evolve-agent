@@ -110,6 +110,9 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 | `custom_hooks:` | 仓库根 `custom_hooks/` | ro | ro | 自定义钩子 |
 | `custom_llm_client:` | 仓库根 `custom_llm_client/` | ro | ro | 自定义 LLM 客户端 |
 | `custom_tools:` | 仓库根 `custom_tools/` | ro | ro | 自定义工具 |
+| `custom_mods:` | 仓库根 `custom_mods/` | ro | ro | 功能指导原文件 |
+
+只读源允许复制到已授权的可写目的，但不可移出或重命名；Move 的源和目标均需写权限，工具入口在创建目标父目录前拒绝只读源。普通 `custom_mods:` 读取不渲染模板、不递归关联或建立 ModTextBlock 来源，不替代 RecallMod，也不计入固着器去重。只读约束属于标准 Sandbox 文件 API，不是操作系统 ACL，不授权用 Shell 绕过。
 
 **没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。权限模型为 `_PERMISSIONS`（mode × namespace → Access 列表），`namespace_bases()` 是 ns→物理根的唯一映射来源（`resolve()` 与 LSP 反向映射复用）；`Namespace` 枚举定义在 `entity/constant/sandbox.py`。
 

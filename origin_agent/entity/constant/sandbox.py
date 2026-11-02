@@ -19,6 +19,8 @@ class Namespace(str, Enum):
     CUSTOM_HOOKS = "custom_hooks"
     CUSTOM_LLM_CLIENT = "custom_llm_client"
     CUSTOM_TOOLS = "custom_tools"
+    # 项目根功能指导目录，fast/fallback 模式均只读。
+    CUSTOM_MODS = "custom_mods"
 
 
 def is_namespaced_path(path: str) -> bool:

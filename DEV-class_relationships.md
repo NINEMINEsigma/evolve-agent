@@ -1733,6 +1733,14 @@ Python模块级实例保留正常缓存引用，已有父System时framework拒�
 
 无新System、模型、持久化版本或easysave key，第三方和工具发现不改。部署合并复制可能遗留旧端点文件，须用户保护本地修改并定向处理后重启；开发助手AI不读取或操作运行时代码。仅完成源码/文档与只读审阅，未运行测试、实际导入、校验、构建或应用，用户人工验收见本任务P11/V12。
 
+### custom_mods固定只读命名空间与Move权限（2026-11-02）
+
+`Namespace.CUSTOM_MODS` 对应项目根 `custom_mods/`，经现有 `_PERMISSIONS` 和 `_static_namespace_bases()` 在 fast/fallback 均提供 READ 权限；所有消费者仍复用唯一 Sandbox，不新增 System、字段、继承关系、接口或跨类 protected 访问。ShellManager 的既有环境构造表加入 `EVOLVE_CUSTOM_MODS`，仅新 Shell 生效，不建立新服务或 OS 级隔离。
+
+`Sandbox.move()` 改为源和目标均需写权限；文件工具入口在目标父目录创建前同样核对源写权限，因而不能移出或重命名任何只读源。Copy 保持源可读、目的可写，允许复制而不修改源。函数签名、返回 ResolvedPath、修改记录归属及错误边界不变。
+
+普通 `custom_mods:` 文件读取不产生 ModTextBlock，不渲染模板或递归关联，不参与固着器去重；正式 mod 加载器与权限无变化。没有持久化字段、对象图、typeref 或 easysave key 变更。新增静态表项会沿原规则拒绝已有同名/目录重叠动态配置，部署前由用户处理，不自动迁移。本次仅源码、文档和只读审阅，未运行测试、校验、导入、构建或应用。
+
 
 
 

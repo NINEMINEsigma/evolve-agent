@@ -26,6 +26,14 @@
 
 用户应停止应用后配套部署本次后端与前端，按既有运行时前端流程构建、重启并刷新浏览器；旧前端不支持新的数组工具结果。开发助手AI不操作运行时副本，也未执行测试、校验、构建、实际导入或应用；仅源码实施与只读差异审阅，人工验收见 `.tasks/2026-11-02_1_read-live-media-display.md` V01–V20。
 
+## custom_mods只读沙盒接入（2026-11-02，后续约定）
+
+项目根 `custom_mods/` 新增固定 `custom_mods:` 命名空间，fast/fallback 均仅允许标准文件 API 读取；本节覆盖下文功能指导初次接入时“无新增沙盒前缀”的当前约定，不改变当时的历史记录。普通 Read/搜索返回原文件，不渲染模板、不递归 related、不建立 ModTextBlock 来源或参与自动去重；RecallMod 与关键词加载的预算、来源、History 和 easysave key 均不变。
+
+只读源可以复制到已授权的可写目的，但不能被写入、删除、移出或重命名。Move 在工具入口和 Sandbox 均要求源写权限，目标仍要求写权限；拒绝只读源发生在创建目标父目录之前。新建 Shell会话获得固定 `EVOLVE_CUSTOM_MODS` 环境引用，现存 Shell 不热更新；沙盒只读不是操作系统 ACL，也不授权通过 Shell 绕过。
+
+新前缀与根目录参与现有动态空间名称保留及目录重叠校验。已有同名或映射相同/父/子目录的动态配置会使 fast 启动按原规则失败；用户应在部署前通过旧版本处理冲突，程序不自动删除、重命名或迁移。用户停止应用、保护本地进化内容后按既有流程部署后端与模板并重启；无前端源码变化，无须为此单独增加前端构建。开发助手AI仅完成源码与只读差异审阅，未运行校验、导入、测试、构建或应用；人工验收见 `.tasks/2026-11-02_3_custom-mods-readonly-namespace.md` 的 V01–V17 及 R1–R3 修订。
+
 ## 功能指导渐进式加载（2026-11-01，当前约定）
 
 项目根custom_mods按同级MOD.md/MOD.md.meta声明系统功能指导，名称简介常驻，全文经core的RecallMod批量读取，related机械递归、允许环、调用内去重；keywords按大小写敏感字面子串在正式顶层user消息的模型请求前触发固着器。具体扩展协议见[custom_mods开发文档](custom_mods/DEV-README.md)，不在本文件维护具体安装条目。
@@ -284,6 +292,7 @@ Evolve Agent 内置两套多代理运行时：
 | `custom_hooks:` | `custom_hooks/` | fast / fallback | 自定义钩子（只读） |
 | `custom_llm_client:` | `custom_llm_client/` | fast / fallback | 自定义 LLM 客户端（只读） |
 | `custom_tools:` | `custom_tools/` | fast / fallback | 自定义工具（只读） |
+| `custom_mods:` | `custom_mods/` | fast / fallback | 功能指导原文件（只读；正式加载仍使用 RecallMod） |
 | 用户定义的动态前缀 | 用户授权的规范化绝对目录 | fast | 全局共享；每项为工具层只读或读写 |
 
 fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一管理，配置直接以

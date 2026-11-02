@@ -89,7 +89,13 @@ Sandbox为无参AsyncSystem，virtual_awake取得唯一RuntimeContext和Subproce
 
 业务通过get_system(ISandbox)取得唯一实例，禁止从另一个工具模块导入私有_s入口。它没有自有进程线程，关闭不删除动态空间文件或清空持久映射。
 
+`custom_mods:` 固定映射项目根 `custom_mods/`，fast/fallback 均仅有 READ 权限；枚举派生的前缀保留及静态目录重叠校验同样覆盖它。已有同名或目录重叠的动态配置会按原严格加载规则拒绝启动，用户需部署前处理，不自动迁移或更改存储 key。普通文件读取不渲染 mod 模板、不递归关联或建立 typed 来源，不代替 RecallMod。
+
+`Sandbox.move()` 的源、目标均通过 `resolve_write()` 校验后才创建目录或移动；文件工具入口也在创建目标父目录前拒绝只读源。所有只读空间均不可移出或重命名；`copy/copy_folder` 保持源可读、目的可写，允许复制而不修改原文件。该边界是标准文件 API 层权限，不是操作系统 ACL。
+
 ## ShellManager
+
+新建 Shell会话通过现有固定命名空间映射获得 `EVOLVE_CUSTOM_MODS` 及对应命令解释器引用，路径来自同一 `namespace_bases()`；现存 Shell 不热注入环境。环境变量只提供路径，不构成操作系统只读隔离，也不授权绕过沙盒文件权限。
 
 业务操作从接收开始到锁等待、原生调用及结果返回均有任务归属；原生线程调用使用独立受跟踪的任务，取消外层协程不等于原生工作完成。创建中的PTY先登记状态，取消或关闭发生在创建期间也会回收最终结果。
 

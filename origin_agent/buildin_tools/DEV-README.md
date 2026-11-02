@@ -85,6 +85,12 @@
 | `session_search.py` | `SessionSearch` | 会话内容搜索；`RecallSession` 通过 `ToolRegistry` 的同步工具线程池执行全会话 History 读取与 BM25/RRF 计算，避免长时间检索占用事件循环，结果协议不变 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
+### 文件工具的只读空间（2026-11-02）
+
+`custom_mods:` 映射项目根功能指导目录，fast/fallback 均只读。Read、SearchFiles、Grep 等沿既有工具可用范围访问原文件；普通读取不渲染 mod 模板、不递归 related、不建立 ModTextBlock 来源或参与固着器去重，正式加载仍由 RecallMod/关键词路径承担。
+
+Copy 只要求源可读、目的可写，因此允许从只读空间复制；目录目的仍必须不存在。Move 会修改源，工具入口在创建目标父目录前检查源写权限，Sandbox 再独立检查源和目的均可写，因此所有只读源均不可移出或重命名。只读空间也不能作为复制/移动目的，其他写入/删除操作继续按现有权限拒绝。Copy/Move 实际工具描述同步此契约，工具参数、危险等级与可用范围不变。
+
 ### 压缩工具共享逻辑
 
 `buildin_tools/tools/_history_compression.py` 是两种压缩工具共享、无 History 副作用的模块：

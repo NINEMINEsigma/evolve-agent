@@ -15,7 +15,8 @@ File tools require canonical logical paths: `namespace:relative/path`, using `/`
 - `custom_hooks:`: context-extension hook sources.
 - `custom_llm_client:`: LLM client implementations.
 - `custom_tools:`: custom tool sources. Tools declare module-level TOOLSET objects and are registered by discovery, not by import-time registry.register calls.
+- `custom_mods:`: raw feature-guidance files under the project-root custom_mods directory, read-only in fast and fallback modes.
 
-Read-only spaces may be inspected with available read/search tools; write, delete, copy/move mutations are refused by the Sandbox. Inspecting an extension does not authorize editing it or bypassing the boundary with Shell.
+Read-only spaces may be inspected with available read/search tools. Writes, deletes, moves out of read-only sources and copy/move destinations in read-only spaces are refused by the Sandbox. Copying from a readable source to an authorized writable destination is allowed and does not modify the source. Inspecting an extension does not authorize editing it or bypassing the boundary with Shell.
 
-The runtime may separately provide user-authorized dynamic namespace mappings in fast mode. That current block is authoritative for their names, access and availability; this fixed list is not a closed set. Purpose descriptions grant no permissions. The guidance loader reads mods by exact names; there is no custom_mods: file namespace.
+The runtime may separately provide user-authorized dynamic namespace mappings in fast mode. That current block is authoritative for their names, access and availability; this fixed list is not a closed set. Purpose descriptions grant no permissions. Raw Read through custom_mods: returns file content without mod template rendering, related-guide recursion or typed mod provenance; it does not count as a loaded mod for automatic deduplication. Use RecallMod with exact names for rendered guidance, recursive related guides and typed provenance.
